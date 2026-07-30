@@ -224,17 +224,17 @@ export function ChatSubBar() {
   );
 
   return (
-    <div className="h-8 flex items-center px-4 gap-2 bg-background border-b border-input flex-shrink-0 min-w-0">
+    <div className="h-10 flex items-center px-4 gap-2 bg-background border-b border-input flex-shrink-0 min-w-0">
       {/* Breadcrumb: workspace › session title */}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 flex-1 min-w-0">
         {activeWorkspace && (
           <>
-            <FolderGit2 className="size-3 flex-shrink-0" style={{ opacity: 0.6 }} />
-            <span className="text-muted-foreground truncate">{activeWorkspace.name}</span>
-            <ChevronRight className="size-3 flex-shrink-0" style={{ opacity: 0.4 }} />
+            <FolderGit2 className="size-5 flex-shrink-0" style={{ opacity: 0.6 }} />
+            <span className="text-[0.8rem] text-muted-foreground truncate">{activeWorkspace.name}</span>
+            <ChevronRight className="size-5 flex-shrink-0" style={{ opacity: 0.4 }} />
           </>
         )}
-        <span className="text-foreground font-medium truncate">{sessionTitle}</span>
+        <span className="text-[0.8rem] text-foreground truncate">{sessionTitle}</span>
       </div>
 
       {/* Right: git branch + scripts + ports — only when a session is active,
@@ -243,9 +243,9 @@ export function ChatSubBar() {
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {/* Git branch badge */}
         {gitBranch && (
-          <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60 font-mono bg-secondary px-2 py-1">
-            <GitBranch className="size-3" style={{ opacity: 0.6 }} />
-            <span className="truncate max-w-[120px]">{gitBranch}</span>
+          <div className="h-8 flex items-center gap-1 text-muted-foreground/60 font-mono bg-secondary rounded-lg px-2 py-1">
+            <GitBranch className="size-5" style={{ opacity: 0.6 }} />
+            <span className="truncate text-[0.8rem] max-w-[120px]">{gitBranch}</span>
           </div>
         )}
 
@@ -257,16 +257,16 @@ export function ChatSubBar() {
           <Tip label={isPrimaryRunActive ? `Stop — ${primaryRun.command}` : primaryRun.command}>
             <Button
               variant={isPrimaryRunActive ? 'destructive' : 'secondary'}
-              size="sm"
-              className="h-6 gap-1 text-[11px] px-2"
+              size="lg"
+              className="h-8 gap-1 px-2 text-[0.8rem]"
               onClick={() =>
                 isPrimaryRunActive ? stopRunTerminal() : runScriptInTerminal(primaryRun.command)
               }
             >
               {isPrimaryRunActive ? (
-                <Square className="size-2.5 fill-current animate-stop-pulse" />
+                <Square className="size-3 fill-current animate-stop-pulse" />
               ) : (
-                <Play className="size-2.5 text-success" />
+                <Play className="size-3 text-success" />
               )}
               {isPrimaryRunActive ? 'Stop' : 'Run'}
             </Button>
@@ -293,9 +293,9 @@ export function ChatSubBar() {
         {activeWorkspace && scripts.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-6 gap-0.5 text-[11px] px-1.5 text-muted-foreground">
+              <Button variant="ghost" size="sm" className="h-9 gap-0.5 text-[0.8rem] px-1.5 text-muted-foreground">
                 <Hammer className="size-3" />
-                <ChevronDown className="size-2.5 text-muted-foreground/60" />
+                <ChevronDown className="size-3" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-[280px]">

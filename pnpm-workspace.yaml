@@ -1,0 +1,12 @@
+# pnpm 10+ requires explicit approval before running dependency install
+# scripts (the ERR_PNPM_IGNORED_BUILDS gate).
+#
+# neverBuiltDependencies: packages whose install/build scripts are always
+# skipped. better-sqlite3 ships a prebuilt binding (prebuilds/<platform>.node)
+# that loads at runtime, so its node-gyp build is unnecessary — and on hosts
+# without the MSVC C++ build tools it fails and aborts the whole install.
+# (pnpm 10 auto-detects its binding.gyp and runs node-gyp regardless of
+# onlyBuiltDependencies, so an explicit neverBuiltDependencies entry is the
+# only way to suppress it on v10.)
+neverBuiltDependencies:
+  - better-sqlite3

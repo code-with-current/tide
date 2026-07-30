@@ -34,10 +34,11 @@ export const SHORTCUT_GROUPS = ['Global', 'Navigation', 'Chat', 'Sessions', 'Too
 
 export const SHORTCUTS: ShortcutDef[] = [
   // ── Global ────────────────────────────────────────────────────────────
-  // commandPalette stays unimplemented: CommandDialog exists but has no
-  // consumers and no command registry is mounted. Wiring requires the palette
-  // to be mounted with real command entries first.
-  { id: 'commandPalette', label: 'Command palette', group: 'Global', keys: ['⌘', 'K'], implemented: false },
+  // commandPalette (⌘K / Ctrl+K) focuses the SessionsPanel search box. It was
+  // originally reserved for a global command palette that was never built; the
+  // sessions search advertises this binding, so it now drives that. A real
+  // palette, if added later, would get its own binding.
+  { id: 'commandPalette', label: 'Search sessions', group: 'Global', keys: ['⌘', 'K'], implemented: true },
   { id: 'newSession', label: 'New session', group: 'Global', keys: ['⌘', 'N'], implemented: true },
   { id: 'openSettings', label: 'Open settings', group: 'Global', keys: ['⌘', ','], implemented: true },
   { id: 'closeWindow', label: 'Close window', group: 'Global', keys: ['⌘', 'W'], implemented: true },

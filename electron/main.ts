@@ -119,7 +119,7 @@ function createWindow() {
       ? { trafficLightPosition: { x: 12, y: 12 } }
       : {
           titleBarOverlay: {
-            color: '#111317',          // matches --color-card, the topbar bg
+            color: '#00000000',        // transparent — let the app top bar show through behind the glyphs
             symbolColor: '#8b94a3',    // matches --color-muted-foreground
             height: 40,                // matches WindowTopBar h-10
           },

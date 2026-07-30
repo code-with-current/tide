@@ -624,8 +624,12 @@ export interface RagInitProgressEvent {
 
 // ─── Open-in-app (top-bar "Open Project In…" menu) ─────────────────────
 /** Apps the top-bar menu can open the active session's project folder in.
- *  `finder` and `terminal` are always available; `vscode` and `zed` are
- *  surfaced only when detected as installed (auto-detect on first menu open). */
+ *  `finder` (the OS file manager — Finder/File Explorer/Files depending on
+ *  platform) and `terminal` are always available; `vscode` and `zed` are
+ *  surfaced only when detected as installed (auto-detect on first menu open).
+ *  The id values are stable cross-platform identifiers; the human-readable
+ *  label (e.g. "File Explorer" on Windows) is supplied by the backend per
+ *  process.platform and may differ from the id. */
 export type ExternalAppTarget = 'finder' | 'terminal' | 'vscode' | 'zed';
 
 /** One entry in the open-in-app menu. `available` is false for editors that
