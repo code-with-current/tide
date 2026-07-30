@@ -189,12 +189,7 @@ export function ScrollTabsList({
   return (
     <div
       className={cn(
-        'scroll-tabs-list',
-        // No bottom border — the active tab's curved pseudo-elements
-        // (filled with var(--color-card)) complete the bottom edge by
-        // flowing into the content body. A border here would cut the
-        // curves off and break the seamless folder-tab effect.
-        'flex items-stretch bg-secondary flex-shrink-0',
+        'scroll-tabs-list flex items-stretch bg-secondary flex-shrink-0',
         className,
       )}
     >
@@ -214,16 +209,9 @@ export function ScrollTabsList({
         className={cn(
           'flex items-end gap-0.5 flex-1 min-w-0 overflow-x-auto scroll',
           'px-1.5 pt-1.5',
-          // Hide the scrollbar — chevrons + drag are the scroll
-          // affordances, a visible scrollbar here looks noisy.
           '[&::-webkit-scrollbar]:hidden',
-          // Drag-to-scroll affordance. `cursor-grab` by default, switches
-          // to `grabbing` mid-drag. `select-none` keeps label text from
-          // getting highlighted during a drag.
           'cursor-grab select-none',
           dragging && 'cursor-grabbing',
-          // Disable the smooth-scroll transition used by the chevrons
-          // while dragging — would cause rubber-banding lag.
           dragging && '[scroll-behavior:auto]',
         )}
         style={{ scrollbarWidth: 'none' }}

@@ -77,31 +77,31 @@ export function ModelSelector({ compact = false }: { compact?: boolean }) {
         <Button
           variant="ghost"
           size="sm"
-          className={cn('h-7 gap-1.5 text-xs px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
+          className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
           disabled={models.length === 0}
         >
           {!compact && (
             <span>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
           )}
-          <ChevronDown className="size-3 text-muted-foreground/60" />
+          <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
         {/* ── Search box ── */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 sticky top-0 bg-popover z-10">
-          <Search className="size-3 text-muted-foreground/50 shrink-0" />
+          <Search className="size-4 text-muted-foreground/50 shrink-0" />
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search models…"
-            className="w-full bg-transparent border-0 outline-none text-xs text-foreground placeholder:text-muted-foreground/50"
+            placeholder="Search…"
+            className="w-full bg-transparent border-0 outline-none text-[0.8rem] text-foreground placeholder:text-muted-foreground/50"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
-              className="text-muted-foreground/50 hover:text-foreground text-xs shrink-0"
+              className="text-muted-foreground/50 hover:text-foreground text-md shrink-0"
             >
               ✕
             </button>
@@ -198,18 +198,18 @@ function ModelRow({
         className="text-muted-foreground/40 hover:text-warning shrink-0"
         title={isStarred ? 'Unstar' : 'Star'}
       >
-        <Star className={cn('size-3', isStarred && 'fill-current text-warning')} />
+        <Star className={cn('size-4', isStarred && 'fill-current text-warning')} />
       </button>
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium flex items-center gap-1.5 truncate">
+        <div className="text-[0.9rem] font-medium flex items-center gap-1.5 truncate">
           <span className="truncate">{model.alias}</span>
           {model.reasoning && <Brain className="size-3 text-reasoning" />}
         </div>
-        <div className="text-[10px] text-muted-foreground/60 truncate">
+        <div className="text-[0.75rem] text-muted-foreground/60 truncate">
           {formatContext(model.contextWindow)} ctx{priceLabel ? ` · ${priceLabel}` : ''}
         </div>
       </div>
-      {selected && <Check className="size-3.5 text-primary shrink-0" />}
+      {selected && <Check className="size-5 text-primary shrink-0" />}
     </DropdownMenuItem>
   );
 }

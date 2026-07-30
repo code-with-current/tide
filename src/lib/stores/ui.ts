@@ -161,6 +161,12 @@ interface UiState {
   leftPanelOpen: boolean;
   sessionsPanelOpen: boolean;
 
+  /** Monotonic counter bumped to request that the SessionsPanel focus its
+   *  search input. The action runs outside React (shortcutActions), so a nonce
+   *  lets the panel react via a useEffect on the change. Bump → focus. */
+  sessionSearchFocus: number;
+  focusSessionSearch: () => void;
+
   /** Terminal panel height in pixels — draggable from its top edge. */
   terminalHeight: number;
   setTerminalHeight: (h: number) => void;
@@ -364,6 +370,9 @@ export const useUi = create<UiState>()(
   fileViewerOpen: false,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
+
+  sessionSearchFocus: 0,
+  focusSessionSearch: () => set((s) => ({ sessionSearchFocus: s.sessionSearchFocus + 1 })),
   dialogs: { addWorkspace: false, addProvider: false },
   selectedModelId: null,
   selectedProviderId: null,

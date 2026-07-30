@@ -19,10 +19,10 @@ const MODES: {
   icon: React.ReactNode;
   hint: string;
 }[] = [
-  { value: 'plan', label: 'Plan only', shortLabel: 'Plan', icon: <Map className="size-3.5" />, hint: 'Proposes changes, never executes' },
-  { value: 'ask', label: 'Ask before changes', shortLabel: 'Ask', icon: <Shield className="size-3.5" />, hint: 'Prompts for every edit & shell call' },
-  { value: 'edit', label: 'Edit automatically', shortLabel: 'Edit', icon: <Pencil className="size-3.5" />, hint: 'Auto-edits files, asks before shell' },
-  { value: 'full', label: 'Full access', shortLabel: 'Full', icon: <Zap className="size-3.5" />, hint: 'Direct access to this machine' },
+  { value: 'plan', label: 'Plan only', shortLabel: 'Plan', icon: <Map className="size-4" />, hint: 'Proposes changes, never executes' },
+  { value: 'ask', label: 'Ask before changes', shortLabel: 'Ask', icon: <Shield className="size-4" />, hint: 'Prompts for every edit & shell call' },
+  { value: 'edit', label: 'Edit automatically', shortLabel: 'Edit', icon: <Pencil className="size-4" />, hint: 'Auto-edits files, asks before shell' },
+  { value: 'full', label: 'Full access', shortLabel: 'Full', icon: <Zap className="size-4" />, hint: 'Direct access to this machine' },
 ];
 
 /** Permission mode picker. */
@@ -37,12 +37,12 @@ export function PermissionModeSelector({ compact = false }: { compact?: boolean 
         <Button
           variant="ghost"
           size="sm"
-          className={cn('h-7 gap-1.5 text-xs px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
+          className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
           title={`Permissions: ${current.label}`}
         >
           {current.icon}
           {!compact && <span>{current.shortLabel}</span>}
-          <ChevronDown className="size-3 text-muted-foreground/60" />
+          <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
@@ -59,8 +59,8 @@ export function PermissionModeSelector({ compact = false }: { compact?: boolean 
           >
             <span className="mt-0.5">{m.icon}</span>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium">{m.label}</div>
-              <div className="text-[10px] text-muted-foreground/60">{m.hint}</div>
+              <div className="text-[0.9rem] font-medium">{m.label}</div>
+              <div className="text-[0.75rem] text-muted-foreground/60">{m.hint}</div>
             </div>
             {m.value === mode && <Check className="size-3.5 text-primary mt-0.5" />}
           </DropdownMenuItem>

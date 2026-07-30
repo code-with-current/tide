@@ -6,6 +6,31 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Platform detection for the renderer. Electron's renderer runs as Chromium, so
+ * `navigator.platform` / `userAgent` is the source of truth (not process.platform,
+ * which isn't available under contextIsolation). All three are derived once.
+ *
+ *   mac     — traffic lights top-LEFT; built-in file manager is "Finder".
+ *   win     — caption buttons top-RIGHT; built-in file manager is "File Explorer".
+ *   linux   — caption buttons top-RIGHT; file manager varies ("Files").
+ *
+ * Note: OS-specific display labels (e.g. the file-manager name shown in the
+ * open-in-app menu) come from the backend, which has process.platform. These
+ * constants are for renderer-side layout/behavior branching only.
+ */
+const _ua =
+  typeof navigator !== 'undefined'
+    ? navigator.platform || navigator.userAgent
+    : '';
+
+/** True on macOS. */
+export const isMac = /Mac/i.test(_ua);
+/** True on Windows. */
+export const isWindows = /Win/i.test(_ua);
+/** True on Linux (and other Unix that aren't Mac). */
+export const isLinux = !isMac && /Linux|X11/i.test(_ua);
+
 /** Format USD cost: 0.0431 → "$0.04". Never throws on undefined/null. */
 export function formatCost(usd: number | null | undefined): string {
   if (usd == null || !isFinite(usd)) return '$0.00';

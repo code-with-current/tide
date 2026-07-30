@@ -81,7 +81,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
           variant="ghost"
           size="sm"
           className={cn(
-            'h-7 gap-1.5 text-xs px-2 text-muted-foreground hover:text-foreground',
+            'h-8 gap-1.5 text-[0.85rem] px-2 text-muted-foreground hover:text-foreground',
             compact && 'px-1.5',
             !effectivelySupported && 'opacity-40',
           )}
@@ -90,9 +90,9 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
             ? (mandatory ? 'Reasoning always on (model mandatory)' : 'Thinking level')
             : `${model?.alias ?? 'This model'} does not support reasoning`}
         >
-          <Brain className="size-3.5 text-reasoning" />
+          <Brain className="size-4 text-reasoning" />
           {!compact && <span>{mandatory ? 'Always' : (current?.label ?? 'Thinking')}</span>}
-          <ChevronDown className="size-3 text-muted-foreground/60" />
+          <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">

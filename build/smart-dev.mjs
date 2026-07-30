@@ -5,12 +5,18 @@
  * all source files in electron/. If yes, skips the vite build + grammar
  * staging entirely. Only rebuilds when something actually changed.
  *
+ * When a rebuild IS needed, this script performs it directly (vite build
+ * for the electron config + grammar staging) so the npm script stays a
+ * plain `node build/smart-dev.mjs` — no shell `||`/`()`/`;` chains that
+ * cmd.exe misparses on Windows ("vite was unexpected at this time.").
+ *
  * Usage: node build/smart-dev.mjs
- * Exits 0 if dist-electron is up-to-date (skip build), exits 1 if
- * rebuild needed.
+ * Exits 0 always (unless the rebuild itself fails). `vite` (the dev server)
+ * is started separately by concurrently.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,26 +50,66 @@ function newestMtime(p) {
   return newest;
 }
 
+/**
+ * Run a command, inheriting stdio so its output streams live. Throws on
+ * non-zero exit so the caller can surface a clear failure.
+ */
+function run(cmd, args, label) {
+  console.log(`[dev] ${label}: ${cmd} ${args.join(' ')}`);
+  const res = spawnSync(cmd, args, { stdio: 'inherit', shell: true, cwd: ROOT });
+  if (res.status !== 0) {
+    throw new Error(`${label} failed with exit code ${res.status}`);
+  }
+}
+
 // --- Check 1: dist-electron/main.mjs exists and is newer than all source ---
 const distTime = fs.existsSync(DIST_MAIN) ? fs.statSync(DIST_MAIN).mtimeMs : 0;
 const sourceTime = Math.max(...SOURCE_DIRS.map((p) => newestMtime(p)));
 
+let needBuild = false;
+let needGrammars = false;
+let needModel = false;
+
 if (distTime < sourceTime) {
   console.log('[dev] electron source changed — rebuild needed');
-  process.exit(1);
+  needBuild = true;
 }
 
 // --- Check 2: grammars staged ---
 if (!fs.existsSync(DIST_GRAMMARS) || fs.readdirSync(DIST_GRAMMARS).length < 10) {
   console.log('[dev] grammars missing — staging needed');
-  process.exit(1);
+  needGrammars = true;
 }
 
 // --- Check 3: model staged ---
 if (!fs.existsSync(DIST_MODEL)) {
   console.log('[dev] model missing — staging needed');
+  needModel = true;
+}
+
+try {
+  if (needBuild) {
+    // Build the electron main + preload + embedder-process entries.
+    run('vite', ['build', '--config', 'vite.electron.config.ts'], 'electron build');
+    // Grammar staging always follows a source rebuild (grammars live under
+    // dist-electron/, which a rebuild could otherwise leave stale).
+    run('node', ['build/copy-tree-sitter-grammars.mjs', '--dist'], 'stage grammars');
+  } else if (needGrammars) {
+    run('node', ['build/copy-tree-sitter-grammars.mjs', '--dist'], 'stage grammars');
+  }
+  // needModel: the model is a large vendored ONNX file copied by the electron
+  // build's assets pipeline; a `vite build` above stages it. If the build was
+  // skipped AND the model is missing, force one build to stage it.
+  if (needModel && !needBuild) {
+    run('vite', ['build', '--config', 'vite.electron.config.ts'], 'electron build (stage model)');
+  }
+
+  if (!needBuild && !needGrammars && !needModel) {
+    console.log('[dev] dist-electron up-to-date — skipping build');
+  }
+} catch (err) {
+  console.error(`[dev] ${err.message}`);
   process.exit(1);
 }
 
-console.log('[dev] dist-electron up-to-date — skipping build');
 process.exit(0);

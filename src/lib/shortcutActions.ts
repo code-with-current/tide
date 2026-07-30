@@ -37,11 +37,18 @@ function pendingToolCallIds(sid: string | null): string[] {
 // ─── Global ──────────────────────────────────────────────────────────────
 
 const commandPalette: Action = () => {
-  // CommandDialog isn't mounted anywhere yet (no command registry consumes
-  // it). Flip a store flag here once it is; for now this is a no-op that
-  // surfaces as "not yet wired" in the Settings screen via implemented:false.
-  void useUi;
-  return false;
+  // ⌘K / Ctrl+K focuses the SessionsPanel search box. (Originally reserved
+  // for a global command palette, but that was never built; the SessionsPanel
+  // search advertises this binding, so it now drives that. A real palette,
+  // if added later, would get its own binding.) Only on the main screen —
+  // the sessions panel isn't mounted elsewhere. Ensures the panel is open,
+  // then bumps a nonce the panel reacts to by focusing its input.
+  if (useUi.getState().screen !== 'main') return false;
+  if (!useUi.getState().sessionsPanelOpen) {
+    useUi.getState().toggleSessionsPanel();
+  }
+  useUi.getState().focusSessionSearch();
+  return true;
 };
 
 const newSession: Action = () => {

@@ -26,11 +26,11 @@ import { Button } from '@/components/ui/button';
 const DEFAULT_INSPECTOR_TABS: RightTab[] = [{ kind: 'inspector', locked: true }];
 
 const TAB_META: Record<RightTabKind, { label: string; icon: React.ReactNode }> = {
-  inspector: { label: 'Inspector', icon: <Info className="size-3" /> },
-  files: { label: 'File Explorer', icon: <FolderTree className="size-3" /> },
-  review: { label: 'Review', icon: <GitCompareArrows className="size-3" /> },
-  changes: { label: 'Source Control', icon: <GitPullRequestArrow className="size-3" /> },
-  terminal: { label: 'Terminal', icon: <Terminal className="size-3" /> },
+  inspector: { label: 'Inspector', icon: <Info className="size-4" /> },
+  files: { label: 'File Explorer', icon: <FolderTree className="size-4" /> },
+  review: { label: 'Review', icon: <GitCompareArrows className="size-4" /> },
+  changes: { label: 'Source Control', icon: <GitPullRequestArrow className="size-4" /> },
+  terminal: { label: 'Terminal', icon: <Terminal className="size-4" /> },
 };
 
 const ADDABLE: { kind: RightTabKind; label: string; icon: React.ReactNode }[] = [
@@ -90,10 +90,7 @@ export function RightPanel() {
         className="flex flex-col gap-0 flex-1 min-h-0"
       >
         <ScrollTabsList
-          // Click-outside picker close: any click inside the tab bar
-          // closes the picker, unless it lands on the picker itself or
-          // the add button. Lives here (not on a wrapping div) so we
-          // don't need an extra layout wrapper.
+          className="h-10"
           onClick={(e) => {
             const t = e.target as HTMLElement;
             if (!t.closest('#rtab-picker') && !t.closest('#rtab-add')) {
@@ -102,7 +99,7 @@ export function RightPanel() {
           }}
           trailing={
             <div className="relative flex items-center flex-none pr-1">
-              <Tip label="Add tab" side="bottom">
+              <Tip label="Add Tab" side="bottom">
                 <Button
                   id="rtab-add"
                   variant="ghost"
@@ -118,8 +115,8 @@ export function RightPanel() {
                   className="absolute top-full right-0 mt-1 z-50 rounded-md py-1 bg-secondary border border-border shadow-[0_10px_30px_-8px_rgba(0,0,0,0.6)] animate-slide-up"
                   style={{ width: 200 }}
                 >
-                  <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
-                    Add tab
+                  <div className="px-2.5 py-1.5 text-[0.8rem] uppercase tracking-wider text-muted-foreground/60 font-semibold">
+                    Add Tab
                   </div>
                   {ADDABLE.map((opt) => {
                     const added = addedKinds.has(opt.kind);
@@ -127,7 +124,7 @@ export function RightPanel() {
                       <Button
                         key={opt.kind}
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon-sm"
                         disabled={added}
                         onClick={() => {
                           addTab(sessionId, opt.kind);
@@ -139,14 +136,14 @@ export function RightPanel() {
                         )}
                       >
                         {opt.icon}
-                        <span className="flex-1">{opt.label}</span>
+                        <span className="text-[0.8rem] flex-1">{opt.label}</span>
                         <Plus className="size-3 text-muted-foreground/60" />
                       </Button>
                     );
                   })}
                   <div className="px-2.5 py-1.5 mt-1 border-t border-input">
-                    <div className="text-[10px] text-muted-foreground/60 flex items-center gap-1">
-                      <Lock className="size-2.5" /> Inspector is always present
+                    <div className="text-[0.8rem] text-muted-foreground/60 flex items-center gap-1">
+                      <Lock className="size-3" /> Inspector is always present
                     </div>
                   </div>
                 </div>
@@ -162,7 +159,7 @@ export function RightPanel() {
               className="px-2.5 h-[2rem] gap-1.5 text-xs"
             >
               {item.icon}
-              <span className="truncate max-w-[12rem]">{item.label}</span>
+              <span className="truncate text-[0.8rem] max-w-[13rem]">{item.label}</span>
               {!item.locked && (
                 // Span (not button) so we don't nest <button> in the
                 // Radix TabsTrigger (which is itself a button). Stop
@@ -188,7 +185,7 @@ export function RightPanel() {
                   title="Close tab"
                   aria-label={`Close ${item.label}`}
                 >
-                  <X className="size-2.5 pointer-events-none" />
+                  <X className="size-3 pointer-events-none" />
                 </span>
               )}
             </ScrollTabsTrigger>

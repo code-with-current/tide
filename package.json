@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "update:model-prices": "node scripts/update-model-prices.mjs",
     "preview": "vite preview",
-    "electron:dev": "concurrently -k \"node build/smart-dev.mjs || (vite build --config vite.electron.config.ts && node build/copy-tree-sitter-grammars.mjs --dist); vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_ENABLE_LOGGING=true ELECTRON_DISABLE_SECURITY_WARNINGS=true electron .\"",
+    "electron:dev": "node build/smart-dev.mjs && concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_ENABLE_LOGGING=true ELECTRON_DISABLE_SECURITY_WARNINGS=true electron .\"",
     "electron:build": "vite build && vite build --config vite.electron.config.ts && electron-builder",
     "electron:build:dir": "vite build && vite build --config vite.electron.config.ts && electron-builder --dir",
     "publish": "node build/build.js target=dir publish=always",
@@ -138,11 +138,5 @@
     "vite": "^8.1.1",
     "vitest": "^4.1.10",
     "wait-on": "^9.0.10"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "sharp",
-      "@xenova/transformers"
-    ]
   }
 }

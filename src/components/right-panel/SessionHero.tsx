@@ -126,39 +126,39 @@ export function SessionHero({ session }: { session: Session }) {
       {/* Title row + status chip */}
       <div className="flex items-start justify-between gap-2.5">
         <div className="min-w-0">
-          <div className="text-sm font-semibold truncate leading-tight">{session.title}</div>
-          <div className="text-[11px] flex items-center gap-1.5 mt-0.5">
-            <Badge variant="outline" className="font-mono text-[10px]">{session.id}</Badge>
+          <div className="text-[0.8rem] font-semibold truncate leading-tight">{session.title}</div>
+          <div className="text-[0.8rem] flex items-center gap-1.5 mt-0.5">
+            <Badge variant="outline" className="font-mono text-[0.9rem]">{session.id}</Badge>
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground">started {formatRelative(session.createdAt)}</span>
           </div>
         </div>
         <span
           className={cn(
-            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap shrink-0',
+            'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[0.8rem] font-semibold whitespace-nowrap shrink-0',
             meta.chipClass,
           )}
         >
-          <Icon className={cn('size-2.5', meta.iconClass)} aria-hidden="true" />
+          <Icon className={cn('size-3', meta.iconClass)} aria-hidden="true" />
           {meta.label}
         </span>
       </div>
 
       {/* Stat strip — the three most-checked numbers. */}
-      <div className="grid grid-cols-3 gap-px mt-3 bg-border border border-border rounded-md overflow-hidden">
-        <Stat icon={<Cpu className="size-2.5" />} label="Iteration">
-          {stream?.iteration ?? u.calls}<span className="text-[10px] text-muted-foreground font-normal"> / {maxSteps}</span>
+      <div className="grid grid-cols-3 gap-px mt-3 bg-border border border-border rounded-md overflow-hidde">
+        <Stat icon={<Cpu className="size-4" />} label="Iteration">
+          {stream?.iteration ?? u.calls}<span className="text-[0.9rem] text-muted-foreground font-normal"> / {maxSteps}</span>
         </Stat>
-        <Stat icon={<Wrench className="size-2.5" />} label="Tools">
-          {formatNumber(u.calls)}<span className="text-[10px] text-muted-foreground font-normal"> calls</span>
+        <Stat icon={<Wrench className="size-4" />} label="Tools">
+          {formatNumber(u.calls)}<span className="text-[0.8rem] text-muted-foreground font-normal"> calls</span>
         </Stat>
         {status === 'blocked' ? (
-          <Stat icon={<Loader2 className="size-2.5 animate-spin" />} label="Waiting">
+          <Stat icon={<Loader2 className="size-4 animate-spin" />} label="Waiting">
             {mm}:{ss}
           </Stat>
         ) : (
           <Stat icon={<DollarSign className="size-2.5" />} label="Cost">
-            {session.costUsd.toFixed(3)}<span className="text-[10px] text-muted-foreground font-normal"> USD</span>
+            {session.costUsd.toFixed(3)}<span className="text-[0.8rem] text-muted-foreground font-normal"> USD</span>
           </Stat>
         )}
       </div>
@@ -168,8 +168,8 @@ export function SessionHero({ session }: { session: Session }) {
         <div className="flex items-baseline justify-between text-[10px] mb-1.5">
           <span className="font-semibold uppercase tracking-wider text-muted-foreground">Context</span>
           <span className="font-mono text-muted-foreground">
-            <span className="text-foreground font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(contextWindow)} ·{' '}
-            <span className={pctUsed >= CONTEXT_WARN_PCT ? 'text-amber-300' : ''}>{pctUsed.toFixed(1)}%</span>
+            <span className="text-foreground text-[0.75rem] font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(contextWindow)} ·{' '}
+            <span className={pctUsed >= CONTEXT_WARN_PCT ? 'text-amber-300 text-[0.75rem]' : 'text-[0.75rem]'}>{pctUsed.toFixed(1)}%</span>
           </span>
         </div>
         <div
@@ -203,11 +203,11 @@ export function SessionHero({ session }: { session: Session }) {
 function Stat({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
     <div className="bg-background px-2.5 py-2">
-      <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-1 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </div>
-      <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">{children}</div>
+      <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight items-center justify-center">{children}</div>
     </div>
   );
 }
