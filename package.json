@@ -1,7 +1,7 @@
 {
   "name": "tide",
   "private": true,
-  "version": "0.0.1-pre",
+  "version": "0.0.2-pre",
   "description": "Tide — Code with the current.",
   "type": "module",
   "main": "dist-electron/main.mjs",

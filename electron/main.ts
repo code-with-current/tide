@@ -110,9 +110,20 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    frame: false,
+    // Frameless custom titlebar. macOS: keep the native traffic lights.
+    // Windows/Linux: render native caption buttons (min/max/close) via
+    // titleBarOverlay so the custom WindowTopBar has working controls.
+    // (frame:false would hide those caption buttons on Windows — don't use it.)
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 12, y: 12 },
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: 12, y: 12 } }
+      : {
+          titleBarOverlay: {
+            color: '#111317',          // matches --color-card, the topbar bg
+            symbolColor: '#8b94a3',    // matches --color-muted-foreground
+            height: 40,                // matches WindowTopBar h-10
+          },
+        }),
     // Non-transparent window — transparent:true disables GPU compositing
     // on macOS (forces software rendering = slow streaming, slow scrolling).
     // The dark background color matches the app's card bg. The rounded
