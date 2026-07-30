@@ -1,0 +1,153 @@
+# Release — cuts desktop installers and a GitHub Release when a v* tag is pushed.
+#
+# How to cut a release:
+#   1. Bump `version` in package.json (semver, e.g. 0.0.1-pre).
+#   2. git tag v0.0.1-pre && git push origin v0.0.1-pre
+#
+# Architecture (avoids the parallel-publish draft race):
+#   - Each `desktop` matrix leg builds ONE artifact with publish=never
+#     (electron-builder writes to release/) and uploads it as a workflow
+#     artifact.
+#   - A single `release` job, gated on every leg succeeding, downloads
+#     them all and creates + publishes the GitHub Release in one shot.
+#     This is the only step that talks to the Releases API.
+#
+# Builds are unsigned. To enable signing later, add Apple notarization
+# secrets and drop the CSC_IDENTITY_AUTO_DISCOVERY override on the mac
+# legs; add a Windows cert (CSC_LINK/CSC_KEY_PASSWORD) for authenticode.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # the release job creates the GitHub Release.
+
+jobs:
+  desktop:
+    name: build · ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── macOS: dmg for Apple Silicon + Intel ──
+          - label: mac · dmg · arm64
+            runner: macos-latest
+            cmd: node build/build.js target=mac arch=arm64 type=dmg publish=never
+          - label: mac · dmg · x64
+            runner: macos-latest
+            cmd: node build/build.js target=mac arch=x64 type=dmg publish=never
+          # ── Windows: nsis installer, 64-bit ──
+          - label: win · nsis · x64
+            runner: windows-latest
+            cmd: node build/build.js target=win arch=x64 type=setup publish=never
+          # ── Linux: AppImage + deb, 64-bit ──
+          - label: linux · AppImage · x64
+            runner: ubuntu-latest
+            cmd: node build/build.js target=linux arch=x64 type=appImage publish=never
+          - label: linux · deb · amd64
+            runner: ubuntu-latest
+            cmd: node build/build.js target=linux arch=x64 type=deb publish=never
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # build/build.js runs: renderer build → electron entry build →
+      # grammar staging, then electron-builder. With publish=never the
+      # installer lands in release/ and no Release API call is made.
+      - name: Build installer
+        env:
+          # Suppress mac code-sign identity auto-discovery (unsigned builds).
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: ${{ matrix.cmd }}
+
+      # Upload the installable artifacts only — skip the blockmap/yml
+      # metadata files that electron-builder also emits (those are for
+      # auto-update feeds we don't serve yet).
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+          retention-days: 1
+
+  # ───────────────────────────── Publish ───────────────────────────
+  # Runs only after every build leg succeeds. Creates the release as
+  # prerelease when the tag contains a semver pre-release identifier
+  # (e.g. v0.0.1-pre, v1.0.0-rc.1).
+  release:
+    name: publish · GitHub Release
+    needs: desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Collect installers
+        id: files
+        run: |
+          mkdir -p dist
+          # Flatten everything into dist/ — download-artifact may create
+          # per-leg subdirs; glob them out.
+          find assets -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \) -exec cp {} dist/ \;
+          echo "## Installers" > dist/notes.md
+          echo "" >> dist/notes.md
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            case "$f" in *.md) continue;; esac
+            name="$(basename "$f")"
+            size="$(du -h "$f" | cut -f1)"
+            echo "- ${name} (${size})" >> dist/notes.md
+          done
+          cat dist/notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Prerelease if the version (tag minus leading 'v') parses as a
+          # semver pre-release: contains '-' after the patch number.
+          if printf '%s' "${TAG#v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-'; then
+            PRE="--prerelease"
+          else
+            PRE=""
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --notes-file dist/notes.md \
+            $PRE \
+            dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb

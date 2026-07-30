@@ -1,0 +1,215 @@
+import { useState } from 'react';
+import { ChevronDown, Check, Brain, Star, Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuGroup,
+} from '@/components/ui/dropdown-menu';
+import { cn, formatContext } from '@/lib/utils';
+import { useModels } from '@/lib/queries';
+import { useUi } from '@/lib/stores/ui';
+import type { ModelOption } from '@/lib/queries';
+
+/**
+ * Model picker. Reads from the real providers query (useModels) and writes
+ * `selectedModelId` to the UI store.
+ *
+ * Layout:
+ *   [🔍 search...]
+ *   ★ Starred        (models the user pinned — always at top, but also remain
+ *                     visible in their provider group below)
+ *   Provider A
+ *     ★ model 1      (starred models stay in their group too)
+ *       model 2
+ *   Provider B
+ *     model 3
+ *
+ * Starred models appear BOTH in the top "Starred" section AND in their
+ * provider group — starring is a pin, not a move. The search box filters
+ * all models by alias or modelId.
+ */
+export function ModelSelector({ compact = false }: { compact?: boolean }) {
+  const selectedProviderId = useUi((s) => s.selectedProviderId);
+  const selectedId = useUi((s) => s.selectedModelId);
+  const setSelected = useUi((s) => s.setSelectedModel);
+  const starred = useUi((s) => s.starredModels);
+  const toggleStar = useUi((s) => s.toggleStarredModel);
+  const { models } = useModels();
+  // Price label is now persisted on the model (sourced from the provider's
+  // /models response at fetch time) — no catalog enrichment roundtrip needed.
+  const [query, setQuery] = useState('');
+
+  // Resolve by (providerId, modelId). Falls back to first-match by modelId
+  // when selectedProviderId is null (old session restored without provider).
+  const selected =
+    models.find((m) => m.providerId === selectedProviderId && m.modelId === selectedId) ??
+    models.find((m) => m.modelId === selectedId);
+
+  // Filter by search query (alias or modelId, case-insensitive).
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? models.filter(
+        (m) =>
+          m.alias.toLowerCase().includes(q) ||
+          m.modelId.toLowerCase().includes(q),
+      )
+    : models;
+
+  // Starred models (filtered) — pinned section at top.
+  const starredModels = filtered.filter((m) => starred.includes(`${m.providerId}:${m.modelId}`));
+
+  // Group ALL filtered models by provider (starred ones stay in their group).
+  const byProvider = new Map<string, ModelOption[]>();
+  for (const m of filtered) {
+    const list = byProvider.get(m.providerName) ?? [];
+    list.push(m);
+    byProvider.set(m.providerName, list);
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn('h-7 gap-1.5 text-xs px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
+          disabled={models.length === 0}
+        >
+          {!compact && (
+            <span>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+          )}
+          <ChevronDown className="size-3 text-muted-foreground/60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
+        {/* ── Search box ── */}
+        <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 sticky top-0 bg-popover z-10">
+          <Search className="size-3 text-muted-foreground/50 shrink-0" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search models…"
+            className="w-full bg-transparent border-0 outline-none text-xs text-foreground placeholder:text-muted-foreground/50"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="text-muted-foreground/50 hover:text-foreground text-xs shrink-0"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        <div className="max-h-[340px] overflow-y-auto overflow-x-hidden">
+          {/* ── Starred section ── */}
+          {starredModels.length > 0 && (
+            <>
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1">
+                <Star className="size-3 fill-current text-warning" />
+                Starred
+              </DropdownMenuLabel>
+              {starredModels.map((m) => (
+                <ModelRow
+                  key={`star-${m.providerId}:${m.modelId}`}
+                  model={m}
+                  priceLabel={m.priceLabel}
+                  selected={m === selected}
+                  isStarred
+                  onSelect={() => setSelected(m.providerId, m.modelId)}
+                  onToggleStar={() => toggleStar(m.providerId, m.modelId)}
+                />
+              ))}
+              <DropdownMenuSeparator />
+            </>
+          )}
+
+          {/* ── Grouped by provider (starred models remain here too) ── */}
+          {[...byProvider.entries()].map(([providerName, providerModels]) => (
+            <DropdownMenuGroup key={providerName}>
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider">
+                {providerName}
+              </DropdownMenuLabel>
+              {providerModels.map((m) => (
+                <ModelRow
+                  key={`${m.providerId}:${m.modelId}`}
+                  model={m}
+                  priceLabel={m.priceLabel}
+                  selected={m === selected}
+                  isStarred={starred.includes(`${m.providerId}:${m.modelId}`)}
+                  onSelect={() => setSelected(m.providerId, m.modelId)}
+                  onToggleStar={() => toggleStar(m.providerId, m.modelId)}
+                />
+              ))}
+            </DropdownMenuGroup>
+          ))}
+
+          {/* ── Empty states ── */}
+          {filtered.length === 0 && q && (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center">
+              No models match "{query}".
+            </div>
+          )}
+          {models.length === 0 && (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center">
+              No models configured.
+              <br />
+              Add a provider in Onboarding or Settings.
+            </div>
+          )}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** A single model row — star toggle, alias, brain icon, context, check mark. */
+function ModelRow({
+  model,
+  priceLabel,
+  selected,
+  isStarred,
+  onSelect,
+  onToggleStar,
+}: {
+  model: ModelOption;
+  /** Catalog price rate, e.g. "$3 / $15 per Mtok". Undefined = no catalog data. */
+  priceLabel?: string;
+  selected: boolean;
+  isStarred: boolean;
+  onSelect: () => void;
+  onToggleStar: () => void;
+}) {
+  return (
+    <DropdownMenuItem
+      onClick={onSelect}
+      className="gap-2 py-2 cursor-pointer overflow-hidden"
+    >
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggleStar(); }}
+        className="text-muted-foreground/40 hover:text-warning shrink-0"
+        title={isStarred ? 'Unstar' : 'Star'}
+      >
+        <Star className={cn('size-3', isStarred && 'fill-current text-warning')} />
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium flex items-center gap-1.5 truncate">
+          <span className="truncate">{model.alias}</span>
+          {model.reasoning && <Brain className="size-3 text-reasoning" />}
+        </div>
+        <div className="text-[10px] text-muted-foreground/60 truncate">
+          {formatContext(model.contextWindow)} ctx{priceLabel ? ` · ${priceLabel}` : ''}
+        </div>
+      </div>
+      {selected && <Check className="size-3.5 text-primary shrink-0" />}
+    </DropdownMenuItem>
+  );
+}

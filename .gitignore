@@ -1,0 +1,56 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+dist-electron
+release
+*.local
+
+# NOTE: `build/` is intentionally NOT ignored — it holds build/build.js,
+# the electron-builder config, and the icon files that the packaging
+# pipeline (electron-builder) depends on.
+
+# Regeneratable by build/copy-tree-sitter-grammars.mjs (postinstall).
+# Vendored at runtime from the tree-sitter-wasms npm dependency.
+electron/rag/chunker/grammars/*.wasm
+
+# Environment variables (credentials — never commit)
+.env
+.env.*
+!.env.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.superset
+.claude
+
+# ── AI agent artifacts & scaffolding (never ship) ───────────────
+# Ignore agent config dirs, per-agent rules, and all markdown docs
+# except the project README.
+.claude/
+.agent/
+.agents/
+.superpowers/
+.zcode/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+*.md
+!README.md
+docs/plans/

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128px" height="128px" viewBox="0 0 128 128" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>next</title>
+    <g id="next" stroke="none" fill="none" fill-rule="nonzero">
+        <path d="M64,0 C28.7,0 0,28.7 0,64 C0,99.3 28.7,128 64,128 C75.2,128 85.7,125.1 94.8,120.1 L48.4,55.3 L48.4,91.9 L41.6,91.9 L41.6,41.8 L48.4,41.8 L98.9,117.6 C116.4,106.2 128,86.5 128,64 C128,28.7 99.3,0 64,0 Z M86.1,84.6 L78.6,73.3 L78.6,41.8 L86.1,41.8 L86.1,84.6 Z" id="Shape" fill="#FFFFFF"></path>
+    </g>
+</svg>

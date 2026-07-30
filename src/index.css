@@ -1,0 +1,721 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================ */
+/* Design tokens — dark-first, modern layered slate */
+/* ============================================================ */
+
+/* Global polish — font rendering, selection, scrollbar */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: color-mix(in srgb, var(--primary) 25%, transparent); }
+.scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--ring); }
+/* ============================================================
+   Design tokens — shadcn standard naming as source of truth.
+   Each theme overrides the shadcn vars; backward-compat aliases
+   (--bg, --surface, --text, etc.) are derived from them so
+   existing components keep working without changes.
+   ============================================================ */
+
+/* ── Tide (default) ── layered slate dark */
+:root,
+[data-theme="tide"] {
+    --background: #08090c;
+     --foreground: #eef1f6;
+     --card: #111317;
+     --card-foreground: #eef1f6;
+     --popover: #181b21;
+     --popover-foreground: #eef1f6;
+     --primary: #e2e8f0;
+     --primary-foreground: #0d1117;
+     --secondary: #1a1e25;
+     --secondary-foreground: #eef1f6;
+     --muted: #181b21;
+     --muted-foreground: #8b94a3;
+     --accent: #3a4150;
+     --accent-foreground: #eef1f6;
+     --destructive: #f87171;
+     --destructive-foreground: #eef1f6;
+     --border: #1e222b;
+     --input: #252a34;
+     --ring: #4b5563;
+     --chart-1: #93c5fd;
+     --chart-2: #3b82f6;
+     --chart-3: #2563eb;
+     --chart-4: #1d4ed8;
+     --chart-5: #1e3a8a;
+     --sidebar: #0d0f13;
+     --sidebar-foreground: #eef1f6;
+     --sidebar-primary: #3b82f6;
+     --sidebar-primary-foreground: #eef1f6;
+     --sidebar-accent: #1a1e25;
+     --sidebar-accent-foreground: #eef1f6;
+     --sidebar-border: #1e222b;
+     --sidebar-ring: #4b5563;
+     --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+     --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+     --radius: 0.625rem;
+     --shadow-x: 0;
+     --shadow-y: 1px;
+     --shadow-blur: 3px;
+     --shadow-spread: 0px;
+     --shadow-opacity: 0.1;
+     --shadow-color: oklch(0 0 0);
+     --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+     --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+     --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+     --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
+     --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
+     --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
+     --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
+     --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+
+
+      --success: #22c55e; --warning: #eab308; --error: #ef4444;
+      --info: #3b82f6; --reasoning: #a78bfa;
+}
+
+/* ── Claude (warm amber) ── */
+[data-theme="claude"] {
+  --background: #1a1715; --foreground: #f5f0eb;
+  --card: #211e1b; --card-foreground: #f5f0eb;
+  --popover: #211e1b; --popover-foreground: #f5f0eb;
+  --primary: #d97757; --primary-foreground: #fff;
+  --secondary: #2a2622; --secondary-foreground: #f5f0eb;
+  --muted: #2a2622; --muted-foreground: #b8aea3;
+  --accent: #332e29; --accent-foreground: #f5f0eb;
+  --destructive: #f87171; --destructive-foreground: #fff;
+  --border: #3a342e; --input: #2a2622; --ring: #d97757;
+  --sidebar: #211e1b; --sidebar-foreground: #f5f0eb;
+  --sidebar-primary: #d97757; --sidebar-primary-foreground: #fff;
+  --sidebar-accent: #2a2622; --sidebar-accent-foreground: #f5f0eb;
+  --sidebar-border: #3a342e; --sidebar-ring: #d97757;
+  --brand: #d97757; --brand-hover: #c66741; --brand-soft: rgba(217,119,87,0.15);
+  --radius: 0.625rem;
+}
+
+/* ── Green (forest emerald) ── */
+[data-theme="green"] {
+  --background: #0d1410; --foreground: #e8f5ed;
+  --card: #131c17; --card-foreground: #e8f5ed;
+  --popover: #131c17; --popover-foreground: #e8f5ed;
+  --primary: #4ade80; --primary-foreground: #052e16;
+  --secondary: #1a2820; --secondary-foreground: #e8f5ed;
+  --muted: #1a2820; --muted-foreground: #8eb8a0;
+  --accent: #213429; --accent-foreground: #e8f5ed;
+  --destructive: #f87171; --destructive-foreground: #fff;
+  --border: #2a4034; --input: #1a2820; --ring: #4ade80;
+  --sidebar: #131c17; --sidebar-foreground: #e8f5ed;
+  --sidebar-primary: #4ade80; --sidebar-primary-foreground: #052e16;
+  --sidebar-accent: #1a2820; --sidebar-accent-foreground: #e8f5ed;
+  --sidebar-border: #2a4034; --sidebar-ring: #4ade80;
+  --brand: #4ade80; --brand-hover: #36c76d; --brand-soft: rgba(74,222,128,0.12);
+  --radius: 0.5rem;
+}
+
+/* ── Celestial (deep blue cosmic) ── */
+[data-theme="celestial"] {
+  --background: #0b0d1a; --foreground: #e8eaf6;
+  --card: #121527; --card-foreground: #e8eaf6;
+  --popover: #121527; --popover-foreground: #e8eaf6;
+  --primary: #7c8aff; --primary-foreground: #fff;
+  --secondary: #1a1e35; --secondary-foreground: #e8eaf6;
+  --muted: #1a1e35; --muted-foreground: #9aa0c8;
+  --accent: #232848; --accent-foreground: #e8eaf6;
+  --destructive: #f87171; --destructive-foreground: #fff;
+  --border: #2c3258; --input: #1a1e35; --ring: #7c8aff;
+  --sidebar: #121527; --sidebar-foreground: #e8eaf6;
+  --sidebar-primary: #7c8aff; --sidebar-primary-foreground: #fff;
+  --sidebar-accent: #1a1e35; --sidebar-accent-foreground: #e8eaf6;
+  --sidebar-border: #2c3258; --sidebar-ring: #7c8aff;
+  --brand: #7c8aff; --brand-hover: #6979f0; --brand-soft: rgba(124,138,255,0.12);
+  --reasoning: #c4b5fd;
+  --radius: 0.625rem;
+}
+
+/* ── Liquid (teal/cyan) ── */
+[data-theme="liquid"] {
+  --background: #08141a; --foreground: #e0f7fa;
+  --card: #0e1e26; --card-foreground: #e0f7fa;
+  --popover: #0e1e26; --popover-foreground: #e0f7fa;
+  --primary: #22d3ee; --primary-foreground: #042f2e;
+  --secondary: #142935; --secondary-foreground: #e0f7fa;
+  --muted: #142935; --muted-foreground: #80c5d4;
+  --accent: #1b3543; --accent-foreground: #e0f7fa;
+  --destructive: #f87171; --destructive-foreground: #fff;
+  --border: #244455; --input: #142935; --ring: #22d3ee;
+  --sidebar: #0e1e26; --sidebar-foreground: #e0f7fa;
+  --sidebar-primary: #22d3ee; --sidebar-primary-foreground: #042f2e;
+  --sidebar-accent: #142935; --sidebar-accent-foreground: #e0f7fa;
+  --sidebar-border: #244455; --sidebar-ring: #22d3ee;
+  --brand: #22d3ee; --brand-hover: #0bb8d4; --brand-soft: rgba(34,211,238,0.12);
+  --radius: 0.625rem;
+}
+
+/* ── Bright (light mode) ── */
+[data-theme="bright"] {
+  --background: #f8f9fa; --foreground: #1a1a2e;
+  --card: #ffffff; --card-foreground: #1a1a2e;
+  --popover: #ffffff; --popover-foreground: #1a1a2e;
+  --primary: #d97757; --primary-foreground: #fff;
+  --secondary: #f1f3f5; --secondary-foreground: #1a1a2e;
+  --muted: #f1f3f5; --muted-foreground: #5c6370;
+  --accent: #e9ecef; --accent-foreground: #1a1a2e;
+  --destructive: #dc2626; --destructive-foreground: #fff;
+  --border: #dee2e6; --input: #f1f3f5; --ring: #d97757;
+  --sidebar: #ffffff; --sidebar-foreground: #1a1a2e;
+  --sidebar-primary: #d97757; --sidebar-primary-foreground: #fff;
+  --sidebar-accent: #f1f3f5; --sidebar-accent-foreground: #1a1a2e;
+  --sidebar-border: #dee2e6; --sidebar-ring: #d97757;
+  --brand: #d97757; --brand-hover: #c66741; --brand-soft: rgba(217,119,87,0.10);
+  --success: #16a34a; --warning: #ca8a04; --error: #dc2626;
+  --info: #2563eb; --reasoning: #7c3aed;
+  --radius: 0.5rem;
+}
+
+@theme inline {
+    --color-background: var(--background);
+     --color-foreground: var(--foreground);
+     --color-card: var(--card);
+     --color-card-foreground: var(--card-foreground);
+     --color-popover: var(--popover);
+     --color-popover-foreground: var(--popover-foreground);
+     --color-primary: var(--primary);
+     --color-primary-foreground: var(--primary-foreground);
+     --color-secondary: var(--secondary);
+     --color-secondary-foreground: var(--secondary-foreground);
+     --color-muted: var(--muted);
+     --color-muted-foreground: var(--muted-foreground);
+     --color-accent: var(--accent);
+     --color-accent-foreground: var(--accent-foreground);
+     --color-destructive: var(--destructive);
+     --color-destructive-foreground: var(--destructive-foreground);
+     --color-border: var(--border);
+     --color-input: var(--input);
+     --color-ring: var(--ring);
+     --color-chart-1: var(--chart-1);
+     --color-chart-2: var(--chart-2);
+     --color-chart-3: var(--chart-3);
+     --color-chart-4: var(--chart-4);
+     --color-chart-5: var(--chart-5);
+     --color-sidebar: var(--sidebar);
+     --color-sidebar-foreground: var(--sidebar-foreground);
+     --color-sidebar-primary: var(--sidebar-primary);
+     --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+     --color-sidebar-accent: var(--sidebar-accent);
+     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+     --color-sidebar-border: var(--sidebar-border);
+     --color-sidebar-ring: var(--sidebar-ring);
+
+     --font-sans: var(--font-sans);
+     --font-mono: var(--font-mono);
+     --font-serif: var(--font-serif);
+
+     --radius-sm: calc(var(--radius) - 4px);
+     --radius-md: calc(var(--radius) - 2px);
+     --radius-lg: var(--radius);
+     --radius-xl: calc(var(--radius) + 4px);
+     --radius-2xl: calc(var(--radius) * 1.8);
+     --radius-3xl: calc(var(--radius) * 2.2);
+
+     --shadow-2xs: var(--shadow-2xs);
+     --shadow-xs: var(--shadow-xs);
+     --shadow-sm: var(--shadow-sm);
+     --shadow: var(--shadow);
+     --shadow-md: var(--shadow-md);
+     --shadow-lg: var(--shadow-lg);
+     --shadow-xl: var(--shadow-xl);
+     --shadow-2xl: var(--shadow-2xl);
+
+  /* ── Tide semantic extras (not in shadcn standard) ── */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-reasoning: var(--reasoning);
+  --color-openai: var(--openai);
+  --color-anthropic: var(--anthropic);
+
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/*
+ * Desktop form-factor base size.
+ * Tailwind v4 derives rem units from this, so dropping from the 16px browser
+ * default to 14px proportionally shrinks every spacing/typography token in
+ * the app (buttons, inputs, padding, text sizes) without touching components.
+ * This is the single knob for "make it look like a desktop app, not a web page."
+ */
+html {
+  font-size: 14px;
+}
+
+body {
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+
+/* ============================================================ */
+/* Scrollbars                                                   */
+/* ============================================================ */
+.scroll::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #34343a;
+}
+
+/* ============================================================ */
+/* Animations                                                   */
+/* ============================================================ */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes slide-up {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Shimmer — sweeping gradient for streaming/in-progress text (tool args). */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Heartbeat — scale + glow pulse for "in-progress" status dots. */
+@keyframes heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 1;
+  }
+  30% {
+    transform: scale(1.5);
+    box-shadow: 0 0 0 4px transparent;
+    opacity: 0.85;
+  }
+  60% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+    opacity: 1;
+  }
+}
+
+/* Stop-icon pulse — used on the Stop button while a turn is running.
+   Gentle opacity + scale breathing on the square glyph itself. */
+@keyframes stop-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.85);
+    opacity: 0.6;
+  }
+}
+.animate-stop-pulse {
+  animation: stop-pulse 1s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin 0.8s linear infinite;
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
+.animate-slide-up {
+  animation: slide-up 0.18s ease-out;
+}
+.animate-heartbeat {
+  animation: heartbeat 1.4s ease-in-out infinite;
+}
+
+/* Braille ASCII spinner. Pair with the <AsciiSpinner /> component which
+   swaps characters on a timer. This class just colors it. */
+.ascii-spinner {
+  font-family: var(--font-mono);
+  color: var(--primary);
+  display: inline-block;
+  width: 1ch;
+  text-align: center;
+  line-height: 1;
+}
+
+.cursor-blink::after {
+  content: '▋';
+  color: var(--primary);
+  margin-left: 1px;
+  animation: blink 1s step-end infinite;
+}
+
+/* ============================================================ */
+/* Misc utility classes                                         */
+/* ============================================================ */
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 2px 5px;
+  background: var(--primary);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  line-height: 1;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  background: var(--primary);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   macOS vibrancy — frosted glass effect for the workspace sidebar
+   and the unified top bar. Translucent + blur + saturation boost
+   matches native apps like Finder, Notes, Mail.
+   ───────────────────────────────────────────────────────────── */
+.frosted {
+    background: color-mix(in srgb, var(--background) 97%, transparent);
+    backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Window drag regions (frameless Electron window).
+   - `.drag-region`: makes the element a window-drag handle.
+   - `.no-drag`: opts interactive children (buttons, inputs, menus)
+     back out of dragging so clicks still work.
+   The native macOS traffic lights are rendered by Electron at
+   (12, 12); pad the drag region so it doesn't sit under them.
+   ───────────────────────────────────────────────────────────── */
+.drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+/* Anything interactive inside a drag region opts out automatically,
+   so we don't have to annotate every button one by one. */
+.drag-region button,
+.drag-region a,
+.drag-region input,
+.drag-region textarea,
+.drag-region select,
+.drag-region [role="button"],
+.drag-region [data-menubar],
+.drag-region [data-radix-popper-arched],
+.drag-region [role="menu"],
+.drag-region [role="dialog"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   ScrollTabs — folder-tab style with curved bottom edge that flows
+   into the content body below.
+
+   Technique: each trigger has ::before + ::after pseudo-elements
+   positioned at its bottom-left and bottom-right corners. Each pseudo
+   is a small square with the appropriate bottom-corner border-radius.
+   A box-shadow (filled with the active tab's bg color) extends the
+   square into the negative space around it, producing the inverse
+   curve illusion — the active tab appears to flow into the content
+   body without a visible seam.
+
+   Pseudo-elements are present on every trigger but only visible when
+   active. Inactive triggers are transparent and the pseudo-elements
+   stay hidden via opacity: 0.
+   ───────────────────────────────────────────────────────────── */
+.scroll-tabs-trigger::before,
+.scroll-tabs-trigger::after {
+  position: absolute;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  content: "";
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.scroll-tabs-trigger::before {
+  left: -8px;
+  border-bottom-right-radius: 8px;
+  /* Match the active tab's bg so the inverse curve fills with the
+     same color and appears to merge with the content body. */
+  box-shadow: 2px 2px 0 0 var(--color-card);
+}
+.scroll-tabs-trigger::after {
+  right: -8px;
+  border-bottom-left-radius: 8px;
+  box-shadow: -2px 2px 0 0 var(--color-card);
+}
+.scroll-tabs-trigger[data-state='active']::before,
+.scroll-tabs-trigger[data-state='active']::after {
+  opacity: 1;
+}
+
+/* Active-tab elevation. All outer shadows offset UPWARD so none land
+   on the bottom seam (where the curves flow into the content body) —
+   that keeps the folder-tab illusion intact while still giving the
+   active tab a lifted, "selected" feel above its inactive neighbors.
+
+   Layered shadows (single declaration so they composite cleanly):
+     1. inset 0 1px — top-edge rim highlight, reads as light catching
+        the lifted tab. White at low opacity works on light + dark themes.
+     2. 0 -4px — soft top halo, the main "lifted from the strip" effect
+     3. -3px -2px — tighter upper-left focus, suggests light from UL
+     4.  3px -2px — upper-right focus, balances the lighting
+
+   Negative spread on the outer shadows keeps them tight to the tab's
+   bounds so they don't bleed into adjacent tabs or the trailing slot. */
+.scroll-tabs-trigger[data-state='active'] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 -4px 8px -4px rgba(0, 0, 0, 0.18),
+    -3px -2px 6px -4px rgba(0, 0, 0, 0.12),
+    3px -2px 6px -4px rgba(0, 0, 0, 0.12);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Chat markdown rendering — scoped to `.prose-chat`.
+   Tighter than full prose: chat messages are compact, not docs.
+   ───────────────────────────────────────────────────────────── */
+.prose-chat {
+  font-size: 0.9rem;       /* text-sm */
+  line-height: 1.6;
+  color: var(--color-ink);
+}
+.prose-chat > :first-child { margin-top: 10px; }
+.prose-chat > :last-child  { margin-bottom: 0; }
+
+/* ─────────────────────────────────────────────────────────────
+   highlight.js theme — github-dark (for the File Viewer panel).
+   Inline (not imported) so Vite doesn't try to resolve a CSS
+   file from the package; this is a compact subset.
+   ───────────────────────────────────────────────────────────── */
+.hljs { color: #c9d1d9; background: transparent; }
+.hljs-comment, .hljs-quote { color: #8b949e; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type { color: #ff7b72; }
+.hljs-string, .hljs-meta-string, .hljs-regexp, .hljs-addition { color: #a5d6ff; }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-template-tag, .hljs-template-variable { color: #79c0ff; }
+.hljs-title, .hljs-section, .hljs-built_in, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: #d2a8ff; }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-property { color: #79c0ff; }
+.hljs-function .hljs-title, .hljs-title.function_ { color: #d2a8ff; }
+.hljs-tag { color: #7ee787; }
+.hljs-tag .hljs-name { color: #7ee787; }
+.hljs-tag .hljs-attr { color: #79c0ff; }
+.hljs-meta, .hljs-comment.hljs-doctag { color: #8b949e; }
+.hljs-deletion { color: #ffa198; background: rgba(255,129,112,0.08); }
+.hljs-addition { color: #a5d6ff; background: rgba(165,214,255,0.08); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
+.hljs-params { color: #c9d1d9; }
+.hljs-link { color: #a5d6ff; text-decoration: underline; }
+
+.prose-chat p         { margin: -0.5em 0; }
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3,
+.prose-chat h4        { font-weight: 600; line-height: 1.1; margin: 0.1em 0 0.3em; }
+.prose-chat h1        { font-size: 1.25rem; }
+.prose-chat h2        { font-size: 1.125rem; }
+.prose-chat h3        { font-size: 1rem; }
+.prose-chat h4        { font-size: 0.9rem; color: var(--color-muted); }
+
+.prose-chat ul,
+.prose-chat ol        { margin: 0.1em 0; padding-left: 1.25em; }
+.prose-chat ul        { list-style: disc; }
+.prose-chat ol        { list-style: decimal; }
+.prose-chat li        { margin: 0.1em 0; }
+.prose-chat li::marker { color: var(--color-faint); }
+.prose-chat li > p    { margin: 0.1em 0; }
+
+/* Task lists from GFM ("- [ ]" / "- [x]") */
+.prose-chat input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--color-accent);
+}
+
+.prose-chat a         { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.prose-chat a:hover   { opacity: 0.85; }
+
+/* File path links — generated by remarkFilePaths plugin. Styled like
+   inline code but with a subtle accent underline to signal clickability. */
+.prose-chat a.file-path-link {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-accent);
+  background: var(--color-neutral-muted);
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.prose-chat a.file-path-link:hover {
+  background: var(--color-neutral-border);
+  text-decoration: none;
+}
+
+.prose-chat strong    { font-weight: 600; color: var(--color-ink); }
+.prose-chat em        { font-style: italic; }
+
+.prose-chat blockquote {
+  margin: 0.4em 0;
+  padding: 0.2em 0 0.2em 0.9em;
+  border-left: 2px solid var(--color-line);
+  color: var(--color-muted);
+}
+
+.prose-chat hr        { border: 0; border-top: 1px solid var(--color-line-soft); margin: 0.6em 0; }
+
+/* Inline code — small pill, distinct from the chat surface. */
+.prose-chat code      {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.85em;
+  padding: 0.1em 0.4em;
+  background: color-mix(in srgb, var(--color-card-foreground) 10%, transparent);
+  color: var(--color-card-foreground);
+  border-radius: 0.25rem;
+}
+
+/* Fenced code blocks — scrollable, distinct surface, no max height. */
+.prose-chat pre {
+  margin: 0.4em 0;
+  padding: 0.75em 0.9em;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+.prose-chat pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: 0.78em;
+  line-height: 1.5;
+}
+
+/* GFM tables — compact, faint borders. */
+.prose-chat table {
+  margin: 0.6em 0;
+  border-collapse: collapse;
+  font-size: 0.82em;
+  width: max-content;
+  max-width: 100%;
+}
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid var(--color-line-soft);
+  padding: 0.35em 0.6em;
+  text-align: left;
+}
+.prose-chat th {
+  background: var(--color-surface-2);
+  font-weight: 600;
+}
+
+:root {
+    --sidebar: hsl(0 0% 98%);
+    --sidebar-foreground: hsl(240 5.3% 26.1%);
+    --sidebar-primary: hsl(240 5.9% 10%);
+    --sidebar-primary-foreground: hsl(0 0% 98%);
+    --sidebar-accent: hsl(240 4.8% 95.9%);
+    --sidebar-accent-foreground: hsl(240 5.9% 10%);
+    --sidebar-border: hsl(220 13% 91%);
+    --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+.dark {
+    --sidebar: hsl(240 5.9% 10%);
+    --sidebar-foreground: hsl(240 4.8% 95.9%);
+    --sidebar-primary: hsl(224.3 76.3% 48%);
+    --sidebar-primary-foreground: hsl(0 0% 100%);
+    --sidebar-accent: hsl(240 3.7% 15.9%);
+    --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+    --sidebar-border: hsl(240 3.7% 15.9%);
+    --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}

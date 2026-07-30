@@ -1,0 +1,414 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { GitBranch, FolderGit2, ChevronDown, ChevronRight, Settings2, X } from 'lucide-react';
+import { ChatComposer } from './ChatComposer';
+import { useWorkspaces } from '@/lib/queries';
+import * as api from '@/lib/api/client';
+import { useUi } from '@/lib/stores/ui';
+import { cn } from '@/lib/utils';
+
+/**
+ * New-session screen — what the user sees when mainView === 'new'.
+ *
+ * Composer at the top + a configurable worktree panel below. The worktree
+ * panel auto-suggests a branch name from the composer's text (slugified),
+ * lets the user pick a base branch from the workspace's local branches,
+ * and toggles isolation on/off per session.
+ *
+ * Removed: the four hardcoded suggestion cards ("Fix a bug", "Add a
+ * feature", etc.) — they weren't tailored to anything and just cluttered
+ * the composer's primary affordance.
+ */
+export function EmptyChatState({
+  onSend,
+  isStreaming = false,
+}: {
+  onSend?: (payload: {
+    text: string;
+    /** Enriched text — display text + full skill/agent content blocks
+     *  injected inline. This is what MainScreen.handleSend ships to the
+     *  orchestrator as the user message. Dropping it (the prior bug) left
+     *  the model seeing a bare `/name` token from a slash-picked skill,
+     *  which it misread as a slash_command tool call and tried to invoke —
+     *  the failed slash_command block at the start of such turns. */
+    promptText?: string;
+    mentions?: Array<{ name: string; kind: 'skill' | 'agent' | 'context' | 'mcp'; source?: 'project' | 'user' | 'builtin' }>;
+    attachments: import('@/types').MessageAttachment[];
+    worktree?: { enabled: boolean; branchName: string; baseBranch: string; configFiles?: string[] };
+  }) => void;
+  isStreaming?: boolean;
+}) {
+  const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
+  const { data: workspaces } = useWorkspaces();
+  const workspace = workspaces?.find((w) => w.id === activeWorkspaceId);
+
+  // ── Worktree config state ──
+  // Disabled by default — worktree isolation is opt-in per session. The user
+  // toggles it on when they want branch-scoped edits; most quick chats don't.
+  const [worktreeEnabled, setWorktreeEnabled] = useState(false);
+  const [branchName, setBranchName] = useState('');
+  const [baseBranch, setBaseBranch] = useState('');
+  const [branchTouched, setBranchTouched] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [composerText, setComposerText] = useState('');
+  // Config files to copy into the worktree (e.g., .env, .env.local).
+  // Auto-populated from listConfigFiles when settings expand; user can
+  // add custom paths too. Without these, dev servers in the worktree
+  // can't read API keys / DB URLs.
+  const [configFiles, setConfigFiles] = useState<string[]>([]);
+
+  // Default base branch = workspace's current branch.
+  useEffect(() => {
+    if (workspace?.branch) setBaseBranch(workspace.branch);
+  }, [workspace?.branch]);
+
+  // Auto-suggest branch name from composer text until the user manually
+  // edits the field. macOS-Save-As-style behavior: typing in the composer
+  // updates the suggestion; focusing + editing the branch field sticks.
+  useEffect(() => {
+    if (branchTouched) return;
+    setBranchName(slugify(composerText) || 'session');
+  }, [composerText, branchTouched]);
+
+  // When settings expand, fire a one-shot auto-detection of likely
+  // config files (.env etc.) and pre-select them. Doesn't re-run on
+  // every render — only when showSettings flips true.
+  const detectedRef = useRef(false);
+  useEffect(() => {
+    if (!showSettings || detectedRef.current) return;
+    if (!activeWorkspaceId) return;
+    detectedRef.current = true;
+    api.listConfigFiles(activeWorkspaceId).then((found) => {
+      // Seed the selection with detected files. User can untick them
+      // individually or add custom paths.
+      setConfigFiles((cur) => {
+        const set = new Set(cur);
+        for (const f of found) set.add(f);
+        return [...set];
+      });
+    }).catch(() => { /* IPC failure — leave selection empty */ });
+  }, [showSettings, activeWorkspaceId]);
+
+  return (
+    <div className="flex-1 overflow-y-auto scroll">
+      <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 gap-6 min-h-full">
+        {/* Workspace context strip */}
+        {workspace && (
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+            <FolderGit2 className="size-3" />
+            <span className="text-muted-foreground">{workspace.name}</span>
+            {workspace.branch && (
+              <>
+                <span>·</span>
+                <span className="font-mono inline-flex items-center gap-1">
+                  <GitBranch className="size-2.5" />
+                  {workspace.branch}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Hero */}
+        <div className="flex flex-col items-center gap-1.5">
+          <h2 className="text-2xl font-semibold tracking-tight">Start a new session</h2>
+          <p className="text-sm text-muted-foreground">What do you want to work on?</p>
+        </div>
+
+        {/* Composer */}
+        <div className="w-full max-w-[40rem]">
+          <ChatComposer
+            compact={false}
+            placeholder="Describe what you want to build, fix, or explain…"
+            inProgress={isStreaming}
+            onChange={setComposerText}
+            onSubmit={(payload) => {
+              if (!payload.text.trim()) return;
+              onSend?.({
+                text: payload.text,
+                promptText: payload.promptText,
+                mentions: payload.mentions,
+                attachments: payload.attachments,
+                worktree: worktreeEnabled
+                  ? { enabled: true, branchName, baseBranch, configFiles }
+                  : { enabled: false, branchName, baseBranch },
+              });
+              setComposerText('');
+            }}
+          />
+        </div>
+
+        {/* Worktree panel */}
+        <WorktreePanel
+          enabled={worktreeEnabled}
+          onToggle={setWorktreeEnabled}
+          branchName={branchName}
+          onBranchName={(v) => {
+            setBranchTouched(true);
+            setBranchName(v);
+          }}
+          baseBranch={baseBranch}
+          onBaseBranch={setBaseBranch}
+          configFiles={configFiles}
+          onConfigFiles={setConfigFiles}
+          workspaceId={activeWorkspaceId}
+          defaultBranch={workspace?.branch}
+          worktreeLocation={workspace?.worktreeLocation}
+          showSettings={showSettings}
+          onToggleSettings={() => setShowSettings((s) => !s)}
+        />
+
+        {/* Keyboard hint */}
+        <div className="text-[11px] text-muted-foreground/60 flex items-center gap-3">
+          <span><kbd className="font-mono">↵</kbd> to send</span>
+          <span>·</span>
+          <span><kbd className="font-mono">/</kbd> for skills</span>
+          <span>·</span>
+          <span><kbd className="font-mono">@</kbd> for agents</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The worktree panel — collapsed by default, expands to show branch name
+ * + base branch + location. Toggle controls whether worktree isolation
+ * is enabled for the session about to start.
+ */
+function WorktreePanel({
+  enabled,
+  onToggle,
+  branchName,
+  onBranchName,
+  baseBranch,
+  onBaseBranch,
+  configFiles,
+  onConfigFiles,
+  workspaceId,
+  defaultBranch,
+  worktreeLocation,
+  showSettings,
+  onToggleSettings,
+}: {
+  enabled: boolean;
+  onToggle: (v: boolean) => void;
+  branchName: string;
+  onBranchName: (v: string) => void;
+  baseBranch: string;
+  onBaseBranch: (v: string) => void;
+  configFiles: string[];
+  onConfigFiles: (v: string[]) => void;
+  workspaceId: string | null;
+  defaultBranch?: string;
+  worktreeLocation?: string;
+  showSettings: boolean;
+  onToggleSettings: () => void;
+}) {
+  // Local-branches query — only fires when the user expands settings.
+  const { data: branches } = useBranches(showSettings ? workspaceId : null);
+  const branchOptions = useMemo(() => {
+    const set = new Set<string>();
+    if (defaultBranch) set.add(defaultBranch);
+    for (const b of branches ?? []) set.add(b);
+    return [...set].sort();
+  }, [branches, defaultBranch]);
+
+  return (
+    <div className="w-full max-w-[40rem] rounded-md border border-border bg-card overflow-hidden">
+      {/* Header row — click toggles settings expand */}
+      <button
+        type="button"
+        onClick={onToggleSettings}
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/40 transition-colors text-left"
+      >
+        {showSettings ? (
+          <ChevronDown className="size-3.5 text-muted-foreground/60" />
+        ) : (
+          <ChevronRight className="size-3.5 text-muted-foreground/60" />
+        )}
+        <GitBranch className="size-3.5 text-muted-foreground/60" />
+        <span className="text-xs font-medium flex-1">Worktree</span>
+        <Toggle enabled={enabled} onClick={(v) => { onToggle(v); }} />
+        <span className={cn('text-[10px] font-mono', enabled ? 'text-success' : 'text-muted-foreground/60')}>
+          {enabled ? 'isolated' : 'off'}
+        </span>
+      </button>
+
+      {/* Expanded settings */}
+      {showSettings && (
+        <div className="px-3 pb-3 pt-1 space-y-2 border-t border-input">
+          {/* Branch name */}
+          <label className="flex items-center gap-3 text-[11px]">
+            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">branch</span>
+            <input
+              type="text"
+              value={branchName}
+              onChange={(e) => onBranchName(e.target.value)}
+              placeholder="session"
+              className="flex-1 h-7 px-2 text-xs font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring"
+              disabled={!enabled}
+            />
+          </label>
+
+          {/* Base branch select */}
+          <label className="flex items-center gap-3 text-[11px]">
+            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">base</span>
+            <select
+              value={baseBranch}
+              onChange={(e) => onBaseBranch(e.target.value)}
+              disabled={!enabled}
+              className="flex-1 h-7 px-2 text-xs font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              {branchOptions.length === 0 && (
+                <option value="">{defaultBranch ?? 'main'}</option>
+              )}
+              {branchOptions.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* Config files — copied into the worktree after creation.
+              Pre-seeded with detected .env files; user can add custom
+              paths (relative to workspace root). Chips are removable. */}
+          <div className="flex flex-col gap-1.5 text-[11px]">
+            <div className="flex items-center gap-2">
+              <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">copy</span>
+              <div className="flex-1 flex flex-wrap items-center gap-1">
+                {configFiles.map((f) => (
+                  <span
+                    key={f}
+                    className="inline-flex items-center gap-1 rounded bg-secondary border border-border pl-1.5 pr-0.5 py-0.5 text-[10px] font-mono"
+                  >
+                    {f}
+                    <button
+                      type="button"
+                      onClick={() => onConfigFiles(configFiles.filter((x) => x !== f))}
+                      disabled={!enabled}
+                      className="text-muted-foreground/60 hover:text-destructive disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label={`Stop copying ${f}`}
+                    >
+                      <X className="size-2.5" />
+                    </button>
+                  </span>
+                ))}
+                {configFiles.length === 0 && (
+                  <span className="text-[10px] text-muted-foreground/60 italic">none — add .env or other config paths</span>
+                )}
+              </div>
+            </div>
+            {/* Add custom path */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const input = (e.currentTarget.elements.namedItem('path') as HTMLInputElement);
+                const v = input.value.trim();
+                if (v && !configFiles.includes(v)) {
+                  onConfigFiles([...configFiles, v]);
+                }
+                input.value = '';
+              }}
+              className="flex items-center gap-2 pl-[4.4rem]"
+            >
+              <input
+                type="text"
+                name="path"
+                placeholder=".env.local, config/secrets.json…"
+                disabled={!enabled}
+                className="flex-1 h-6 px-2 text-[10px] font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!enabled}
+                className="text-[10px] text-muted-foreground/60 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                + add
+              </button>
+            </form>
+          </div>
+
+          {/* Location — read-only, derived from workspace config */}
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">location</span>
+            <code className="flex-1 text-[10px] font-mono text-muted-foreground/60 truncate">
+              {joinPath(worktreeLocation || '.agent/worktrees/', branchName || 'session')}
+            </code>
+            <Settings2
+              className="size-3 text-muted-foreground/40 cursor-pointer hover:text-muted-foreground/80"
+              onClick={() => useUi.getState().setScreen('settings')}
+            />
+          </div>
+
+          {/* Hint */}
+          <div className="text-[10px] text-muted-foreground/60 pt-1 border-t border-input/60">
+            Tool calls run inside the worktree — your main checkout stays clean.
+            Branch + worktree are removed when the session is deleted.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Tiny pill toggle for the worktree on/off state. */
+function Toggle({ enabled, onClick }: { enabled: boolean; onClick: (v: boolean) => void }) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(!enabled);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          onClick(!enabled);
+        }
+      }}
+      className={cn(
+        'inline-flex items-center h-4 w-7 rounded-full p-0.5 transition-colors cursor-pointer',
+        enabled ? 'bg-primary' : 'bg-muted',
+      )}
+      aria-pressed={enabled}
+      aria-label={enabled ? 'Disable worktree' : 'Enable worktree'}
+    >
+      <span
+        className={cn(
+          'block size-3 rounded-full bg-background transition-transform',
+          enabled ? 'translate-x-3' : 'translate-x-0',
+        )}
+      />
+    </span>
+  );
+}
+
+/** Fetch local branches — only runs when the user opens the settings. */
+function useBranches(workspaceId: string | null) {
+  const [branches, setBranches] = useState<string[] | undefined>(undefined);
+  useEffect(() => {
+    if (!workspaceId) return;
+    api.listBranches(workspaceId).then(setBranches).catch(() => setBranches([]));
+  }, [workspaceId]);
+  return { data: branches };
+}
+
+/** Convert free text into a valid git branch name. Lowercase, ASCII-only,
+ *  non-alphanumerics → dashes, trimmed + collapsed. "Fix the auth leak!"
+ *  → "fix-the-auth-leak". */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 40);
+}
+
+/** Join a base path with a name, collapsing double slashes. Handles both
+ *  `.agent/worktrees/` (trailing slash) and `.agent/worktrees` (no slash)
+ *  without producing `.agent/worktrees//session`. */
+function joinPath(base: string, name: string): string {
+  return `${base.replace(/\/+$/, '')}/${name}`;
+}

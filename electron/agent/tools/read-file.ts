@@ -1,0 +1,151 @@
+/**
+ * read_file tool — read a file from the workspace, sandboxed.
+ *
+ * Caps at `maxLines` (default 2000) to keep the response bounded. Files on
+ * the secret blocklist are refused outright. Output passes through the
+ * redaction hook (currently a passthrough).
+ *
+ * Migration state (Phase 2): dual export — legacy `readFileTool` keeps the
+ * existing orchestrator working; `createReadFileTool(ctx)` is the SDK
+ * factory for the Phase 3 orchestrator rewrite. Both call `runReadFile`.
+ */
+
+import * as fs from 'fs';
+import { tool } from 'ai';
+import { z } from 'zod';
+import { resolveAndFollowSymlinks, resolveUnderSkillRoot } from '../path-safety';
+import { isSecretPath, redact } from '../redaction';
+import { withPermission } from '../permission-wrapper';
+import type { ToolRegistration } from './types';
+import type { ToolContext } from './tool-context';
+
+const DEFAULT_MAX_LINES = 2000;
+const MAX_BYTES = 256 * 1024; // 256 KB hard cap
+
+export async function runReadFile(
+  relPath: string,
+  maxLines: number,
+  workspaceRoot: string,
+): Promise<{
+  status: 'executed' | 'failed' | 'rejected';
+  output: string;
+  meta?: string;
+  display?: { kind: 'text'; text: string };
+}> {
+  if (!relPath) return { status: 'failed', output: 'Missing required arg: path' };
+
+  if (isSecretPath(relPath)) {
+    return {
+      status: 'rejected',
+      output: `Refused: "${relPath}" is on the secret blocklist. Read a non-secret file instead.`,
+    };
+  }
+
+  let abs: string;
+  try {
+    abs = resolveAndFollowSymlinks(workspaceRoot, relPath);
+  } catch (e: any) {
+    // Not inside the workspace. Allow reads of skill/agent/context files under
+    // the user's ~/.claude or ~/.agent dirs — these are trusted entries the
+    // user explicitly invoked via `/name`, and the model needs to `read_file`
+    // them for progressive skill disclosure (they live outside the workspace).
+    // Anything else stays rejected (no arbitrary filesystem access).
+    try {
+      abs = resolveUnderSkillRoot(relPath);
+    } catch {
+      return { status: 'failed', output: `Path error: ${e.message}` };
+    }
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    return {
+      status: 'failed',
+      output: `File not found: ${relPath} (resolved: ${abs}; workspace root: ${workspaceRoot}). Use list_dir to see what's actually in the workspace.`,
+    };
+  }
+  if (!stat.isFile()) {
+    return { status: 'failed', output: `Not a regular file: ${relPath} (resolved: ${abs})` };
+  }
+
+  const truncated = stat.size > MAX_BYTES;
+
+  try {
+    const fd = fs.openSync(abs, 'r');
+    try {
+      const buf = Buffer.alloc(Math.min(stat.size, MAX_BYTES));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      let content = buf.toString('utf-8');
+      if (content.charCodeAt(0) === 0xfeff) content = content.slice(1); // strip BOM
+
+      const allLines = content.split('\n');
+      const overLineCap = allLines.length > maxLines;
+      if (overLineCap) content = allLines.slice(0, maxLines).join('\n');
+
+      const notes: string[] = [];
+      if (truncated) notes.push(`truncated at ${MAX_BYTES.toLocaleString()} bytes (file is ${stat.size.toLocaleString()} bytes)`);
+      if (overLineCap) notes.push(`truncated at ${maxLines} lines (file has ${allLines.length})`);
+
+      const meta = `${stat.size.toLocaleString()} bytes · ${allLines.length} lines`;
+
+      return {
+        status: 'executed',
+        output: redact(content),
+        meta,
+        display: { kind: 'text', text: content + (notes.length ? `\n\n[${notes.join('; ')}]` : '') },
+      };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (e: any) {
+    return { status: 'failed', output: `Read failed: ${e.message}` };
+  }
+}
+
+// ─── Legacy envelope (deleted in Phase 3) ──────────────────────────────
+
+export const readFileTool: ToolRegistration = {
+  name: 'read_file',
+  definition: {
+    name: 'read_file',
+    description:
+      'Read a file from the workspace. Returns its contents as text. ' +
+      'Paths are relative to the workspace root. Files outside the root, ' +
+      'and files on the secret blocklist (.env, *.pem, id_rsa, etc.), are refused.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path relative to workspace root.' },
+        maxLines: { type: 'number', description: 'Maximum number of lines to return. Default 2000.' },
+      },
+      required: ['path'],
+    },
+  },
+  riskTier: 'read_only',
+  requiresWorktree: false,
+  timeoutMs: 10_000,
+  autoApproveIn: ['plan', 'ask', 'edit', 'full'],
+  execute: async (args, ctx) =>
+    runReadFile(String(args.path ?? ''), typeof args.maxLines === 'number' ? args.maxLines : DEFAULT_MAX_LINES, ctx.workspaceRoot),
+};
+
+// ─── New SDK factory envelope (Phase 3+) ───────────────────────────────
+
+export function createReadFileTool(ctx: ToolContext) {
+  return tool({
+    description:
+      'Read a file from the workspace. Returns its contents as text. ' +
+      'Paths are relative to the workspace root. Files outside the root, ' +
+      'and files on the secret blocklist (.env, *.pem, id_rsa, etc.), are refused.',
+    inputSchema: z.object({
+      path: z.string().describe('Path relative to workspace root.'),
+      maxLines: z.number().optional().describe('Maximum number of lines to return. Default 2000.'),
+    }),
+    execute: async ({ path, maxLines }) =>
+      withPermission(ctx, 'read_file', { path, maxLines }, () =>
+        runReadFile(path, maxLines ?? DEFAULT_MAX_LINES, ctx.workspaceRoot),
+      ),
+  });
+}

@@ -1,0 +1,1075 @@
+/**
+ * IPC handler implementations.
+ *
+ * Phase 1: Real workspace (file dialog, git detection, real file tree).
+ * Provider/session/terminal handlers still return mock data — Phase 2 replaces
+ * providers with real persistence, Phase 3 adds chat streaming.
+ */
+
+import { app, ipcMain, dialog, BrowserWindow } from 'electron';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { execSync, spawnSync } from 'child_process';
+import { workspaces as mockWorkspaces, sessionsByWorkspace, allSessions, fileTree, terminalLines } from '../../src/lib/mock/data';
+import * as store from '../store.js';
+import * as sessions from './sessions.js';
+import { BUILTIN_AGENTS } from '../agent/agents/registry';
+import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
+import { scanProjectEntries } from '../agent/project-context';
+import { getGitStatus, gitStage, gitCommit, gitDiff } from './git.js';
+import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal } from './terminal.js';
+import { generateSessionTitle } from '../agent/title.js';
+import { registerRagHandlers } from './rag.js';
+
+import { forwardLog, createLogger } from '../logger.js';
+import type { Workspace, FileNode, ProviderModelMeta } from '../../src/types';
+import type { AgentSettings } from '../configStore.js';
+
+const log = createLogger('ipc');
+
+// ── OpenRouter model catalog ──────────────────────────────────────
+// The public OpenRouter /models API is the universal metadata source. It's
+// fetched once at boot, cached to userData, and refreshed every 7 days. When
+// a provider's own /models endpoint returns bare ids (z.ai, OpenAI direct, LM
+// Studio), we enrich them by matching against this catalog — so a model like
+// 'glm-5.2' gets its real pricing, context window, and reasoning config even
+// though z.ai's API returns only `{ id }`.
+const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const OR_CACHE_FILE = 'openrouter-models.json';
+const OR_REFRESH_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+let orCatalog: ProviderModelMeta[] | null = null;
+let orBooted: Promise<void> | null = null;
+
+function orCachePath(): string {
+  return path.join(app.getPath('userData'), OR_CACHE_FILE);
+}
+
+/** Fetch + normalize the OpenRouter catalog. Cached to disk; refreshed when
+ *  stale. Never throws — returns [] on any failure. */
+export function bootstrapCatalog(): Promise<void> {
+  if (orBooted) return orBooted;
+  orBooted = (async () => {
+    // Try cache first.
+    try {
+      const cached = await fs.promises.readFile(orCachePath(), 'utf8');
+      const parsed = JSON.parse(cached) as { data: unknown[]; fetchedAt?: string };
+      if (parsed?.data && Array.isArray(parsed.data)) {
+        orCatalog = normalizeProbeList(parsed.data);
+        const age = parsed.fetchedAt ? Date.now() - Date.parse(parsed.fetchedAt) : Infinity;
+        if (age < OR_REFRESH_MS) {
+          log.info('or-catalog loaded from cache', { count: orCatalog.length });
+          return;
+        }
+      }
+    } catch { /* no cache — fetch fresh */ }
+
+    // Cache missing or stale → fetch from OpenRouter.
+    const res = await fetch(OPENROUTER_MODELS_URL, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) {
+      log.warn('or-catalog fetch failed', { status: res.status });
+      return;
+    }
+    const json = (await res.json()) as { data?: unknown[] };
+    if (!json.data || !Array.isArray(json.data)) {
+      log.warn('or-catalog unexpected response shape');
+      return;
+    }
+    orCatalog = normalizeProbeList(json.data);
+    // Persist to cache (with timestamp) for next boot.
+    try {
+      await fs.promises.writeFile(
+        orCachePath(),
+        JSON.stringify({ data: json.data, fetchedAt: new Date().toISOString() }),
+        'utf8',
+      );
+    } catch { /* cache write failed — non-fatal */ }
+    log.info('or-catalog fetched from OpenRouter', { count: orCatalog.length });
+  })().catch((e) => { log.warn('or-catalog bootstrap failed', { err: e?.message ?? e }); });
+  return orBooted;
+}
+
+/** Look up a bare model id in the OpenRouter catalog to enrich it with
+ *  pricing/context/reasoning. Returns a rich ProviderModelMeta when found,
+ *  or null when no match. Matches by exact id, then by the tail after the
+ *  last '/' (e.g. 'glm-5.2' matches 'z-ai/glm-5.2'). */
+function enrichFromOrCatalog(modelId: string): ProviderModelMeta | null {
+  if (!orCatalog) return null;
+  const lower = modelId.trim().toLowerCase();
+  // Exact match.
+  let hit = orCatalog.find((m) => m.id.toLowerCase() === lower);
+  // Suffix match: 'glm-5.2' → 'z-ai/glm-5.2'.
+  if (!hit) {
+    hit = orCatalog.find((m) => {
+      const tail = m.id.toLowerCase().slice(m.id.lastIndexOf('/') + 1);
+      return tail === lower;
+    });
+  }
+  return hit ?? null;
+}
+
+/** True when a provider model entry carries rich metadata beyond a bare id. */
+function isRichProviderModel(m: ProviderModelMeta): boolean {
+  return !!(m.context_length || m.pricing || m.reasoning || m.max_completion_tokens || m.input_modalities);
+}
+
+/** For each model in the list that is bare (no rich fields), try to enrich it
+ *  from the OpenRouter catalog. CRITICAL: preserves the provider's original id
+ *  — the provider's API expects its own id (e.g. 'glm-5.2'), NOT OpenRouter's
+ *  canonical id ('z-ai/glm-5.2'). Only the metadata fields (context, pricing,
+ *  reasoning, etc.) are copied from the catalog entry. */
+function enrichBareModels(models: ProviderModelMeta[]): ProviderModelMeta[] {
+  if (!orCatalog || orCatalog.length === 0) return models;
+  return models.map((m) => {
+    if (isRichProviderModel(m)) return m;
+    const enriched = enrichFromOrCatalog(m.id);
+    if (!enriched) return m;
+    // Keep the provider's original id; copy everything else from the catalog.
+    return { ...enriched, id: m.id };
+  });
+}
+
+/**
+ * Normalize a raw /models response array into ProviderModelMeta objects.
+ * Handles both rich (OpenRouter) and bare-id (OpenAI/Anthropic direct, LM
+ * Studio) shapes. Reads the rich fields defensively — any field may be absent.
+ * Drops entries with no valid `id`. Sorted by id for stable display.
+ */
+function normalizeProbeList(raw: unknown[]): ProviderModelMeta[] {
+  const out: ProviderModelMeta[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const m = item as Record<string, unknown>;
+    const id = typeof m.id === 'string' ? m.id : undefined;
+    if (!id) continue;
+    const tp = m.top_provider as Record<string, unknown> | undefined;
+    const arch = m.architecture as Record<string, unknown> | undefined;
+    const reasoning = m.reasoning as Record<string, unknown> | undefined;
+    const pricing = m.pricing as Record<string, unknown> | undefined;
+    const supportedEfforts = Array.isArray(reasoning?.supported_efforts)
+      ? (reasoning!.supported_efforts as string[]).filter((e) => typeof e === 'string')
+      : undefined;
+    out.push({
+      id,
+      name: typeof m.name === 'string' ? m.name : undefined,
+      context_length: typeof m.context_length === 'number' ? m.context_length : undefined,
+      max_completion_tokens:
+        typeof m.max_completion_tokens === 'number'
+          ? m.max_completion_tokens
+          : typeof tp?.max_completion_tokens === 'number'
+            ? tp.max_completion_tokens
+            : undefined,
+      pricing:
+        pricing && (typeof pricing.prompt === 'string' || typeof pricing.completion === 'string')
+          ? {
+              prompt: typeof pricing.prompt === 'string' ? pricing.prompt : undefined,
+              completion: typeof pricing.completion === 'string' ? pricing.completion : undefined,
+              input_cache_read: typeof pricing.input_cache_read === 'string' ? pricing.input_cache_read : undefined,
+              input_cache_write: typeof pricing.input_cache_write === 'string' ? pricing.input_cache_write : undefined,
+            }
+          : undefined,
+      reasoning:
+        reasoning && (typeof reasoning.mandatory === 'boolean' || typeof reasoning.default_enabled === 'boolean' || supportedEfforts)
+          ? {
+              mandatory: typeof reasoning.mandatory === 'boolean' ? reasoning.mandatory : undefined,
+              default_enabled: typeof reasoning.default_enabled === 'boolean' ? reasoning.default_enabled : undefined,
+              supported_efforts: supportedEfforts?.length ? supportedEfforts : undefined,
+            }
+          : undefined,
+      supported_parameters: Array.isArray(m.supported_parameters)
+        ? (m.supported_parameters as string[]).filter((p) => typeof p === 'string')
+        : undefined,
+      input_modalities: Array.isArray(arch?.input_modalities)
+        ? (arch!.input_modalities as string[]).filter((x) => typeof x === 'string')
+        : Array.isArray(m.input_modalities)
+          ? (m.input_modalities as string[]).filter((x) => typeof x === 'string')
+          : undefined,
+    });
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * Wrapped ipcMain.handle that logs mutation/critical channels. Use for
+ * create/delete/update/git/provider operations where a server-side audit
+ * trail is valuable. Read-only handlers (list/get) can use ipcMain.handle
+ * directly — they're not worth the log volume.
+ *
+ * Logs at debug on success (with duration), error on failure (with the error).
+ * The channel name is the tag suffix, so lines read:
+ *   [DEBUG] [ipc] tide:createSession {"ms":12}
+ *   [ERROR] [ipc] tide:gitCommit failed {"error":"nothing staged"}
+ */
+function handle(
+  channel: string,
+  fn: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<any> | any,
+): void {
+  ipcMain.handle(channel, async (e, ...args) => {
+    const t0 = Date.now();
+    try {
+      const result = await fn(e, ...args);
+      log.debug(channel, { ms: Date.now() - t0 });
+      return result;
+    } catch (err) {
+      log.error(`${channel} failed`, { error: err instanceof Error ? err.message : String(err), ms: Date.now() - t0 });
+      throw err;
+    }
+  });
+}
+
+export function registerIpcHandlers() {
+  // ── Workspaces (real persistence via store) ─────────────────
+
+  ipcMain.handle('tide:listWorkspaces', async () => {
+    // Read from the persistent store. Merges with any mock data for dev fallback.
+    const stored = store.listWorkspaces();
+    if (stored.length > 0) return stored;
+    return structuredClone(mockWorkspaces) as Workspace[];
+  });
+
+  ipcMain.handle('tide:getWorkspace', async (_e, id: string) => {
+    const stored = store.listWorkspaces();
+    return structuredClone(stored.find((w) => w.id === id)) as Workspace | undefined;
+  });
+
+  // ── Last session persistence ────────────────────────────────
+  // Survives app restarts. Independent of renderer localStorage.
+
+  ipcMain.handle('tide:getLastSession', async () => {
+    return store.getLastSession();
+  });
+
+  handle('tide:setLastSession', async (_e, sessionId: string | null, workspaceId: string | null) => {
+    store.setLastSession(sessionId, workspaceId);
+  });
+
+  // ── File dialog (real) ──────────────────────────────────────
+
+  ipcMain.handle('tide:pickDirectory', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openDirectory'],
+      title: 'Select a folder',
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  // Diagnostics — live version/platform info for the About screen. Avoids
+  // hardcoding versions that drift on every dep bump.
+  ipcMain.handle('tide:getDiagnostics', () => ({
+    appVersion: app.getVersion(),
+    electron: process.versions.electron ?? 'unknown',
+    chrome: process.versions.chrome ?? 'unknown',
+    node: process.versions.node ?? 'unknown',
+    platform: `${process.platform} ${os.release()} ${process.arch}`,
+    userDataPath: app.getPath('userData'),
+  }));
+
+  // External file picker — for the Attach button. Returns multiple file paths.
+  ipcMain.handle('tide:pickFiles', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openFile', 'multiSelections'],
+      title: 'Select files to attach',
+    });
+    if (result.canceled || result.filePaths.length === 0) return [];
+    return result.filePaths;
+  });
+
+  // Read an external file (absolute path, outside workspace) for attachment.
+  ipcMain.handle('tide:readExternalFile', async (_e, filePath: string) => {
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) return null;
+      const MAX_BYTES = 256 * 1024;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return {
+        content: content.slice(0, MAX_BYTES),
+        bytes: stat.size,
+        truncated: stat.size > MAX_BYTES,
+      };
+    } catch {
+      return null;
+    }
+  });
+
+  // ── Git detection (real) ────────────────────────────────────
+
+  ipcMain.handle('tide:detectGitRepo', async (_e, dirPath: string) => {
+    const info = await detectGit(dirPath);
+    return info ? { ...info, isRepo: true } : null;
+  });
+
+  // ── Add workspace (real path + git detection) ───────────────
+
+  ipcMain.handle(
+    'tide:addWorkspace',
+    async (
+      _e,
+      input: { path: string; name?: string; repository?: string; template?: import('../../src/lib/templates').TemplateId },
+    ) => {
+      const { TEMPLATES_BY_ID } = await import('../../src/lib/templates');
+      const template = input.template ? TEMPLATES_BY_ID[input.template] : undefined;
+      let dirPath = input.path;
+
+    // If a repository URL is provided and the path doesn't exist yet,
+    // clone it first. This is the "Clone from URL" flow.
+    if (input.repository && !fs.existsSync(dirPath)) {
+      const parentDir = path.dirname(dirPath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      try {
+        execSync(`git clone --depth 1 "${input.repository}" "${dirPath}"`, {
+          stdio: 'pipe',
+          timeout: 120_000,
+        });
+      } catch (e) {
+        throw new Error(
+          `Git clone failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+
+    // New Project / Template flow: no repository, and the path doesn't exist
+    // yet → create the directory. NOTE: we intentionally do NOT `git init`
+    // here when a template will scaffold — most scaffolders (create-next-app,
+    // create-t3-app, nuxi init) refuse to run into a directory that already
+    // contains a .git, aborting with "destination is not empty". Git init is
+    // deferred to after the scaffold step (see below), where we only init if
+    // the scaffolder didn't already.
+    if (!input.repository && !fs.existsSync(dirPath)) {
+      try {
+        fs.mkdirSync(dirPath, { recursive: true });
+        // Empty/new-project case (no template): init git now since there's no
+        // scaffold step coming. Templated projects init after scaffolding.
+        if (!template || template.scaffold.length === 0) {
+          execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
+        }
+      } catch (e) {
+        throw new Error(
+          `Failed to create project directory: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+
+    // Template scaffold: run the template's create command (and optional
+    // separate install) inside the new project dir. Skipped for the Empty
+    // template (no scaffold command) and the Clone-from-URL flow (the repo
+    // already has its files). Commands run with stdio captured so a failure
+    // surfaces a useful stderr message rather than a generic non-zero exit.
+    if (template && template.scaffold.length > 0 && !input.repository) {
+      // Ensure the dir exists — covers the case where the user picked a
+      // template without going through the New Project mkdir branch above
+      // (defensive; the dialog always mkdirs first).
+      if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+
+      const runStep = (label: string, argv: string[]) => {
+        const r = spawnSync(argv[0], argv.slice(1), {
+          cwd: dirPath,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          encoding: 'utf-8',
+          // Deps install (npm install) can take minutes; scaffold itself is
+          // usually <30s. 10 min ceiling covers worst-case cold installs.
+          timeout: 600_000,
+        });
+        if (r.status !== 0) {
+          const tail = (r.stderr || r.stdout || '').trim().split('\n').slice(-6).join('\n');
+          throw new Error(`${label} failed (exit ${r.status}):\n${tail}`);
+        }
+      };
+
+      try {
+        runStep('Scaffold', template.scaffold);
+        if (template.install) runStep('Install', template.install);
+      } catch (e) {
+        // Best-effort cleanup: a half-scaffolded dir is worse than none.
+        // Leave it (don't rm a user-chosen path they may want to inspect).
+        throw new Error(
+          `Template '${template.id}' failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+
+      // Ensure git is initialized after scaffolding. Some scaffolders init
+      // their own repo (create-next-app does); others (create-vite, nuxi
+      // --no-gitInit) don't. Init only if .git is absent so we don't disturb
+      // an existing repo's config/branches.
+      if (!fs.existsSync(path.join(dirPath, '.git'))) {
+        try {
+          execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
+        } catch {
+          /* non-fatal — the workspace is usable without git */
+        }
+      }
+    }
+
+    const gitInfo = await detectGit(dirPath);
+    const name = input.name || path.basename(dirPath);
+
+    const workspace: Workspace = {
+      id: `ws_${Math.random().toString(36).slice(2, 10)}`,
+      name,
+      path: dirPath,
+      repository: input.repository,
+      branch: gitInfo?.branch ?? 'main',
+      headCommit: gitInfo?.headCommit ?? 'unknown',
+      isDefault: false,
+      fileCount: gitInfo?.fileCount ?? 0,
+      worktreeLocation: '.agent/worktrees/',
+      scripts: [],
+    };
+
+    store.addWorkspace(workspace);
+    return workspace;
+  });
+
+  handle('tide:updateWorkspace', async (_e, id: string, patch: Partial<Workspace>) => {
+    store.updateWorkspace(id, patch);
+    return store.listWorkspaces().find((w) => w.id === id);
+  });
+
+  handle('tide:archiveWorkspace', async (_e, id: string) => {
+    store.archiveWorkspace(id);
+  });
+
+  handle('tide:unarchiveWorkspace', async (_e, id: string) => {
+    store.unarchiveWorkspace(id);
+  });
+
+  handle('tide:deleteWorkspace', async (_e, id: string) => {
+    try {
+      store.deleteWorkspace(id);
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  });
+
+  // ── File tree (real filesystem) ─────────────────────────────
+
+  ipcMain.handle('tide:getFileTree', async (_e, workspaceId: string) => {
+    // Resolve from the real store first; fall back to mock for dev mode.
+    const stored = store.listWorkspaces();
+    const ws = stored.find((w) => w.id === workspaceId) ?? mockWorkspaces.find((w) => w.id === workspaceId);
+    if (!ws) return structuredClone(fileTree);
+
+    const dirPath = expandPath(ws.path);
+    try {
+      return readDirTree(dirPath, '', 3); // max depth 3
+    } catch {
+      return structuredClone(fileTree); // fallback to mock
+    }
+  });
+
+  // ── Workspace context for the system prompt ────────────────
+  // Returns a compact text blob summarizing the workspace so the model can
+  // answer "what is this project?" without tool calls. Reads package.json,
+  // the top-level README, and a flat top-level file/dir listing.
+
+  ipcMain.handle('tide:getWorkspaceContext', async (_e, workspaceId: string): Promise<string> => {
+    const stored = store.listWorkspaces();
+    const ws = stored.find((w) => w.id === workspaceId);
+    if (!ws) return '';
+
+    const dirPath = expandPath(ws.path);
+    const lines: string[] = [];
+
+    // package.json — name, description, key deps, scripts.
+    try {
+      const pkgRaw = fs.readFileSync(path.join(dirPath, 'package.json'), 'utf-8');
+      const pkg = JSON.parse(pkgRaw);
+      lines.push(`Project: ${pkg.name ?? path.basename(dirPath)}`);
+      if (pkg.description) lines.push(`Description: ${pkg.description}`);
+      if (pkg.version) lines.push(`Version: ${pkg.version}`);
+      if (pkg.private != null) lines.push(`Private: ${pkg.private}`);
+      const depKeys = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) });
+      if (depKeys.length) {
+        // Highlight the most signal-y deps; cap the list to keep tokens bounded.
+        const interesting = depKeys.filter((k) =>
+          /^(react|next|vue|nuxt|svelte|@angular|electron|vite|typescript|tailwind|express|fastify|nest|prisma|drizzle|@modelcontextprotocol|ai|openai|anthropic|zustand|redux|@tanstack)/i.test(k),
+        );
+        const shown = interesting.length ? interesting : depKeys.slice(0, 12);
+        lines.push(`Stack: ${shown.join(', ')}${depKeys.length > shown.length ? ` (+${depKeys.length - shown.length} more)` : ''}`);
+      }
+      const scripts = Object.entries(pkg.scripts ?? {});
+      if (scripts.length) {
+        const shown = scripts.slice(0, 6).map(([k]) => k).join(', ');
+        lines.push(`Scripts: ${shown}${scripts.length > 6 ? ` (+${scripts.length - 6} more)` : ''}`);
+      }
+    } catch {
+      // No package.json — not a JS project. Note that and move on.
+      lines.push(`Project: ${path.basename(dirPath)} (no package.json)`);
+    }
+
+    // Top-level file/dir snapshot — gives the model a sense of layout.
+    try {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      const visible = entries
+        .filter((e) => !(e.name.startsWith('.') && e.name !== '.agent') && !['node_modules', 'dist', 'build', 'release', 'target'].includes(e.name))
+        .slice(0, 40)
+        .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+      if (visible.length) lines.push(`Top-level: ${visible.join(', ')}`);
+    } catch {
+      // unreadable — skip
+    }
+
+    // README excerpt — first ~40 lines or until a clear section break.
+    for (const name of ['README.md', 'README.MD', 'README.txt', 'README']) {
+      try {
+        const readme = fs.readFileSync(path.join(dirPath, name), 'utf-8');
+        const excerpt = readme.split('\n').slice(0, 40).join('\n').trim();
+        if (excerpt) {
+          lines.push(`---\nREADME (${name}):\n${excerpt}`);
+        }
+        break;
+      } catch {
+        // try next
+      }
+    }
+
+    // Project-level agent guidance — CLAUDE.md or AGENT.md at the root.
+    // This is always-on context (the conventional behavior): every turn
+    // sees it in the system prompt so the model follows repo conventions
+    // without the user having to @-mention it. Capped at 8KB to keep the
+    // prompt bounded.
+    const entries = scanProjectEntries(dirPath);
+    for (const ctx of entries.contextFiles) {
+      lines.push(`---\n${ctx.path} (project agent guidance — always apply):\n${ctx.content}`);
+      break; // one context file is enough; CLAUDE.md wins over AGENT.md
+    }
+
+    return lines.join('\n');
+  });
+
+  // ── Read a single file from a workspace (for context injection) ──
+  // Used when the user references a path in their message — the harness
+  // fetches the file and stuffs it into the system prompt so the model
+  // can discuss it without real tool calls. Path is sandboxed to the
+  // workspace root; size and binary files are capped.
+
+  ipcMain.handle(
+    'tide:readFileInWorkspace',
+    async (_e, workspaceId: string, relPath: string): Promise<{ ok: true; content: string; truncated: boolean; bytes: number } | { ok: false; reason: string }> => {
+      const stored = store.listWorkspaces();
+      const ws = stored.find((w) => w.id === workspaceId);
+      if (!ws) return { ok: false, reason: 'workspace not found' };
+
+      const root = expandPath(ws.path);
+      const full = path.resolve(root, relPath);
+
+      // Sandbox: resolved path must be inside the workspace root.
+      const rel = path.relative(root, full);
+      if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+        return { ok: false, reason: 'path escapes workspace root' };
+      }
+
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        return { ok: false, reason: 'file not found' };
+      }
+      if (!stat.isFile()) return { ok: false, reason: 'not a regular file' };
+
+      // Skip obvious binaries by extension — they wouldn't render as text.
+      const binExt = /\.(png|jpe?g|gif|webp|ico|bmp|tiff?|pdf|zip|tar|gz|bz2|7z|rar|exe|dll|so|dylib|class|jar|war|wasm|mp[34]|wav|ogg|mov|mp4|avi|mkv|ttf|otf|woff2?|eot|sumo|db|sqlite|db3)$/i;
+      if (binExt.test(relPath)) return { ok: false, reason: 'binary file' };
+
+      // Hard size cap — 256 KB. Anything bigger should be addressed by the
+      // model telling the user to paste a relevant excerpt.
+      const MAX_BYTES = 256 * 1024;
+      const truncated = stat.size > MAX_BYTES;
+
+      try {
+        // Read up to MAX_BYTES + 1 so we know we're truncating, then slice.
+        const fd = fs.openSync(full, 'r');
+        try {
+          const buf = Buffer.alloc(Math.min(stat.size, MAX_BYTES));
+          fs.readSync(fd, buf, 0, buf.length, 0);
+          // Strip a UTF-8 BOM if present, decode with replacement chars.
+          let content = buf.toString('utf-8');
+          if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+          return { ok: true, content, truncated, bytes: stat.size };
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch (e: any) {
+        return { ok: false, reason: e?.message ?? 'read failed' };
+      }
+    },
+  );
+
+  // ── Sessions (real persistence) ─────────────────────────────
+
+  ipcMain.handle('tide:listSessions', async (_e, workspaceId: string) => {
+    return sessions.listSessions(workspaceId);
+  });
+
+  // ── Built-in sub-agents (single source of truth for the @mention picker
+  //    and any future settings UI). Returns name/description/whenToUse.
+  ipcMain.handle('tide:listAgents', async () => {
+    return BUILTIN_AGENTS.map((a) => ({ name: a.name, description: a.description, whenToUse: a.whenToUse }));
+  });
+
+  // ── Project-level entries (CLAUDE.md / AGENT.md + .claude|.agent/) ────
+  // Scans the workspace root for project-wide agent guidance and any
+  // user-defined skills/agents. Surfaces them in the @mention picker so the
+  // user can invoke them from the composer alongside the built-ins.
+  ipcMain.handle('tide:listProjectEntries', async (_e, workspaceId: string) => {
+    const stored = store.listWorkspaces();
+    const ws = stored.find((w) => w.id === workspaceId);
+    if (!ws || !ws.path) return { contextFiles: [], skills: [], agents: [] };
+    try {
+      return scanProjectEntries(ws.path);
+    } catch {
+      return { contextFiles: [], skills: [], agents: [] };
+    }
+  });
+
+  // ── Todos (model-maintained via todo_write tool) ───────────────
+  // The list lives in main-process memory keyed by sessionId. Push events
+  // to the renderer whenever a tool call updates it so the floating panel
+  // reflects progress live.
+  ipcMain.handle('tide:listTodos', async (_e, sessionId: string) => {
+    return getSessionTodos(sessionId);
+  });
+
+  ipcMain.handle('tide:subscribeTodos', (event) => {
+    const wc = event.sender;
+    const onUpdate = ({ sessionId, todos }: { sessionId: string; todos: any[] }) => {
+      // Filter to the active window's sessions — every renderer receives
+      // updates; each drops events for sessions it isn't viewing.
+      if (!wc.isDestroyed()) wc.send('todos:updated', { sessionId, todos });
+    };
+    todoEvents.on(onUpdate);
+    // Only register the 'closed' cleanup listener ONCE per WebContents —
+    // the renderer calls subscribeTodos on every session switch, and each
+    // call would add another listener, eventually hitting MaxListeners.
+    if (!(wc as any).__todosCleanedUp) {
+      (wc as any).__todosCleanedUp = true;
+      wc.once('closed', () => {
+        todoEvents.off(onUpdate);
+      });
+    }
+  });
+
+  ipcMain.handle('tide:getSession', async (_e, id: string) => {
+    return sessions.getSession(id);
+  });
+
+  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }) => {
+    return sessions.createSession(workspaceId, title, modelId, opts);
+  });
+
+  handle('tide:updateSessionSettings', async (
+    _e,
+    sessionId: string,
+    patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  ) => {
+    return sessions.updateSessionSettings(sessionId, patch);
+  });
+
+  handle('tide:addMessage', async (_e, sessionId: string, role: 'user' | 'assistant' | 'system', content: string) => {
+    sessions.addMessage(sessionId, role, content);
+  });
+
+  handle('tide:addAssistantMessage', async (
+    _e,
+    sessionId: string,
+    message: {
+      content: string;
+      reasoning?: string;
+      reasoningTokens?: number;
+      reasoningMs?: number;
+      toolCalls?: any[];
+      timeline?: any[];
+      turn?: any;
+    },
+  ) => {
+    sessions.addAssistantMessage(sessionId, message);
+  });
+
+  // Accumulate a turn's usage into the session's cumulative totals.
+  // Drives the context-window meter in the right panel.
+  handle('tide:addSessionUsage', async (
+    _e,
+    sessionId: string,
+    delta: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
+  ) => {
+    sessions.addUsage(sessionId, delta);
+  });
+
+  handle('tide:deleteSession', async (_e, id: string) => {
+    sessions.deleteSession(id);
+  });
+
+  handle('tide:clearAllSessions', async () => {
+    sessions.clearAllSessions();
+    return { ok: true };
+  });
+
+  handle('tide:renameSession', async (_e, sessionId: string, title: string) => {
+    sessions.renameSession(sessionId, title);
+  });
+
+  // Best-effort LLM title generation via the system app model (lightweight,
+  // app-owned; see agent/system-model.ts). Looks up the session's first user
+  // message, strips /skill and @agent prefixes, asks for a 3-5 word title,
+  // and renames. Returns the new title or null (caller keeps placeholder).
+  // Fire-and-forget from the renderer on new-session creation — never blocks
+  // the turn. No-op (returns null) if TIDE_SYSTEM_API_KEY isn't configured.
+  handle('tide:generateSessionTitle', async (_e, sessionId: string) => {
+    try {
+      const session = sessions.getSession(sessionId);
+      if (!session) return null;
+      const firstUser = session.messages.find((m: any) => m.role === 'user');
+      if (!firstUser || !firstUser.content) return null;
+      const title = await generateSessionTitle(String(firstUser.content));
+      if (title) sessions.renameSession(sessionId, title);
+      return title;
+    } catch (e: any) {
+      log.warn('generateSessionTitle failed', { err: e?.message });
+      return null;
+    }
+  });
+
+  // ── Agent settings (Settings → Permissions & caps) ────────────
+  ipcMain.handle('tide:getAgentSettings', async () => {
+    return store.getAgentSettings();
+  });
+  ipcMain.handle('tide:updateAgentSettings', async (_e, patch: Partial<AgentSettings>) => {
+    log.info('agent settings updated', { keys: Object.keys(patch) });
+    store.updateAgentSettings(patch);
+    return store.getAgentSettings();
+  });
+
+  handle('tide:archiveSession', async (_e, sessionId: string) => {
+    sessions.archiveSession(sessionId);
+  });
+
+  handle('tide:unarchiveSession', async (_e, sessionId: string) => {
+    sessions.unarchiveSession(sessionId);
+  });
+
+  ipcMain.handle('tide:listArchivedSessions', async (_e, workspaceId: string) => {
+    return sessions.listArchivedSessions(workspaceId);
+  });
+
+  // ── Worktree lifecycle (per-session git isolation) ──────────────
+  // CreateWorktree runs `git worktree add` against the session's
+  // workspace and persists the metadata; the orchestrator picks up
+  // session.worktree.path on the next turn. removeWorktree is exposed
+  // for manual cleanup but usually deleteSession cascades automatically.
+
+  handle('tide:session:createWorktree', async (_e, sessionId: string, opts: { branchName: string; baseBranch: string; configFiles?: string[] }) => {
+    return sessions.createWorktree(sessionId, opts);
+  });
+
+  handle('tide:session:removeWorktree', async (_e, sessionId: string) => {
+    await sessions.removeWorktree(sessionId);
+  });
+
+  ipcMain.handle('tide:workspace:listBranches', async (_e, workspaceId: string) => {
+    return await sessions.listBranches(workspaceId);
+  });
+
+  // Auto-detected config files (.env etc.) at the workspace root — used
+  // by the new-session UI to pre-check the files most users want copied
+  // into the worktree.
+  ipcMain.handle('tide:workspace:listConfigFiles', async (_e, workspaceId: string) => {
+    return sessions.listConfigFiles(workspaceId);
+  });
+
+  // ── Providers (real persistence via safeStorage + JSON config) ──
+
+  ipcMain.handle('tide:listProviders', async () => {
+    // Read from store. If store is empty (first run), seed with defaults.
+    const stored = store.listProviders();
+    if (stored.length > 0) return stored;
+    // First-run: seed default providers so the user sees something.
+    // In production these would start empty and the onboarding would guide.
+    return stored;
+  });
+
+  handle('tide:addProvider', async (_e, input: {
+    name: string;
+    apiStyle: 'openai' | 'anthropic';
+    baseUrl: string;
+    apiKey?: string;
+    models?: { alias: string; modelId: string; contextWindow: number }[];
+  }) => {
+    return store.addProvider(input);
+  });
+
+  handle('tide:updateProvider', async (_e, id: string, patch: any) => {
+    return store.updateProvider(id, patch);
+  });
+
+  handle('tide:deleteProvider', async (_e, id: string) => {
+    return store.deleteProvider(id);
+  });
+
+  // ── Probe provider's /models endpoint ──────────────────────────────
+  // Fetches the list of models the provider exposes, so the user can
+  // populate the Models table from the API instead of typing each id.
+  // Uses the form's CURRENT values (not the saved provider) so it works
+  // in the add form too, before the provider exists. Returns {ok, models}
+  // or {ok:false, error} — never throws, so the button can show the error
+  // inline without a try/catch at every call site.
+  handle('tide:provider:probeModels', async (
+    _e,
+    input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string },
+  ): Promise<{ ok: true; models: ProviderModelMeta[] } | { ok: false; error: string }> => {
+    try {
+      const { apiStyle, baseUrl, apiKey } = input;
+      if (!baseUrl.trim()) return { ok: false, error: 'Base URL is empty.' };
+      // Ensure the OpenRouter catalog is loaded so bare-id models can be
+      // enriched. Awaits the boot promise (fast if already loaded). If it
+      // fails, enrichment is skipped — models still return as bare.
+      await bootstrapCatalog();
+      if (!apiKey.trim()) return { ok: false, error: 'API key is empty — type one or save a stored key first.' };
+      // OpenAI-compatible: GET {baseUrl}/models. Anthropic: GET {baseUrl}/v1/models.
+      const url = baseUrl.replace(/\/+$/, '') + (apiStyle === 'openai' ? '/models' : '/v1/models');
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (apiStyle === 'anthropic') {
+        headers['x-api-key'] = apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+      } else {
+        headers['authorization'] = `Bearer ${apiKey}`;
+      }
+      const res = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { ok: false, error: `HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}` };
+      }
+      // Guard against non-JSON responses (HTML error pages, proxy login
+      // screens, etc.). Some servers return 200 + text/html for missing
+      // endpoints — .json() would throw "Unexpected token '<'" on those.
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        const body = await res.text().catch(() => '');
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed && (parsed.data || parsed.models)) {
+            return { ok: true, models: enrichBareModels(normalizeProbeList(parsed.data ?? parsed.models ?? [])) };
+          }
+        } catch {
+          /* not JSON — fall through to error */
+        }
+        return {
+          ok: false,
+          error: `Expected JSON but got ${contentType || 'unknown content type'}. Check the base URL — it may need a different path or the provider may not expose a models endpoint.`,
+        };
+      }
+      const json = (await res.json()) as { data?: unknown[]; models?: unknown[] };
+      const models = enrichBareModels(normalizeProbeList(json.data ?? json.models ?? []));
+      return { ok: true, models };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: msg };
+    }
+  });
+
+  // ── Renderer log forwarding ───────────────────────────────────────
+  // Renderer log calls are forwarded here to land in the central log file.
+  // The renderer's src/lib/logger.ts calls window.tideIpc.log.send(...).
+  ipcMain.handle('tide:log', (_e, input: { level: string; tag: string; msg: string; args?: unknown[] }) => {
+    forwardLog(input.level, input.tag, input.msg, input.args);
+  });
+
+  // ── Test provider connection ─────────────────────────────────────
+  // Sends a minimal chat completion ("Say hello in one word.") to verify
+  // the provider config (baseUrl + apiKey + modelId) actually works end-to-
+  // end. Used by the onboarding form before saving. Returns {ok:true} or
+  // {ok:false, error} — never throws.
+  handle('tide:provider:testConnection', async (
+    _e,
+    input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string; modelId: string },
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    try {
+      const { apiStyle, baseUrl, apiKey, modelId } = input;
+      if (!baseUrl.trim()) return { ok: false, error: 'Base URL is empty.' };
+      if (!apiKey.trim()) return { ok: false, error: 'API key is empty.' };
+      if (!modelId.trim()) return { ok: false, error: 'Model ID is empty.' };
+
+      const url = baseUrl.replace(/\/+$/, '') + (apiStyle === 'openai' ? '/chat/completions' : '/v1/messages');
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (apiStyle === 'anthropic') {
+        headers['x-api-key'] = apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+      } else {
+        headers['authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const body = apiStyle === 'anthropic'
+        ? JSON.stringify({ model: modelId, max_tokens: 16, messages: [{ role: 'user', content: 'Say hello in one word.' }] })
+        : JSON.stringify({ model: modelId, max_tokens: 16, messages: [{ role: 'user', content: 'Say hello in one word.' }] });
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body,
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return { ok: false, error: `HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}` };
+      }
+      return { ok: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: msg };
+    }
+  });
+
+  // ── Terminal seed (mock) ────────────────────────────────────
+
+  ipcMain.handle('tide:getTerminalLines', async (_e, _sessionId: string) => {
+    return [];
+  });
+
+  // ── Real terminal (bottom panel) ────────────────────────────
+  handle('terminal:start', (e, terminalId: string, sessionId: string) => {
+    startTerminal(terminalId, sessionId, e.sender);
+  });
+
+  ipcMain.handle('terminal:input', async (_e, terminalId: string, input: string) => {
+    sendInput(terminalId, input);
+  });
+
+  handle('terminal:kill', async (_e, terminalId: string) => {
+    killTerminal(terminalId);
+  });
+
+  // Stop the foreground process in a terminal (Ctrl+C / SIGINT). Used by
+  // the Run-script Stop button — graceful: dev servers clean up before
+  // exiting. The PTY itself stays alive so the user can read the tail of
+  // the output and start another command in the same shell.
+  handle('terminal:stop', async (_e, terminalId: string) => {
+    stopTerminal(terminalId);
+  });
+
+  ipcMain.handle('terminal:resize', async (_e, terminalId: string, cols: number, rows: number) => {
+    resizeTerminal(terminalId, cols, rows);
+  });
+
+  // ── Git source control ─────────────────────────────────────────
+  // Resolve the git cwd for an operation: prefer the active session's
+  // worktree path (so Source Control shows worktree changes when one is
+  // isolated), fall back to the workspace's main checkout.
+  const resolveGitCwd = async (workspaceId: string, sessionId?: string): Promise<string | undefined> => {
+    if (sessionId) {
+      try {
+        const session = sessions.getSession(sessionId);
+        if (session?.worktree?.path) return session.worktree.path;
+      } catch { /* sessions module not ready — fall through */ }
+    }
+    return store.listWorkspaces().find((w) => w.id === workspaceId)?.path;
+  };
+
+  ipcMain.handle('tide:gitStatus', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await getGitStatus(root); } catch { return []; }
+  });
+
+  handle('tide:gitStage', async (_e, workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false };
+    try { await gitStage(root, filePath, stage); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message }; }
+  });
+
+  handle('tide:gitCommit', async (_e, workspaceId: string, message: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    try {
+      const sha = await gitCommit(root, message);
+      return { ok: true, sha };
+    } catch (e: any) { return { ok: false, error: e?.message }; }
+  });
+
+  ipcMain.handle('tide:gitDiff', async (_e, workspaceId: string, filePath: string, staged: boolean, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await gitDiff(root, filePath, staged); } catch { return []; }
+  });
+
+  // ── RAG (Memory & RAG panel) ────────────────────────────────────
+  // One read-only handler. The panel refetches on query invalidation;
+  // no streaming or push channel needed for status.
+  registerRagHandlers();
+}
+
+// ── Helper functions ──────────────────────────────────────────
+
+/** Detect git info at a path. Returns null if not a git repo.
+ *  Async — git operations no longer block the main process event loop. */
+async function detectGit(dirPath: string): Promise<{ branch: string; headCommit: string; fileCount: number } | null> {
+  try {
+    if (!fs.existsSync(path.join(dirPath, '.git'))) return null;
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    const { stdout: branch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: dirPath, encoding: 'utf-8', timeout: 5000 });
+    const { stdout: headCommit } = await execAsync('git rev-parse --short HEAD', { cwd: dirPath, encoding: 'utf-8', timeout: 5000 });
+    const { stdout: fileCountStr } = await execAsync('git ls-files | wc -l', { cwd: dirPath, encoding: 'utf-8', timeout: 5000 });
+    return { branch: branch.trim(), headCommit: headCommit.trim(), fileCount: parseInt(fileCountStr.trim(), 10) || 0 };
+  } catch {
+    return null;
+  }
+}
+
+/** Expand ~ to home directory. */
+function expandPath(p: string): string {
+  if (p.startsWith('~/')) {
+    return path.join(process.env.HOME || process.env.USERPROFILE || '~', p.slice(2));
+  }
+  return p;
+}
+
+/** Read a directory tree recursively up to maxDepth. */
+function readDirTree(basePath: string, relativePath: string, maxDepth: number): FileNode[] {
+  if (maxDepth < 0) return [];
+  const fullPath = relativePath ? path.join(basePath, relativePath) : basePath;
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(fullPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const nodes: FileNode[] = [];
+  for (const entry of entries) {
+    // Skip hidden dirs, node_modules, .git, etc.
+    if (entry.name.startsWith('.') && entry.name !== '.agent') continue;
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'release') continue;
+
+    const entryRelative = relativePath ? path.join(relativePath, entry.name) : entry.name;
+
+    if (entry.isDirectory()) {
+      nodes.push({
+        name: entry.name,
+        path: entryRelative,
+        kind: 'dir',
+        expanded: maxDepth > 1,
+        children: readDirTree(basePath, entryRelative, maxDepth - 1),
+      });
+    } else {
+      nodes.push({
+        name: entry.name,
+        path: entryRelative,
+        kind: 'file',
+      });
+    }
+  }
+  return nodes;
+}
