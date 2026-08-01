@@ -19,10 +19,12 @@ import * as path from 'path';
 import {
   getStatusList,
   retryServer,
+  authenticateServer,
   activateWorkspace,
   onStatusChange,
   loadServer,
   unloadServer,
+  reinitializeAll,
 } from '../agent/mcp/pool.js';
 import {
   addServer,
@@ -163,6 +165,32 @@ export function registerMcpHandlers(
       return { ok: true };
     },
   );
+
+  // ── Authenticate (OAuth): user-initiated browser sign-in ──
+  // Opens the browser at the stashed authorization URL, then re-runs connect.
+  // MUST be triggered by the "Authenticate" button — not during init/reload.
+  ipcMain.handle(
+    'tide:mcp:authenticate',
+    (_e, name: string, scope: 'user' | 'project', workspaceId?: string) => {
+      authenticateServer(name, scope, workspaceId).catch((e) =>
+        log.warn('authenticate failed', { name, error: String(e) }),
+      );
+      return { ok: true };
+    },
+  );
+
+  // ── Re-initialize ALL servers (disconnect + reconnect from config) ──
+  // The MCP "reload" action: tears down every connection and re-runs the
+  // full init (user servers + active workspace's project servers), so newly
+  // added/removed/edited servers and previously-failing ones all get a fresh
+  // connect attempt. Fire-and-forget; the UI updates off statusChanged.
+  ipcMain.handle('tide:mcp:reinitialize', () => {
+    const ws = getActiveWorkspace();
+    reinitializeAll(ws ?? undefined).catch((e) =>
+      log.warn('reinitialize failed', { error: String(e) }),
+    );
+    return { ok: true };
+  });
 
   // ── Secret management (safeStorage-backed) ──
   ipcMain.handle('tide:mcp:setSecret', (_e, name: string, value: string) => {

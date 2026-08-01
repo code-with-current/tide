@@ -146,26 +146,26 @@ export function SessionHero({ session }: { session: Session }) {
 
       {/* Stat strip — the three most-checked numbers. */}
       <div className="grid grid-cols-3 gap-px mt-3 bg-border border border-border rounded-md overflow-hidde">
-        <Stat icon={<Cpu className="size-4" />} label="Iteration">
-          {stream?.iteration ?? u.calls}<span className="text-[0.9rem] text-muted-foreground font-normal"> / {maxSteps}</span>
+        <Stat icon={<Cpu className="size-3" />} label="Iteration">
+          <span className="text-[0.75rem]">{stream?.iteration ?? u.calls}</span><span className="text-[0.75rem] text-muted-foreground font-normal"> / {maxSteps}</span>
         </Stat>
-        <Stat icon={<Wrench className="size-4" />} label="Tools">
-          {formatNumber(u.calls)}<span className="text-[0.8rem] text-muted-foreground font-normal"> calls</span>
+        <Stat icon={<Wrench className="size-3" />} label="Tools">
+          <span className="text-[0.75rem]">{formatNumber(u.calls)}</span><span className="text-[0.75rem] text-muted-foreground font-normal"> calls</span>
         </Stat>
         {status === 'blocked' ? (
-          <Stat icon={<Loader2 className="size-4 animate-spin" />} label="Waiting">
+          <Stat icon={<Loader2 className="size-3 animate-spin" />} label="Waiting">
             {mm}:{ss}
           </Stat>
         ) : (
           <Stat icon={<DollarSign className="size-2.5" />} label="Cost">
-            {session.costUsd.toFixed(3)}<span className="text-[0.8rem] text-muted-foreground font-normal"> USD</span>
+            <span className="text-[0.75rem]">{session.costUsd.toFixed(3)}</span><span className="text-[0.75rem] text-muted-foreground font-normal"> USD</span>
           </Stat>
         )}
       </div>
 
       {/* Pinned context-window meter (moved from the bottom section). */}
       <div className="mt-3">
-        <div className="flex items-baseline justify-between text-[10px] mb-1.5">
+        <div className="flex items-baseline justify-between text-[0.65rem] mb-1.5">
           <span className="font-semibold uppercase tracking-wider text-muted-foreground">Context</span>
           <span className="font-mono text-muted-foreground">
             <span className="text-foreground text-[0.75rem] font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(contextWindow)} ·{' '}
@@ -203,7 +203,7 @@ export function SessionHero({ session }: { session: Session }) {
 function Stat({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
     <div className="bg-background px-2.5 py-2">
-      <div className="flex items-center gap-1 text-[0.75rem] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </div>

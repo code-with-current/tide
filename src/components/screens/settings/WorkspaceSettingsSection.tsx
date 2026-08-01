@@ -6,11 +6,14 @@ import {
   Save,
   RefreshCw,
   AlertTriangle,
-  Loader2,
   CheckCircle2,
   Pencil,
   Archive,
   ArchiveRestore,
+  GitBranch,
+  Database,
+  FileCode2,
+  FolderCode,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -24,6 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Chip } from "@/components/primitives";
+import { RagIndexProgress } from "@/components/rag/RagIndexProgress";
+import { toast } from "@/lib/toast";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +61,7 @@ import * as api from "@/lib/api/client";
 import type { Workspace, WorkspaceScript, RagStatus } from "@/types";
 import { Card, SettingsGroup, SettingsRow } from "./shared";
 import { cn } from "@/lib/utils";
+import { Tip } from "@/components/ui/quick-tooltip";
 
 const SCRIPT_META: Record<
   WorkspaceScript["kind"],
@@ -137,10 +143,10 @@ export function WorkspaceSettingsSection() {
       {/* SIDEBAR */}
       <aside className="w-[180px] flex-shrink-0 border-r border-input bg-card flex flex-col">
         <div className="px-3 py-2.5 border-b border-input flex items-center justify-between">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
+          <div className="text-[0.75rem] uppercase tracking-wider text-foreground/80 font-semibold">
             Workspaces
           </div>
-          <span className="text-[10px] text-muted-foreground/60">
+          <span className="text-[0.70rem] text-warning/80 py-0.5 px-2 rounded-2xl bg-warning/20">
             {workspaces?.length ?? 0}
           </span>
         </div>
@@ -255,20 +261,56 @@ function WorkspaceListRow({
             }
           }}
           className={cn(
-            "w-full flex items-center gap-2 rounded-md px-2.5 py-[7px] text-left text-[12px] transition-colors cursor-default outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "w-full flex flex-col gap-1 rounded-md px-2.5 py-[7px] text-left text-[12px] transition-colors cursor-default outline-none focus-visible:ring-1 focus-visible:ring-ring",
             active
               ? "bg-secondary text-foreground"
               : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground/90",
             archived && "opacity-60",
           )}
         >
-          <span
-            className={cn(
-              "size-[5px] rounded-full shrink-0 transition-colors",
-              isEnabled ? "bg-emerald-400" : "bg-muted-foreground/25",
-            )}
-          />
           <span className="truncate flex-1 leading-tight">{workspace.name}</span>
+          {/* Feature icons — always shown, grayed out when the feature is off.
+              Git: on when the workspace tracks a branch.
+              RAG: on when enabled for this workspace (isEnabled from ragStatus).
+              Script: on when at least one lifecycle script is defined. */}
+          <div className="flex items-center gap-1.5">
+            <Tip label={workspace.branch ? `Git · ${workspace.branch}` : "Git · not initialized"} side="bottom">
+              <GitBranch
+                className={cn(
+                  "size-3 transition-opacity",
+                  workspace.branch ? "text-muted-foreground/70" : "text-muted-foreground/20",
+                )}
+                aria-label="git"
+              />
+            </Tip>
+            <Tip label={isEnabled ? "RAG · enabled" : "RAG · disabled"} side="bottom">
+              <Database
+                className={cn(
+                  "size-3 transition-opacity",
+                  isEnabled ? "text-muted-foreground/70" : "text-muted-foreground/20",
+                )}
+                aria-label="rag"
+              />
+            </Tip>
+            <Tip
+              label={
+                workspace.scripts && workspace.scripts.length > 0
+                  ? `Scripts · ${workspace.scripts.length}`
+                  : "Scripts · none"
+              }
+              side="bottom"
+            >
+              <FileCode2
+                className={cn(
+                  "size-3 transition-opacity",
+                  workspace.scripts && workspace.scripts.length > 0
+                    ? "text-muted-foreground/70"
+                    : "text-muted-foreground/20",
+                )}
+                aria-label="scripts"
+              />
+            </Tip>
+          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-40">
@@ -366,24 +408,30 @@ function WorkspaceColumn({
     if (runCmd.trim()) scripts.push({ kind: "run", command: runCmd.trim() });
     if (deleteCmd.trim())
       scripts.push({ kind: "delete", command: deleteCmd.trim() });
-    await api.updateWorkspace(workspace.id, {
-      name: name.trim() || workspace.name,
-      repository: repository.trim() || undefined,
-      path: location.trim(),
-      worktreeLocation: worktreeLocation.trim(),
-      scripts,
-    });
-    qc.invalidateQueries({ queryKey: ["workspaces"] });
-    setSaving(false);
+    try {
+      await api.updateWorkspace(workspace.id, {
+        name: name.trim() || workspace.name,
+        repository: repository.trim() || undefined,
+        path: location.trim(),
+        worktreeLocation: worktreeLocation.trim(),
+        scripts,
+      });
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      toast.success("Workspace saved");
+    } catch (e) {
+      toast.error("Save failed", { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div>
       <div
-        className="text-[12x] font-semibold uppercase text-foreground/50"
+        className="flex flex-row items-center text-[0.9rem] font-semibold uppercase text-foreground/50 gap-2"
         style={{ height: 40 }}
       >
-        ⬡ {workspace.name}
+        <div className="p-1.5 rounded-2xl bg-foreground/10 text-foreground"><FolderCode className="size-3.5"/> </div> {workspace.name}
       </div>
 
       {/* General */}
@@ -609,7 +657,6 @@ function RagColumn({
   const initWs = useInitRagWorkspace(workspaceId);
   const initProgress = useRagInitProgress(workspaceId);
   const initRunning = status.initState === "running";
-  const showProgress = !!initProgress && initProgress.phase !== "done";
   const isLocal = status.embedderId === "local-code-512";
   const chunkOptions = isLocal ? [256, 384, 512] : [256];
   const currentChunk = status.chunkTokens ?? 384;
@@ -617,10 +664,10 @@ function RagColumn({
   return (
     <div>
       <div
-        className="text-[12px] font-semibold uppercase text-foreground/50"
+        className="flex flex-row items-center text-[0.9rem] font-semibold uppercase text-foreground/50 gap-2"
         style={{ height: 40 }}
       >
-        ◈ RAG · {status.chunkCount} chunks
+        <div className="p-1.5 rounded-2xl bg-foreground/10 text-foreground"><Database className="size-3.5"/> </div> RAG · {status.chunkCount} chunks
       </div>
 
       {/* Status */}
@@ -649,41 +696,8 @@ function RagColumn({
         </Card>
       </SettingsGroup>
 
-      {/* Indexing progress */}
-      {showProgress && initProgress && (
-        <SettingsGroup
-          title={initProgress.phase === "failed" ? "Failed" : "Indexing"}
-        >
-          <Card>
-            <SettingsRow
-              title={phaseLabel(initProgress.phase)}
-              description={
-                initProgress.phase === "walking"
-                  ? `${initProgress.filesSeen} files`
-                  : initProgress.phase === "chunking"
-                    ? `${initProgress.chunksTotal} chunks from ${initProgress.filesSeen} files`
-                    : initProgress.phase === "embedding"
-                      ? `${initProgress.chunksEmbedded} / ${initProgress.chunksTotal}`
-                      : ""
-              }
-              last={initProgress.phase !== "failed" || !initProgress.error}
-            >
-              {initProgress.phase === "failed" ? (
-                <AlertTriangle className="size-3.5 text-destructive" />
-              ) : (
-                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-              )}
-            </SettingsRow>
-            {initProgress.phase === "failed" && initProgress.error && (
-              <div className="px-4 pb-3">
-                <pre className="text-[10px] leading-relaxed text-destructive/80 whitespace-pre-wrap break-words max-w-full font-mono bg-destructive/5 rounded-md p-2.5">
-                  {initProgress.error}
-                </pre>
-              </div>
-            )}
-          </Card>
-        </SettingsGroup>
-      )}
+      {/* Indexing progress — prominent card (self-gates when idle/done). */}
+      <RagIndexProgress event={initProgress} />
 
       {/* Cloud fallback */}
       <SettingsGroup title="Cloud Fallback">
@@ -794,19 +808,4 @@ function RagColumn({
       </SettingsGroup>
     </div>
   );
-}
-
-function phaseLabel(phase: string): string {
-  switch (phase) {
-    case "walking":
-      return "Walking files";
-    case "chunking":
-      return "Chunking source";
-    case "embedding":
-      return "Embedding chunks";
-    case "failed":
-      return "Failed";
-    default:
-      return "Indexing";
-  }
 }

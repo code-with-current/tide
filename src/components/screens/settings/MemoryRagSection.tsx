@@ -2,7 +2,6 @@ import {
   RefreshCw,
   Download,
   Loader2,
-  AlertCircle,
   CheckCircle2,
   XCircle,
   Cpu,
@@ -15,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Chip } from '@/components/primitives';
+import { RagIndexProgress } from '@/components/rag/RagIndexProgress';
 import { Card, SettingsGroup, SettingsRow } from './shared';
 import {
   useRagStatus,
@@ -52,7 +52,6 @@ export function MemoryRagSection() {
   const wsEnabled = !!effectiveWsId && enabledIds.includes(effectiveWsId);
   const downloading = downloadModel.isPending;
   const initRunning = status?.initState === 'running';
-  const showProgress = !!initProgress && initProgress.phase !== 'done';
 
   const isLocal = status?.embedderId === 'local-code-512';
   const chunkOptions = isLocal ? [256, 384, 512] : [256];
@@ -175,7 +174,7 @@ export function MemoryRagSection() {
                           : 'Not enabled for this workspace'
                   }
                 >
-                  <Chip tone={wsEnabled ? 'ok' : modelReady ? 'info' : 'bad'}>
+                  <Chip tone={wsEnabled ? 'ok' : modelReady ? 'info' : 'bad'} className={initRunning ? 'animate-pulse' : undefined}>
                     {wsEnabled ? 'enabled' : initRunning ? 'indexing' : modelReady ? 'off' : 'no model'}
                   </Chip>
                 </SettingsRow>
@@ -195,39 +194,8 @@ export function MemoryRagSection() {
               </Card>
             </SettingsGroup>
 
-            {/* Indexing progress */}
-            {showProgress && initProgress && (
-              <SettingsGroup title={initProgress.phase === 'failed' ? 'Failed' : 'Indexing'}>
-                <Card>
-                  <SettingsRow
-                    title={phaseLabel(initProgress.phase)}
-                    description={
-                      initProgress.phase === 'walking'
-                        ? `${initProgress.filesSeen} files`
-                        : initProgress.phase === 'chunking'
-                          ? `${initProgress.chunksTotal} chunks from ${initProgress.filesSeen} files`
-                          : initProgress.phase === 'embedding'
-                            ? `${initProgress.chunksEmbedded} / ${initProgress.chunksTotal}`
-                            : ''
-                    }
-                    last={initProgress.phase !== 'failed' || !initProgress.error}
-                  >
-                    {initProgress.phase === 'failed' ? (
-                      <AlertCircle className="size-3.5 text-destructive" />
-                    ) : (
-                      <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                    )}
-                  </SettingsRow>
-                  {initProgress.phase === 'failed' && initProgress.error && (
-                    <div className="px-4 pb-3">
-                      <pre className="text-[10px] leading-relaxed text-destructive/80 whitespace-pre-wrap break-words max-w-full font-mono bg-destructive/5 rounded-md p-2.5">
-                        {initProgress.error}
-                      </pre>
-                    </div>
-                  )}
-                </Card>
-              </SettingsGroup>
-            )}
+            {/* Indexing progress — prominent card (self-gates when idle/done). */}
+            <RagIndexProgress event={initProgress} />
 
             {/* Embedder */}
             <SettingsGroup title="Embedder">
@@ -348,14 +316,4 @@ export function MemoryRagSection() {
       </div>
     </div>
   );
-}
-
-function phaseLabel(phase: string): string {
-  switch (phase) {
-    case 'walking': return 'Walking files';
-    case 'chunking': return 'Chunking source';
-    case 'embedding': return 'Embedding chunks';
-    case 'failed': return 'Failed';
-    default: return 'Indexing';
-  }
 }

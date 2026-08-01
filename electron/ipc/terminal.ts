@@ -5,6 +5,7 @@
 
 import { createRequire } from 'module';
 import * as fs from 'fs';
+import { spawn } from 'child_process';
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
 import { createLogger } from '../logger.js';
@@ -21,6 +22,14 @@ try {
 
 interface TerminalEntry {
   ptyProc: any;
+  /** Shell PID (ptyProc.pid). The stable anchor for a terminal — used for
+   *  process-group Stop + liveness checks. The FOREGROUND process (the dev
+   *  server the user ran) is a child of this shell; we reach it by signaling
+   *  the process group, since node-pty doesn't expose the fg pid directly. */
+  pid: number;
+  /** The session id this terminal belongs to — so ports + liveness can be
+   *  scoped per-session (a port in session A shouldn't show in session B). */
+  sessionId: string;
   cwd: string;
   /** Cached WebContents — stopTerminal needs to emit `terminal:ports`
    *  when the user interrupts, but onExit doesn't fire (the shell
@@ -35,6 +44,31 @@ interface TerminalEntry {
    *  every output chunk would re-fire the event for a listening dev
    *  server's banner. */
   detectedPorts: Set<number>;
+}
+
+/**
+ * Check whether a process (by pid) is still alive. Uses kill(pid, 0) on
+ * Unix (no signal sent, just an existence check) and tasklist on Windows.
+ * Returns true if the process exists.
+ */
+export function isProcessAlive(pid: number): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    if (process.platform === 'win32') {
+      // tasklist returns non-zero exit if the process doesn't exist.
+      spawn('tasklist', ['/FI', `PID eq ${pid}`], { stdio: 'ignore' });
+      return true; // best-effort; can't synchronously check on Windows here
+    }
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Get the shell pid for a terminal, or undefined if it doesn't exist. */
+export function getTerminalPid(terminalId: string): number | undefined {
+  return terminals.get(terminalId)?.pid;
 }
 
 const terminals = new Map<string, TerminalEntry>();
@@ -156,6 +190,7 @@ export function startTerminal(
     env,
   });
 
+  const pid: number = ptyProc.pid;
   // Store disposables so we can unsubscribe before killing.
   const disposables: Array<{ dispose: () => void }> = [];
   disposables.push(ptyProc.onData((data: string) => sendOutput(data)));
@@ -172,8 +207,8 @@ export function startTerminal(
     terminals.delete(terminalId);
   }));
 
-  terminals.set(terminalId, { ptyProc, cwd, wc, disposables, detectedPorts });
-  log.info('started PTY', { terminalId, cwd });
+  terminals.set(terminalId, { ptyProc, pid, sessionId, cwd, wc, disposables, detectedPorts });
+  log.info('started PTY', { terminalId, pid, sessionId, cwd });
 }
 
 export function sendInput(terminalId: string, input: string): void {
@@ -182,21 +217,26 @@ export function sendInput(terminalId: string, input: string): void {
 }
 
 /**
- * Stop the foreground process in a terminal. Sends ETX (Ctrl+C, \x03)
- * to the PTY — the shell forwards SIGINT to whatever the user's running,
- * same as hitting Ctrl+C manually. Graceful: dev servers get a chance
- * to clean up sockets / child workers before exiting.
+ * Stop the foreground process running inside a terminal's shell.
  *
- * Use this for the Run-script Stop button. Harder kill (SIGKILL via
- * killTerminal) is reserved for close-tab, where we tear down the PTY
- * entirely.
+ * PRIMARY: send Ctrl+C (\x03) to the PTY. The PTY's terminal driver forwards
+ * SIGINT to the FOREGROUND process group — the real one (the dev server the
+ * user ran + its children), NOT the shell's own group. This is how Ctrl+C
+ * works interactively, and it's the only reliable cross-platform way to reach
+ * the foreground job: job-control shells put each foreground command in its
+ * OWN process group, so signaling the shell's group (-shellPid) misses it.
  *
- * Also clears detected ports: the dev server is dying, so its port is
- * no longer reachable. The shell stays alive after SIGINT (only the
- * foreground process dies), so onExit does NOT fire — without this
- * explicit clear, port badges would linger forever after Stop.
- * Clearing the dedup Set also lets a re-run of the same script re-emit
- * the port event instead of being silently filtered as "already seen".
+ * A single \x03 can be swallowed if the process is mid-output or ignores the
+ * first SIGINT, so we send it twice with a short gap. If the process still
+ * hasn't died after ~1s (stubborn server, swallowed SIGINT), we escalate to a
+ * tree-kill: find the shell's descendants and SIGKILL them directly.
+ *
+ * - Windows: Ctrl+C is also sent via \x03 (ConPTY forwards it), with a
+ *   taskkill /T tree-kill fallback on the shell pid.
+ *
+ * The shell itself stays alive (only the foreground group dies), so onExit
+ * does NOT fire — we clear ports explicitly here. Clearing the dedup Set lets
+ * a re-run re-emit the port event.
  */
 export function stopTerminal(terminalId: string): void {
   const entry = terminals.get(terminalId);
@@ -205,7 +245,30 @@ export function stopTerminal(terminalId: string): void {
   if (!entry.wc.isDestroyed()) {
     entry.wc.send('terminal:ports', { terminalId, ports: [] });
   }
-  try { entry.ptyProc.write('\x03'); } catch { /* already dead */ }
+  const { pid, ptyProc } = entry;
+
+  // Primary: Ctrl+C via the PTY (twice, with a gap, for reliability).
+  try { ptyProc.write('\x03'); } catch { /* already dead */ }
+  setTimeout(() => {
+    try { ptyProc.write('\x03'); } catch { /* already dead */ }
+  }, 200);
+
+  // Escalation fallback: if the process survives ~1.2s, tree-kill the shell's
+  // descendants directly. SIGKILL is unblockable — catches stubborn servers.
+  setTimeout(() => {
+    if (!isProcessAlive(pid)) return; // already gone — Ctrl+C worked
+    log.info('stop: escalating to tree-kill', { terminalId, pid });
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' })
+        .on('error', () => { /* already dead */ });
+    } else {
+      // pgrep -P finds direct children of the shell; recurse one level for
+      // their children (npm → vite → workers). SIGKILL each. The shell itself
+      // is left alive (we only kill its descendants).
+      spawn('pkill', ['-KILL', '-P', String(pid)], { stdio: 'ignore' })
+        .on('error', () => { /* already dead or pkill unavailable */ });
+    }
+  }, 1200);
 }
 
 export function killTerminal(terminalId: string): void {

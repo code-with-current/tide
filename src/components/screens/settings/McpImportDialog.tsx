@@ -1,5 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, Check, Download } from 'lucide-react';
+import { Download, Plug, Globe, FolderCode, Loader2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { SectionLabel } from './ProvidersSection';
+import { ScopeCard } from './McpServerDialog';
 
 interface DetectedServer {
   name: string;
@@ -31,17 +37,17 @@ export function McpImportDialog({
   useEffect(() => {
     if (!open) return;
     setScanning(true);
+    // Default to NONE selected — the user opts into each server explicitly
+    // rather than silently importing everything the scanner found.
     setChecked(new Set());
     window.tideIpc?.mcpScan().then((result) => {
       setServers(result.servers);
       setAlreadyImported(new Set(result.alreadyImported));
-      // Pre-check all non-already-imported servers
-      setChecked(new Set(result.servers.filter((s) => !result.alreadyImported.includes(s.name)).map((s) => s.name)));
       setScanning(false);
     });
   }, [open]);
 
-  // Group by source
+  // Group by source tool (Claude Code, Codex, OpenCode, Generic…)
   const bySource = useMemo(() => {
     const groups: Record<string, DetectedServer[]> = {};
     for (const s of servers) {
@@ -62,6 +68,19 @@ export function McpImportDialog({
     });
   }
 
+  function toggleAllInGroup(groupServers: DetectedServer[]) {
+    const importable = groupServers.filter((s) => !alreadyImported.has(s.name));
+    const allChecked = importable.every((s) => checked.has(s.name));
+    setChecked((prev) => {
+      const next = new Set(prev);
+      for (const s of importable) {
+        if (allChecked) next.delete(s.name);
+        else next.add(s.name);
+      }
+      return next;
+    });
+  }
+
   async function handleImport() {
     const selected = servers.filter((s) => checked.has(s.name));
     if (selected.length === 0) return;
@@ -74,149 +93,172 @@ export function McpImportDialog({
     onClose();
   }
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Import MCP servers"
-        className="w-full max-w-md rounded-xl bg-card border border-border shadow-xl flex flex-col max-h-[80vh]"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold">Import MCP Servers</h2>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-muted transition-colors">
-            <X className="size-4" />
-          </button>
-        </div>
+      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+        {/* Header — matches the Add/Edit server dialog. */}
+        <DialogHeader className="px-5 py-4 flex-row items-center gap-3.5 border-b border-border space-y-0">
+          <div
+            className="size-9 rounded-[10px] flex items-center justify-center shrink-0 border"
+            style={{ background: 'rgba(217,119,87,0.1)', borderColor: 'rgba(217,119,87,0.2)' }}
+          >
+            <Download className="size-4 text-primary" />
+          </div>
+          <div className="flex-1">
+            <DialogTitle className="text-[15px] font-semibold text-left tracking-tight">
+              Import MCP
+            </DialogTitle>
+            <DialogDescription className="text-[11px] text-muted-foreground/60 mt-0.5 text-left">
+              Detected from Claude Code, Codex, OpenCode, and other configs.
+            </DialogDescription>
+          </div>
+        </DialogHeader>
 
         {/* Body */}
-        <div className="px-5 py-4 overflow-y-auto flex-1">
+        <div className="px-5 py-3 overflow-y-auto scroll max-h-[50vh]">
           {scanning ? (
-            <p className="text-sm text-muted-foreground text-center py-8">Scanning…</p>
+            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+              <Loader2 className="size-5 animate-spin text-muted-foreground/60" />
+              <p className="text-xs text-muted-foreground/60">Scanning configs…</p>
+            </div>
           ) : servers.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">
-              No MCP servers found from Claude Code, Codex, OpenCode, or Generic configs.
-            </p>
+            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+              <div className="size-10 rounded-xl bg-muted/50 flex items-center justify-center">
+                <Plug className="size-4 text-muted-foreground/50" />
+              </div>
+              <p className="text-xs text-muted-foreground/70 max-w-[260px]">
+                No MCP found in Claude Code, Codex, OpenCode, or Generic configs.
+              </p>
+            </div>
           ) : (
-            <>
-              <p className="text-xs text-muted-foreground/70 mb-3">
-                Found {servers.length} server{servers.length === 1 ? '' : 's'} ({importableCount} new, {alreadyImported.size} already imported)
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground/70">
+                Found {servers.length} server{servers.length === 1 ? '' : 's'} · {importableCount} new · {alreadyImported.size} already imported
               </p>
 
-              {Object.entries(bySource).map(([source, sourceServers]) => (
-                <div key={source} className="mb-4">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium">
-                      {source}
-                    </h3>
-                    <span className="text-[10px] text-muted-foreground/40 font-mono">{sourceServers.length}</span>
-                  </div>
-                  <div className="space-y-0.5">
-                    {sourceServers.map((s) => {
-                      const isImported = alreadyImported.has(s.name);
-                      const isChecked = checked.has(s.name);
-                      return (
-                        <label
-                          key={s.name}
-                          className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors ${
-                            isImported ? 'opacity-40' : 'hover:bg-muted/50'
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            disabled={isImported}
-                            onClick={() => toggle(s.name)}
-                            className={`shrink-0 size-4 rounded border flex items-center justify-center transition-colors ${
-                              isChecked
-                                ? 'bg-accent border-accent text-white'
-                                : 'border-border'
+              {Object.entries(bySource).map(([source, sourceServers]) => {
+                const importable = sourceServers.filter((s) => !alreadyImported.has(s.name));
+                const allChecked = importable.length > 0 && importable.every((s) => checked.has(s.name));
+                return (
+                  <div key={source}>
+                    {/* Source group header — mirrors the ExtensionCard header,
+                        with a select-all checkbox for the group. */}
+                    <div className="flex items-center justify-between mb-1.5 px-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleAllInGroup(sourceServers)}
+                        disabled={importable.length === 0}
+                        className="flex items-center gap-1.5 group"
+                      >
+                        <Checkbox
+                          checked={allChecked}
+                          disabled={importable.length === 0}
+                          onCheckedChange={() => toggleAllInGroup(sourceServers)}
+                          className="size-3.5"
+                        />
+                        <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium">
+                          {source}
+                        </h3>
+                      </button>
+                      <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
+                        {sourceServers.length}
+                      </span>
+                    </div>
+
+                    {/* Server rows */}
+                    <div className="space-y-0.5">
+                      {sourceServers.map((s) => {
+                        const isImported = alreadyImported.has(s.name);
+                        const isChecked = checked.has(s.name);
+                        return (
+                          <label
+                            key={s.name}
+                            className={`flex items-center gap-2.5 px-2 py-2 rounded-md transition-colors ${
+                              isImported ? 'opacity-40 cursor-default' : 'cursor-pointer hover:bg-secondary/60'
                             }`}
                           >
-                            {isChecked && <Check className="size-2.5" />}
-                          </button>
-                          <div className="min-w-0 flex-1">
-                            <span className="text-xs font-medium">{s.name}</span>
-                            {isImported && (
-                              <span className="text-[9px] text-muted-foreground/50 ml-1.5">(already in Tide)</span>
-                            )}
-                          </div>
-                          <span className="text-[9px] uppercase tracking-wide text-muted-foreground/40 font-mono shrink-0">
-                            {s.config.type}
-                          </span>
-                        </label>
-                      );
-                    })}
+                            <Checkbox
+                              checked={isChecked}
+                              disabled={isImported}
+                              onCheckedChange={() => toggle(s.name)}
+                              className="size-4 shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <span className="text-xs font-medium">{s.name}</span>
+                              {isImported && (
+                                <span className="text-[10px] text-muted-foreground/50 ml-1.5">(already in Tide)</span>
+                              )}
+                            </div>
+                            <span className="text-[9px] uppercase tracking-wide text-muted-foreground/40 font-mono shrink-0">
+                              {s.config.type}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </>
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* Scope selector + footer */}
+        {/* Scope + footer — only once servers are scanned + there's something
+            importable. Mirrors the Add/Edit dialog's scope cards + footer. */}
         {!scanning && importableCount > 0 && (
           <div className="px-5 py-3 border-t border-border space-y-3">
+            <div>
+              <SectionLabel icon={<Globe className="size-3" />}>Scope</SectionLabel>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <ScopeCard
                 active={scope === 'user'}
                 onClick={() => setScope('user')}
+                icon={<Globe className="size-3.5" />}
                 label="Global"
                 hint="~/.tide/mcp.json"
               />
               <ScopeCard
                 active={scope === 'project'}
                 onClick={() => setScope('project')}
-                label={workspaceRoot ? 'Workspace' : 'Workspace'}
+                icon={<FolderCode className="size-3.5" />}
+                label="Workspace"
                 hint={workspaceRoot ? `${workspaceRoot}/.mcp.json` : '.mcp.json'}
               />
             </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={handleImport}
-                disabled={checked.size === 0 || importing}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Download className="size-3" />
-                {importing ? 'Importing…' : `Import ${checked.size} server${checked.size === 1 ? '' : 's'}`}
-              </button>
-            </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
 
-function ScopeCard({
-  active,
-  onClick,
-  label,
-  hint,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  hint: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
-        active
-          ? 'border-accent bg-accent/10 ring-1 ring-accent/30'
-          : 'border-border hover:border-accent/40 hover:bg-muted/50'
-      }`}
-    >
-      <span className={`text-xs font-medium ${active ? 'text-accent' : 'text-foreground'}`}>{label}</span>
-      <span className="text-[10px] text-muted-foreground/60 font-mono truncate max-w-full">{hint}</span>
-    </button>
+        <DialogFooter className="px-5 py-3.5 flex-row items-center justify-between border-t border-border bg-secondary/30">
+          <div className="text-[11px] text-muted-foreground/60">
+            {checked.size > 0 ? (
+              <Badge variant="secondary" className="font-mono">{checked.size} selected</Badge>
+            ) : (
+              <span></span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleImport}
+              disabled={checked.size === 0 || importing}
+              className="gap-1.5"
+            >
+              <Download className="size-3.5" />
+              {importing ? 'Importing…' : `Import${checked.size > 0 ? ` ${checked.size}` : ''}`}
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

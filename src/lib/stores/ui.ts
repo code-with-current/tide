@@ -680,6 +680,13 @@ export const useUi = create<UiState>()(
                 t.id === terminalId ? { ...t, scriptRunning: false } : t,
               ),
             },
+            // Clear this terminal's ports too — the process is dead, so its
+            // exposed dev-server port is no longer reachable. Keeps port
+            // badges in sync when a process dies (crash / external kill),
+            // not just on a user-initiated Stop.
+            terminalPorts: Object.fromEntries(
+              Object.entries(s.terminalPorts).filter(([k]) => k !== terminalId),
+            ),
           };
         }
       }
@@ -783,7 +790,7 @@ export const useUi = create<UiState>()(
   fontScale: 14,
   reduceMotion: false,
   terminalTheme: 'tide-dark',
-  terminalFontSize: 14,
+  terminalFontSize: 11,
   appTheme: 'tide',
   setAppearance: (patch) => {
     set(patch);
@@ -878,4 +885,3 @@ export const useUi = create<UiState>()(
     },
   ),
 );
-

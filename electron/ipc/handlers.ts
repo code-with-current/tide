@@ -18,7 +18,7 @@ import { BUILTIN_AGENTS } from '../agent/agents/registry';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, gitStage, gitCommit, gitDiff } from './git.js';
-import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal } from './terminal.js';
+import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { registerRagHandlers } from './rag.js';
 
@@ -308,7 +308,7 @@ export function registerIpcHandlers() {
     'tide:addWorkspace',
     async (
       _e,
-      input: { path: string; name?: string; repository?: string; template?: import('../../src/lib/templates').TemplateId },
+      input: { path: string; name?: string; repository?: string; template?: import('../../src/lib/templates').TemplateId; scripts?: import('../../src/types').WorkspaceScript[]; initGit?: boolean },
     ) => {
       const { TEMPLATES_BY_ID } = await import('../../src/lib/templates');
       const template = input.template ? TEMPLATES_BY_ID[input.template] : undefined;
@@ -405,6 +405,19 @@ export function registerIpcHandlers() {
       }
     }
 
+    // Existing local folder flow: if the user opted to initialize git and the
+    // folder isn't already a repo, run `git init` before detection so the
+    // workspace is tracked from the start. Applies only to the local-open
+    // flow (no repository, folder already exists); clone/scaffold flows are
+    // already covered by their own git handling above.
+    if (input.initGit && !input.repository && fs.existsSync(dirPath) && !fs.existsSync(path.join(dirPath, '.git'))) {
+      try {
+        execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
+      } catch {
+        /* non-fatal — the workspace is usable without git */
+      }
+    }
+
     const gitInfo = await detectGit(dirPath);
     const name = input.name || path.basename(dirPath);
 
@@ -418,7 +431,7 @@ export function registerIpcHandlers() {
       isDefault: false,
       fileCount: gitInfo?.fileCount ?? 0,
       worktreeLocation: '.agent/worktrees/',
-      scripts: [],
+      scripts: input.scripts ?? [],
     };
 
     store.addWorkspace(workspace);
@@ -958,6 +971,19 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('terminal:resize', async (_e, terminalId: string, cols: number, rows: number) => {
     resizeTerminal(terminalId, cols, rows);
+  });
+
+  // PID-based liveness — lets the renderer check whether a terminal's process
+  // is still alive (e.g. to show/clear port badges + Run/Stop state) without
+  // relying on name matching. Returns the shell pid or null if no terminal.
+  ipcMain.handle('terminal:getPid', async (_e, terminalId: string) => {
+    return getTerminalPid(terminalId) ?? null;
+  });
+
+  // Check if a process (by pid) is still alive. Used for port-liveness checks
+  // when switching sessions (a stale pid means the dev server died).
+  ipcMain.handle('process:isAlive', async (_e, pid: number) => {
+    return isProcessAlive(pid);
   });
 
   // ── Git source control ─────────────────────────────────────────

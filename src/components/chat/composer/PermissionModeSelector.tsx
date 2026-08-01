@@ -46,8 +46,8 @@ export function PermissionModeSelector({ compact = false }: { compact?: boolean 
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
-        <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
-          <Shield className="size-3" /> Permissions
+        <DropdownMenuLabel className="text-[0.9rem] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2 pt-3">
+          <Shield className="size-4.5" /> Permissions
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 

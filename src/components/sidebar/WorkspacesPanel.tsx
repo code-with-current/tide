@@ -9,6 +9,7 @@ import {
   Trash2,
   ChevronDown,
   ArchiveIcon,
+  Loader2,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import {
@@ -48,6 +49,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import type { Workspace } from "@/types";
+import { toast } from "@/lib/toast";
 
 /**
  * Derive a workspace's aggregate status from live signals:
@@ -93,10 +95,15 @@ export function WorkspacesPanel() {
    * Sessions panel is always kept open — that's the dual-panel browsing
    * concept (workspace list + session list side by side).
    */
+  // The workspace whose sessions are currently loading (during a switch).
+  // Drives a per-row spinner so a slow load reads as "switching," not frozen.
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+
   const handleSelect = async (workspaceId: string) => {
     // Optimistically set the workspace so the highlight follows immediately;
     // the session id resolves a tick later.
     useUi.setState({ activeWorkspaceId: workspaceId, sessionsPanelOpen: true });
+    setSwitchingTo(workspaceId);
     try {
       const sessions = await api.listSessions(workspaceId);
       // Pick the latest by updatedAt (or fall back to createdAt). Sessions
@@ -128,39 +135,45 @@ export function WorkspacesPanel() {
           sessionsPanelOpen: true,
         });
       }
-    } catch {
+    } catch (e) {
       // Network/IPC failure — leave the workspace selected with no session
-      // rather than blocking the click.
+      // rather than blocking the click. Toast so the user can tell a failure
+      // apart from a legitimately empty workspace.
+      toast.error("Couldn't load sessions", {
+        description: e instanceof Error ? e.message : "IPC call failed",
+      });
       useUi.setState({
         activeWorkspaceId: workspaceId,
         activeSessionId: null,
         mainView: "new",
         sessionsPanelOpen: true,
       });
+    } finally {
+      setSwitchingTo(null);
     }
   };
 
   return (
     <aside
       className="flex flex-col h-full overflow-hidden flex-shrink-0 p-2"
-      style={{ width: 200 }}
+      style={{ width: 220 }}
     >
       {/* Top spacer — clears the native macOS traffic lights, which render at
           the top-LEFT (over this sidebar) at (12, 12). On Windows/Linux the
           caption buttons sit at the top-RIGHT, so this sidebar needs no
           clearance and the spacer is omitted to avoid a wasted gap. */}
-      {isMac && <div className="h-10 flex-shrink-0" />}
+      {isMac && <div className="h-8 flex-shrink-0" />}
       <div className="px-3 py-2.5 flex items-center justify-between border-input flex-shrink-0 border-b ">
-        <div className="text-[1rem] uppercase tracking-wider text-muted-foreground/60 font-semibold">
+        <div className="text-[1rem] uppercase tracking-wider text-foreground/80 font-bold font-stretch-semi-expanded">
           Workspaces
         </div>
         <Tip label="Add workspace" side="bottom">
           <Button
-            variant="outline"
+            variant="default"
             size="icon-sm"
             onClick={() => openDialog("addWorkspace")}
           >
-            <Plus className="size-3.5" />
+            <Plus />
           </Button>
         </Tip>
       </div>
@@ -178,6 +191,7 @@ export function WorkspacesPanel() {
               key={ws.id}
               workspace={ws}
               active={ws.id === activeId}
+              switching={switchingTo === ws.id}
               runningSessionIds={runningSessionIds}
               unreadSessionIds={unreadSessionIds}
               onSelect={() => handleSelect(ws.id)}
@@ -226,12 +240,14 @@ export function WorkspacesPanel() {
 function WorkspaceItem({
   workspace,
   active,
+  switching,
   runningSessionIds,
   unreadSessionIds,
   onSelect,
 }: {
   workspace: Workspace;
   active: boolean;
+  switching?: boolean;
   runningSessionIds: string[];
   unreadSessionIds: string[];
   onSelect: () => void;
@@ -333,12 +349,18 @@ function WorkspaceItem({
             )}
             {!isRenaming && (
               <>
-                {status === "in_progress" && (
+                {/* Switching spinner — replaces the status dots while this
+                    workspace's sessions load, so a slow switch reads as
+                    "loading" rather than "selected + idle." */}
+                {switching && (
+                  <Loader2 className="size-3 animate-spin text-muted-foreground shrink-0" />
+                )}
+                {!switching && status === "in_progress" && (
                   <span title="Session in progress">
                     <Dot tone="warn" pulse="heartbeat" />
                   </span>
                 )}
-                {status === "unread" && (
+                {!switching && status === "unread" && (
                   <span title="Unread session output">
                     <Dot tone="ok" />
                   </span>

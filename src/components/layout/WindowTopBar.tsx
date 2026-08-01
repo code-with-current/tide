@@ -3,7 +3,6 @@ import {
   PanelRight,
   Terminal,
   PanelRightClose,
-  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/quick-tooltip";
@@ -16,12 +15,10 @@ const CAPTION_PAD = isMac ? 0 : 140;
 export function WindowTopBar() {
   const toggleTerminal = useUi((s) => s.toggleTerminal);
   const toggleRightPanel = useUi((s) => s.toggleRightPanel);
-  const toggleFileViewer = useUi((s) => s.toggleFileViewer);
   const toggleLeftPanel = useUi((s) => s.toggleLeftPanel);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
   const terminalOpen = useUi((s) => s.terminalOpen);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
-  const fileViewerOpen = useUi((s) => s.fileViewerOpen);
   const leftPanelOpen = useUi((s) => s.leftPanelOpen);
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
 

@@ -5,7 +5,8 @@ import tideLogoSvg from '@/assets/logo.svg';
 import {
   ArrowLeft, ArrowRight, ShieldCheck, Loader2,
   Folder, CheckCircle2, HardDrive, Globe,
-  Check, X, AlertCircle, Plus, Trash2, Plug, Brain,
+  Check, AlertCircle, Plus, Trash2, Plug, Brain,
+  Terminal, TriangleAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,8 +16,9 @@ import { qk, useAddProvider } from '@/lib/queries';
 import { supportsThinking } from '@/lib/model-capabilities';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api/client';
+import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
-import type { ApiStyle, Model } from '@/types';
+import type { ApiStyle, Model, Workspace, WorkspaceScript } from '@/types';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -415,6 +417,13 @@ function WorkspaceStep({
   const [enableRag, setEnableRag] = useState(false);
   const [phase, setPhase] = useState<Phase>('form');
   const [error, setError] = useState<string | null>(null);
+  // Mirrors AddWorkspaceDialog: optional install (setup) + running (run)
+  // scripts, saved onto the new workspace; init-git offer when the local
+  // folder isn't a repo yet. Both gated behind canOpen in the form.
+  const [addScript, setAddScript] = useState(false);
+  const [installCmd, setInstallCmd] = useState('');
+  const [runCmd, setRunCmd] = useState('');
+  const [initGit, setInitGit] = useState(true);
 
   const [gitInfo, setGitInfo] = useState<GitRepoInfo | null>(null);
   const [gitChecking, setGitChecking] = useState(false);
@@ -450,13 +459,33 @@ function WorkspaceStep({
     }
     if (!path) { setPhase('form'); return; }
 
-    let ws;
+    // Assemble scripts (install → setup, running → run) — only non-empty.
+    const scripts: WorkspaceScript[] = [];
+    if (installCmd.trim()) scripts.push({ kind: 'setup', command: installCmd.trim() });
+    if (runCmd.trim()) scripts.push({ kind: 'run', command: runCmd.trim() });
+    // init-git applies only to the local-open flow.
+    const shouldInitGit = source === 'local' && initGit;
+
+    const input: Parameters<typeof api.addWorkspace>[0] = source === 'remote'
+      ? { path, repository: remoteUrl, ...(scripts.length ? { scripts } : {}) }
+      : { path, ...(scripts.length ? { scripts } : {}), ...(shouldInitGit ? { initGit: true } : {}) };
+
+    let ws: Workspace | undefined;
     try {
-      ws = await api.addWorkspace(source === 'remote' ? { path, repository: remoteUrl } : { path });
+      ws = await api.addWorkspace(input);
+      // Instantly place the returned workspace into the list cache so it
+      // appears in the sidebar the moment creation resolves.
+      const created = ws;
+      qc.setQueryData<Workspace[]>(qk.workspaces, (old) =>
+        old ? [...old, created] : [created],
+      );
       qc.invalidateQueries({ queryKey: qk.workspaces });
     } catch (e: unknown) {
       setPhase('error');
       setError(e instanceof Error ? e.message : 'Failed');
+      toast.error('Workspace creation failed', {
+        description: e instanceof Error ? e.message : undefined,
+      });
       return;
     }
     if (!ws?.id) return;
@@ -479,6 +508,7 @@ function WorkspaceStep({
     }
 
     setPhase('done');
+    toast.success('Workspace added');
     setTimeout(() => onComplete(ws.id), 600);
   };
 
@@ -568,7 +598,18 @@ function WorkspaceStep({
                 </div>
               )}
               {localPath && !gitChecking && gitError && (
-                <Hint warn icon={<X className="size-3.5" />}>{gitError} — Tide works best with git.</Hint>
+                <div className="rounded-[10px] p-3.5 border border-warning bg-warning/10 flex items-start gap-3">
+                  <div className="size-8 rounded-lg bg-warning/20 flex items-center justify-center shrink-0 text-warning">
+                    <TriangleAlert className="size-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold">{gitError}</div>
+                    <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                      Initialize git repo on this folder.
+                    </div>
+                  </div>
+                  <Switch checked={initGit} onCheckedChange={setInitGit} className="mt-1.5" />
+                </div>
               )}
             </Field>
           )}
@@ -592,18 +633,59 @@ function WorkspaceStep({
             </>
           )}
 
-          {/* RAG */}
-          <div className="rounded-xl p-4 border flex items-start gap-3"
-            style={{ background: 'rgba(52,211,153,0.03)', borderColor: 'rgba(52,211,153,0.12)' }}>
-            <div className="size-8 rounded-lg flex items-center justify-center shrink-0 text-[15px]"
-              style={{ background: 'rgba(52,211,153,0.08)', color: '#34d399' }}>◈</div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-semibold">Enable RAG</div>
-              <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">Indexes your codebase locally for semantic search.</div>
-              <div className="text-[10px] text-muted-foreground/30 mt-1 font-mono">all-MiniLM-L6-v2 · 384-dim · bundled</div>
-            </div>
-            <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1" />
-          </div>
+          {/* Script + RAG cards appear only once a project folder is in place. */}
+          {canOpen && (
+            <>
+              {/* Add script toggle */}
+              <div className="rounded-xl p-4 border border-border bg-card flex items-start gap-3">
+                <div className="size-8 rounded-lg bg-secondary flex items-center justify-center shrink-0 text-muted-foreground">
+                  <Terminal className="size-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-semibold">Add script</div>
+                  <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">
+                    Bind install & run commands to this workspace.
+                  </div>
+                  {addScript && (
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Install</label>
+                        <Input
+                          className="font-mono text-[12px] h-[34px]"
+                          value={installCmd}
+                          onChange={(e) => setInstallCmd(e.target.value)}
+                          placeholder="npm install"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Running</label>
+                        <Input
+                          className="font-mono text-[12px] h-[34px]"
+                          value={runCmd}
+                          onChange={(e) => setRunCmd(e.target.value)}
+                          placeholder="npm run dev"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <Switch checked={addScript} onCheckedChange={setAddScript} className="mt-1.5" />
+              </div>
+
+              {/* RAG */}
+              <div className="rounded-xl p-4 border flex items-start gap-3"
+                style={{ background: 'rgba(52,211,153,0.03)', borderColor: 'rgba(52,211,153,0.12)' }}>
+                <div className="size-8 rounded-lg flex items-center justify-center shrink-0 text-[15px]"
+                  style={{ background: 'rgba(52,211,153,0.08)', color: '#34d399' }}>◈</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-semibold">Enable RAG</div>
+                  <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">Indexes your codebase locally for semantic search.</div>
+                  <div className="text-[10px] text-muted-foreground/30 mt-1 font-mono">all-MiniLM-L6-v2 · 384-dim · bundled</div>
+                </div>
+                <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1" />
+              </div>
+            </>
+          )}
         </div>
 
           </CardContent>

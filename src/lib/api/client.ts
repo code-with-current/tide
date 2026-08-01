@@ -30,6 +30,7 @@ import type {
   RagStatus,
   RagWorkspaceOpResult,
   Workspace,
+  WorkspaceScript,
 } from '@/types';
 
 // ── Electron detection ──────────────────────────────────────────
@@ -81,6 +82,8 @@ export async function addWorkspace(input: {
   name?: string;
   repository?: string;
   template?: import('@/lib/templates').TemplateId;
+  scripts?: WorkspaceScript[];
+  initGit?: boolean;
 }): Promise<Workspace> {
   if (ipc) return ipc.addWorkspace(input);
   await delay(300);
@@ -93,7 +96,7 @@ export async function addWorkspace(input: {
     isDefault: false,
     fileCount: 0,
     worktreeLocation: '.agent/worktrees/',
-    scripts: [],
+    scripts: input.scripts ?? [],
   };
 }
 

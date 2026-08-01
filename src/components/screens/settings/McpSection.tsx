@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plug, Plus, Download, ExternalLink, Globe, FolderGit2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plug, Plus, Download, ExternalLink, Globe, FolderCode, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { toast } from '@/lib/toast';
 import { SettingsHeader, Card } from './shared';
+import { ReloadButton } from './ReloadButton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { McpServerRow, type McpStatusValue } from './McpServerRow';
 import {
   McpServerDialog,
@@ -10,6 +19,8 @@ import {
 import { McpImportDialog } from './McpImportDialog';
 import { useWorkspaces } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 /**
  * Settings → Extensions → MCP.
@@ -31,6 +42,7 @@ interface McpStatus {
   config: McpConfig;
   status: McpStatusValue;
   toolCount: number;
+  toolNames: string[];
   error?: string;
   transport: 'stdio' | 'sse' | 'http';
   enabled: boolean;
@@ -51,6 +63,7 @@ export function McpSection() {
   const workspaceRoot = ws?.path ?? '';
 
   const [servers, setServers] = useState<McpStatus[]>([]);
+  const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<EditingServer | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -64,8 +77,31 @@ export function McpSection() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
-    if (result) setServers(result);
+    setLoading(true);
+    try {
+      const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
+      if (result) setServers(result);
+    } finally {
+      setLoading(false);
+    }
+  }, [activeWorkspaceId]);
+
+  // Full re-initialize: disconnect + reconnect ALL servers from their config
+  // files. Picks up added/removed/edited servers and re-runs every connection
+  // (including ones that were failing). The pool broadcasts statusChanged as
+  // each connect resolves, so refresh() re-pulls the list afterwards.
+  const reinitialize = useCallback(async () => {
+    setLoading(true);
+    try {
+      await window.tideIpc?.mcpReinitialize();
+      const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
+      if (result) setServers(result);
+      toast.success('MCP reinitialized');
+    } catch (e) {
+      toast.error('Reinitialize failed', { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setLoading(false);
+    }
   }, [activeWorkspaceId]);
 
   useEffect(() => {
@@ -102,20 +138,26 @@ export function McpSection() {
   const handleSave = async (scope: McpScope, name: string, config: McpConfig) => {
     const ipc = window.tideIpc;
     if (!ipc) return;
-    if (editingServer) {
-      // Editing an existing server. If the user renamed it, remove the old
-      // entry first (the bridge keys servers by name).
-      const isRename = editingServer.name !== name;
-      if (isRename) {
-        await ipc.mcpRemove(editingServer.name, editingServer.scope);
+    try {
+      if (editingServer) {
+        // Editing an existing server. If the user renamed it, remove the old
+        // entry first (the bridge keys servers by name).
+        const isRename = editingServer.name !== name;
+        if (isRename) {
+          await ipc.mcpRemove(editingServer.name, editingServer.scope);
+        }
+        await ipc.mcpUpdate(name, config, scope);
+        toast.success('Server updated');
+      } else {
+        await ipc.mcpAdd(name, config, scope);
+        toast.success('Server added');
       }
-      await ipc.mcpUpdate(name, config, scope);
-    } else {
-      await ipc.mcpAdd(name, config, scope);
+      setDialogOpen(false);
+      setEditingServer(null);
+      await refresh();
+    } catch (e) {
+      toast.error('Save failed', { description: e instanceof Error ? e.message : undefined });
     }
-    setDialogOpen(false);
-    setEditingServer(null);
-    await refresh();
   };
 
   const handleRemove = async (s: McpStatus) => {
@@ -146,6 +188,14 @@ export function McpSection() {
     await refresh();
   };
 
+  // User-initiated OAuth sign-in: opens the browser, then re-runs connect.
+  const handleAuthenticate = async (s: McpStatus) => {
+    const ipc = window.tideIpc;
+    if (!ipc) return;
+    await ipc.mcpAuthenticate(s.name, s.scope, activeWorkspaceId ?? undefined);
+    await refresh();
+  };
+
   const handleToggleEnabled = async (s: McpStatus, enabled: boolean) => {
     const ipc = window.tideIpc;
     if (!ipc) return;
@@ -156,35 +206,69 @@ export function McpSection() {
   const handleImport = async (toImport: Array<{ name: string; config: unknown }>, importScope: McpScope) => {
     const ipc = window.tideIpc;
     if (!ipc) return;
-    await ipc.mcpImport(toImport, importScope);
-    setImportBadge(0);
-    await refresh();
+    try {
+      await ipc.mcpImport(toImport, importScope);
+      setImportBadge(0);
+      await refresh();
+      toast.success(`Imported ${toImport.length} server${toImport.length === 1 ? '' : 's'}`);
+    } catch (e) {
+      toast.error('Import failed', { description: e instanceof Error ? e.message : undefined });
+    }
   };
 
   const addButton = (
     <div className="flex items-center gap-2">
-      {importBadge > 0 && (
-        <button
-          type="button"
-          onClick={() => setImportOpen(true)}
-          title={`Import ${importBadge} MCP server${importBadge === 1 ? '' : 's'} from other tools`}
-          className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-accent/30 text-accent hover:bg-accent/10 transition-colors"
+      <ReloadButton
+        loading={loading}
+        onClick={() => void reinitialize()}
+        title="Re-initialize all MCP (disconnect + reconnect)"
+      />
+      {/* Split button group: Add (primary) + dropdown caret for Import.
+          Import is only offered when the scanner detected importable servers
+          (importBadge > 0); it lives in the menu so the header stays compact. */}
+      <div className="inline-flex rounded-md shadow-xs" role="group">
+        <Button
+          size="sm"
+          onClick={handleAdd}
+          className="rounded-r-none gap-1.5"
         >
-          <Download className="size-3.5" />
-          Import
-          <span className="ml-0.5 inline-flex items-center justify-center size-4 rounded-full bg-accent text-white text-[9px] font-bold">
-            {importBadge}
-          </span>
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={handleAdd}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 transition-colors"
-      >
-        <Plus className="size-3.5" />
-        Add Server
-      </button>
+          <Plus className="size-3.5" />
+          Add
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="default"
+              className="rounded-l-none border-l border-primary/30 px-2"
+              aria-label="More actions"
+            >
+              <ChevronDown className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem
+              onClick={() => setImportOpen(true)}
+              disabled={importBadge === 0}
+            >
+              <Download className="size-3.5" />
+              <span className="flex-1">Import</span>
+              {importBadge > 0 && (
+                <Badge className="p-1 py-0.5 text-[10px] border-none">
+                  {importBadge}
+                </Badge>
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => void reinitialize()}
+            >
+              <Plug className="size-3.5" />
+              Re-initialize all
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   );
 
@@ -193,7 +277,7 @@ export function McpSection() {
   return (
     <>
       <SettingsHeader
-        title="Extensions → MCP"
+        title="MCP"
         description="Model Context Protocol servers. Add stdio commands or remote endpoints; approve new servers before they can run tools."
         action={addButton}
       />
@@ -205,28 +289,28 @@ export function McpSection() {
               label="Global"
               icon={<Globe className="size-3.5" />}
               hint="~/.tide/mcp.json · available in all workspaces"
-              badgeClass="bg-info/5"
               servers={globalServers}
               onEdit={handleEdit}
               onRemove={handleRemove}
               onApprove={handleApprove}
               onRetry={handleRetry}
               onReauthorize={handleReauthorize}
+              onAuthenticate={handleAuthenticate}
               onToggleEnabled={handleToggleEnabled}
             />
           )}
           {workspaceServers.length > 0 && (
             <ServerCard
               label="This Workspace"
-              icon={<FolderGit2 className="size-3.5" />}
+              icon={<FolderCode className="size-3.5" />}
               hint={workspaceRoot ? `${workspaceRoot}/.mcp.json · only active in this project` : '.mcp.json'}
-              badgeClass="bg-accent/5"
               servers={workspaceServers}
               onEdit={handleEdit}
               onRemove={handleRemove}
               onApprove={handleApprove}
               onRetry={handleRetry}
               onReauthorize={handleReauthorize}
+              onAuthenticate={handleAuthenticate}
               onToggleEnabled={handleToggleEnabled}
             />
           )}
@@ -266,25 +350,25 @@ function ServerCard({
   label,
   icon,
   hint,
-  badgeClass,
   servers,
   onEdit,
   onRemove,
   onApprove,
   onRetry,
   onReauthorize,
+  onAuthenticate,
   onToggleEnabled,
 }: {
   label: string;
   icon: React.ReactNode;
   hint?: string;
-  badgeClass?: string;
   servers: McpStatus[];
   onEdit: (s: McpStatus) => void;
   onRemove: (s: McpStatus) => void;
   onApprove: (s: McpStatus) => void;
   onRetry: (s: McpStatus) => void;
   onReauthorize: (s: McpStatus) => void;
+  onAuthenticate: (s: McpStatus) => void;
   onToggleEnabled: (s: McpStatus, enabled: boolean) => void;
 }) {
   const PAGE_SIZE = 5;
@@ -300,21 +384,23 @@ function ServerCard({
 
   return (
     <Card>
-      {/* Header with icon + label + count */}
-      <div className={`flex items-center gap-2 px-4 py-2.5 border-b border-border/60 ${badgeClass ?? ''}`}>
-        <span className="shrink-0 opacity-70">{icon}</span>
-        <h3 className="text-[11px] uppercase tracking-wide font-semibold flex-1">
+      {/* Header — matches ExtensionCard: uppercase label + count, with the
+          scope icon + hint folded in as subtle accents so the MCP cards read
+          as siblings of the Skills/Agents cards. */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border/60">
+        <span className="shrink-0 text-muted-foreground/50">{icon}</span>
+        <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium flex-1">
           {label}
         </h3>
-        <span className="text-[10px] text-muted-foreground/50 font-mono">
-          {servers.length} server{servers.length === 1 ? '' : 's'}
+        {hint && (
+          <code className="hidden sm:block text-[10px] text-muted-foreground/40 font-mono truncate max-w-[40%]">
+            {hint}
+          </code>
+        )}
+        <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+          {servers.length}
         </span>
       </div>
-      {hint && (
-        <div className="px-4 py-1 border-b border-border/30 bg-muted/20">
-          <code className="text-[10px] text-muted-foreground/50">{hint}</code>
-        </div>
-      )}
       <div className="divide-y divide-border/30">
         {paged.map((s) => (
           <McpServerRow
@@ -322,6 +408,7 @@ function ServerCard({
             name={s.name}
             status={s.status}
             toolCount={s.toolCount}
+            toolNames={s.toolNames}
             transport={s.transport}
             error={s.error}
             scope={s.scope}
@@ -332,6 +419,7 @@ function ServerCard({
             onApprove={() => onApprove(s)}
             onRetry={() => onRetry(s)}
             onReauthorize={() => onReauthorize(s)}
+            onAuthenticate={() => onAuthenticate(s)}
           />
         ))}
       </div>
@@ -376,7 +464,7 @@ function EmptyState() {
       <div className="size-12 rounded-xl bg-muted/50 flex items-center justify-center mb-4">
         <Plug className="size-6 text-muted-foreground/50" />
       </div>
-      <h3 className="text-base font-medium mb-1">No MCP servers yet</h3>
+      <h3 className="text-base font-medium mb-1">No MCP yet</h3>
       <p className="text-sm text-muted-foreground/70 max-w-sm">
         Add a stdio command (like the filesystem or fetch server) or connect to a
         remote SSE/HTTP endpoint. New servers need approval before they can run tools.

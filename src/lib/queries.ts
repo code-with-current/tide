@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, QueryClient } from '@tanstack/re
 import { useEffect, useState } from 'react';
 import * as api from './api/client';
 import { useUi } from './stores/ui';
+import { toast } from './toast';
 import type { RagInitProgressEvent } from '@/types';
 
 /**
@@ -259,6 +260,7 @@ export function useRenameWorkspace() {
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       api.updateWorkspace(id, { name }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.workspaces }),
+    onError: (e) => toast.error('Rename failed', { description: e instanceof Error ? e.message : undefined }),
   });
 }
 
@@ -272,7 +274,8 @@ export function useArchiveWorkspace(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.archiveWorkspace(id),
-    onSuccess: () => invalidateWorkspaceAndSessions(qc, workspaceId),
+    onSuccess: () => { invalidateWorkspaceAndSessions(qc, workspaceId); toast.success('Workspace archived'); },
+    onError: (e) => toast.error('Archive failed', { description: e instanceof Error ? e.message : undefined }),
   });
 }
 
@@ -280,7 +283,8 @@ export function useUnarchiveWorkspace(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.unarchiveWorkspace(id),
-    onSuccess: () => invalidateWorkspaceAndSessions(qc, workspaceId),
+    onSuccess: () => { invalidateWorkspaceAndSessions(qc, workspaceId); toast.success('Workspace restored'); },
+    onError: (e) => toast.error('Restore failed', { description: e instanceof Error ? e.message : undefined }),
   });
 }
 
@@ -288,7 +292,8 @@ export function useDeleteWorkspace(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteWorkspace(id),
-    onSuccess: () => invalidateWorkspaceAndSessions(qc, workspaceId),
+    onSuccess: () => { invalidateWorkspaceAndSessions(qc, workspaceId); toast.success('Workspace deleted'); },
+    onError: (e) => toast.error('Delete failed', { description: e instanceof Error ? e.message : undefined }),
   });
 }
 

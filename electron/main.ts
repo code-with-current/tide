@@ -183,6 +183,7 @@ if (!gotLock) {
     // just focus the window.
     const lastArg = argv[argv.length - 1];
     if (lastArg?.startsWith('tide://oauth/callback')) {
+      log.info('second-instance: tide:// callback received', { url: lastArg.slice(0, 50) + '…' });
       handleOAuthCallback(lastArg);
     }
     if (mainWindow) {
@@ -209,6 +210,7 @@ if (!gotLock) {
       if (url.startsWith('tide://oauth/callback')) {
         // Prevent the default (opening a window); we handle it ourselves.
         _event.preventDefault();
+        log.info('open-url: tide:// callback received', { url: url.slice(0, 50) + '…' });
         handleOAuthCallback(url);
       }
     });
@@ -220,42 +222,60 @@ if (!gotLock) {
     log.info('app ready', { dev: isDev, userData: app.getPath('userData') });
 
     registerIpcHandlers();
-    log.info('IPC handlers registered', { ms: Date.now() - t0 });
-    // Bootstrap the OpenRouter catalog — the universal metadata source. When
-    // a provider's /models returns bare ids (z.ai, OpenAI direct), we enrich
-    // them from this catalog. Fire-and-forget; cached to disk, refreshed weekly.
-    void bootstrapCatalog();
-    registerChatHandlers();
-    if (USE_SDK_ORCHESTRATOR) {
-      registerAgentSdkHandlers(ipcMain);
-    } else {
-      registerAgentHandlers(ipcMain);
-    }
-    registerScriptHandlers();
-    registerOpenInAppHandlers();
+    // Settings handlers MUST be ready before the window shows — the renderer
+    // hydrates shortcuts on mount via tide:settings:get. Deferring it would
+    // leave the user with hardcoded macOS defaults until a restart.
     registerSettingsHandlers();
-    registerExtensionsHandlers();
-    // MCP pool — boot user-scoped servers (~/.tide/mcp.json). Project-scoped
-    // servers are connected lazily when the renderer signals the active
-    // workspace via `tide:mcp:workspaceActivated`. Init is fire-and-forget;
-    // failures (e.g. no config yet) just log and leave an empty pool.
-    initUserServers().catch((e) =>
-      log.warn('mcp pool init failed', { error: String(e) }),
-    );
-    registerMcpHandlers(() => activeWorkspace);
-    // The renderer pushes the active workspace whenever it changes so the
-    // main process can keep `activeWorkspace` fresh for the MCP handlers
-    // and (re)connect project-scoped servers in the pool.
-    ipcMain.on(
-      'tide:mcp:workspaceActivated',
-      (_e, workspaceId: string, workspaceRoot: string) => {
-        activeWorkspace = { id: workspaceId, root: workspaceRoot };
-      },
-    );
-    log.info('all handlers registered', { ms: Date.now() - t0 });
+    log.info('core IPC handlers registered', { ms: Date.now() - t0 });
 
+    // Create the window NOW — don't block first paint on the remaining
+    // handlers. The renderer needs core IPC (workspaces/sessions/settings,
+    // registered above) on mount; chat/agent/MCP/extensions are only used on
+    // user action, so we defer them to the next tick (after the window is
+    // shown) via setImmediate. This cuts time-to-first-paint by the cost of
+    // loading + registering ~6 handler modules.
     createWindow();
     log.info('window created', { ms: Date.now() - t0 });
+
+    // ── Deferred (non-critical) registration ──
+    // Runs immediately after createWindow returns, before the next event-loop
+    // turn — so the handlers are ready by the time the renderer's bundle has
+    // loaded and the user can interact. Order within this block doesn't
+    // matter (none of these call each other at registration time).
+    setImmediate(() => {
+      const t1 = Date.now();
+      // Bootstrap the OpenRouter catalog — the universal metadata source. When
+      // a provider's /models returns bare ids (z.ai, OpenAI direct), we enrich
+      // them from this catalog. Fire-and-forget; cached to disk, refreshed weekly.
+      void bootstrapCatalog();
+      registerChatHandlers();
+      if (USE_SDK_ORCHESTRATOR) {
+        registerAgentSdkHandlers(ipcMain);
+      } else {
+        registerAgentHandlers(ipcMain);
+      }
+      registerScriptHandlers();
+      registerOpenInAppHandlers();
+      registerExtensionsHandlers();
+      // MCP pool — boot user-scoped servers (~/.tide/mcp.json). Project-scoped
+      // servers are connected lazily when the renderer signals the active
+      // workspace via `tide:mcp:workspaceActivated`. Init is fire-and-forget;
+      // failures (e.g. no config yet) just log and leave an empty pool.
+      initUserServers().catch((e) =>
+        log.warn('mcp pool init failed', { error: String(e) }),
+      );
+      registerMcpHandlers(() => activeWorkspace);
+      // The renderer pushes the active workspace whenever it changes so the
+      // main process can keep `activeWorkspace` fresh for the MCP handlers
+      // and (re)connect project-scoped servers in the pool.
+      ipcMain.on(
+        'tide:mcp:workspaceActivated',
+        (_e, workspaceId: string, workspaceRoot: string) => {
+          activeWorkspace = { id: workspaceId, root: workspaceRoot };
+        },
+      );
+      log.info('deferred handlers registered', { ms: Date.now() - t1, total: Date.now() - t0 });
+    });
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

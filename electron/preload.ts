@@ -56,6 +56,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:mcp:approve', name),
   mcpRetry: (name: string, scope: 'user' | 'project', workspaceId?: string) =>
     ipcRenderer.invoke('tide:mcp:retry', name, scope, workspaceId),
+  // OAuth sign-in: opens the browser (user-initiated) + re-runs connect.
+  mcpAuthenticate: (name: string, scope: 'user' | 'project', workspaceId?: string) =>
+    ipcRenderer.invoke('tide:mcp:authenticate', name, scope, workspaceId),
+  // Re-initialize ALL servers: disconnect + reconnect from config (reload).
+  mcpReinitialize: () =>
+    ipcRenderer.invoke('tide:mcp:reinitialize'),
   mcpSetSecret: (name: string, value: string) =>
     ipcRenderer.invoke('tide:mcp:setSecret', name, value),
   mcpHasSecret: (name: string) =>
@@ -86,8 +92,17 @@ contextBridge.exposeInMainWorld('tideIpc', {
     const { shell } = require('electron');
     shell.showItemInFolder(fullPath);
   },
+  // Open an external URL in the user's default browser. Used by the terminal
+  // WebLinksAddon handler so clicked URLs open externally (the renderer can't
+  // navigate to https:// directly). Restricted to http(s) for safety.
+  openExternal: (url: string) => {
+    if (/^https?:\/\//i.test(url)) {
+      const { shell } = require('electron');
+      shell.openExternal(url);
+    }
+  },
   detectGitRepo: (dirPath: string) => ipcRenderer.invoke('tide:detectGitRepo', dirPath),
-  addWorkspace: (input: { path: string; name?: string; repository?: string }) =>
+  addWorkspace: (input: { path: string; name?: string; repository?: string; template?: import('../src/lib/templates').TemplateId; scripts?: import('../src/types').WorkspaceScript[]; initGit?: boolean }) =>
     ipcRenderer.invoke('tide:addWorkspace', input),
 
   // ── Sessions ──
@@ -201,6 +216,9 @@ contextBridge.exposeInMainWorld('tideIpc', {
   terminalKill: (terminalId: string) => ipcRenderer.invoke('terminal:kill', terminalId),
   terminalStop: (terminalId: string) => ipcRenderer.invoke('terminal:stop', terminalId),
   terminalResize: (terminalId: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', terminalId, cols, rows),
+  // PID-based liveness for port badges + Run/Stop detection.
+  terminalGetPid: (terminalId: string) => ipcRenderer.invoke('terminal:getPid', terminalId),
+  processIsAlive: (pid: number) => ipcRenderer.invoke('process:isAlive', pid),
   onTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void) =>
     ipcRenderer.on('terminal:output', (_e, data) => callback(data)),
   onTerminalExit: (callback: (data: { terminalId: string; code: number | null }) => void) =>

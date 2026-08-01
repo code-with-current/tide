@@ -15,6 +15,7 @@ import { createLogger } from '../../logger';
 import { readMcpConfig } from './config';
 import { resolveSecrets, resolveArgsSecrets } from './secrets';
 import { getApprovedServers, approveServer } from './approvals';
+import { createAuthProvider, consumePendingAuthUrl, hasPendingAuthUrl, registerOAuthCompleter } from './oauth';
 import { createExtensionsStore } from '../../extensionsStore';
 import type {
   McpConnection,
@@ -183,9 +184,16 @@ async function connectServer(
         env: { ...process.env, ...resolvedEnv } as Record<string, string>,
       });
     } else if (config.type === 'sse') {
-      transport = new SSEClientTransport(new URL(config.url!));
+      // Remote servers may require OAuth — pass an authProvider so the SDK can
+      // run the 401 → metadata → browser → callback → token-exchange flow.
+      // No-op for servers that don't require auth.
+      transport = new SSEClientTransport(new URL(config.url!), {
+        authProvider: createAuthProvider(name) as any,
+      });
     } else {
-      transport = new StreamableHTTPClientTransport(new URL(config.url!));
+      transport = new StreamableHTTPClientTransport(new URL(config.url!), {
+        authProvider: createAuthProvider(name) as any,
+      });
     }
 
     const client = new Client(
@@ -195,6 +203,12 @@ async function connectServer(
       // top-level `tools` field — tool listing is built-in.)
       { capabilities: {} },
     );
+
+    // Keep the transport on the connection so the OAuth callback can call
+    // finishAuth(code) on THIS transport (a fresh one can't complete the
+    // exchange — it lacks the in-flight PKCE verifier + discovery state).
+    const conn0 = pool.get(name);
+    if (conn0) conn0.transport = transport;
 
     await client.connect(transport);
 
@@ -215,11 +229,25 @@ async function connectServer(
     log.info('connected', { name, scope, tools: mcpTools.length });
   } catch (e: any) {
     const conn = pool.get(name);
+    const msg: string = e?.message ?? String(e);
     if (conn) {
-      conn.status = 'error';
-      conn.error = e?.message ?? String(e);
+      // The SDK's auth() returns 'REDIRECT' (after our deferred
+      // redirectToAuthorization stashes the URL) and the transport then throws
+      // Unauthorized. That's the "needs user sign-in" signal — surface a
+      // needs_oauth state with an Authenticate button instead of an error.
+      if (/^Unauthorized$/i.test(msg) || hasPendingAuthUrl(name)) {
+        conn.status = 'needs_oauth';
+        conn.error = undefined;
+        log.info('awaiting user authentication', { name });
+      } else {
+        conn.status = 'error';
+        // Translate cryptic SDK errors into actionable guidance.
+        conn.error = explainConnectError(e, name);
+        log.warn('connect failed', { name, error: msg });
+      }
+    } else {
+      log.warn('connect failed (no conn)', { name, error: msg });
     }
-    log.warn('connect failed', { name, error: e?.message ?? String(e) });
   }
   notifyStatusChange();
 }
@@ -236,6 +264,51 @@ async function disconnectConnection(conn: McpConnection): Promise<void> {
   conn.tools = [];
 }
 
+/**
+ * Turn a connect/auth failure into a clear, actionable error message.
+ *
+ * The MCP SDK's auth() surfaces low-level HTTP failures as opaque strings
+ * (e.g. "HTTP 403: Invalid OAuth error response: ... Raw body: Forbidden").
+ * Detect the common, meaningful cases and reword them so the user
+ * understands the cause instead of seeing SDK internals.
+ */
+function explainConnectError(e: any, name: string): string {
+  const raw: string = e?.message ?? String(e);
+
+  // 403 / "Forbidden" during the OAuth flow → the server rejected our client
+  // registration or authorization request. Most often this means the server
+  // does NOT support dynamic client registration and requires a
+  // pre-registered / allowlisted client (e.g. Figma's remote MCP server).
+  if (/HTTP 403|Forbidden/i.test(raw) && /oauth|register|client|auth/i.test(raw)) {
+    return (
+      `"${name}" rejected the connection (HTTP 403). This server likely does not ` +
+      'support dynamic client registration and requires a pre-registered OAuth ' +
+      'client. Use a server that supports DCR, or provide a client_id/client_secret ' +
+      'for this server.'
+    );
+  }
+
+  // Server explicitly advertises no DCR support.
+  if (/does not support dynamic client registration/i.test(raw)) {
+    return (
+      `"${name}" does not support dynamic client registration (DCR). It must be ` +
+      'pre-registered with the server before it can connect.'
+    );
+  }
+
+  // Missing PKCE verifier (auth flow interrupted / cleared mid-flow).
+  if (/No stored PKCE code verifier/i.test(raw)) {
+    return (
+      `Authorization for "${name}" was interrupted. Re-initialize to restart the ` +
+      'sign-in flow.'
+    );
+  }
+
+  // Fall through with the raw message for anything unrecognized — better to
+  // show the underlying detail than hide it.
+  return raw;
+}
+
 export async function disconnectAll(): Promise<void> {
   const userCount = userConnections.size;
   const wsCount = [...workspaceConnections.values()].reduce((n, m) => n + m.size, 0);
@@ -245,6 +318,32 @@ export async function disconnectAll(): Promise<void> {
   for (const wsPool of workspaceConnections.values()) {
     for (const conn of wsPool.values()) await disconnectConnection(conn);
     wsPool.clear();
+  }
+}
+
+/**
+ * Re-initialize ALL MCP servers — disconnect everything and reconnect from
+ * the config files (user ~/.tide/mcp.json + the active workspace's
+ * .mcp.json). This is the "reload" action for the MCP settings panel: it
+ * picks up newly-added/removed/edited servers and re-runs every connection,
+ * so a server that was failing (stale, misconfigured, or just added outside
+ * the app) gets a fresh connect attempt.
+ *
+ * Reuses initUserServers() / activateWorkspace() so the reconnect path is
+ * identical to app startup / workspace switch — no divergent logic.
+ */
+export async function reinitializeAll(
+  activeWorkspace?: { id: string; root: string },
+): Promise<void> {
+  const userCount = userConnections.size;
+  const wsCount = [...workspaceConnections.values()].reduce((n, m) => n + m.size, 0);
+  log.info('reinitialize all', { userServers: userCount, workspaceServers: wsCount });
+  await disconnectAll();
+  await initUserServers();
+  if (activeWorkspace) {
+    await activateWorkspace(activeWorkspace.id, activeWorkspace.root);
+  } else {
+    notifyStatusChange();
   }
 }
 
@@ -306,6 +405,7 @@ export function getStatusList(workspaceId?: string): McpServerStatus[] {
       config: conn.config,
       status: conn.status,
       toolCount: conn.tools.length,
+      toolNames: conn.tools.map((t) => t.name),
       error: conn.error,
       transport: conn.config.type,
       enabled: !isServerDisabled(conn.name),
@@ -321,6 +421,7 @@ export function getStatusList(workspaceId?: string): McpServerStatus[] {
           config: conn.config,
           status: conn.status,
           toolCount: conn.tools.length,
+          toolNames: conn.tools.map((t) => t.name),
           error: conn.error,
           transport: conn.config.type,
           enabled: !isServerDisabled(conn.name),
@@ -343,6 +444,111 @@ export async function retryServer(
   const conn = pool.get(name);
   if (!conn) return;
   await connectServer(name, conn.config, scope, workspaceId);
+}
+
+/**
+ * User-initiated OAuth sign-in: opens the browser at the authorization URL the
+ * deferred flow stashed, then the `tide://oauth/callback` round-trip completes
+ * the token exchange inside the SDK. After the browser opens, we re-run
+ * connectServer — which now has stored tokens (once the user authorizes) and
+ * will connect, or will return to needs_oauth if the user cancels.
+ *
+ * MUST be triggered by an explicit user action (the "Authenticate" button) —
+ * never during init/reload, per the product requirement.
+ */
+export async function authenticateServer(
+  name: string,
+  scope: 'user' | 'project',
+  workspaceId?: string,
+): Promise<void> {
+  const pool =
+    scope === 'user'
+      ? userConnections
+      : (workspaceConnections.get(workspaceId!) ?? new Map());
+  const conn = pool.get(name);
+  if (!conn) {
+    log.warn('authenticate: unknown server', { name });
+    return;
+  }
+  const url = consumePendingAuthUrl(name);
+  if (url) {
+    const { shell } = await import('electron');
+    log.info('opening browser for oauth (user-initiated)', { server: name, url: url.origin });
+    await shell.openExternal(url.toString());
+    // Mark connecting while the user completes sign-in in the browser.
+    // Do NOT re-run connectServer here — the ORIGINAL transport from init is
+    // still alive and waiting; the OAuth callback will call finishAuth(code)
+    // on it via completeOAuthCallback(). Creating a fresh transport would
+    // orphan the in-flight PKCE verifier.
+    conn.status = 'connecting';
+    conn.error = undefined;
+    notifyStatusChange();
+  } else {
+    // No stashed URL (e.g. tokens expired after a prior success) — re-run the
+    // full connect, which will re-trigger discovery + a new auth flow.
+    log.info('authenticate: no pending URL, re-running connect', { server: name });
+    await connectServer(name, conn.config, scope, workspaceId);
+  }
+}
+
+/**
+ * Complete the OAuth flow from the `tide://oauth/callback` redirect.
+ *
+ * The SDK transport that started the flow is still alive (kept on the
+ * connection); call its `finishAuth(code)` to exchange the authorization
+ * code for tokens, then reconnect. This MUST run on the ORIGINAL transport —
+ * a fresh one can't complete the exchange (no PKCE verifier / discovery state).
+ *
+ * `state` is currently unused for routing (the SDK doesn't always set it),
+ * but accepted for forward-compat. We match the flow to the single server
+ * that's `needs_oauth` / connecting with a pending auth.
+ */
+export async function completeOAuthCallback(code: string, _state?: string): Promise<void> {
+  if (!code) {
+    log.warn('oauth callback: no code');
+    return;
+  }
+  // Find the connection awaiting auth: status needs_oauth, or connecting with
+  // a stored transport. Search user servers first, then all workspace pools.
+  const findPending = (): { conn: McpConnection; scope: 'user' | 'project'; workspaceId?: string } | undefined => {
+    for (const conn of userConnections.values()) {
+      if (conn.status === 'needs_oauth' || (conn.status === 'connecting' && conn.transport)) {
+        return { conn, scope: 'user' };
+      }
+    }
+    for (const [wsId, wsPool] of workspaceConnections) {
+      for (const conn of wsPool.values()) {
+        if (conn.status === 'needs_oauth' || (conn.status === 'connecting' && conn.transport)) {
+          return { conn, scope: 'project', workspaceId: wsId };
+        }
+      }
+    }
+    return undefined;
+  };
+
+  const pending = findPending();
+  if (!pending) {
+    log.warn('oauth callback: no pending auth flow to complete', { state: _state });
+    return;
+  }
+  const { conn, scope, workspaceId } = pending;
+  const transport = conn.transport as { finishAuth?: (code: string) => Promise<void> } | undefined;
+  if (!transport?.finishAuth) {
+    log.warn('oauth callback: pending connection has no transport.finishAuth', { name: conn.name });
+    return;
+  }
+  log.info('oauth callback: completing auth', { server: conn.name });
+  try {
+    await transport.finishAuth(code);
+    // finishAuth exchanged the code for tokens (now persisted). Reconnect with
+    // a fresh transport — it will read the stored tokens and connect cleanly.
+    await connectServer(conn.name, conn.config, scope, workspaceId);
+  } catch (e: any) {
+    log.warn('oauth callback: finishAuth failed', { server: conn.name, error: e?.message ?? String(e) });
+    conn.status = 'error';
+    conn.error = explainConnectError(e, conn.name);
+    notifyStatusChange();
+  }
 }
 
 export async function approveAndConnect(
@@ -418,3 +624,13 @@ export async function unloadServer(
     notifyStatusChange();
   }
 }
+
+// Wire the OAuth callback bridge: when the OS hands us a `tide://oauth/callback`
+// URL (via open-url / second-instance), oauth.handleOAuthCallback parses out
+// the code and calls this completer → completeOAuthCallback finishes the flow
+// on the transport that started it. Registered once at module load.
+registerOAuthCompleter((code, state) => {
+  completeOAuthCallback(code, state).catch((e) =>
+    log.warn('oauth completer failed', { error: String(e) }),
+  );
+});

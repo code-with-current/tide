@@ -10,6 +10,7 @@ import { OnboardingScreen } from '@/components/screens/OnboardingScreen';
 import { MainScreen } from '@/components/screens/MainScreen';
 import { SettingsScreen } from '@/components/screens/SettingsScreen';
 import { AddWorkspaceDialog } from '@/components/modals/AddWorkspaceDialog';
+import { Toaster } from '@/components/ui/sonner';
 
 function App() {
   const screen = useUi((s) => s.screen);
@@ -69,12 +70,24 @@ function App() {
           <div className="flex-1 flex min-h-0">
             {screen === 'splash' && <SplashScreen />}
             {screen === 'onboarding' && <OnboardingScreen />}
-            {screen === 'main' && <MainScreen />}
+            {/* MainScreen is ALWAYS MOUNTED (CSS-hidden when not active). It
+                owns the TerminalPanel + xterm canvases — unmounting it on
+                every screen switch (e.g. to Settings) destroys the terminal
+                state, scrollback, and input wiring, causing "can't type" and
+                "state lost" jank. display:none keeps it alive; the guards in
+                MainScreen no-op its effects while hidden to avoid wasted work. */}
+            <div className={`flex-1 flex min-h-0 ${screen === 'main' ? '' : 'hidden'}`}>
+              <MainScreen />
+            </div>
             {screen === 'settings' && <SettingsScreen />}
           </div>
 
           {/* Global dialogs (rendered above whatever screen is active). */}
           <AddWorkspaceDialog />
+          {/* Global toast surface. bottom-right clears the macOS traffic
+              lights + top bar. The primitive is theme-aware (themed
+              success/info/warning/error/loading icons + CSS-var colors). */}
+          <Toaster position="bottom-right" theme="dark" />
         </div>
       </TooltipProvider>
     </QueryClientProvider>

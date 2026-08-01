@@ -8,26 +8,34 @@ import {
   XCircle,
   RefreshCw,
   GitPullRequestArrow,
+  Brain,
+  Loader2,
 } from 'lucide-react';
 import type { Session } from '@/types';
 import { Avatar } from '@/components/primitives';
+import { RagIndexProgress } from '@/components/rag/RagIndexProgress';
 import { Badge } from '@/components/ui/badge';
-import { formatNumber, formatRelative } from '@/lib/utils';
+import { LoadingRows } from '@/components/ui/loading-rows';
+import { formatNumber, formatRelative, cn } from '@/lib/utils';
 import {
   useModelOption,
+  useModels,
   useWorkspaces,
   useGitStatus,
   useRagStatus,
   useReindexWorkspace,
+  useRagInitProgress,
   useAgentSettings,
 } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { PanelSection } from '../PanelSection';
 import { SessionHero } from '../SessionHero';
+import { Button } from '@/components/ui/button';
 
 export function InspectorTab({ session }: { session: Session }) {
   const usage = session.usage;
+  const { isLoading: modelsLoading } = useModels();
   const model = useModelOption(null, session.modelId);
   const { data: agentSettings } = useAgentSettings();
   const maxSteps = agentSettings?.maxSteps ?? 100;
@@ -38,6 +46,14 @@ export function InspectorTab({ session }: { session: Session }) {
     [workspaces, session.workspaceId],
   );
   const { data: gitChanges } = useGitStatus(session.workspaceId, session.worktree ? session.id : undefined);
+
+  // Any of the core async deps still loading → show a skeleton for the
+  // Configuration section instead of fabricated values (e.g. a hardcoded
+  // 100 maxSteps or a raw modelId before the model record resolves). Uses
+  // the queries' isLoading flags (not a value === undefined check) so a
+  // legitimately-missing model doesn't keep the skeleton up forever.
+  const loading =
+    modelsLoading || agentSettings === undefined || workspaces === undefined || gitChanges === undefined;
 
   const gitStats = useMemo(() => {
     const changes = gitChanges ?? [];
@@ -72,6 +88,11 @@ export function InspectorTab({ session }: { session: Session }) {
 
         {/* Configuration */}
         <PanelSection title="Configuration" defaultOpen>
+          {loading ? (
+            // Deps still resolving — skeleton instead of fabricated values
+            // (avoids leaking a hardcoded 100 maxSteps or a raw modelId).
+            <LoadingRows count={3} />
+          ) : (
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
               <Cpu className="size-3 text-muted-foreground" />
@@ -88,7 +109,7 @@ export function InspectorTab({ session }: { session: Session }) {
             <div className="flex items-center gap-2">
               <Shield className="size-3 text-muted-foreground" />
               <span className="text-muted-foreground flex-1 text-[12px]">Permissions</span>
-              <Badge variant="secondary" className="text-[10px]">{autonomyLabel(effectiveMode)}</Badge>
+              <Badge variant="secondary" className="text-[10px] rounded-md">{autonomyLabel(effectiveMode)}</Badge>
             </div>
             <div className="flex items-center gap-2">
               <Repeat className="size-3 text-muted-foreground" />
@@ -96,6 +117,7 @@ export function InspectorTab({ session }: { session: Session }) {
               <span className="font-mono text-[11px]">{usage?.calls ?? 0} / {maxSteps}</span>
             </div>
           </div>
+          )}
         </PanelSection>
 
         {/* Memory & RAG — with Re-Index action in the header */}
@@ -283,9 +305,9 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
 
   return (
     <PanelSection
-      title="Context window"
+      title="Context Window"
       defaultOpen={false}
-      badge={<span className="ml-1.5 font-mono font-normal normal-case tracking-normal">{formatNumber(contextWindow)}</span>}
+      badge={<Badge variant="secondary" className="ml-1.5 font-mono font-normal normal-case tracking-normal rounded-md">{formatNumber(contextWindow)}</Badge>}
     >
       <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
         {segments.map((s) => (
@@ -307,6 +329,12 @@ function MemoryRagSection({ session }: { session: Session }) {
   const { data } = useRagStatus(session.workspaceId ?? null);
   const status = data && !('error' in data) ? (data as import('@/types').RagStatus) : undefined;
   const { reindex, isReindexing } = useReindexWorkspace(session.workspaceId);
+  // Streamed indexing progress — the Inspector previously ignored this and
+  // showed only a spinning icon. Now it drives the prominent progress card.
+  const initProgress = useRagInitProgress(session.workspaceId ?? null);
+  const indexing =
+    isReindexing ||
+    (!!initProgress && initProgress.phase !== 'done' && initProgress.phase !== 'failed');
 
   const modelReady = status?.localAvailable === true;
   const isEnabled = status?.enabledWorkspaces?.includes(session.workspaceId ?? '') ?? false;
@@ -320,62 +348,114 @@ function MemoryRagSection({ session }: { session: Session }) {
     <PanelSection
       title="Memory & RAG"
       defaultOpen={true}
-      badge={
-        <span className="ml-1.5 flex items-center gap-1 font-normal normal-case tracking-normal">
-          {toolAvailable ? (
+      action={
+        <Badge variant="secondary" className={cn('ml-1.5 flex items-center gap-1 font-mono normal-case tracking-normal rounded-md', indexing && 'animate-pulse')}>
+          {indexing ? (
+            <>
+              <Loader2 className="size-2.5 animate-spin text-emerald-400" />
+              <span className="text-[10px] text-emerald-400">Indexing</span>
+            </>
+          ) : toolAvailable ? (
             <>
               <CheckCircle2 className="size-2.5 text-emerald-400" />
-              <span className="text-[10px]">active</span>
+              <span className="text-[10px]">Active</span>
             </>
           ) : (
             <>
-              <XCircle className="size-2.5 text-muted-foreground/50" />
-              <span className="text-[10px]">inactive</span>
+              <XCircle className="size-2.5 text-warning/70" />
+              <span className="text-[10px] text-warning/70">Inactive</span>
             </>
           )}
-        </span>
+        </Badge>
       }
-      action={
-        <button
-          type="button"
-          disabled={!session.workspaceId || isReindexing}
-          onClick={() => reindex()}
-          title="Re-index this workspace's files into the RAG store"
-          // Mirrors the mockup's .head-action: compact bordered pill. Spinner
-          // replaces the icon while ingesting; disabled greys it out.
-          className="inline-flex items-center gap-1 h-5 px-2 rounded border border-border bg-transparent text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-accent hover:bg-secondary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <RefreshCw className={`size-3 ${isReindexing ? 'animate-spin' : ''}`} />
-          Re-Index
-        </button>
-      }
+
     >
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground flex-1  text-[12px]">Memory</span>
-          <span className={`text-[11px] ${toolAvailable ? 'text-foreground' : 'text-muted-foreground/60'}`}>
-            {toolAvailable ? 'available' : modelReady ? 'workspace off' : 'no model'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground flex-1 text-[12px]">Indexed</span>
-          <span className="font-mono text-[11px]">
-            {chunkCount > 0 ? `${formatNumber(chunkCount)}` : '—'}
-          </span>
-        </div>
-        {lastIndexed && (
-          <div className="flex justify-between gap-2">
-            <span className="text-muted-foreground text-[12px]">Last indexed</span>
-            <span className="text-[11px] text-muted-foreground/70">{lastIndexed}</span>
+      {!isEnabled ? (
+        // RAG not enabled for this workspace — overlay the section with a
+        // disabled state and a button to open Settings → Memory & RAG.
+        <div className="relative">
+          {/* faint disabled preview of the stats underneath the overlay */}
+          <div className="space-y-1 select-none pointer-events-none opacity-40" aria-hidden>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground flex-1  text-[12px]">Memory</span>
+              <span className="text-[11px] text-muted-foreground/60">workspace off</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground flex-1 text-[12px]">Indexed</span>
+              <span className="font-mono text-[11px]">—</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground text-[12px]">Embedder</span>
+              <span className="font-mono text-[10px] text-muted-foreground/70 truncate max-w-[60%] text-right">
+                {status?.embedderId ?? '—'}
+              </span>
+            </div>
+
           </div>
-        )}
-        <div className="flex justify-between gap-2">
-          <span className="text-muted-foreground text-[12px]">Embedder</span>
-          <span className="font-mono text-[10px] text-muted-foreground/70 truncate max-w-[60%] text-right">
-            {status?.embedderId ?? '—'}
-          </span>
+
+          {/* overlay */}
+          <div className="absolute inset-0 -m-3 flex flex-col items-center justify-center gap-2 bg-background/80 backdrop-blur-[2px] text-center py-10">
+            <Brain className="size-4 text-muted-foreground/70" />
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              RAG is disabled for this workspace.
+              <br />
+              Enable it in Settings to index your files.
+            </p>
+            <Button
+              variant="warning"
+              size="xs"
+              className="h-6 mb-5"
+              onClick={() => useUi.getState().setScreen('settings')}
+            >
+              Enable RAG
+            </Button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground flex-1  text-[12px]">Memory</span>
+            <span className={`text-[11px] ${toolAvailable ? 'text-foreground' : 'text-muted-foreground/60'}`}>
+              {toolAvailable ? 'Available' : modelReady ? 'Workspace Off' : 'No Model'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground flex-1 text-[12px]">Indexed</span>
+            <span className="font-mono text-[11px]">
+              {chunkCount > 0 ? `${formatNumber(chunkCount)}` : '—'}
+            </span>
+          </div>
+          {lastIndexed && (
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground text-[12px]">Last Indexed</span>
+              <span className="text-[11px] text-muted-foreground/70">{lastIndexed}</span>
+            </div>
+          )}
+          <div className="flex justify-between gap-2">
+            <span className="text-muted-foreground text-[12px]">Embedder</span>
+            <span className="font-mono text-[10px] text-muted-foreground/70 truncate max-w-[60%] text-right">
+              {status?.embedderId ?? '—'}
+            </span>
+            </div>
+            { isEnabled ? (
+              <Button
+                size="sm"
+                disabled={!session.workspaceId || isReindexing}
+                onClick={() => reindex()}
+                title="Re-index this workspace's files into the RAG store"
+                // Mirrors the mockup's .head-action: compact bordered pill. Spinner
+                // replaces the icon while ingesting; disabled greys it out.
+                className="w-full h-7"
+              >
+                <RefreshCw className={`size-3 ${isReindexing ? 'animate-spin' : ''}`} />
+                Re-Index
+              </Button>
+                ) : undefined
+            }
+            {/* Prominent indexing progress — renders only while active/failed. */}
+            <RagIndexProgress event={initProgress} />
+          </div>
+      )}
     </PanelSection>
   );
 }

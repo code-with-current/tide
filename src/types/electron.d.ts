@@ -84,6 +84,7 @@ declare global {
           | 'needs_credentials'
           | 'needs_oauth';
         toolCount: number;
+        toolNames: string[];
         error?: string;
         transport: 'stdio' | 'sse' | 'http';
         enabled: boolean;
@@ -105,6 +106,14 @@ declare global {
         scope: 'user' | 'project',
         workspaceId?: string,
       ): Promise<{ ok: boolean }>;
+      /** OAuth sign-in: opens the browser (user-initiated) + re-runs connect. */
+      mcpAuthenticate(
+        name: string,
+        scope: 'user' | 'project',
+        workspaceId?: string,
+      ): Promise<{ ok: boolean }>;
+      /** Re-initialize ALL servers — disconnect + reconnect from config. */
+      mcpReinitialize(): Promise<{ ok: boolean }>;
       mcpSetSecret(name: string, value: string): Promise<{ ok: boolean }>;
       mcpHasSecret(name: string): Promise<boolean>;
       mcpClearSecret(name: string): Promise<{ ok: boolean }>;
@@ -136,6 +145,8 @@ declare global {
       onMcpStatusChanged(callback: () => void): void;
       removeAllMcpListeners(): void;
       showItemInFolder(fullPath: string): void;
+      /** Open an http(s) URL in the system browser. No-op for other schemes. */
+      openExternal(url: string): void;
       detectGitRepo(dirPath: string): Promise<{ branch: string; headCommit: string; fileCount: number; isRepo: boolean } | null>;
       addWorkspace(input: {
         path: string;
@@ -143,6 +154,13 @@ declare global {
         repository?: string;
         /** Optional project template to scaffold (New Project → From Template). */
         template?: import('@/lib/templates').TemplateId;
+        /** Optional lifecycle scripts to persist on the new workspace
+         *  (Existing Project flow: install = setup kind, running = run kind).
+         *  Saved only — not executed during creation. */
+        scripts?: import('./index').WorkspaceScript[];
+        /** Existing local folder flow: run `git init` when the folder isn't
+         *  already a git repo. Ignored for clone/scaffold flows. */
+        initGit?: boolean;
       }): Promise<import('./index').Workspace>;
 
       // Sessions
@@ -284,6 +302,10 @@ declare global {
       terminalKill: (terminalId: string) => Promise<void>;
       terminalStop: (terminalId: string) => Promise<void>;
       terminalResize: (terminalId: string, cols: number, rows: number) => Promise<void>;
+      /** Shell pid for a terminal (null if no PTY). Anchor for liveness checks. */
+      terminalGetPid: (terminalId: string) => Promise<number | null>;
+      /** Is a process (by pid) still alive? Used for port-liveness + Run/Stop. */
+      processIsAlive: (pid: number) => Promise<boolean>;
       onTerminalOutput(callback: (data: { terminalId: string; data: string }) => void): void;
       onTerminalExit(callback: (data: { terminalId: string; code: number | null }) => void): void;
       onTerminalPorts(callback: (data: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => void): void;

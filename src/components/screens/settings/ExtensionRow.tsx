@@ -1,5 +1,6 @@
 import { memo, useState, type ReactNode } from 'react';
 import { Copy, Check, FolderOpen } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 
 export interface ExtensionRowProps {
   name: string;
@@ -40,24 +41,6 @@ export const ExtensionRow = memo(function ExtensionRow({
         enabled ? '' : 'opacity-50'
       }`}
     >
-      {/* Toggle */}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={`Toggle ${name}`}
-        onClick={() => onToggle(!enabled)}
-        className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${
-          enabled ? 'bg-accent' : 'bg-muted-foreground/30'
-        }`}
-      >
-        <span
-          className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform mt-0.5 ${
-            enabled ? 'translate-x-3.5' : 'translate-x-0.5'
-          }`}
-        />
-      </button>
-
       {/* Name + description */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -70,7 +53,7 @@ export const ExtensionRow = memo(function ExtensionRow({
         )}
       </div>
 
-      {/* Hover actions */}
+      {/* Hover actions (between name and switch) */}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
         {actions}
         <button
@@ -95,6 +78,14 @@ export const ExtensionRow = memo(function ExtensionRow({
           </button>
         )}
       </div>
+
+      {/* Toggle — custom switch at the right, consistent with other Settings rows. */}
+      <Switch
+        checked={enabled}
+        onCheckedChange={onToggle}
+        aria-label={`Toggle ${name}`}
+        size="sm"
+      />
     </div>
   );
 });

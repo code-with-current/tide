@@ -7,8 +7,10 @@ import { WindowTopBar } from "@/components/layout/WindowTopBar";
 import { ChatSubBar } from "@/components/chat/ChatSubBar";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { EmptyChatState } from "@/components/chat/EmptyChatState";
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { NoWorkspaceState } from "@/components/chat/NoWorkspaceState";
 import { ChatMessage } from "@/components/chat/ChatMessage";
+import { VirtualizedChatList } from "@/components/chat/VirtualizedChatList";
 import { OptionsPopup } from "@/components/chat/OptionsPopup";
 import { TodoFloatingPanel } from "@/components/chat/TodoFloatingPanel";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
@@ -52,6 +54,11 @@ export function MainScreen() {
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   const fileViewerOpen = useUi((s) => s.fileViewerOpen);
+  // Whether this screen is the active top-level view. App.tsx keeps MainScreen
+  // always-mounted (so TerminalPanel + xterm state survive Settings visits);
+  // this flag lets effects no-op while hidden to avoid wasted work (auto-
+  // scroll, streaming re-renders) on a display:none element.
+  const isActive = useUi((s) => s.screen === "main");
   const setSessionsPanelOpen = useUi((s) => s.toggleSessionsPanel);
   const setRightPanelOpen = useUi((s) => s.toggleRightPanel);
   const mainView = useUi((s) => s.mainView);
@@ -158,6 +165,13 @@ export function MainScreen() {
 
   // Local chat state — mirrors the persisted session.
   const [chatHistory, setChatHistory] = useState<Message[]>([]);
+  // True while a session's messages are loading from IPC (on session switch).
+  // Drives a skeleton so switching sessions doesn't flash a blank/empty chat.
+  const [sessionLoading, setSessionLoading] = useState(false);
+  // True during the pre-stream window (session create + worktree + message
+  // add + context build) — closes the dead window between clicking send and
+  // the first token, where the app otherwise looks frozen.
+  const [submitting, setSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentSessionRef = useRef<string | null>(activeSessionId);
 
@@ -166,16 +180,21 @@ export function MainScreen() {
     currentSessionRef.current = activeSessionId;
     if (!activeSessionId) {
       setChatHistory([]);
+      setSessionLoading(false);
       return;
     }
     // Viewing a session clears its unread badge.
     markSessionRead(activeSessionId);
+    // Show a skeleton while messages load so a session switch doesn't read
+    // as an empty chat before the IPC resolves.
+    setSessionLoading(true);
     api.getSession(activeSessionId).then((s) => {
       // Stale session id (deleted since last run) — clear so we don't keep
       // trying to load a session that doesn't exist.
       if (!s) {
         setActiveSession(null);
         setChatHistory([]);
+        setSessionLoading(false);
         return;
       }
       if (currentSessionRef.current === activeSessionId) {
@@ -206,6 +225,12 @@ export function MainScreen() {
           thinkingLevel: s.thinkingLevel,
         });
       }
+      setSessionLoading(false);
+    }).catch(() => {
+      // IPC failure loading the session — clear loading + history so the user
+      // isn't stuck on a skeleton, and they can retry by re-selecting.
+      setSessionLoading(false);
+      setChatHistory([]);
     });
   }, [activeSessionId, markSessionRead, setActiveSession]);
 
@@ -287,7 +312,11 @@ export function MainScreen() {
   // Auto-scroll ONLY when the user is following (hasn't scrolled up).
   // Once they scroll up during a stream, this effect no-ops until they
   // click the scroll-to-bottom button or send a new message.
+  // Also no-ops while this screen is hidden (Settings open) — MainScreen is
+  // always-mounted, so without this guard streaming would keep re-rendering
+  // a display:none element and burning CPU.
   useEffect(() => {
+    if (!isActive) return;
     if (!userPinnedRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
@@ -296,6 +325,7 @@ export function MainScreen() {
     });
     return () => cancelAnimationFrame(rafId);
   }, [
+    isActive,
     chatHistory.length,
     streamingText,
     streamingReasoning,
@@ -417,6 +447,11 @@ export function MainScreen() {
         log.warn("No model selected");
         return;
       }
+
+      // Pre-stream window begins: session create + worktree + message add +
+      // context build all run before the first token. Flip submitting so the
+      // send button shows "Preparing…" instead of looking frozen.
+      setSubmitting(true);
 
       let sessionId = activeSessionId;
 
@@ -548,8 +583,15 @@ export function MainScreen() {
         },
       ];
 
-      if (!sessionId) return;
+      if (!sessionId) {
+        setSubmitting(false);
+        return;
+      }
       setSessionRunning(sessionId, true);
+      // Streaming is about to begin — the pre-stream window is over. From
+      // here the turn drives the button via isStreaming/inProgress, so clear
+      // submitting so it doesn't fight with the streaming indicator.
+      setSubmitting(false);
       await start({
         sessionId,
         messages: apiMessages,
@@ -755,9 +797,13 @@ export function MainScreen() {
                         className="flex-1 min-h-0 overflow-y-auto scroll px-6 py-5"
                       >
                         <div className="max-w-3xl mx-auto flex flex-col gap-3">
-                          {chatHistory.map((msg) => (
-                            <ChatMessage key={msg.id} message={msg} />
-                          ))}
+                          {sessionLoading && chatHistory.length === 0 ? (
+                            // Session messages are loading on switch — show a
+                            // skeleton instead of flashing an empty chat.
+                            <LoadingRows count={4} className="px-1" rowClassName="h-12" />
+                          ) : (
+                            <VirtualizedChatList messages={chatHistory} scrollRef={scrollRef} />
+                          )}
 
                           {streamingMessage && (
                             <ChatMessage
@@ -834,7 +880,7 @@ export function MainScreen() {
                                 ? "Stop to abort, or queue a message…"
                                 : "Send a message…"
                           }
-                          inProgress={isStreaming || !!pendingOptions}
+                          inProgress={isStreaming || !!pendingOptions || submitting}
                           onSubmit={handleSend}
                           onStop={() => {
                             // abort() requires an explicit sessionId — without

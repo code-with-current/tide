@@ -165,7 +165,14 @@ export async function ingestWorkspace(
     // ── Phase 1: walk ────────────────────────────────────────────────
     const files: string[] = [];
     emit({ phase: 'walking', filesSeen: 0, chunksTotal: 0, chunksEmbedded: 0 });
-    walkSource(ws.path, files, (n) =>
+    // Exclude the worktree subtree from indexing. Each worktree is a full
+    // per-branch checkout of the repo; indexing them multiplies the index
+    // with duplicates and wastes embedding budget. Resolved from the
+    // workspace's configured worktreeLocation (default .agent/worktrees/).
+    const worktreeRoot = ws.worktreeLocation
+      ? path.resolve(ws.path, ws.worktreeLocation)
+      : path.resolve(ws.path, '.agent', 'worktrees');
+    walkSource(ws.path, files, worktreeRoot, (n) =>
       emit({ phase: 'walking', filesSeen: n, chunksTotal: 0, chunksEmbedded: 0 }),
     );
 
@@ -262,7 +269,20 @@ export async function ingestWorkspace(
 /** Recursive directory walk. Filters by SKIP_DIRS + hidden-dir rule +
  * extension whitelist. Calls onProgress every ~50 files so the panel
  * can render walking status on large workspaces. */
-function walkSource(root: string, out: string[], onProgress: (n: number) => void): void {
+function walkSource(
+  root: string,
+  out: string[],
+  excludeDirs: string[],
+  onProgress: (n: number) => void,
+): void {
+  // Normalize excludes once for O(1) prefix checks (resolve to absolute,
+  // trailing-separator-stripped). A dir is excluded if it IS one of these or
+  // lives beneath one — used to drop the worktree subtree wholesale.
+  const excluded = excludeDirs.map((d) => path.resolve(d));
+  const isExcluded = (p: string) => {
+    const rp = path.resolve(p);
+    return excluded.some((x) => rp === x || rp.startsWith(x + path.sep));
+  };
   let count = 0;
   const walk = (dir: string) => {
     let entries: fs.Dirent[];
@@ -276,9 +296,11 @@ function walkSource(root: string, out: string[], onProgress: (n: number) => void
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         // Skip listed dirs and hidden dirs (except .agent, which is
-        // first-class — matches the grep tool's rule).
+        // first-class — matches the grep tool's rule). Also skip the
+        // configured worktree subtree so per-branch checkouts aren't indexed.
         if (SKIP_DIRS.has(e.name)) continue;
         if (e.name.startsWith('.') && e.name !== '.agent') continue;
+        if (isExcluded(full)) continue;
         walk(full);
       } else if (e.isFile()) {
         const ext = path.extname(e.name).toLowerCase();

@@ -82,14 +82,10 @@ function mentionBlock(m: Mention): string {
 }
 
 /** Chip class lookup — kind drives the tint, source drives the border style. */
-function chipClasses(m: Mention): string {
-  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[11px] font-mono align-middle select-none';
-  const bySource = m.source === 'user'
-    ? 'bg-info/10 border-info/30 text-info'
-    : m.source === 'project'
-      ? 'bg-secondary border-border text-muted-foreground'
-      : 'bg-primary/10 border-accent/30 text-primary';
-  return `${base} ${bySource}`;
+function chipClasses(_m: Mention): string {
+  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[11px] font-mono align-middle select-none rounded-md bg-foreground/10 text-foreground/70';
+
+  return `${base}`;
 }
 
 export function ChatComposer({
@@ -299,7 +295,7 @@ export function ChatComposer({
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = '×';
-    btn.className = 'text-muted-foreground/60 hover:text-destructive px-0.5 leading-none';
+    btn.className = 'text-muted-foreground/60 hover:text-destructive px-0.5 leading-none rounded-xl';
     btn.setAttribute('aria-label', `Remove ${m.name}`);
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -641,19 +637,6 @@ export function ChatComposer({
     displayText = displayText.replace(/\u00A0/g, ' ').trim();
     promptText = promptText.replace(/\u00A0/g, ' ').trim();
 
-    // On-send slash invocation: a LEADING `/name` that the user typed (and
-    // didn't convert to a chip via the picker) resolves against the mention
-    // catalog. If the entry has a file path, we use PROGRESSIVE DISCLOSURE —
-    // instead of inlining the (potentially large) body into the prompt, we
-    // point the model at the file and tell it to `read_file` it. The load
-    // then shows up as a visible tool call, the user message stays small,
-    // and the model reads the skill the same way it reads any other file.
-    // Built-in agents (no file) fall back to the inline guidance block.
-    //
-    // Only a leading token is resolved (mid-text `/foo` stays literal), and a
-    // name already present as a chip isn't re-resolved (avoids double-inject).
-    // No match → leave the text untouched so it falls through to a normal
-    // model turn (never silently no-ops).
     const existingNames = new Set(mentions.map((m) => m.name.toLowerCase()));
     const slashMatch = displayText.match(/^\/([\w][\w.-]*)\s?/);
     if (slashMatch) {
@@ -775,7 +758,7 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="border border-border bg-card rounded-md flex overflow-hidden focus-within:border-faint transition-colors">
+      <div className="border border-input bg-card rounded-md flex overflow-hidden focus-within:border-ring focus-within:shadow-xs focus-within:ring-[3px] focus-within:ring-ring/50 hover:border-ring hover:ring-[3px] hover:ring-ring/50 shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground">
         {/* ====================================================
             LEFT — vertical toolbar (attach, @).
            ==================================================== */}
@@ -814,10 +797,10 @@ export function ChatComposer({
                 <span
                   key={a.path}
                   className={
-                    'inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[11px] font-mono ' +
+                    'inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[11px] font-mono rounded-md border-border' +
                     (a.kind === 'paste'
-                      ? 'bg-primary/10 border-accent/30 text-primary'
-                      : 'bg-secondary border-border text-muted-foreground')
+                      ? 'bg-foreground/15 text-foreground/70'
+                      : 'bg-foreground/15 text-foreground/70')
                   }
                   title={a.kind === 'paste' ? a.content : a.path}
                 >

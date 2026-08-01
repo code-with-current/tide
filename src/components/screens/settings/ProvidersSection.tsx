@@ -14,6 +14,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -110,12 +111,10 @@ export function ProvidersSection() {
         description="OpenAI- or Anthropic-compatible endpoints. Set any base URL."
         action={
           <Button
-            variant="default"
             size="sm"
-            className="text-xs h-7"
             onClick={() => setDialogOpen(true)}
           >
-            <Plus className="size-3.5" /> Add provider
+            <Plus className="size-3.5" /> Add Provider
           </Button>
         }
       />
@@ -133,12 +132,10 @@ export function ProvidersSection() {
             />
           </div>
           <Button
-            variant="outline"
             size="sm"
-            className="justify-start text-[11.5px] h-7"
             onClick={() => setDialogOpen(true)}
           >
-            <Plus className="size-3.5" /> Add provider
+            <Plus className="size-3.5" /> Add Provider
           </Button>
           <div className="flex items-center justify-between px-1 pt-1">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/55 font-semibold">
@@ -370,7 +367,7 @@ function ProviderFormDialog({
           </div>
           <div className="flex-1">
             <DialogTitle className="text-base font-semibold text-left">
-              Add provider
+              Add Provider
             </DialogTitle>
             <DialogDescription className="text-xs mt-0.5">
               Configure an OpenAI- or Anthropic-compatible endpoint.
@@ -733,7 +730,14 @@ function ProviderDetail({
       if (newKey) patch.apiKey = newKey;
       void api
         .updateProvider(provider.id, patch)
-        .then(() => qc.invalidateQueries({ queryKey: ["providers"] }));
+        .then(() => qc.invalidateQueries({ queryKey: ["providers"] }))
+        .catch((e) =>
+          // Autosave is silent on success (fields visibly updating is the
+          // confirmation), but surface failures so a broken save isn't invisible.
+          toast.error("Provider save failed", {
+            description: e instanceof Error ? e.message : undefined,
+          }),
+        );
     }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1620,17 +1624,30 @@ export function FormField({
 function EnableToggle({ provider }: { provider: Provider }) {
   const qc = useQueryClient();
   const [on, setOn] = useState(provider.enabled);
+  const [busy, setBusy] = useState(false);
   const toggle = async (checked: boolean) => {
-    setOn(checked);
-    await api.updateProvider(provider.id, { enabled: checked });
-    qc.invalidateQueries({ queryKey: ["providers"] });
+    setOn(checked); // optimistic
+    setBusy(true);
+    try {
+      await api.updateProvider(provider.id, { enabled: checked });
+      qc.invalidateQueries({ queryKey: ["providers"] });
+    } catch (e) {
+      // Revert on failure — the IPC didn't land, so don't leave the toggle
+      // lying in the "on" position. Toast so the user knows why it flipped back.
+      setOn(!checked);
+      toast.error("Couldn't update provider", {
+        description: e instanceof Error ? e.message : undefined,
+      });
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-[10px] text-muted-foreground/55">
         {on ? "on" : "off"}
       </span>
-      <Switch checked={on} onCheckedChange={toggle} />
+      <Switch checked={on} disabled={busy} onCheckedChange={toggle} />
     </div>
   );
 }
@@ -1646,7 +1663,7 @@ export function ApiStylePicker({
   onChange: (s: ApiStyle) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 gap-2.5">
       <StyleCard
         active={value === "anthropic"}
         onClick={() => onChange("anthropic")}
@@ -1678,47 +1695,63 @@ function StyleCard({
   detail: string;
   tone: "anthropic" | "openai";
 }) {
+  // Brand tint per protocol — used for the active ring, avatar glow, and the
+  // subtle background wash. Kept as hex (not CSS vars) because these are
+  // fixed brand colors, not theme tokens.
+  const tint = tone === "anthropic" ? "#d97757" : "#10a37f";
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
-        "relative flex items-center gap-2.5 p-3 rounded-lg  text-left cursor-pointer transition-all duration-150 border border-b-4",
+        "relative flex items-center gap-2.5 p-3 rounded-xl text-left transition-all duration-150 border",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
         active
-          ? tone === "anthropic"
-            ? "border-0 translate-y-1 bg-orange/30 hover:bg-orange-100/10"
-            : "border-0 translate-y-1 bg-green/30 hover:bg-green-100/10"
-          : tone === "anthropic"
-            ? " hover:bg-orange-100/10"
-            : " hover:bg-green-100/10",
+          ? "bg-secondary shadow-sm"
+          : "border-border bg-card hover:border-primary/30 hover:bg-secondary/60",
       )}
+      style={
+        active
+          ? { borderColor: `${tint}55`, boxShadow: `inset 0 0 0 1px ${tint}40` }
+          : undefined
+      }
     >
-      <StyleAvatar tone={tone} />
+      <StyleAvatar tone={tone} active={active} />
       <div className="flex-1 min-w-0">
         <div
           className={cn(
-            "text-[12.5px] font-semibold",
-            active ? "text-primary" : "text-foreground",
+            "text-[12.5px] font-semibold tracking-tight",
+            active ? "text-foreground" : "text-foreground/80",
           )}
         >
           {title}
         </div>
-        <div className="text-[10px] text-muted-foreground/55 font-mono mt-0.5">
+        <div className="text-[10px] text-muted-foreground/55 font-mono mt-0.5 truncate">
           {detail}
         </div>
       </div>
-      {active && <Check className="size-3.5 text-primary shrink-0" />}
+      {active && (
+        <span
+          className="size-4 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: tint }}
+        >
+          <Check className="size-3 text-white" strokeWidth={3} />
+        </span>
+      )}
     </button>
   );
 }
 
 /** Brand-colored letter avatar — mirrors the ProviderAvatar used in the
- *  composer/selector so the protocol reads at a glance. */
-function StyleAvatar({ tone }: { tone: "anthropic" | "openai" }) {
+ *  composer/selector so the protocol reads at a glance. Rounded-full with a
+ *  subtle ring on the active card so the selection reads at a glance. */
+function StyleAvatar({ tone, active }: { tone: "anthropic" | "openai"; active: boolean }) {
+  const base = "size-8 rounded-lg flex items-center justify-center text-[12px] font-bold text-white shrink-0 transition-shadow";
   if (tone === "anthropic") {
     return (
       <span
-        className="size-7 rounded-md flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+        className={cn(base, active && "shadow-[0_0_0_3px_rgba(217,119,87,0.15)]")}
         style={{ background: "linear-gradient(135deg,#d97757,#b8553f)" }}
       >
         A
@@ -1727,7 +1760,7 @@ function StyleAvatar({ tone }: { tone: "anthropic" | "openai" }) {
   }
   return (
     <span
-      className="size-7 rounded-md flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+      className={cn(base, active && "shadow-[0_0_0_3px_rgba(16,163,127,0.15)]")}
       style={{ background: "#10a37f" }}
     >
       O
@@ -1751,7 +1784,12 @@ function DeleteProviderAction({
     try {
       await api.deleteProvider(provider.id);
       qc.invalidateQueries({ queryKey: ["providers"] });
+      toast.success("Provider deleted");
       onDone();
+    } catch (e) {
+      toast.error("Delete failed", {
+        description: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setBusy(false);
     }

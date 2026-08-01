@@ -55,7 +55,7 @@ function renderUserContent(content: string, mentions?: Message['mentions']): Rea
         <span
           key={i}
           title={`${meta.description ?? name}${meta.filePath ? `\n${meta.filePath}` : ''}`}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 bg-primary/30 border border-accent/15 text-[11px] font-mono align-middle cursor-help"
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 bg-foreground/15 text-foreground/70 rounded-md text-[11px] font-mono align-middle cursor-help"
         >
           /{name}
         </span>

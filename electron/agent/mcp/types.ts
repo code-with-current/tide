@@ -61,6 +61,11 @@ export interface McpConnection {
   restartCount: number;
   /** The SDK client (typed loosely — imported lazily). */
   client?: unknown;
+  /** The SDK transport (typed loosely). Kept so finishAuth(code) can be called
+   *  on the SAME transport that started the OAuth flow — a fresh transport
+   *  can't complete the code exchange because it lacks the in-flight PKCE
+   *  verifier + discovery state. */
+  transport?: unknown;
 }
 
 /** Status row for the management UI. */
@@ -70,6 +75,9 @@ export interface McpServerStatus {
   config: McpServerConfig;
   status: McpConnectionStatus;
   toolCount: number;
+  /** Names of the tools the server exposes — drives the clickable tool list
+   *  in the settings UI. Only populated when connected (empty otherwise). */
+  toolNames: string[];
   error?: string;
   transport: McpTransportType;
   /** Whether the user has enabled this server (toggled on). */
