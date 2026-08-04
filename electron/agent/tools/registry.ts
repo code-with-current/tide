@@ -321,3 +321,25 @@ export function buildToolset(
   }
   return out;
 }
+
+/**
+ * Build a subset of the toolset — only the named tools. Used by multi-step
+ * sub-agents that have `allowedTools` in their AgentDef. Filters the full
+ * toolset (built via buildToolset) to only include tools whose canonical
+ * name is in the allow list. Aliases are preserved.
+ */
+export function buildToolsetSubset(
+  ctx: SdkToolContext,
+  allowedTools: string[],
+  hookConfig?: HookConfig | null,
+): Record<string, AnySdkTool> {
+  const full = buildToolset(ctx, hookConfig);
+  const allowed = new Set(allowedTools);
+  // Also include aliases of allowed tools.
+  for (const [alias, canonical] of Object.entries(TOOL_ALIASES)) {
+    if (allowed.has(canonical)) allowed.add(alias);
+  }
+  return Object.fromEntries(
+    Object.entries(full).filter(([name]) => allowed.has(name)),
+  );
+}

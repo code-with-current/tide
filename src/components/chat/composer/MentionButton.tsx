@@ -162,8 +162,20 @@ export function useMentionCatalog(activeWorkspaceId: string | null): Mention[] {
       filePath: e.path,
       absPath: e.absPath,
     }));
+    // Built-in slash commands — appear in the / picker but have no file path.
+    // They're intercepted by MainScreen.handleSend before reaching the model.
+    const builtinCommands: Mention[] = [
+      {
+        id: 'cmd_compact',
+        kind: 'skill' as const,
+        name: 'compact',
+        description: 'Summarize earlier conversation to free context space',
+        source: 'builtin',
+      },
+    ];
+
     // Filter out disabled extensions (Settings → Extensions toggles).
-    const all = [...agents, ...projectAgentMentions, ...projectSkillMentions, ...contextMentions];
+    const all = [...builtinCommands, ...agents, ...projectAgentMentions, ...projectSkillMentions, ...contextMentions];
     if (!disabledConfig) return all;
     return all.filter((m) => {
       if (m.kind === 'agent') return !disabledConfig.agents.includes(m.name);

@@ -54,3 +54,7 @@ GEMINI.md
 *.md
 !README.md
 docs/plans/
+# Auto-generated prompt bundle (from build/promptMarkdownUtils.mjs)
+src/lib/prompts/_system-prompt-bundle.ts
+src/lib/prompts/_agent-prompts-bundle.ts
+src/lib/prompts/_tool-descriptions-bundle.ts

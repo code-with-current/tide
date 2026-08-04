@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
+import type { ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
@@ -9,7 +10,7 @@ import { getTerminalTheme } from '@/components/screens/settings/AppearanceSectio
 import { Button } from '@/components/ui/button';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
 import { Tip } from '@/components/ui/quick-tooltip';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
@@ -28,9 +29,92 @@ interface LiveTerminal {
 
 const registry = new Map<string, LiveTerminal>();
 
+// ── Output batching ──────────────────────────────────────────────
+// PTY output arrives as many small IPC events (one per node-pty onData
+// chunk). Writing each synchronously to xterm saturates the main thread on
+// high-throughput output (cargo build, npm install, log floods) → UI
+// freeze. Instead, buffer per-terminal and flush once per animation frame.
+// Worst-case added latency: ~16ms (imperceptible); throughput is unchanged
+// because the chunks concatenate into a single write.
+const outputBuffers = new Map<string, string>();
+const pendingFlushes = new Set<string>();
+
+function flushTerminal(terminalId: string) {
+  pendingFlushes.delete(terminalId);
+  const buf = outputBuffers.get(terminalId);
+  if (!buf) return;
+  outputBuffers.delete(terminalId);
+  const entry = registry.get(terminalId);
+  if (entry) {
+    try { entry.term.write(buf); } catch { /* disposed mid-flush */ }
+  }
+}
+
+/** Queue a chunk for the terminal; schedules a single rAF flush. */
+function queueOutput(terminalId: string, data: string) {
+  outputBuffers.set(terminalId, (outputBuffers.get(terminalId) ?? "") + data);
+  if (!pendingFlushes.has(terminalId)) {
+    pendingFlushes.add(terminalId);
+    requestAnimationFrame(() => flushTerminal(terminalId));
+  }
+}
+
+// ── File-path link provider ──────────────────────────────────────
+// Detects absolute paths (and path:line / path:line:col) in terminal output
+// and reveals them in the OS file manager on click. xterm calls provideLinks
+// per visible line as the user hovers; we scan that line for path matches and
+// return ILink objects with the buffer range + activate handler.
+//
+// Path pattern: an absolute POSIX path (starts with /) OR a Windows path
+// (drive letter:\), optionally suffixed with :line and :col. We deliberately
+// require a leading slash / drive to avoid matching arbitrary "foo:bar" text.
+const PATH_PATTERN = /(?:\/[\w./@-]+|[A-Za-z]:\\[\w\\./-]+)(?::(\d+))?(?::(\d+))?/g;
+
+class FilePathLinkProvider {
+  private term: Terminal;
+  constructor(term: Terminal) {
+    this.term = term;
+  }
+
+  provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
+    const line = this.term.buffer.active.getLine(bufferLineNumber);
+    if (!line) { callback(undefined); return; }
+    const text = line.translateToString(true);
+    const links: ILink[] = [];
+    let m: RegExpExecArray | null;
+    PATH_PATTERN.lastIndex = 0;
+    while ((m = PATH_PATTERN.exec(text)) !== null) {
+      const path = m[0];
+      // Filter obvious false positives: must have a slash/backslash beyond
+      // the root, and be at least 3 chars ("/a" is too short to be useful).
+      if (path.length < 3) continue;
+      const x1 = m.index;
+      const x2 = m.index + path.length - 1;
+      links.push({
+        range: {
+          start: { x: x1 + 1, y: bufferLineNumber },
+          end: { x: x2 + 1, y: bufferLineNumber },
+        },
+        text: path,
+        decorations: { underline: true, pointerCursor: true },
+        activate: (event: MouseEvent) => {
+          // VS Code-style: only open on modifier+click (Cmd on macOS, Ctrl
+          // elsewhere) — a plain click just positions the cursor.
+          const mod = isMac ? event.metaKey : event.ctrlKey;
+          if (mod) window.tideIpc?.showItemInFolder(path);
+        },
+      });
+    }
+    callback(links.length > 0 ? links : undefined);
+  }
+}
+
 export const TerminalPanel = memo(function TerminalPanel() {
   const sessionId = useUi((s) => s.activeSessionId ?? 'default');
   const terminalOpen = useUi((s) => s.terminalOpen);
+  // MainScreen is always-mounted now; the panel survives Settings visits but
+  // its box measures zero-size while hidden. This flag re-fits on return.
+  const screenActive = useUi((s) => s.screen === "main");
   const toggle = useUi((s) => s.toggleTerminal);
   const terminalTheme = useUi((s) => s.terminalTheme);
   const terminalFontSize = useUi((s) => s.terminalFontSize);
@@ -74,10 +158,10 @@ export const TerminalPanel = memo(function TerminalPanel() {
     document.body.style.userSelect = 'none';
   }, [setHeight]);
 
-  // Only process the ACTIVE session's terminals — not all sessions'.
-  // Previously this flattened every session's terminals, causing all PTYs
-  // to spawn on startup (20+ zombie processes). Now only the current
-  // session's terminals get xterm instances + PTYs.
+  // The ACTIVE session's terminals — only these get xterm instances created
+  // and shown. Switching sessions must NOT destroy the previous session's
+  // terminals (that loses scrollback + kills their PTYs); it should just hide
+  // them and let the new session's terminals show.
   const allEntries = useMemo(
     () => (allTerminals[sessionId] ?? []).map((t) => ({
       sessionId,
@@ -86,7 +170,21 @@ export const TerminalPanel = memo(function TerminalPanel() {
     })),
     [allTerminals, sessionId],
   );
-  const allIds = useMemo(() => new Set(allEntries.map((e) => e.terminalId)), [allEntries]);
+  // IDs of terminals that should SURVIVE — every session's, not just the
+  // active one. The dispose loop uses this so switching sessions hides the
+  // old session's terminals instead of killing them. Only terminals removed
+  // from the store entirely (tab closed / session deleted) get killed.
+  const survivingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of Object.values(allTerminals)) {
+      for (const t of list) ids.add(t.id);
+    }
+    return ids;
+  }, [allTerminals]);
+  const activeSessionIds = useMemo(
+    () => new Set(allEntries.map((e) => e.terminalId)),
+    [allEntries],
+  );
 
   // Tracks which terminal we last focused. We only refocus when the active
   // id actually CHANGES — calling focus() on every effect run would steal
@@ -102,12 +200,14 @@ export const TerminalPanel = memo(function TerminalPanel() {
     if (!ipc) return;
 
     const onOutput = ({ terminalId, data }: { terminalId: string; data: string }) => {
-      const entry = registry.get(terminalId);
-      if (entry) entry.term.write(data);
+      // Batched flush (rAF) — see queueOutput. Keeps the UI responsive under
+      // high-throughput PTY output instead of writing per-IPC-event.
+      queueOutput(terminalId, data);
     };
     const onExit = ({ terminalId, code }: { terminalId: string; code: number | null }) => {
-      const entry = registry.get(terminalId);
-      if (entry) entry.term.write(`\r\n\x1b[31m[Process exited with code ${code}]\x1b[0m\r\n`);
+      // Route through the same buffer so the exit line stays ordered after
+      // any pending output (a direct write could land before buffered chunks).
+      queueOutput(terminalId, `\r\n\x1b[31m[Process exited with code ${code}]\x1b[0m\r\n`);
     };
     const onPorts = ({ terminalId, ports }: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => {
       useUi.getState().setTerminalPorts(terminalId, ports);
@@ -148,7 +248,13 @@ export const TerminalPanel = memo(function TerminalPanel() {
 
       const fit = new FitAddon();
       term.loadAddon(fit);
-      term.loadAddon(new WebLinksAddon());
+      // Web links — open in the system browser via the openExternal bridge.
+      // VS Code-style: only open on modifier+click (Cmd on macOS, Ctrl
+      // elsewhere) — a plain click just positions the cursor.
+      term.loadAddon(new WebLinksAddon((event, uri) => {
+        const mod = isMac ? event.metaKey : event.ctrlKey;
+        if (mod) ipc?.openExternal(uri);
+      }));
 
       // Create a wrapper div INSIDE the mount. xterm renders into this.
       // We manage this div imperatively — React never touches it.
@@ -158,6 +264,28 @@ export const TerminalPanel = memo(function TerminalPanel() {
       mount.appendChild(wrapper);
       term.open(wrapper);
       fit.fit();
+
+      // Hardware-accelerated WebGL renderer — a major perf win for dense
+      // output (build logs, cat-ing large files) over the default DOM/canvas
+      // renderer. Must load AFTER term.open(). Throws if WebGL isn't
+      // available (headless, old GPU, context limit) → fall back to canvas.
+      // Loaded dynamically so the CJS addon isn't in the initial bundle (its
+      // UMD wrapper trips rolldown's require-resolution in dev otherwise).
+      import('@xterm/addon-webgl')
+        .then(({ WebglAddon }) => {
+          try {
+            const webgl = new WebglAddon();
+            webgl.onContextLoss(() => webgl.dispose());
+            term.loadAddon(webgl);
+          } catch { /* canvas renderer is the automatic fallback */ }
+        })
+        .catch(() => { /* addon unavailable — canvas fallback */ });
+
+      // File-path link provider — detects absolute paths (and path:line:col)
+      // in terminal output and reveals them in the OS file manager on click.
+      // Complements WebLinksAddon (URLs). Registered per-terminal; xterm
+      // calls provideLinks per visible line as the user hovers.
+      term.registerLinkProvider(new FilePathLinkProvider(term));
 
       // Start PTY. Await so any pendingCommand is flushed to a real PTY
       // rather than a not-yet-existing id — without this, the Run button
@@ -203,9 +331,14 @@ export const TerminalPanel = memo(function TerminalPanel() {
       if (tid === active) createdActive = true;
     }
 
-    // ── Dispose terminals removed from store (tab closed) ──
+    // ── Dispose terminals truly removed from the store (tab closed / session
+    //    deleted). Uses survivingIds (ALL sessions) so switching sessions does
+    //    NOT kill the previous session's terminals — only ones removed from
+    //    every session are torn down. ──
     for (const [tid, live] of registry) {
-      if (allIds.has(tid)) continue;
+      if (survivingIds.has(tid)) continue;
+      // Drain any buffered output first so nothing is lost, then tear down.
+      flushTerminal(tid);
       live.inputDisposable.dispose();
       live.resizeObserver.disconnect();
       ipc.terminalKill(tid);
@@ -216,21 +349,25 @@ export const TerminalPanel = memo(function TerminalPanel() {
     }
 
     // ── Visibility toggle ──
-    // Only refocus / refit when the active id actually changed, or when
-    // the active terminal was just created. Calling focus() on every
-    // effect run is what caused the "can't type" + flicker symptoms.
+    // Terminals in the ACTIVE session are candidates to show; everything else
+    // (other sessions' terminals still alive in the registry) is hidden.
+    // Only refocus / refit when the active id actually changed, or when the
+    // active terminal was just created — calling focus() on every effect run
+    // is what caused the "can't type" + flicker symptoms.
     const activeChanged = active !== prevActiveRef.current;
     for (const [tid, live] of registry) {
       const wrapper = live.term.element?.parentElement;
       if (!wrapper) continue;
-      const isVisible = tid === active;
+      // Belongs to the active session AND is the active terminal → visible.
+      // (activeSessionIds = the active session's terminal IDs.)
+      const isVisible = activeSessionIds.has(tid) && tid === active;
       wrapper.style.display = isVisible ? 'block' : 'none';
       if (isVisible && (activeChanged || createdActive)) {
         try { live.fit.fit(); live.term.focus(); } catch { /* */ }
       }
     }
     prevActiveRef.current = active;
-  }, [allEntries, allIds, active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allEntries, activeSessionIds, survivingIds, active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Theme / font-size updates: apply to EXISTING terminals in place via
   // term.options rather than recreating them. Keeps scrollback + PTY state.
@@ -245,14 +382,15 @@ export const TerminalPanel = memo(function TerminalPanel() {
     }
   }, [terminalTheme, terminalFontSize]);
 
-  // Refit on expand. The panel is always mounted (so xterm state survives
-  // collapse), but its outer div has display:none while collapsed — the
-  // ResizeObserver can't measure a zero-size box, so the active terminal's
-  // last fit() ran against the pre-collapse dimensions. When the user
-  // re-opens the panel, refit + refocus so the canvas matches the new
-  // visible size.
+  // Refit on expand OR on screen return. The panel is always mounted (so
+  // xterm state survives collapse + Settings visits), but its outer div has
+  // display:none while collapsed/hidden — the ResizeObserver can't measure a
+  // zero-size box, so the active terminal's last fit() ran against the
+  // pre-hide dimensions. When the user re-opens the panel or returns from
+  // Settings, refit + refocus so the canvas matches the new visible size.
   useEffect(() => {
     if (!terminalOpen) return;
+    if (!screenActive) return;
     if (!active) return;
     const entry = registry.get(active);
     if (!entry) return;
@@ -262,7 +400,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       try { entry.fit.fit(); entry.term.focus(); } catch { /* */ }
     });
     return () => cancelAnimationFrame(raf);
-  }, [terminalOpen, active]);
+  }, [terminalOpen, screenActive, active]);
 
   const items = terminals.map((t) => ({
     id: t.id,
@@ -278,7 +416,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
       // toggle cycles. Re-displayed when terminalOpen flips back to true.
       className={cn(
         'flex-shrink-0 flex flex-col overflow-hidden',
-        !terminalOpen && 'hidden',
+        // Hide when collapsed OR when the active session has no terminals —
+        // otherwise switching to a terminal-less session leaves an empty
+        // panel expanded. The component stays mounted either way (xterm
+        // canvases + PTYs for other sessions survive behind display:none).
+        (!terminalOpen || terminals.length === 0) && 'hidden',
       )}
       style={{ height }}
     >

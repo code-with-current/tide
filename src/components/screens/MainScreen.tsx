@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, AlertCircle, RotateCw, Loader2 } from "lucide-react";
 import { Panel, Group, Separator } from "react-resizable-panels";
 import { WorkspacesPanel } from "@/components/sidebar/WorkspacesPanel";
 import { SessionsPanel } from "@/components/sidebar/SessionsPanel";
@@ -7,8 +7,11 @@ import { WindowTopBar } from "@/components/layout/WindowTopBar";
 import { ChatSubBar } from "@/components/chat/ChatSubBar";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { EmptyChatState } from "@/components/chat/EmptyChatState";
+import { LoadingRows } from "@/components/ui/loading-rows";
 import { NoWorkspaceState } from "@/components/chat/NoWorkspaceState";
+import { MissingWorkspaceScreen } from "./MissingWorkspaceScreen";
 import { ChatMessage } from "@/components/chat/ChatMessage";
+import { VirtualizedChatList } from "@/components/chat/VirtualizedChatList";
 import { OptionsPopup } from "@/components/chat/OptionsPopup";
 import { TodoFloatingPanel } from "@/components/chat/TodoFloatingPanel";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
@@ -27,6 +30,7 @@ import type { Message, MessageAttachment } from "@/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { createLogger } from "@/lib/logger";
+import { toast } from "@/lib/toast";
 
 const log = createLogger("main-screen");
 
@@ -52,6 +56,11 @@ export function MainScreen() {
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   const fileViewerOpen = useUi((s) => s.fileViewerOpen);
+  // Whether this screen is the active top-level view. App.tsx keeps MainScreen
+  // always-mounted (so TerminalPanel + xterm state survive Settings visits);
+  // this flag lets effects no-op while hidden to avoid wasted work (auto-
+  // scroll, streaming re-renders) on a display:none element.
+  const isActive = useUi((s) => s.screen === "main");
   const setSessionsPanelOpen = useUi((s) => s.toggleSessionsPanel);
   const setRightPanelOpen = useUi((s) => s.toggleRightPanel);
   const mainView = useUi((s) => s.mainView);
@@ -91,24 +100,26 @@ export function MainScreen() {
   const selectedProviderId = useUi((s) => s.selectedProviderId);
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const autonomyMode = useUi((s) => s.autonomyMode);
-  // On first mount, load the configured default autonomy from Settings → Permissions & caps.
+  // On first mount, load the configured default autonomy from Settings → Permissions & Caps.
+  // Only applies the default if the persisted mode is the initial 'ask' —
+  // don't override a mode the user escalated to mid-session (e.g. 'edit' via
+  // the permission card).
   useEffect(() => {
     window.tideIpc?.getAgentSettings().then((s) => {
-      if (
-        s?.defaultAutonomy &&
-        s.defaultAutonomy !== useUi.getState().autonomyMode
-      ) {
-        useUi
-          .getState()
-          .setAutonomyMode(
-            s.defaultAutonomy as "plan" | "ask" | "edit" | "full",
-          );
+      const current = useUi.getState().autonomyMode;
+      // Only apply the default on first-ever launch (current is still 'ask'
+      // AND the user hasn't explicitly set a mode in the UI).
+      // If the user escalated to 'edit'/'full'/'plan', respect that choice.
+      if (s?.defaultAutonomy && current === 'ask' && s.defaultAutonomy !== 'ask') {
+        useUi.getState().setAutonomyMode(s.defaultAutonomy as "plan" | "ask" | "edit" | "full");
       }
     });
   }, []);
   const thinkingLevel = useUi((s) => s.thinkingLevel);
   const applySessionSettings = useUi((s) => s.applySessionSettings);
   const setSessionRunning = useUi((s) => s.setSessionRunning);
+  const addTitleGenerating = useUi((s) => s.addTitleGenerating);
+  const removeTitleGenerating = useUi((s) => s.removeTitleGenerating);
   const markSessionUnread = useUi((s) => s.markSessionUnread);
   const markSessionRead = useUi((s) => s.markSessionRead);
   const pendingOptions = useUi((s) =>
@@ -158,6 +169,27 @@ export function MainScreen() {
 
   // Local chat state — mirrors the persisted session.
   const [chatHistory, setChatHistory] = useState<Message[]>([]);
+  // True while a session's messages are loading from IPC (on session switch).
+  // Drives a skeleton so switching sessions doesn't flash a blank/empty chat.
+  const [sessionLoading, setSessionLoading] = useState(false);
+  // True when the active workspace's folder is missing on disk. Drives the
+  // MissingWorkspaceScreen (warns the user + offers Delete / re-check) instead
+  // of letting tools fail mid-turn. Re-probed whenever the active workspace or
+  // mainView changes; cleared on success so the normal chat/new view returns.
+  const activeWorkspace = workspaces?.find((w) => w.id === activeWorkspaceId);
+  const [workspaceMissing, setWorkspaceMissing] = useState(false);
+  useEffect(() => {
+    if (!activeWorkspace) { setWorkspaceMissing(false); return; }
+    let cancelled = false;
+    window.tideIpc?.workspacesExist([activeWorkspace.path]).then((map) => {
+      if (!cancelled) setWorkspaceMissing(map?.[activeWorkspace.path] === false);
+    }).catch(() => { if (!cancelled) setWorkspaceMissing(false); });
+    return () => { cancelled = true; };
+  }, [activeWorkspace]);
+  // True during the pre-stream window (session create + worktree + message
+  // add + context build) — closes the dead window between clicking send and
+  // the first token, where the app otherwise looks frozen.
+  const [submitting, setSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentSessionRef = useRef<string | null>(activeSessionId);
 
@@ -166,16 +198,21 @@ export function MainScreen() {
     currentSessionRef.current = activeSessionId;
     if (!activeSessionId) {
       setChatHistory([]);
+      setSessionLoading(false);
       return;
     }
     // Viewing a session clears its unread badge.
     markSessionRead(activeSessionId);
+    // Show a skeleton while messages load so a session switch doesn't read
+    // as an empty chat before the IPC resolves.
+    setSessionLoading(true);
     api.getSession(activeSessionId).then((s) => {
       // Stale session id (deleted since last run) — clear so we don't keep
       // trying to load a session that doesn't exist.
       if (!s) {
         setActiveSession(null);
         setChatHistory([]);
+        setSessionLoading(false);
         return;
       }
       if (currentSessionRef.current === activeSessionId) {
@@ -202,10 +239,22 @@ export function MainScreen() {
         applySessionSettings({
           modelId: s.modelId,
           providerId: s.providerId,
-          autonomyMode: s.autonomyMode,
+          // Preserve the live autonomy mode if the user escalated mid-turn
+          // (e.g. switched from 'plan' to 'edit' via permission card). The
+          // persisted record may not have the update yet (race between
+          // updateSessionSettings and the session re-fetch).
+          autonomyMode: useUi.getState().autonomyMode !== 'ask'
+            ? useUi.getState().autonomyMode
+            : (s.autonomyMode ?? undefined),
           thinkingLevel: s.thinkingLevel,
         });
       }
+      setSessionLoading(false);
+    }).catch(() => {
+      // IPC failure loading the session — clear loading + history so the user
+      // isn't stuck on a skeleton, and they can retry by re-selecting.
+      setSessionLoading(false);
+      setChatHistory([]);
     });
   }, [activeSessionId, markSessionRead, setActiveSession]);
 
@@ -287,7 +336,11 @@ export function MainScreen() {
   // Auto-scroll ONLY when the user is following (hasn't scrolled up).
   // Once they scroll up during a stream, this effect no-ops until they
   // click the scroll-to-bottom button or send a new message.
+  // Also no-ops while this screen is hidden (Settings open) — MainScreen is
+  // always-mounted, so without this guard streaming would keep re-rendering
+  // a display:none element and burning CPU.
   useEffect(() => {
+    if (!isActive) return;
     if (!userPinnedRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
@@ -296,6 +349,7 @@ export function MainScreen() {
     });
     return () => cancelAnimationFrame(rafId);
   }, [
+    isActive,
     chatHistory.length,
     streamingText,
     streamingReasoning,
@@ -403,6 +457,25 @@ export function MainScreen() {
       const text = payload.text;
       const promptText = payload.promptText ?? text;
       const attachments = payload.attachments ?? [];
+
+      // ── Built-in slash commands ──
+      // /compact — manually trigger context compaction for the active session.
+      if (text.trim().toLowerCase() === '/compact') {
+        if (!activeSessionId) {
+          toast.error('No active session to compact');
+          return;
+        }
+        if (isStreaming) {
+          toast.error('Cannot compact while streaming');
+          return;
+        }
+        toast.info('Compacting context…');
+        // Send a marker message — the orchestrator detects it and forces
+        // compaction in prepareStep before the model responds.
+        payload.text = '[[FORCE_COMPACT]]Summarize our conversation so far. Keep the key decisions, files touched, and current task state.';
+        payload.promptText = '[[FORCE_COMPACT]]Summarize our conversation so far. Keep the key decisions, files touched, and current task state.';
+      }
+
       // Only abort if the ACTIVE session is already streaming. A different
       // session streaming in the background should not block this send.
       if (isStreaming && activeSessionId) {
@@ -417,6 +490,11 @@ export function MainScreen() {
         log.warn("No model selected");
         return;
       }
+
+      // Pre-stream window begins: session create + worktree + message add +
+      // context build all run before the first token. Flip submitting so the
+      // send button shows "Preparing…" instead of looking frozen.
+      setSubmitting(true);
 
       let sessionId = activeSessionId;
 
@@ -445,11 +523,15 @@ export function MainScreen() {
         // is already set; this renames server-side on resolve and invalidates
         // the sessions list so the sidebar picks up the new title. Never
         // awaits on the send path — a slow/stuck title call can't block the turn.
-        void api.generateSessionTitle(newSession.id).then((generated) => {
-          if (generated && activeWorkspaceId) {
-            qc.invalidateQueries({ queryKey: ["sessions", activeWorkspaceId] });
-          }
-        });
+        addTitleGenerating(newSession.id);
+        void api
+          .generateSessionTitle(newSession.id)
+          .then((generated) => {
+            if (generated && activeWorkspaceId) {
+              qc.invalidateQueries({ queryKey: ["sessions", activeWorkspaceId] });
+            }
+          })
+          .finally(() => removeTitleGenerating(newSession.id));
 
         // Worktree isolation — if the user opted in from the new-session
         // screen, create a git worktree for this session now (before the
@@ -492,7 +574,15 @@ export function MainScreen() {
       setChatHistory((h) => [...h, userMsg]);
       if (sessionId) {
         // Persist basic shape (sessions.ts handles the StoredMessage projection).
-        await api.addMessage(sessionId, "user", text);
+        // Pass attachments + mentions so chips survive reload — without these
+        // the viewer can't reopen attached files (no absPath/isImage to match).
+        await api.addMessage(sessionId, "user", text, {
+          attachments: attachments.length > 0 ? attachments : undefined,
+          mentions:
+            payload.mentions && payload.mentions.length > 0
+              ? (payload.mentions as Message["mentions"])
+              : undefined,
+        });
         // addMessage bumps the session's updatedAt — invalidate so the sidebar
         // re-sorts (latest activity on top) and the title updates if it was
         // auto-derived from the first user message.
@@ -548,8 +638,15 @@ export function MainScreen() {
         },
       ];
 
-      if (!sessionId) return;
+      if (!sessionId) {
+        setSubmitting(false);
+        return;
+      }
       setSessionRunning(sessionId, true);
+      // Streaming is about to begin — the pre-stream window is over. From
+      // here the turn drives the button via isStreaming/inProgress, so clear
+      // submitting so it doesn't fight with the streaming indicator.
+      setSubmitting(false);
       await start({
         sessionId,
         messages: apiMessages,
@@ -574,6 +671,8 @@ export function MainScreen() {
       setActiveSession,
       setMainView,
       setSessionRunning,
+      addTitleGenerating,
+      removeTitleGenerating,
       start,
     ],
   );
@@ -603,6 +702,7 @@ export function MainScreen() {
         reasoningTokens: fm.reasoningTokens,
         createdAt: new Date().toISOString(),
         toolCalls: fm.toolCalls,
+        stopReason: stream.stopReason,
       };
       // Only push to the visible chatHistory if the user is currently viewing
       // the session that just finished. Other sessions' histories will refresh
@@ -611,7 +711,7 @@ export function MainScreen() {
         setChatHistory((h) => [...h, assistantMsg]);
       }
       api.addAssistantMessage(sid, assistantMsg);
-      if (fm.usage) api.addSessionUsage(sid, fm.usage);
+      if (fm.usage) api.addSessionUsage(sid, fm.usage, fm.lastStepUsage ?? fm.usage);
       setSessionRunning(sid, false);
       if (sid === activeSessionId) markSessionRead(sid);
       else markSessionUnread(sid);
@@ -711,7 +811,7 @@ export function MainScreen() {
           orientation="horizontal"
           className="flex-1 min-h-0 overflow-hidden"
         >
-          {sessionsPanelOpen && (
+          {sessionsPanelOpen && !workspaceMissing && (
             <Panel
               id="sessions"
               defaultSize="15"
@@ -722,7 +822,7 @@ export function MainScreen() {
               <SessionsPanel />
             </Panel>
           )}
-          {sessionsPanelOpen && <ResizeHandle />}
+          {sessionsPanelOpen && !workspaceMissing && <ResizeHandle />}
 
           <Panel
             id="chat"
@@ -734,7 +834,7 @@ export function MainScreen() {
             style={{ overflow: "hidden", height: "100%" }}
           >
             <main className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden">
-              <ChatSubBar />
+              {!workspaceMissing && <ChatSubBar />}
 
               {/* Body column — holds chat scroll + optional terminal + composer.
                   This is the column flex container; everything below ChatSubBar
@@ -742,6 +842,16 @@ export function MainScreen() {
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 {!activeWorkspaceId ? (
                   <NoWorkspaceState />
+                ) : workspaceMissing && activeWorkspace ? (
+                  // Active workspace's folder is gone — warn + offer recovery
+                  // instead of letting tools fail mid-turn.
+                  <MissingWorkspaceScreen
+                    workspace={activeWorkspace}
+                    onRestored={() => {
+                      setWorkspaceMissing(false);
+                      setMainView("new");
+                    }}
+                  />
                 ) : mainView === "chat" || isStreaming ? (
                   <>
                     {/* Chat scroll — flex-1 absorbs leftover height so terminal
@@ -755,11 +865,23 @@ export function MainScreen() {
                         className="flex-1 min-h-0 overflow-y-auto scroll px-6 py-5"
                       >
                         <div className="max-w-3xl mx-auto flex flex-col gap-3">
-                          {chatHistory.map((msg) => (
-                            <ChatMessage key={msg.id} message={msg} />
-                          ))}
+                          {sessionLoading && chatHistory.length === 0 ? (
+                            // Session messages are loading on switch — show a
+                            // skeleton instead of flashing an empty chat.
+                            <LoadingRows count={4} className="px-1" rowClassName="h-12" />
+                          ) : (
+                            <VirtualizedChatList messages={chatHistory} scrollRef={scrollRef} />
+                          )}
 
                           {streamingMessage && (
+                            <>
+                              {activeStream?.compacting && (
+                                <div className="flex items-center gap-2 px-3.5 py-2 mx-1 mb-1 rounded-lg border border-primary/15 bg-primary/[0.04] text-[11px] text-muted-foreground font-mono">
+                                  <Loader2 className="size-3 animate-spin text-primary/60" />
+                                  <span>Compacting context</span>
+                                  <span className="text-muted-foreground/40">— summarizing earlier turns to fit the context window</span>
+                                </div>
+                              )}
                             <ChatMessage
                               message={streamingMessage}
                               streaming
@@ -787,11 +909,74 @@ export function MainScreen() {
                                   : undefined
                               }
                             />
+                            </>
                           )}
 
-                          {error && (
-                            <div className="text-xs text-destructive border border-destructive/20 bg-destructive/[0.06] px-3 py-2 rounded-md">
-                              {error}
+                          {/* Terminal error — shown when the turn fails.
+                              Retry re-sends the last user message. */}
+                          {error && !isStreaming && (
+                            <div className="flex flex-col gap-2 px-3.5 py-3 rounded-lg border border-destructive/20 bg-destructive/[0.06]">
+                              <div className="flex items-start gap-2.5">
+                                <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[12px] font-medium text-destructive">
+                                    Turn failed
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
+                                    {error}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  className="text-[11px] font-medium text-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary/70 hover:bg-secondary"
+                                  onClick={() => {
+                                    if (!activeSessionId || !modelOption) return;
+                                    // Remove the failed assistant message from chatHistory
+                                    // so the retry produces a fresh one, not a duplicate.
+                                    setChatHistory((h) => {
+                                      const last = h[h.length - 1];
+                                      if (last && last.role === 'assistant') {
+                                        return h.slice(0, -1);
+                                      }
+                                      return h;
+                                    });
+                                    // Clear the error state.
+                                    useUi.getState().patchStream(activeSessionId, { error: null });
+                                    // Re-invoke the turn with the existing conversation
+                                    // (last user message is already in chatHistory).
+                                    const retryMessages = chatHistory
+                                      .filter((m) => m.role === 'user' || m.role === 'assistant')
+                                      .filter((m) => {
+                                        // Drop the failed assistant message.
+                                        const arr = chatHistory;
+                                        return m !== arr[arr.length - 1] || m.role !== 'assistant';
+                                      })
+                                      .map((m) => ({ role: m.role, content: m.content }));
+                                    start({
+                                      sessionId: activeSessionId,
+                                      messages: retryMessages as any,
+                                      modelId: selectedModelId ?? modelOption.modelId,
+                                      providerId: selectedProviderId ?? modelOption.providerId,
+                                      autonomyMode,
+                                      thinkingLevel,
+                                    });
+                                  }}
+                                >
+                                  <RotateCw className="size-3" />
+                                  Retry
+                                </button>
+                                <button
+                                  className="text-[11px] font-medium text-muted-foreground/60 hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-secondary/50"
+                                  onClick={() => {
+                                    if (activeSessionId) {
+                                      useUi.getState().patchStream(activeSessionId, { error: null });
+                                    }
+                                  }}
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -834,7 +1019,7 @@ export function MainScreen() {
                                 ? "Stop to abort, or queue a message…"
                                 : "Send a message…"
                           }
-                          inProgress={isStreaming || !!pendingOptions}
+                          inProgress={isStreaming || !!pendingOptions || submitting}
                           onSubmit={handleSend}
                           onStop={() => {
                             // abort() requires an explicit sessionId — without
@@ -863,8 +1048,8 @@ export function MainScreen() {
             </main>
           </Panel>
 
-          {showRightPanel && <ResizeHandle />}
-          {showRightPanel && (
+          {showRightPanel && !workspaceMissing && <ResizeHandle />}
+          {showRightPanel && !workspaceMissing && (
             <Panel
               id="right"
               defaultSize="22"

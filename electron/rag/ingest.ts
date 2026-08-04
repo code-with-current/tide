@@ -20,6 +20,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { minimatch } from 'minimatch';
 import { createLogger } from '../logger.js';
 import { chunkFile, type Chunk } from './chunker/index.js';
 
@@ -165,9 +166,28 @@ export async function ingestWorkspace(
     // ── Phase 1: walk ────────────────────────────────────────────────
     const files: string[] = [];
     emit({ phase: 'walking', filesSeen: 0, chunksTotal: 0, chunksEmbedded: 0 });
-    walkSource(ws.path, files, (n) =>
+    // Exclude the worktree subtree from indexing. Each worktree is a full
+    // per-branch checkout of the repo; indexing them multiplies the index
+    // with duplicates and wastes embedding budget. Resolved from the
+    // workspace's configured worktreeLocation (default .agent/worktrees/).
+    const worktreeRoot = ws.worktreeLocation
+      ? path.resolve(ws.path, ws.worktreeLocation)
+      : path.resolve(ws.path, '.agent', 'worktrees');
+    walkSource(ws.path, files, [worktreeRoot], (n) =>
       emit({ phase: 'walking', filesSeen: n, chunksTotal: 0, chunksEmbedded: 0 }),
     );
+
+    // If the workspace root is gone, the walk yields 0 files silently. Fail
+    // loudly here instead of writing a misleading "success" lastIngestedAt —
+    // the caller (rag.ts) turns the throw into a 'failed' progress event so
+    // the UI's RagIndexProgress card shows the real reason. We check the root
+    // existence directly rather than relying on files.length === 0, since a
+    // genuinely-empty workspace (new project, no source yet) also yields 0.
+    if (!fs.existsSync(ws.path)) {
+      throw new Error(
+        `Workspace folder no longer exists: ${ws.path}. Restore the folder or re-add the workspace before indexing.`,
+      );
+    }
 
     // ── Phase 2: chunk ───────────────────────────────────────────────
     const allChunks: Chunk[] = [];
@@ -259,12 +279,66 @@ export async function ingestWorkspace(
   }
 }
 
+/**
+ * Parse a .gitignore file into a list of glob patterns. Handles negation
+ * (!prefix), comments (#), and blank lines. Patterns are relative to the
+ * directory containing the .gitignore file.
+ */
+function parseGitignore(filePath: string): string[] {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return content
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Check if a relative path is ignored by any accumulated .gitignore pattern.
+ * Uses minimatch with the standard .gitignore semantics: patterns without
+ * a slash match at any depth, patterns with a slash are relative to the
+ * .gitignore's directory. Negation (!) un-ignores.
+ */
+function isGitignored(relPath: string, patterns: string[]): boolean {
+  let ignored = false;
+  for (const pattern of patterns) {
+    if (pattern.startsWith('!')) {
+      // Negation — un-ignore if the pattern matches.
+      if (minimatch(relPath, pattern.slice(1), { dot: true, matchBase: true })) {
+        ignored = false;
+      }
+    } else {
+      if (minimatch(relPath, pattern, { dot: true, matchBase: true })) {
+        ignored = true;
+      }
+    }
+  }
+  return ignored;
+}
+
 /** Recursive directory walk. Filters by SKIP_DIRS + hidden-dir rule +
- * extension whitelist. Calls onProgress every ~50 files so the panel
- * can render walking status on large workspaces. */
-function walkSource(root: string, out: string[], onProgress: (n: number) => void): void {
+ *  extension whitelist + .gitignore rules. Reads .gitignore files at each
+ *  directory level (nested .gitignore files are respected, matching git's
+ *  behavior). Calls onProgress every ~50 files. */
+function walkSource(
+  root: string,
+  out: string[],
+  excludeDirs: string[],
+  onProgress: (n: number) => void,
+): void {
+  // Normalize excludes once for O(1) prefix checks (resolve to absolute,
+  // trailing-separator-stripped). A dir is excluded if it IS one of these or
+  // lives beneath one — used to drop the worktree subtree wholesale.
+  const excluded = excludeDirs.map((d) => path.resolve(d));
+  const isExcluded = (p: string) => {
+    const rp = path.resolve(p);
+    return excluded.some((x) => rp === x || rp.startsWith(x + path.sep));
+  };
   let count = 0;
-  const walk = (dir: string) => {
+  const walk = (dir: string, parentPatterns: string[]) => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -272,15 +346,34 @@ function walkSource(root: string, out: string[], onProgress: (n: number) => void
       log.warn('directory read skipped during walk', { dir, error: e instanceof Error ? e.message : String(e) });
       return;
     }
+    // Read this directory's .gitignore (if present) and merge with parent patterns.
+    // Nested .gitignore files are additive — a child can override a parent.
+    let patterns = parentPatterns;
+    const gitignorePath = path.join(dir, '.gitignore');
+    if (fs.existsSync(gitignorePath)) {
+      const local = parseGitignore(gitignorePath);
+      if (local.length > 0) {
+        patterns = [...parentPatterns, ...local];
+      }
+    }
+
     for (const e of entries) {
       const full = path.join(dir, e.name);
+      const relPath = path.relative(root, full);
       if (e.isDirectory()) {
         // Skip listed dirs and hidden dirs (except .agent, which is
-        // first-class — matches the grep tool's rule).
+        // first-class — matches the grep tool's rule). Also skip the
+        // configured worktree subtree so per-branch checkouts aren't indexed.
         if (SKIP_DIRS.has(e.name)) continue;
         if (e.name.startsWith('.') && e.name !== '.agent') continue;
-        walk(full);
+        if (isExcluded(full)) continue;
+        // Check .gitignore for directories too (e.g. "coverage/", "*.egg-info").
+        if (isGitignored(relPath, patterns)) continue;
+        walk(full, patterns);
       } else if (e.isFile()) {
+        // Check .gitignore before the extension filter — saves the ext lookup
+        // for ignored files (e.g. .env, build artifacts in non-skipped dirs).
+        if (isGitignored(relPath, patterns)) continue;
         const ext = path.extname(e.name).toLowerCase();
         if (!CHUNKABLE_EXTS.has(ext)) continue;
         out.push(full);
@@ -289,7 +382,7 @@ function walkSource(root: string, out: string[], onProgress: (n: number) => void
       }
     }
   };
-  walk(root);
+  walk(root, []);
   onProgress(count);
 }
 

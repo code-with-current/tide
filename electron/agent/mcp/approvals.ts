@@ -5,11 +5,12 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { appDataDir } from '../../appPaths.js';
 
 const EXTENSIONS_FILE = 'extensions.json';
 
 function extensionsFilePath(): string {
-  return path.join(app.getPath('userData'), EXTENSIONS_FILE);
+  return path.join(appDataDir(), EXTENSIONS_FILE);
 }
 
 interface ExtensionsFileShape {

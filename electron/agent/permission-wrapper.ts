@@ -22,7 +22,7 @@
 import { checkPermission } from './permission.js';
 import { getToolMeta } from './tools/tool-meta.js';
 import { waitForPermissionResolve, storePendingAsk } from './permission-resolver.js';
-import { evaluateRules, getSessionRules, loadPermissionRules } from './permissions/rules.js';
+import { evaluateRules, getSessionRules, loadPermissionRules, type RuleSet } from './permissions/rules.js';
 import { currentToolCallId } from './tools/tool-call-context.js';
 import { createLogger } from '../logger.js';
 import type { ToolContext } from './tools/tool-context.js';
@@ -43,14 +43,17 @@ export async function withPermission<T>(
   const meta = getToolMeta(toolName);
   const argsObj = (args ?? {}) as Record<string, unknown>;
 
-  // Rule-based gate (`.agent/settings.json` + session rules). Deny always wins;
-  // allow only upgrades an 'ask' to auto (does NOT bypass plan-mode 'blocked').
-  // Re-read project/user rules fresh here — ctx.permissionRules is a snapshot
-  // frozen at turn start, so a rule written mid-turn (e.g. "always allow ·
-  // project" on THIS card) would be invisible until the next turn. The gated
-  // path is the one that prompts, so the re-read cost is not on the hot path.
-  const freshProjectRules = loadPermissionRules(ctx.workspaceRoot);
-  const ruleDecision = evaluateRules(getSessionRules(ctx.sessionId), freshProjectRules, toolName, argsObj);
+  // Rule-based gate: merge file rules (.agent/settings.json, re-read fresh)
+  // with session rules (in-memory, added via "Always Allow" during this turn).
+  // Deny wins; allow upgrades 'ask' to auto (does NOT bypass plan-mode 'blocked').
+  const fileRules = loadPermissionRules(ctx.workspaceRoot);
+  const sessionRls = getSessionRules(ctx.sessionId);
+  // Merge: session rules + file rules. Session rules take precedence (added this turn).
+  const mergedRules: RuleSet = {
+    allow: [...sessionRls.allow, ...fileRules.allow],
+    deny: [...sessionRls.deny, ...fileRules.deny],
+  };
+  const ruleDecision = evaluateRules(mergedRules, toolName, argsObj);
   if (ruleDecision === 'deny') {
     log.warn('denied by rule', { tool: toolName, mode: ctx.autonomyMode });
     return { status: 'rejected', output: 'Denied by permission rule (.agent/settings.json or session).' };

@@ -19,10 +19,10 @@ const MODES: {
   icon: React.ReactNode;
   hint: string;
 }[] = [
-  { value: 'plan', label: 'Plan only', shortLabel: 'Plan', icon: <Map className="size-4" />, hint: 'Proposes changes, never executes' },
-  { value: 'ask', label: 'Ask before changes', shortLabel: 'Ask', icon: <Shield className="size-4" />, hint: 'Prompts for every edit & shell call' },
-  { value: 'edit', label: 'Edit automatically', shortLabel: 'Edit', icon: <Pencil className="size-4" />, hint: 'Auto-edits files, asks before shell' },
-  { value: 'full', label: 'Full access', shortLabel: 'Full', icon: <Zap className="size-4" />, hint: 'Direct access to this machine' },
+  { value: 'plan', label: 'Plan Only', shortLabel: 'Plan', icon: <Map className="size-4" />, hint: 'Proposes changes, never executes' },
+  { value: 'ask', label: 'Ask Before Changes', shortLabel: 'Ask', icon: <Shield className="size-4" />, hint: 'Prompts for every edit & shell call' },
+  { value: 'edit', label: 'Edit Automatically', shortLabel: 'Edit', icon: <Pencil className="size-4" />, hint: 'Auto-edits files, asks before shell' },
+  { value: 'full', label: 'Full Access', shortLabel: 'Full', icon: <Zap className="size-4" />, hint: 'Direct access to this machine' },
 ];
 
 /** Permission mode picker. */
@@ -45,9 +45,9 @@ export function PermissionModeSelector({ compact = false }: { compact?: boolean 
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
-        <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
-          <Shield className="size-3" /> Permissions
+      <DropdownMenuContent align="start" side="top" className="w-[300px] p-0 overflow-hidden">
+        <DropdownMenuLabel className="text-[0.9rem] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2 pt-3">
+          <Shield className="size-4.5" /> Permissions
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 

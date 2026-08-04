@@ -7,6 +7,7 @@
  */
 
 import { spawnSync } from 'child_process';
+import { toolEnv } from './tool-env';
 import * as fs from 'fs';
 import * as path from 'path';
 import { tool } from 'ai';
@@ -48,6 +49,7 @@ export async function runGrep(
       encoding: 'utf-8',
       timeout: timeoutMs,
       maxBuffer: 1024 * 1024,
+      env: toolEnv(),
     });
     if (result.status === 0 || result.stdout) {
       // rg returns exit 1 for "no matches" — that's not an error.

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, X, AlertCircle } from 'lucide-react';
+import { Check, AlertCircle, Plug, Server, Globe, FolderCode, Terminal, Link2, KeyRound, Code2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import { SectionLabel, FormField } from './ProvidersSection';
 
 /**
  * Add / edit dialog for an MCP server. Two modes:
@@ -25,11 +31,12 @@ export interface McpConfig {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
   auth?: 'oauth';
 }
 
-/** Where the server is stored: 'user' (global ~/.tide/mcp.json) or 'project'. */
-export type McpScope = 'user' | 'project';
+/** Where the server is stored: 'user' (global ~/.tide/mcp.json), 'project', or 'builtin'. */
+export type McpScope = 'user' | 'project' | 'builtin';
 
 export interface McpServerDialogProps {
   open: boolean;
@@ -56,6 +63,7 @@ const EMPTY_FORM: FormState = {
   argsText: '',
   envText: '',
   url: '',
+  headersText: '',
   auth: 'none',
 };
 
@@ -67,6 +75,8 @@ interface FormState {
   argsText: string;
   envText: string;
   url: string;
+  /** JSON string of custom HTTP headers (e.g. {"Authorization": "Bearer xxx"}). */
+  headersText: string;
   auth: Auth;
 }
 
@@ -185,68 +195,63 @@ export function McpServerDialog({
     onSave(form.scope, saveState.name, saveState.config);
   };
 
-  // Escape closes; backdrop click closes.
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    }
-  };
-
   if (!open) return null;
 
   const saveLabel = isEdit ? 'Save' : 'Add';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
       }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={isEdit ? `Edit ${initialName}` : 'Add MCP server'}
-        onKeyDown={onKeyDown}
-        className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl flex flex-col max-h-[90vh]"
-      >
+      <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold">
-            {isEdit ? `Edit ${initialName}` : 'Add MCP server'}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1 rounded hover:bg-muted transition-colors"
+        <DialogHeader className="px-5 py-4 flex-row items-center gap-3.5 border-b border-border space-y-0">
+          <div
+            className="size-9 rounded-[10px] flex items-center justify-center shrink-0 border"
+            style={{ background: 'rgba(217,119,87,0.1)', borderColor: 'rgba(217,119,87,0.2)' }}
           >
-            <X className="size-4" />
-          </button>
-        </div>
+            <Plug className="size-4 text-primary" />
+          </div>
+          <div className="flex-1">
+            <DialogTitle className="text-[15px] font-semibold text-left tracking-tight">
+              {isEdit ? `Edit ${initialName}` : 'Add MCP server'}
+            </DialogTitle>
+            <DialogDescription className="text-[11px] text-muted-foreground/60 mt-0.5 text-left">
+              {isEdit ? 'Update the server configuration.' : 'Connect a stdio command or remote endpoint.'}
+            </DialogDescription>
+          </div>
+        </DialogHeader>
 
-        {/* Scope selector — full-width card buttons */}
+        {/* Scope selector — matches the provider ApiStylePicker rhythm:
+            two side-by-side cards. */}
         <div className="px-5 pt-4">
+          <div className="mb-2">
+            <SectionLabel icon={<Globe className="size-3" />}>Scope</SectionLabel>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <ScopeCard
               active={form.scope === 'user'}
               onClick={() => setForm((f) => ({ ...f, scope: 'user' }))}
+              icon={<Globe className="size-3.5" />}
               label="Global"
               hint="~/.tide/mcp.json"
             />
             <ScopeCard
               active={form.scope === 'project'}
               onClick={() => setForm((f) => ({ ...f, scope: 'project' }))}
+              icon={<FolderCode className="size-3.5" />}
               label="Workspace"
               hint={workspaceRoot ? `${workspaceRoot}/.mcp.json` : '.mcp.json'}
             />
           </div>
         </div>
 
-        {/* Mode toggle */}
-        <div className="px-5 pt-3">
-          <div className="inline-flex rounded-lg border border-border p-0.5 text-xs">
+        {/* Mode toggle — segmented control like the provider form's tabs. */}
+        <div className="px-5 pt-3 pb-1">
+          <div className="inline-flex rounded-md bg-secondary p-[3px] text-xs">
             <ModeButton active={mode === 'form'} onClick={() => (mode === 'json' ? toForm() : null)}>
               Form
             </ModeButton>
@@ -257,7 +262,7 @@ export function McpServerDialog({
         </div>
 
         {/* Body */}
-        <div className="px-5 py-4 overflow-y-auto">
+        <div className="px-5 py-3 overflow-y-auto scroll max-h-[55vh]">
           {mode === 'form' ? (
             <FormBody form={form} setForm={setForm} isEdit={isEdit} />
           ) : (
@@ -270,45 +275,30 @@ export function McpServerDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border">
-          <div className="text-[11px] text-muted-foreground/60 truncate">
-            {form.scope === 'user'
-              ? 'Stored in ~/.tide/mcp.json'
-              : workspaceRoot
-                ? `Stored in ${workspaceRoot}/.mcp.json`
-                : 'No active workspace — switch to a workspace first'}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!saveState}
-              className="px-3 py-1.5 text-xs rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {saveLabel}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+        <DialogFooter className="px-5 py-3.5 flex-row items-center justify-end gap-2 border-t border-border bg-secondary/30">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="default" size="sm" onClick={handleSave} disabled={!saveState} className="gap-1.5">
+            <Check className="size-3.5" />
+            {saveLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function ScopeCard({
+export function ScopeCard({
   active,
   onClick,
+  icon,
   label,
   hint,
 }: {
   active: boolean;
   onClick: () => void;
+  icon: React.ReactNode;
   label: string;
   hint: string;
 }) {
@@ -316,18 +306,33 @@ function ScopeCard({
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
+      aria-pressed={active}
+      className={`relative flex items-center gap-2.5 p-3 rounded-xl text-left transition-all duration-150 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 ${
         active
-          ? 'border-accent bg-accent/10 ring-1 ring-accent/30'
-          : 'border-border hover:border-accent/40 hover:bg-muted/50'
+          ? 'bg-secondary shadow-sm'
+          : 'border-border bg-card hover:border-primary/30 hover:bg-secondary/60'
       }`}
+      style={active ? { borderColor: 'rgba(217,119,87,0.35)', boxShadow: 'inset 0 0 0 1px rgba(217,119,87,0.3)' } : undefined}
     >
-      <span className={`text-xs font-medium ${active ? 'text-accent' : 'text-foreground'}`}>
-        {label}
+      <span className={`size-7 rounded-lg flex items-center justify-center shrink-0 ${active ? 'text-primary' : 'text-muted-foreground bg-secondary'}`}>
+        {icon}
       </span>
-      <span className="text-[10px] text-muted-foreground/60 font-mono truncate max-w-full">
-        {hint}
-      </span>
+      <div className="flex-1 min-w-0">
+        <div className={`text-[12.5px] font-semibold tracking-tight ${active ? 'text-foreground' : 'text-foreground/80'}`}>
+          {label}
+        </div>
+        <div className="text-[10px] text-muted-foreground/55 font-mono mt-0.5 truncate">
+          {hint}
+        </div>
+      </div>
+      {active && (
+        <span
+          className="size-4 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: '#d97757' }}
+        >
+          <Check className="size-3 text-white" strokeWidth={3} />
+        </span>
+      )}
     </button>
   );
 }
@@ -345,8 +350,10 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className={`px-3 py-1 rounded-md transition-colors ${
-        active ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
+      className={`flex-1 py-1.5 px-3 rounded-[5px] text-[12px] font-medium text-center transition-all ${
+        active
+          ? 'bg-card text-foreground shadow-sm'
+          : 'bg-transparent text-muted-foreground hover:text-foreground/80'
       }`}
     >
       {children}
@@ -370,76 +377,70 @@ function FormBody({
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
 
   return (
-    <div className="space-y-4">
-      <Field label="Name">
-        <input
-          type="text"
-          value={form.name}
-          disabled={isEdit}
-          placeholder="e.g. filesystem"
-          onChange={(e) => patch({ name: e.target.value })}
-          className={inputClass + (isEdit ? ' opacity-60 cursor-not-allowed' : '')}
-        />
-      </Field>
+    <div className="space-y-5">
+      {/* Identity */}
+      <section className="space-y-3">
+        <SectionLabel icon={<Server className="size-3" />}>Identity</SectionLabel>
+        <FormField id="mcp-name" label="Name">
+          <Input
+            className="h-8 text-[12.5px]"
+            value={form.name}
+            disabled={isEdit}
+            placeholder="e.g. filesystem"
+            onChange={(e) => patch({ name: e.target.value })}
+          />
+        </FormField>
+      </section>
 
-      <Field label="Transport">
-        <RadioRow>
-          <Radio
-            name="transport"
-            checked={form.transport === 'stdio'}
-            onChange={() => patch({ transport: 'stdio' })}
-            label="stdio"
-          />
-          <Radio
-            name="transport"
-            checked={form.transport === 'sse'}
-            onChange={() => patch({ transport: 'sse' })}
-            label="SSE"
-          />
-          <Radio
-            name="transport"
-            checked={form.transport === 'http'}
-            onChange={() => patch({ transport: 'http' })}
-            label="HTTP"
-          />
-        </RadioRow>
-      </Field>
+      {/* Transport — segmented control matching the provider ApiStylePicker
+          rhythm (icon + label tabs in a bg-secondary pill). */}
+      <section className="space-y-3">
+        <SectionLabel icon={<Plug className="size-3" />}>Transport</SectionLabel>
+        <div className="flex gap-1 bg-secondary rounded-md p-[3px]">
+          <TransportTab active={form.transport === 'stdio'} onClick={() => patch({ transport: 'stdio' })} icon={<Terminal className="size-3.5" />} label="stdio" />
+          <TransportTab active={form.transport === 'sse'} onClick={() => patch({ transport: 'sse' })} icon={<Link2 className="size-3.5" />} label="SSE" />
+          <TransportTab active={form.transport === 'http'} onClick={() => patch({ transport: 'http' })} icon={<Globe className="size-3.5" />} label="HTTP" />
+        </div>
+      </section>
 
       {form.transport === 'stdio' ? (
-        <>
-          <Field label="Command">
-            <input
-              type="text"
+        <section className="space-y-3">
+          <SectionLabel icon={<Terminal className="size-3" />}>Command</SectionLabel>
+          <FormField id="mcp-command" label="Command">
+            <Input
+              className="font-mono text-[12px] h-8"
               value={form.command}
               placeholder="e.g. npx"
               onChange={(e) => patch({ command: e.target.value })}
-              className={inputClass}
             />
-          </Field>
-          <Field label="Args" hint="One per line">
-            <textarea
+          </FormField>
+          <FormField id="mcp-args" label="Args">
+            <Textarea
+              className="font-mono text-[12px] min-h-[72px] resize-y"
               value={form.argsText}
               rows={3}
               placeholder={'-y\n@modelcontextprotocol/server-filesystem\n/Users/me'}
               onChange={(e) => patch({ argsText: e.target.value })}
-              className={inputClass + ' font-mono resize-y'}
             />
-          </Field>
-          <Field label="Environment" hint="KEY=value per line">
-            <textarea
+            <p className="text-[10px] text-muted-foreground/50 mt-1">One argument per line.</p>
+          </FormField>
+          <FormField id="mcp-env" label="Environment">
+            <Textarea
+              className="font-mono text-[12px] min-h-[72px] resize-y"
               value={form.envText}
               rows={3}
               placeholder={'API_KEY=...'}
               onChange={(e) => patch({ envText: e.target.value })}
-              className={inputClass + ' font-mono resize-y'}
             />
-          </Field>
-        </>
+            <p className="text-[10px] text-muted-foreground/50 mt-1">KEY=value per line.</p>
+          </FormField>
+        </section>
       ) : (
-        <>
-          <Field label="URL">
-            <input
-              type="text"
+        <section className="space-y-3">
+          <SectionLabel icon={<Link2 className="size-3" />}>Endpoint</SectionLabel>
+          <FormField id="mcp-url" label="URL">
+            <Input
+              className="font-mono text-[12px] h-8"
               value={form.url}
               placeholder={
                 form.transport === 'sse'
@@ -447,28 +448,55 @@ function FormBody({
                   : 'https://example.com/mcp'
               }
               onChange={(e) => patch({ url: e.target.value })}
-              className={inputClass + ' font-mono'}
             />
-          </Field>
-          <Field label="Auth">
-            <RadioRow>
-              <Radio
-                name="auth"
-                checked={form.auth === 'none'}
-                onChange={() => patch({ auth: 'none' })}
-                label="None"
-              />
-              <Radio
-                name="auth"
-                checked={form.auth === 'oauth'}
-                onChange={() => patch({ auth: 'oauth' })}
-                label="OAuth"
-              />
-            </RadioRow>
-          </Field>
-        </>
+          </FormField>
+          <div className="space-y-1.5">
+            <Label className="text-[11px] text-muted-foreground/60">Auth</Label>
+            <div className="flex gap-1 bg-secondary rounded-md p-[3px]">
+              <TransportTab active={form.auth === 'none'} onClick={() => patch({ auth: 'none' })} label="None" />
+              <TransportTab active={form.auth === 'oauth'} onClick={() => patch({ auth: 'oauth' })} icon={<KeyRound className="size-3.5" />} label="OAuth" />
+            </div>
+          </div>
+          <FormField id="mcp-headers" label="Headers (JSON)">
+            <Textarea
+              className="font-mono text-[11px] min-h-[60px] resize-y"
+              value={form.headersText}
+              placeholder={"{\n  \"Authorization\": \"Bearer YOUR_KEY\"\n}"}
+              onChange={(e) => patch({ headersText: e.target.value })}
+            />
+          </FormField>
+        </section>
       )}
     </div>
+  );
+}
+
+/** Segmented-control tab used for Transport + Auth selectors — mirrors the
+ *  Add Workspace dialog's SourceTab and the provider form's tab styling. */
+function TransportTab({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 py-1.5 px-3 rounded-[5px] text-[12px] font-medium text-center transition-all flex items-center justify-center gap-1.5 ${
+        active
+          ? 'bg-card text-foreground shadow-sm'
+          : 'bg-transparent text-muted-foreground hover:text-foreground/80'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
@@ -494,9 +522,12 @@ function JsonBody({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      <SectionLabel icon={<Code2 className="size-3" />}>
+        Server config
+      </SectionLabel>
       {/* Editor with line numbers */}
-      <div className="relative flex rounded-md border border-input overflow-hidden focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/40 transition-colors">
+      <div className="relative flex rounded-md border border-input overflow-hidden focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/40 transition-colors">
         {/* Line number gutter */}
         <div
           aria-hidden
@@ -553,11 +584,32 @@ function JsonBody({
 }`}</pre>
             </div>
             <div>
-              <p className="text-muted-foreground/60 mb-0.5">HTTP server:</p>
+              <p className="text-muted-foreground/60 mb-0.5">HTTP with headers (type inferred):</p>
               <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
-  "supabase": {
+  "context7": {
     "type": "http",
-    "url": "https://mcp.supabase.com/mcp?project_ref=xxx"
+    "url": "https://mcp.context7.com/mcp",
+    "headers": {
+      "Authorization": "Bearer YOUR_API_KEY"
+    }
+  }
+}`}</pre>
+            </div>
+            <div>
+              <p className="text-muted-foreground/60 mb-0.5">HTTP (type inferred from url):</p>
+              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+  "vue-docs": {
+    "url": "https://mcp.vue-mcp.org/mcp"
+  }
+}`}</pre>
+            </div>
+            <div>
+              <p className="text-muted-foreground/60 mb-0.5">stdio with env (type inferred):</p>
+              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+  "firecrawl-mcp": {
+    "command": "npx",
+    "args": ["-y", "firecrawl-mcp"],
+    "env": { "FIRECRAWL_API_KEY": "YOUR-API-KEY" }
   }
 }`}</pre>
             </div>
@@ -575,65 +627,6 @@ function JsonBody({
         </details>
       </div>
     </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Field / Radio primitives
-// ──────────────────────────────────────────────────────────────────────────
-
-const inputClass =
-  'w-full rounded-md bg-background border border-input px-2.5 py-1.5 text-xs outline-none focus:border-accent focus:ring-1 focus:ring-accent/40 transition-colors';
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1">
-        <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
-        {hint && <span className="text-[10px] text-muted-foreground/50">{hint}</span>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function RadioRow({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center gap-4">{children}</div>;
-}
-
-function Radio({
-  name,
-  checked,
-  onChange,
-  label,
-  hint,
-}: {
-  name: string;
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-  hint?: string;
-}) {
-  return (
-    <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
-      <input
-        type="radio"
-        name={name}
-        checked={checked}
-        onChange={onChange}
-        className="size-3 accent-accent"
-      />
-      <span>{label}</span>
-      {hint && <span className="text-[10px] text-muted-foreground/50 font-mono">{hint}</span>}
-    </label>
   );
 }
 
@@ -672,18 +665,39 @@ function argsToText(args?: string[]): string {
   return args?.join('\n') ?? '';
 }
 
-/** Build a FormState from an existing config (used in edit mode). */
+/** Build a FormState from an existing config (used in edit mode).
+ *  Infers transport type if missing (command → stdio, url → http). */
 function configToForm(config: McpConfig, scope: McpScope, name: string): FormState {
+  const transport: Transport =
+    config.type === 'sse' ? 'sse'
+    : config.type === 'http' ? 'http'
+    : config.command ? 'stdio'
+    : config.url ? 'http'
+    : 'stdio';
   return {
     name,
     scope,
-    transport: config.type,
+    transport,
     command: config.command ?? '',
     argsText: argsToText(config.args),
     envText: envToText(config.env),
     url: config.url ?? '',
+    headersText: config.headers ? JSON.stringify(config.headers, null, 2) : '',
     auth: config.auth === 'oauth' ? 'oauth' : 'none',
   };
+}
+
+/** Parse a JSON string of headers. Returns undefined if empty or invalid. */
+function parseHeaders(text: string): Record<string, string> | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch { /* invalid JSON — return undefined */ }
+  return undefined;
 }
 
 /** Build a config from a FormState. Returns null if required fields are missing. */
@@ -706,6 +720,8 @@ function formToConfig(form: FormState): McpConfig | null {
     type: form.transport,
     url: form.url.trim(),
   };
+  const headers = parseHeaders(form.headersText);
+  if (headers) cfg.headers = headers;
   if (form.auth === 'oauth') cfg.auth = 'oauth';
   return cfg;
 }
@@ -717,9 +733,12 @@ function configToJson(form: FormState): string {
 }
 
 /** Try to parse a JSON string as a server config.
- *  Handles two shapes:
- *    1. Bare config:  { "type": "http", "url": "..." }
- *    2. Wrapped:      { "server-name": { "type": "http", "url": "..." } }
+ *  Handles these shapes:
+ *    1. Bare config:    { "type": "http", "url": "..." }
+ *    2. Wrapped:        { "server-name": { "type": "http", "url": "..." } }
+ *    3. No type field:  { "command": "npx", ... } → inferred as stdio
+ *    4. No type field:  { "url": "https://..." } → inferred as http
+ *
  *  When wrapped, extracts the inner config AND returns the server name so
  *  the caller can auto-fill the Name field.
  */
@@ -741,13 +760,15 @@ function tryParseConfig(text: string):
   let extractedName: string | undefined;
 
   // Detect the wrapped format: { "server-name": { ...config } }
-  // If the top-level object has no "type" but has exactly one key whose
-  // value is an object with a "type", unwrap it.
-  const keys = Object.keys(o);
-  if (!('type' in o) && keys.length >= 1) {
+  // Unwrap if the top-level has no transport/config keys but has exactly
+  // one key whose value is an object.
+  const configKeys = ['type', 'command', 'url', 'args', 'env', 'headers', 'auth'];
+  const hasConfigKey = configKeys.some((k) => k in o);
+  if (!hasConfigKey) {
+    const keys = Object.keys(o);
     for (const k of keys) {
       const v = o[k];
-      if (v && typeof v === 'object' && !Array.isArray(v) && 'type' in v) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
         o = v as Record<string, unknown>;
         extractedName = k;
         break;
@@ -755,14 +776,22 @@ function tryParseConfig(text: string):
     }
   }
 
-  const type = o.type;
+  // Infer type if missing.
+  let type = o.type as string | undefined;
   if (type !== 'stdio' && type !== 'sse' && type !== 'http') {
-    return {
-      ok: false,
-      error: '"type" must be one of "stdio", "sse", or "http". Paste just the config object (not the server-name wrapper), e.g.:\n{ "type": "http", "url": "..." }',
-    };
+    if (typeof o.command === 'string') {
+      type = 'stdio';
+    } else if (typeof o.url === 'string') {
+      type = 'http'; // default remote transport
+    } else {
+      return {
+        ok: false,
+        error: 'Missing "type". Expected "stdio", "sse", or "http". Type is inferred from "command" (stdio) or "url" (http) when omitted.',
+      };
+    }
   }
-  const config: McpConfig = { type };
+
+  const config: McpConfig = { type: type as McpConfig['type'] };
   if (typeof o.command === 'string') config.command = o.command;
   if (Array.isArray(o.args) && o.args.every((a) => typeof a === 'string')) {
     config.args = o.args as string[];
@@ -775,6 +804,13 @@ function tryParseConfig(text: string):
     if (Object.keys(env).length) config.env = env;
   }
   if (typeof o.url === 'string') config.url = o.url;
+  if (o.headers && typeof o.headers === 'object' && !Array.isArray(o.headers)) {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(o.headers as Record<string, unknown>)) {
+      if (typeof v === 'string') headers[k] = v;
+    }
+    if (Object.keys(headers).length) config.headers = headers;
+  }
   if (o.auth === 'oauth') config.auth = 'oauth';
   return { ok: true, config, extractedName };
 }

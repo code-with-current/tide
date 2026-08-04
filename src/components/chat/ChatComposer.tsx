@@ -1,5 +1,5 @@
 import { useState, useRef, useReducer, useEffect, useCallback, useMemo } from 'react';
-import { ClipboardPaste } from 'lucide-react';
+import { ClipboardPaste, FileCode2, FileText, Image as ImageIcon } from 'lucide-react';
 import { Chip } from '@/components/primitives';
 import { cn } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
@@ -7,7 +7,7 @@ import { useModelOption, supportsThinking } from '@/lib/queries';
 import { ModelSelector } from './composer/ModelSelector';
 import { PermissionModeSelector } from './composer/PermissionModeSelector';
 import { ThinkingLevelSelector } from './composer/ThinkingLevelSelector';
-import { AttachButton, type AttachedFile } from './composer/AttachButton';
+import { AttachButton, kindForPath, shortName } from './composer/AttachButton';
 import { MentionButton, useMentionCatalog, type Mention } from './composer/MentionButton';
 import { SlashPicker, filterMentions, detectSlashQueryAt, detectAtQueryAt } from './composer/SlashPicker';
 import { ProjectFilePicker } from './composer/ProjectFilePicker';
@@ -82,14 +82,10 @@ function mentionBlock(m: Mention): string {
 }
 
 /** Chip class lookup — kind drives the tint, source drives the border style. */
-function chipClasses(m: Mention): string {
-  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[11px] font-mono align-middle select-none';
-  const bySource = m.source === 'user'
-    ? 'bg-info/10 border-info/30 text-info'
-    : m.source === 'project'
-      ? 'bg-secondary border-border text-muted-foreground'
-      : 'bg-primary/10 border-accent/30 text-primary';
-  return `${base} ${bySource}`;
+function chipClasses(_m: Mention): string {
+  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[11px] font-mono align-middle select-none rounded-md bg-foreground/10 text-foreground/70';
+
+  return `${base}`;
 }
 
 export function ChatComposer({
@@ -126,7 +122,16 @@ export function ChatComposer({
   const savedRangeRef = useRef<Range | null>(null);
   const [, bumpVersion] = useReducer((x: number) => x + 1, 0);
 
-  const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  // Attachments + pending paste reads live in the shared UI store (not local
+  // useState) so they persist across the two ChatComposer instances (chat
+  // view + empty/new-session view) — otherwise switching sessions/workspaces
+  // remounts the composer and drops pasted files.
+  const attachments = useUi((s) => s.composerAttachments);
+  const pendingReads = useUi((s) => s.composerPendingReads);
+  const addAttachment = useUi((s) => s.addComposerAttachment);
+  const removeAttachment = useUi((s) => s.removeComposerAttachment);
+  const clearAttachments = useUi((s) => s.clearComposerAttachments);
+  const bumpPendingReads = useUi((s) => s.bumpComposerPendingReads);
   const setMainView = useUi((s) => s.setMainView);
   const enqueue = useUi((s) => s.enqueueMessage);
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
@@ -258,11 +263,6 @@ export function ChatComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addAttachment = (f: AttachedFile) =>
-    setAttachments((a) => (a.some((x) => x.path === f.path) ? a : [...a, f]));
-  const removeAttachment = (path: string) =>
-    setAttachments((a) => a.filter((x) => x.path !== path));
-
   const removeChip = useCallback((chipId: string) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -299,7 +299,7 @@ export function ChatComposer({
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = '×';
-    btn.className = 'text-muted-foreground/60 hover:text-destructive px-0.5 leading-none';
+    btn.className = 'text-muted-foreground/60 hover:text-destructive px-0.5 leading-none rounded-xl';
     btn.setAttribute('aria-label', `Remove ${m.name}`);
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -384,6 +384,53 @@ export function ChatComposer({
    */
   const PASTE_LINE_THRESHOLD = 10;
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    // Pasted FILES (e.g. from Finder/File Explorer) take precedence over
+    // text — they arrive as a FileList on clipboardData. Attach each like a
+    // browsed file so the chip + sent-message preview are identical. We read
+    // the File's content directly in the renderer (File API) so this works
+    // regardless of contextIsolation; webUtils.getPathForFile is used only
+    // opportunistically for a real on-disk path when available.
+    const files = e.clipboardData?.files;
+    if (files && files.length > 0) {
+      e.preventDefault();
+      const wu = (typeof window !== 'undefined' ? (window as any).webUtils : undefined) as
+        | { getPathForFile?: (f: File) => string }
+        | undefined;
+      for (const f of Array.from(files)) {
+        const name = f.name || 'pasted-file';
+        // Prefer the real on-disk path so the chip matches a browsed file's
+        // 2-segment shortName; fall back to the bare filename.
+        const realPath = wu?.getPathForFile?.(f) || name;
+        const kind = kindForPath(name);
+        if (kind === 'image') {
+          // Images attach by path only (no inline content), matching the
+          // browsed-file behavior in AttachButton.
+          addAttachment({ path: shortName(realPath), kind, absPath: realPath });
+          continue;
+        }
+        // Read the File's content directly. This is async; we bump
+        // pendingReads so the send button stays disabled until the content
+        // lands in `attachments` — otherwise send() could snapshot state
+        // before the read resolves and drop the attachment.
+        bumpPendingReads(1);
+        f.text().then((content) => {
+          const MAX = 200_000; // matches the IPC read cap in readExternalFile
+          const truncated = content.length > MAX;
+          addAttachment({
+            path: shortName(realPath),
+            kind,
+            content: truncated ? content.slice(0, MAX) : content,
+            bytes: f.size,
+            truncated,
+            absPath: realPath,
+          });
+        }).catch(() => {
+          addAttachment({ path: shortName(realPath), kind: 'text', content: '[read failed]', absPath: realPath });
+        }).finally(() => bumpPendingReads(-1));
+      }
+      return;
+    }
+
     const text = e.clipboardData.getData('text/plain');
     if (!text) return;
     const lineCount = text.split('\n').length;
@@ -595,9 +642,16 @@ export function ChatComposer({
           if (id) {
             const m = mentionsRef.current.get(id);
             if (m) {
-              // Display: short inline reference so the chat bubble stays
-              // readable. Shows where the skill was placed in the text.
-              displayText += `/${m.name}`;
+              // Display: emit a markdown link so the chat bubble can render
+              // the chip ABOVE the text. Skills/agents use the bare /name
+              // form (inline text chip); file references use the
+              // [/path/](absPath) form (chip above text).
+              if (m.kind === 'context') {
+                const target = m.filePath ?? m.name;
+                displayText += `[/${m.name}/](${target})`;
+              } else {
+                displayText += `/${m.name}`;
+              }
               // Prompt: for skills/agents WITH a file path, emit the
               // LOAD_SKILL marker so the orchestrator runs the skill as a
               // sub-agent (runSkillAgent) BEFORE the model thinks. This is
@@ -641,19 +695,6 @@ export function ChatComposer({
     displayText = displayText.replace(/\u00A0/g, ' ').trim();
     promptText = promptText.replace(/\u00A0/g, ' ').trim();
 
-    // On-send slash invocation: a LEADING `/name` that the user typed (and
-    // didn't convert to a chip via the picker) resolves against the mention
-    // catalog. If the entry has a file path, we use PROGRESSIVE DISCLOSURE —
-    // instead of inlining the (potentially large) body into the prompt, we
-    // point the model at the file and tell it to `read_file` it. The load
-    // then shows up as a visible tool call, the user message stays small,
-    // and the model reads the skill the same way it reads any other file.
-    // Built-in agents (no file) fall back to the inline guidance block.
-    //
-    // Only a leading token is resolved (mid-text `/foo` stays literal), and a
-    // name already present as a chip isn't re-resolved (avoids double-inject).
-    // No match → leave the text untouched so it falls through to a normal
-    // model turn (never silently no-ops).
     const existingNames = new Set(mentions.map((m) => m.name.toLowerCase()));
     const slashMatch = displayText.match(/^\/([\w][\w.-]*)\s?/);
     if (slashMatch) {
@@ -662,7 +703,11 @@ export function ChatComposer({
         const found = catalog.find((m) => m.name.toLowerCase() === name);
         if (found) {
           const rest = promptText.slice(slashMatch[0].length).trim();
-          if (found.absPath) {
+          // Built-in commands (like /compact) — pass through as-is, MainScreen
+          // intercepts them. No skill file to load, no guidance block to inject.
+          if (found.source === 'builtin' && found.kind === 'skill' && !found.absPath) {
+            promptText = `/${found.name}${rest ? ` ${rest}` : ''}`;
+          } else if (found.absPath) {
             // Orchestrator-driven load (reliable): drop a transient marker.
             // runSdkTurn reads the file via read_file's logic BEFORE the model
             // thinks, and replaces the marker with the body wrapped in a strong
@@ -692,13 +737,28 @@ export function ChatComposer({
   };
 
   const send = () => {
+    // Safety net: the send button is disabled while paste-file reads are
+    // pending, but the Enter key path bypasses the button. Refuse to send
+    // until reads land so attachments aren't dropped.
+    if (pendingReads > 0) return;
     const { displayText, promptText, mentions } = buildOutgoingContent();
     // Allow send if there's editor content (text or chips) OR attachments.
     if (!displayText && attachments.length === 0 && mentions.length === 0) return;
 
+    // Encode attachments as markdown links prepended to the display text.
+    // The link TARGET carries the absolute path when known so the viewer
+    // can re-read the file via readExternalFile even after a reload (when
+    // inline content is gone and attachments[] isn't persisted). The LABEL
+    // stays as the short display name. This makes chips part of
+    // message.content (always persisted) AND re-openable across reloads.
+    const attachmentLinks = attachments.length > 0
+      ? attachments.map((a) => `[/${a.path}/](${a.absPath ?? a.path})`).join(' ') + '\n'
+      : '';
+    const textWithAttachments = attachmentLinks + displayText;
+
     const hasMentions = mentions.length > 0;
     const payload: ChatComposerPayload = {
-      text: displayText,
+      text: textWithAttachments,
       // Only include promptText when it differs from displayText (i.e.,
       // there are mentions with content). Saves the caller from checking.
       promptText: hasMentions ? promptText : undefined,
@@ -709,6 +769,7 @@ export function ChatComposer({
         content: a.content,
         bytes: a.bytes,
         truncated: a.truncated,
+        absPath: a.absPath,
       })),
     };
 
@@ -730,7 +791,7 @@ export function ChatComposer({
     const editor = editorRef.current;
     if (editor) editor.innerHTML = '';
     mentionsRef.current.clear();
-    setAttachments([]);
+    clearAttachments();
     bumpVersion();
   };
 
@@ -775,7 +836,7 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="border border-border bg-card rounded-md flex overflow-hidden focus-within:border-faint transition-colors">
+      <div className="border border-input bg-card rounded-md flex overflow-hidden focus-within:border-ring focus-within:shadow-xs focus-within:ring-[3px] focus-within:ring-ring/50 hover:border-ring hover:ring-[3px] hover:ring-ring/50 shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground">
         {/* ====================================================
             LEFT — vertical toolbar (attach, @).
            ==================================================== */}
@@ -807,21 +868,21 @@ export function ChatComposer({
           )}
 
           {/* Attachment chips above the editor. Mentions are NOT here —
-              they live inline in the editor itself. */}
+              they live inline in the editor itself. Each chip shows a
+              file-type icon (paste/code/text/image) so pasted files render
+              like picker-selected attachments. */}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-3 pt-2">
               {attachments.map((a) => (
                 <span
                   key={a.path}
-                  className={
-                    'inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[11px] font-mono ' +
-                    (a.kind === 'paste'
-                      ? 'bg-primary/10 border-accent/30 text-primary'
-                      : 'bg-secondary border-border text-muted-foreground')
-                  }
+                  className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[11px] font-mono rounded-md border-border bg-foreground/15 text-foreground/70"
                   title={a.kind === 'paste' ? a.content : a.path}
                 >
-                  {a.kind === 'paste' && <ClipboardPaste className="size-3" />}
+                  {a.kind === 'paste' && <ClipboardPaste className="size-3 shrink-0" />}
+                  {a.kind === 'code' && <FileCode2 className="size-3 shrink-0" />}
+                  {a.kind === 'text' && <FileText className="size-3 shrink-0" />}
+                  {a.kind === 'image' && <ImageIcon className="size-3 shrink-0" />}
                   <span className="truncate max-w-[16rem]">{a.path}</span>
                   <button
                     type="button"
@@ -890,7 +951,7 @@ export function ChatComposer({
             <SendStopButton
               mode={!editorEmpty || attachments.length > 0 ? 'send' : inProgress ? 'stop' : 'send'}
               willQueue={inProgress && !!sessionId}
-              disabled={!inProgress && editorEmpty && attachments.length === 0}
+              disabled={pendingReads > 0 || (!inProgress && editorEmpty && attachments.length === 0)}
               onSend={() => send()}
               onStop={() => onStop?.()}
             />

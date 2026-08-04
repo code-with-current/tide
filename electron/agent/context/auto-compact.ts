@@ -90,18 +90,29 @@ export function estimateTokens(messages: ModelMessage[]): number {
 /**
  * Should we compact? True when estimated tokens exceed threshold fraction of
  * the context window, minus a safety buffer for the model's output.
+ *
+ * Uses the character-based heuristic as a first check. If the caller provides
+ * `actualInputTokens` (from the SDK's usage), uses that as a more accurate
+ * second check — the heuristic underestimates code-heavy conversations by
+ * 2-5x because tokens like `{`, `}`, `=>` are short but count as full tokens.
  */
 export function shouldCompact(
   messages: ModelMessage[],
   config: AutoCompactConfig,
   consecutiveFailures = 0,
+  actualInputTokens?: number,
 ): boolean {
   // Circuit breaker — don't try again after repeated failures
   if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) return false;
 
   const effectiveWindow = config.contextWindow - 8_000; // reserve for output
   const thresholdTokens = Math.floor(effectiveWindow * config.threshold);
-  const tokens = estimateTokens(messages);
+
+  // Use actual token count if available (from the last API response's usage).
+  // Fall back to the character-based heuristic.
+  const tokens = actualInputTokens && actualInputTokens > 0
+    ? actualInputTokens
+    : estimateTokens(messages);
   return tokens >= thresholdTokens;
 }
 

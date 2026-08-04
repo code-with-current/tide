@@ -54,6 +54,7 @@ import { streamText, isStepCount } from 'ai';
 import type { LanguageModelUsage, ModelMessage } from 'ai';
 import type { WebContents } from 'electron';
 import { app } from 'electron';
+import * as fs from 'fs';
 import * as store from '../store.js';
 import * as sessions from '../ipc/sessions.js';
 import { createLogger } from '../logger.js';
@@ -78,6 +79,7 @@ import {
 import {
   shouldCompact,
   compactConversation,
+  estimateTokens,
   DEFAULT_AUTO_COMPACT_CONFIG,
   type AutoCompactConfig,
 } from './context/auto-compact.js';
@@ -93,10 +95,7 @@ import {
 } from './permission-resolver.js';
 import {
   loadPermissionRules,
-  addSessionRule,
-  addProjectRule,
-  deriveRuleSpec,
-  parseRule,
+  addPermissionRule,
 } from './permissions/rules.js';
 import {
   resolveFollowup,
@@ -126,6 +125,7 @@ import type {
 } from '../../src/types/block.js';
 import { categorizeTool } from '../../src/lib/stream/blockState.js';
 import type { ToolContext } from './tools/tool-context.js';
+import { appDataDir } from '../appPaths.js';
 
 // ─── Turn constants ──────────────────────────────────────────────────
 
@@ -180,6 +180,12 @@ const THINKING_BUDGET: Record<string, number> = {
 const ESCALATED_MAX_TOKENS = 65_535; // 2^16-1 — Gemini's hard cap; safe everywhere.
 const MAX_RESUME_ATTEMPTS = 3;
 
+/** Turn-level retry for transient provider errors (network, 5xx, empty stream).
+ *  These are NOT retried by the SDK (maxRetries:0) — we handle them here so the
+ *  UI can show "Retrying 1/3…" and surface a human-friendly error only after
+ *  all attempts fail. Aborts and permission errors skip the retry loop. */
+const TURN_MAX_RETRIES = 2; // 1 initial call + 2 retries = 3 total attempts
+
 /**
  * The exact wording Claude Code uses to resume after a max-output-tokens hit.
  * Every clause is load-bearing:
@@ -228,6 +234,10 @@ interface SdkTurn {
   toolCalls: ToolCall[];
   timeline: TimelineEntry[];
   usage: Usage;
+  /** The LAST MAIN-STEP's usage only (not accumulated, not sub-agent).
+   *  The context-window meter reads this to show "how full is the context
+   *  right now" — the model's most recent request is what fills the window. */
+  lastStepUsage: Usage | null;
   /** finish-step parts observed — detects the step-cap (Slice E). */
   stepsCompleted: number;
   /** Effective per-turn step cap (agentSettings.maxSteps || MAX_STEPS).
@@ -310,20 +320,17 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
       sessionId: string,
       toolCallIds: string[],
       newMode?: AutonomyMode,
-      remember?: 'session' | 'project',
+      remember?: boolean,
     ) => {
-      // "Always allow" — derive a rule from the first approved call's pending
-      // ask and persist it (session = in-memory; project = .agent/settings.json).
-      // Best-effort: no pending ask (race) → skip silently, still approve.
+      // "Always Allow" — derive a rule from the approved call and persist it
+      // to .agent/settings.json. Takes effect immediately (in-memory) AND
+      // survives across sessions (file-backed). No separate session/project
+      // scope — all rules are project-level.
       if (remember && toolCallIds[0]) {
         const ask = getPendingAsk(sessionId, toolCallIds[0]);
         if (ask) {
-          const spec = deriveRuleSpec(ask.toolName, ask.args);
-          const rule = parseRule(spec);
-          if (rule) {
-            if (remember === 'session') addSessionRule(sessionId, 'allow', rule);
-            else addProjectRule(ask.workspaceRoot, 'allow', spec);
-          }
+          const spec = addPermissionRule(sessionId, ask.workspaceRoot, ask.toolName, ask.args);
+          if (spec) log.info('permission rule added', { tool: ask.toolName, spec });
         }
       }
       // newMode (plan→edit escalation) sticks for the rest of the turn —
@@ -444,6 +451,24 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   // `let`-declared variables keep their original union type even after `??=`.
   const root: string = workspaceRoot ?? process.cwd();
 
+  // Liveness check: refuse to start a turn against a missing workspace root.
+  // Without this, the turn proceeds and individual tools fail inconsistently
+  // (write_file is guarded, but the model flails on read/bash/list failures
+  // before the user understands why). Surface the problem up front with a
+  // clear, actionable message. The throw propagates to the IPC handler which
+  // emits it as a turn error event.
+  if (!fs.existsSync(root)) {
+    const where = worktreeMeta
+      ? `worktree (${worktreeMeta.branch})`
+      : 'workspace';
+    throw new Error(
+      `The ${where} folder no longer exists:\n${root}\n\nIt may have been moved or deleted. ` +
+        (worktreeMeta
+          ? 'Start a new session without worktree isolation, or restore the worktree.'
+          : 'Re-add the workspace or restore the folder.'),
+    );
+  }
+
   // ── Build the SDK conversation (ModelMessage[]) + system prompt ─────
   // The first system message becomes the top-level `system` option; the SDK
   // (like Anthropic) takes system out-of-band rather than inline. User
@@ -483,6 +508,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
     toolCalls: [],
     timeline: [],
     usage: emptyUsage(),
+    lastStepUsage: null,
     stepsCompleted: 0,
     maxSteps: effectiveMaxSteps,
     permissionTimeoutMs: effectivePermissionTimeout,
@@ -511,12 +537,26 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   // effectiveMaxSteps was snapshot above onto turn.maxSteps; reused here.
   const turnController = createTurnController(effectiveMaxSteps);
   const knownCtxWindow = contextWindowSize(modelId);
-  if (knownCtxWindow) {
+  // Read compaction settings from agentSettings (Settings → Permissions & Caps).
+  // Falls back to defaults if missing or disabled.
+  const compactionEnabled = agentSettings.compactionEnabled ?? true;
+  const compactionThreshold = Math.min(0.95, Math.max(0.5, agentSettings.compactionThreshold ?? 0.75));
+  const compactionKeepTurns = Math.max(1, Math.floor(agentSettings.compactionKeepTurns ?? 3));
+  if (knownCtxWindow && compactionEnabled) {
     turnController.compactionConfig = {
       ...DEFAULT_AUTO_COMPACT_CONFIG,
       contextWindow: knownCtxWindow,
+      threshold: compactionThreshold,
+      keepRecentTurns: compactionKeepTurns,
     };
-    turnController.budget.warningThreshold = Math.floor(knownCtxWindow * 0.75);
+    turnController.budget.warningThreshold = Math.floor(knownCtxWindow * compactionThreshold);
+  } else if (knownCtxWindow) {
+    // Compaction disabled — set a very high threshold so shouldCompact never fires.
+    turnController.compactionConfig = {
+      ...DEFAULT_AUTO_COMPACT_CONFIG,
+      contextWindow: knownCtxWindow,
+      threshold: 0.99,
+    };
   }
 
   // ── Skill pipeline: markers → sticky ref → discovery index ──────────
@@ -540,7 +580,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   let disabledSkills: string[] = [];
   let disabledAgents: string[] = [];
   try {
-    const extStore = createExtensionsStore(app.getPath('userData'));
+    const extStore = createExtensionsStore(appDataDir());
     const disabled = extStore.getDisabled();
     disabledSkills = disabled.skills;
     disabledAgents = disabled.agents;
@@ -548,29 +588,8 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   systemPrompt = injectSkillDiscoveryIndex(systemPrompt, root, activeSkillRef?.path, disabledSkills);
   systemPrompt = injectSkillChainingReminder(systemPrompt, root, turnController, disabledSkills);
 
-  // Diagram requirement — always injected. The renderer supports mermaid
-  // code blocks, so the model should visualize flows, architectures, and
-  // sequences as diagrams rather than only text descriptions.
-  systemPrompt +=
-    `\n\n# Diagrams\n` +
-    `When explaining flows, architecture, data pipelines, authentication sequences, ` +
-    `state machines, or any multi-step process, include a mermaid diagram. ` +
-    `Use the appropriate diagram type:\n` +
-    `- \`sequenceDiagram\` for request/response flows, auth flows, API calls\n` +
-    `- \`flowchart TD\` or \`flowchart LR\` for decision trees, branching logic, pipelines\n` +
-    `- \`graph\` for architecture overviews, component relationships\n` +
-    `- \`classDiagram\` for data models, entity relationships\n` +
-    `- \`stateDiagram-v2\` for state machines, lifecycle transitions\n` +
-    `Wrap the diagram in a fenced code block with language \`mermaid\`. Keep diagrams ` +
-    `readable (max ~20 nodes). Place the diagram BEFORE the text explanation so the ` +
-    `user sees the visual first.\n\n` +
-    `**Mermaid syntax rules (violations cause render failures):**\n` +
-    `- Every line inside a diagram MUST be valid syntax — no bare comments, labels, or prose\n` +
-    `- In \`flowchart\`/\`graph\`: every node MUST have brackets: \`NodeName["Label"]\`, not bare text\n` +
-    `- In \`classDiagram\`: do NOT use ER relationship syntax (\`||--o{\`). Use \`A --> B\` or \`A "label" --> B\`\n` +
-    `- In \`classDiagram\`: relationships are \`-->\`, not \`||--||\` or \`}o--||\`\n` +
-    `- Node labels with special chars must be quoted: \`Node["has spaces / slashes"]\`\n` +
-    `- Do NOT mix diagram types — a \`classDiagram\` cannot contain \`erDiagram\` relationships`;
+  // (Mermaid diagram rules moved to 13-data-visualization.md — bundled in the
+  // base system prompt via promptMarkdownUtils.mjs.)
 
   const ragEnabled = store.listRagEnabledWorkspaces().includes(workspaceId);
   if (ragEnabled) {
@@ -655,6 +674,15 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
     worktree: worktreeMeta ? { branch: worktreeMeta.branch, baseBranch: worktreeMeta.baseBranch } : undefined,
   });
 
+  // ── Turn-level retry loop ───────────────────────────────────────────
+  // Wraps the entire try/catch. On transient provider errors (network, 5xx,
+  // empty stream, timeout), we retry up to TURN_MAX_RETRIES times, emitting a
+  // `retry` event each time so the UI can show "Retrying 1/2…". After all
+  // retries are exhausted, the final error is sent as a terminal `error` event.
+  // Aborts (user Stop) skip retrying and flush partial work immediately.
+  let retryCount = 0;
+
+  turnRetryLoop: for (;;) {
   try {
     let responseMessages = await runStream(wc, turn, {
       model,
@@ -831,33 +859,69 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
     }
 
     emitTurnEnd(wc, turn, stopReasonFor(turn));
+    break; // success — exit the retry loop
   } catch (err: any) {
-    const aborted = err?.name === 'AbortError' || controller.signal.aborted;
-    if (aborted) {
-      // Partial work (text + executed tools) was already streamed live; flush
-      // whatever we have into a turn_end so the renderer can freeze + persist
-      // it instead of silently dropping the streaming bubble.
+    const userAborted = err?.name === 'AbortError' && controller.signal.aborted;
+    if (userAborted) {
+      // User pressed Stop — flush partial work, no retry.
       emitTurnEnd(wc, turn, 'aborted');
-    } else {
-      turn.errored = err?.message || String(err);
-      const errMsg: string = turn.errored ?? 'Turn failed';
+      break;
+    }
+    // Transient error (provider 5xx, network, timeout, empty stream).
+    // Retry up to TURN_MAX_RETRIES times before surfacing the terminal error.
+    if (retryCount < TURN_MAX_RETRIES && !controller.signal.aborted) {
+      retryCount++;
+      const reason = isTimeoutError(err)
+        ? `Request timed out after ${TURN_RETRY_TIMEOUT_MS / 1000}s`
+        : (err?.message || String(err));
+      log.warn('turn failed — retrying', {
+        session: sessionId,
+        attempt: retryCount,
+        maxRetries: TURN_MAX_RETRIES,
+        reason,
+      });
+      // Notify the UI so it can show "Retrying 1/2…".
       send(wc, sessionId, {
-        type: 'error',
+        type: 'retry',
         sessionId,
         seq: nextSeq(sessionId),
-        message: errMsg,
+        attempt: retryCount,
+        maxAttempts: TURN_MAX_RETRIES,
+        reason,
       });
+      // Reset turn state for the retry — clear partial text/error so the
+      // retried stream starts clean. Keep timeline/blocks from prior steps
+      // (tools that already executed are still valid).
+      turn.errored = null;
+      turn.finishReason = null;
+      turn.finalText = '';
+      turn.finalReasoning = '';
+      continue turnRetryLoop;
     }
-  } finally {
-    clearSession(sessionId);
-    // NOTE: clearSessionRules intentionally NOT called here. Session-scoped
-    // "always allow" rules must survive across turns within the same session
-    // (the UI promises "until session ends"). They are cleared on real
-    // session end in ipc/sessions.ts → deleteSession.
-    clearFollowupSession(sessionId);
-    activeTurns.delete(sessionId);
-    activeCtxs.delete(sessionId);
-  }
+    // All retries exhausted — surface the terminal error.
+    turn.errored = isTimeoutError(err)
+      ? `Request timed out after ${TURN_RETRY_TIMEOUT_MS / 1000}s (${retryCount + 1} attempts)`
+      : (err?.message || String(err));
+    const errMsg: string = turn.errored ?? 'Turn failed';
+    send(wc, sessionId, {
+      type: 'error',
+      sessionId,
+      seq: nextSeq(sessionId),
+      message: errMsg,
+    });
+    break;
+  } // end try
+  } // end turnRetryLoop for(;;)
+
+  // Runs once after the retry loop exits (success, abort, or terminal error).
+  clearSession(sessionId);
+  // NOTE: clearSessionRules intentionally NOT called here. Session-scoped
+  // "always allow" rules must survive across turns within the same session
+  // (the UI promises "until session ends"). They are cleared on real
+  // session end in ipc/sessions.ts → deleteSession.
+  clearFollowupSession(sessionId);
+  activeTurns.delete(sessionId);
+  activeCtxs.delete(sessionId);
 }
 
 // ─── Slice A–D: the stream runner ────────────────────────────────────
@@ -918,6 +982,16 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
   // Pricing rates for real cost calculation — resolved from the provider's
   // model entry (persisted at fetch time from the provider's /models response).
   const modelEntry = args.provider.models.find((m) => m.modelId === args.modelId);
+  if (modelEntry) {
+    log.debug('pricing resolved', {
+      model: args.modelId,
+      inputCost: modelEntry.inputCostPerToken,
+      outputCost: modelEntry.outputCostPerToken,
+      hasPricing: !!(modelEntry.inputCostPerToken || modelEntry.outputCostPerToken),
+    });
+  } else {
+    log.warn('no model entry for pricing', { model: args.modelId, providerModels: args.provider.models.map(m => m.modelId) });
+  }
   // Per-protocol thinking/options resolution lives in ./protocols — the
   // orchestrator itself is protocol-agnostic and just consumes the result.
   // Anthropic → thinking.budget_tokens; OpenAI → reasoning_effort (unless
@@ -926,7 +1000,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
   const resolved = resolveProtocolOptions(
     args.provider.apiStyle,
     args.thinking,
-    { hasTools, modelId: args.modelId, maxOutputTokens: resolveMaxOutputTokens(args.modelId) },
+    { hasTools, modelId: args.modelId, maxOutputTokens: resolveMaxOutputTokens(args.modelId), providerBaseUrl: args.provider.baseUrl },
   );
   // An explicit override (length-cap escalation) wins over the protocol's
   // default — the model already proved it needs more room than the default
@@ -947,6 +1021,11 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
     system: args.system || undefined,
     messages: args.messages,
     tools: args.tools as any,
+    // Non-native Anthropic endpoints (z.ai, etc.) wrap errors as 200+JSON.
+    // The SDK retries these (default maxRetries=2 = 3 attempts), wasting
+    // ~8s on a permanent error. Fail fast instead — the diagnostic fetch
+    // wrapper in provider-factory.ts surfaces the real provider error.
+    maxRetries: 0,
     // v7 renamed `maxSteps` → `stopWhen`. isStepCount(N) returns true once N
     // steps complete, capping the model↔tool loop at MAX_STEPS. The custom
     // predicate lets the controller stop the loop early (e.g. skill complete).
@@ -1022,13 +1101,37 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
       let nextMessages: ModelMessage[] | undefined;
       let activeTools: string[] | undefined;
 
-      // 1. Autocompact — check if context is too large and summarize if so.
-      // Runs first so compaction replaces the message base for this step, and
-      // any correction below is appended to the COMPACTED set.
+      // 1. Autocompact — check if context is too large (or user forced via /compact).
+      // The [[FORCE_COMPACT]] marker is injected by the /compact slash command.
+      const forceCompact = messages.some((m) =>
+        typeof m.content === 'string' && m.content.includes('[[FORCE_COMPACT]]')
+      );
+      // Use the LAST step's actual input tokens (what the model saw) rather
+      // than the cumulative sum across all steps. The context window is filled
+      // by the messages sent — each step re-sends the full conversation, so
+      // the last step's inputTokens IS the current context size.
+      const lastStepInputTokens = ctrl.budget.lastInputTokens || undefined;
       if (
-        shouldCompact(messages, ctrl.compactionConfig ?? DEFAULT_AUTO_COMPACT_CONFIG, ctrl.consecutiveCompactionFailures)
+        forceCompact ||
+        shouldCompact(
+          messages,
+          ctrl.compactionConfig ?? DEFAULT_AUTO_COMPACT_CONFIG,
+          ctrl.consecutiveCompactionFailures,
+          lastStepInputTokens,
+        )
       ) {
         try {
+          if (forceCompact) log.info('forced compaction (/compact)', { messagesBefore: messages.length });
+          // Emit a compacting event so the UI can show an indicator.
+          const tokensBefore = lastStepInputTokens ?? estimateTokens(messages);
+          send(wc, sessionId, {
+            type: 'compacting',
+            sessionId,
+            seq: nextSeq(sessionId),
+            messageId: turn.messageId,
+            tokensBefore,
+            forced: forceCompact,
+          });
           const config = ctrl.compactionConfig ?? DEFAULT_AUTO_COMPACT_CONFIG;
           const result = await compactConversation(messages, config, {
             provider: args.provider,
@@ -1084,6 +1187,21 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
       ctrl.stepCount = step.stepNumber + 1;
       ctrl.budget.inputTokens += step.usage?.inputTokens ?? 0;
       ctrl.budget.outputTokens += step.usage?.outputTokens ?? 0;
+      // Track the LAST step's actual input tokens — this is what the model
+      // saw in its context window (the full conversation + system prompt).
+      // Used by autocompact's threshold check: the cumulative sum is wrong
+      // because each step re-sends the entire conversation.
+      ctrl.budget.lastInputTokens = step.usage?.inputTokens ?? ctrl.budget.lastInputTokens;
+      // Capture the MAIN orchestrator's per-step usage as lastStepUsage.
+      // This fires for every main-loop step (not sub-agent steps, which have
+      // their own streamText in runtime.ts). The context meter reads this.
+      if (step.usage) {
+        turn.lastStepUsage = sdkUsageToTide(
+          step.usage as LanguageModelUsage,
+          modelEntry,
+          1,
+        );
+      }
 
       // Skill process gate
       if (ctrl.skill && ctrl.skill.checklist.length > 0) {
@@ -1465,6 +1583,10 @@ function translatePart(
       if (p.usage) {
         const stepUsage = sdkUsageToTide(p.usage as LanguageModelUsage, modelEntry, 1);
         accumulateUsage(turn, stepUsage);
+        // Save the LAST step's usage for the context meter (turn_end carries
+        // it as lastStepUsage). The accumulated turn.usage sums all steps —
+        // wrong for the meter because each step re-sends the full conversation.
+        turn.lastStepUsage = stepUsage;
         send(wc, sessionId, {
           type: 'usage',
           sessionId,
@@ -1483,9 +1605,17 @@ function translatePart(
     // ── Terminal ────────────────────────────────────────────────────
     case 'finish': {
       if (p.finishReason) turn.finishReason = p.finishReason;
-      // totalUsage is authoritative across all steps; prefer it if present.
+      // totalUsage is the MAIN stream's accumulated usage (not sub-agents).
+      // Use it as the authoritative turn.usage, overriding the sub-agent-
+      // inflated accumulateUsage total. Also use it as a lastStepUsage
+      // fallback when finish-step didn't fire on the final step (some
+      // providers skip the last finish-step and go straight to finish).
       if (p.totalUsage) {
-        turn.usage = sdkUsageToTide(p.totalUsage as LanguageModelUsage, modelEntry, turn.usage.calls || 1);
+        const finishUsage = sdkUsageToTide(p.totalUsage as LanguageModelUsage, modelEntry, turn.usage.calls || 1);
+        turn.usage = finishUsage;
+        if (!turn.lastStepUsage) {
+          turn.lastStepUsage = finishUsage;
+        }
       }
       break;
     }
@@ -1578,6 +1708,10 @@ function emitTurnEnd(wc: WebContents, turn: SdkTurn, stopReason: TurnEndStopReas
     reasoningTokens: turn.usage.reasoningTokens || undefined,
     toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
     usage: turn.usage,
+    // The last step's actual usage — what the model's most recent request
+    // consumed. The context meter reads this instead of the accumulated
+    // turn.usage to avoid showing 200%+ on multi-step turns.
+    lastStepUsage: turn.lastStepUsage ?? undefined,
   });
 }
 
@@ -2255,4 +2389,10 @@ function errMessage(err: unknown): string {
   } catch {
     return String(err);
   }
+}
+
+/** True if an error is a timeout (from an external timeout/abort). */
+function isTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.name === 'AbortError';
 }

@@ -22,9 +22,19 @@ contextBridge.exposeInMainWorld('tideIpc', {
   pickDirectory: () => ipcRenderer.invoke('tide:pickDirectory'),
   pickFiles: () => ipcRenderer.invoke('tide:pickFiles'),
   readExternalFile: (filePath: string) => ipcRenderer.invoke('tide:readExternalFile', filePath),
+  // Read an image as a base64 data URL for <img> rendering in the viewer.
+  // Accepts an absolute path (external attachment) or workspace+relPath.
+  readImageFile: (input: { absPath?: string; workspaceId?: string; relPath?: string }) =>
+    ipcRenderer.invoke('tide:readImageFile', input),
   detectExternalApps: () => ipcRenderer.invoke('tide:openInApp:detect'),
   getDiagnostics: () => ipcRenderer.invoke('tide:getDiagnostics'),
   openInApp: (target, sessionId) => ipcRenderer.invoke('tide:openInApp:open', target, sessionId),
+  // macOS permissions (consent screen). No-op on non-mac — the handlers
+  // return a platform:'other' status and shouldShowConsent === false.
+  permissionStatus: () => ipcRenderer.invoke('tide:permissions:status'),
+  requestPermission: (type: 'accessibility' | 'fullDiskAccess' | 'folders') =>
+    ipcRenderer.invoke('tide:permissions:request', type),
+  shouldShowConsent: () => ipcRenderer.invoke('tide:permissions:shouldShowConsent'),
   // Settings (settings.json) — shortcut overrides + platform-aware defaults.
   getSettings: () => ipcRenderer.invoke('tide:settings:get'),
   setShortcut: (id, keys) => ipcRenderer.invoke('tide:settings:setShortcut', id, keys),
@@ -56,6 +66,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:mcp:approve', name),
   mcpRetry: (name: string, scope: 'user' | 'project', workspaceId?: string) =>
     ipcRenderer.invoke('tide:mcp:retry', name, scope, workspaceId),
+  // OAuth sign-in: opens the browser (user-initiated) + re-runs connect.
+  mcpAuthenticate: (name: string, scope: 'user' | 'project', workspaceId?: string) =>
+    ipcRenderer.invoke('tide:mcp:authenticate', name, scope, workspaceId),
+  // Re-initialize ALL servers: disconnect + reconnect from config (reload).
+  mcpReinitialize: () =>
+    ipcRenderer.invoke('tide:mcp:reinitialize'),
   mcpSetSecret: (name: string, value: string) =>
     ipcRenderer.invoke('tide:mcp:setSecret', name, value),
   mcpHasSecret: (name: string) =>
@@ -86,8 +102,17 @@ contextBridge.exposeInMainWorld('tideIpc', {
     const { shell } = require('electron');
     shell.showItemInFolder(fullPath);
   },
+  // Open an external URL in the user's default browser. Used by the terminal
+  // WebLinksAddon handler so clicked URLs open externally (the renderer can't
+  // navigate to https:// directly). Restricted to http(s) for safety.
+  openExternal: (url: string) => {
+    if (/^https?:\/\//i.test(url)) {
+      const { shell } = require('electron');
+      shell.openExternal(url);
+    }
+  },
   detectGitRepo: (dirPath: string) => ipcRenderer.invoke('tide:detectGitRepo', dirPath),
-  addWorkspace: (input: { path: string; name?: string; repository?: string }) =>
+  addWorkspace: (input: { path: string; name?: string; repository?: string; template?: import('../src/lib/templates').TemplateId; scripts?: import('../src/types').WorkspaceScript[]; initGit?: boolean }) =>
     ipcRenderer.invoke('tide:addWorkspace', input),
 
   // ── Sessions ──
@@ -107,8 +132,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:createSession', workspaceId, title, modelId, opts),
   updateSessionSettings: (sessionId: string, patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:updateSessionSettings', sessionId, patch),
-  addMessage: (sessionId: string, role: 'user' | 'assistant' | 'system', content: string) =>
-    ipcRenderer.invoke('tide:addMessage', sessionId, role, content),
+  addMessage: (sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }) =>
+    ipcRenderer.invoke('tide:addMessage', sessionId, role, content, extra),
   addAssistantMessage: (sessionId: string, message: {
     content: string;
     reasoning?: string;
@@ -122,7 +147,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
   addSessionUsage: (
     sessionId: string,
     delta: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
-  ) => ipcRenderer.invoke('tide:addSessionUsage', sessionId, delta),
+    lastStepUsage?: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
+  ) => ipcRenderer.invoke('tide:addSessionUsage', sessionId, delta, lastStepUsage),
   deleteSession: (id: string) => ipcRenderer.invoke('tide:deleteSession', id),
   clearAllSessions: () => ipcRenderer.invoke('tide:clearAllSessions'),
   renameSession: (sessionId: string, title: string) =>
@@ -201,6 +227,9 @@ contextBridge.exposeInMainWorld('tideIpc', {
   terminalKill: (terminalId: string) => ipcRenderer.invoke('terminal:kill', terminalId),
   terminalStop: (terminalId: string) => ipcRenderer.invoke('terminal:stop', terminalId),
   terminalResize: (terminalId: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', terminalId, cols, rows),
+  // PID-based liveness for port badges + Run/Stop detection.
+  terminalGetPid: (terminalId: string) => ipcRenderer.invoke('terminal:getPid', terminalId),
+  processIsAlive: (pid: number) => ipcRenderer.invoke('process:isAlive', pid),
   onTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void) =>
     ipcRenderer.on('terminal:output', (_e, data) => callback(data)),
   onTerminalExit: (callback: (data: { terminalId: string; code: number | null }) => void) =>
@@ -236,6 +265,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   archiveWorkspace: (id: string) => ipcRenderer.invoke('tide:archiveWorkspace', id),
   unarchiveWorkspace: (id: string) => ipcRenderer.invoke('tide:unarchiveWorkspace', id),
   deleteWorkspace: (id: string) => ipcRenderer.invoke('tide:deleteWorkspace', id),
+  workspacesExist: (paths: string[]) => ipcRenderer.invoke('tide:workspacesExist', paths),
 
   // ── Git source control ──
   // sessionId is optional — when the active session has a worktree, the
@@ -254,6 +284,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   ragStatus: (workspaceId: string) =>
     ipcRenderer.invoke('tide:rag:status', workspaceId),
   downloadRagModel: () => ipcRenderer.invoke('tide:rag:downloadModel'),
+  ragModelExists: () => ipcRenderer.invoke('tide:rag:modelExists'),
   enableRagWorkspace: (workspaceId: string) =>
     ipcRenderer.invoke('tide:rag:enableWorkspace', workspaceId),
   disableRagWorkspace: (workspaceId: string) =>
@@ -264,6 +295,11 @@ contextBridge.exposeInMainWorld('tideIpc', {
     const listener = (_e: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on('tide:rag:initProgress', listener);
     return () => ipcRenderer.off('tide:rag:initProgress', listener);
+  },
+  onRagDownloadProgress: (cb: (e: unknown) => void) => {
+    const listener = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on('tide:rag:downloadProgress', listener);
+    return () => ipcRenderer.off('tide:rag:downloadProgress', listener);
   },
 
   // ── Agent (tool-calling loop) ──

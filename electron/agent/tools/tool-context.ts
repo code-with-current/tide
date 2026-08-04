@@ -33,4 +33,7 @@ export interface ToolContext {
   emit: ToolEmit;
   /** Abort signal for the parent turn — checked by long-running tools. */
   abortSignal: AbortSignal;
+  /** Recursion depth for sub-agent dispatch. 0 = main orchestrator, 1+ = nested.
+   *  Used to prevent infinite agent-spawns-agent chains. */
+  _depth?: number;
 }

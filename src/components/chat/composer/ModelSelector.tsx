@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Check, Brain, Star, Search } from 'lucide-react';
+import { ChevronDown, Check, Brain, Star, Search, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -39,7 +39,7 @@ export function ModelSelector({ compact = false }: { compact?: boolean }) {
   const setSelected = useUi((s) => s.setSelectedModel);
   const starred = useUi((s) => s.starredModels);
   const toggleStar = useUi((s) => s.toggleStarredModel);
-  const { models } = useModels();
+  const { models, isLoading } = useModels();
   // Price label is now persisted on the model (sourced from the provider's
   // /models response at fetch time) — no catalog enrichment roundtrip needed.
   const [query, setQuery] = useState('');
@@ -78,15 +78,15 @@ export function ModelSelector({ compact = false }: { compact?: boolean }) {
           variant="ghost"
           size="sm"
           className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
-          disabled={models.length === 0}
+          disabled={isLoading || models.length === 0}
         >
           {!compact && (
-            <span>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+            <span>{selected?.alias ?? (isLoading ? 'Loading…' : models.length === 0 ? 'No models' : 'Select model')}</span>
           )}
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
+      <DropdownMenuContent align="start" side="top"  className="w-[300px] p-0 overflow-hidden">
         {/* ── Search box ── */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 sticky top-0 bg-popover z-10">
           <Search className="size-4 text-muted-foreground/50 shrink-0" />
@@ -152,12 +152,17 @@ export function ModelSelector({ compact = false }: { compact?: boolean }) {
           ))}
 
           {/* ── Empty states ── */}
-          {filtered.length === 0 && q && (
+          {filtered.length === 0 && q && !isLoading && (
             <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center">
               No models match "{query}".
             </div>
           )}
-          {models.length === 0 && (
+          {isLoading && models.length === 0 && (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center flex items-center justify-center gap-1.5">
+              <Loader2 className="size-3 animate-spin" /> Loading models…
+            </div>
+          )}
+          {!isLoading && models.length === 0 && (
             <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center">
               No models configured.
               <br />

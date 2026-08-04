@@ -21,6 +21,7 @@ import {
 import type { ExternalApp, ExternalAppTarget } from "@/types";
 import { cn } from "@/lib/utils";
 import { createLogger } from "@/lib/logger";
+import { toast } from "@/lib/toast";
 
 const log = createLogger("openInApp");
 
@@ -125,10 +126,19 @@ export function useExternalApps(): UseExternalAppsResult {
     if (!sessionId) return;
     try {
       const result = await window.tideIpc?.openInApp(target, sessionId);
-      if (result && !result.ok)
+      if (result && !result.ok) {
         log.warn("openInApp failed", target, result.error);
+        // Surface the failure — a silent spawn fail otherwise looks like
+        // nothing happened, and the user clicks repeatedly.
+        toast.error(`Couldn't open in ${target}`, {
+          description: result.error,
+        });
+      }
     } catch (e) {
       log.warn("openInApp threw", target, e);
+      toast.error(`Couldn't open in ${target}`, {
+        description: e instanceof Error ? e.message : undefined,
+      });
     }
   };
 

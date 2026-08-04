@@ -13,10 +13,13 @@ export interface AttachedFile {
   bytes?: number;
   /** True if `content` was truncated to fit the attachment budget. */
   truncated?: boolean;
+  /** Absolute on-disk path (kept so the viewer can re-read the file after
+   *  a reload, when inline content is no longer in memory). */
+  absPath?: string;
 }
 
 /** Map a file extension to an attachment kind. */
-function kindForPath(p: string): AttachedFile['kind'] {
+export function kindForPath(p: string): AttachedFile['kind'] {
   const ext = p.split('.').pop()?.toLowerCase() ?? '';
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return 'image';
   if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'java', 'rb', 'php', 'c', 'cc', 'cpp', 'h', 'hpp', 'swift', 'kt', 'vue', 'svelte'].includes(ext)) return 'code';
@@ -24,9 +27,37 @@ function kindForPath(p: string): AttachedFile['kind'] {
 }
 
 /** Extract a short display name from an absolute path. */
-function shortName(p: string): string {
+export function shortName(p: string): string {
   const parts = p.replace(/\\/g, '/').split('/');
   return parts.slice(-2).join('/');
+}
+
+/**
+ * Read a file from disk and build an AttachedFile. Shared by the AttachButton
+ * file picker and the composer's paste handler so both produce identical
+ * attachments. Images attach by path only (no inline content); code/text
+ * files are read via IPC and inline'd. Returns null if the read fails AND
+ * the caller wants to skip rather than emit an error stub (used by paste).
+ */
+export async function attachFromPath(
+  filePath: string,
+): Promise<AttachedFile | null> {
+  const kind = kindForPath(filePath);
+  if (kind === 'image') {
+    return { path: shortName(filePath), kind, absPath: filePath };
+  }
+  const result = await api.readExternalFile(filePath);
+  if (result) {
+    return {
+      path: shortName(filePath),
+      kind,
+      content: result.content,
+      bytes: result.bytes,
+      truncated: result.truncated,
+      absPath: filePath,
+    };
+  }
+  return { path: shortName(filePath), kind: 'text', content: '[read failed]', absPath: filePath };
 }
 
 /**
@@ -46,23 +77,8 @@ export function AttachButton({
     try {
       const paths = await api.pickFiles();
       for (const filePath of paths) {
-        const kind = kindForPath(filePath);
-        if (kind === 'image') {
-          onAdd({ path: shortName(filePath), kind });
-          continue;
-        }
-        const result = await api.readExternalFile(filePath);
-        if (result) {
-          onAdd({
-            path: shortName(filePath),
-            kind,
-            content: result.content,
-            bytes: result.bytes,
-            truncated: result.truncated,
-          });
-        } else {
-          onAdd({ path: shortName(filePath), kind: 'text', content: '[read failed]' });
-        }
+        const attached = await attachFromPath(filePath);
+        if (attached) onAdd(attached);
       }
     } catch {
       // User cancelled or error — silent

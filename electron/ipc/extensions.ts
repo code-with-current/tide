@@ -2,7 +2,7 @@
  * Extensions IPC — power the Extensions management UI.
  *
  * Mirrors the settingsStore pattern: a singleton store created at module init
- * from `app.getPath('userData')` (post-relocation: ~/.tide / ~/.tide-dev),
+ * from `appDataDir()` (post-relocation: ~/.tide / ~/.tide-dev),
  * plus a single `registerExtensionsHandlers()` registration entry point.
  *
  * Five handlers:
@@ -21,12 +21,13 @@ import { createExtensionsStore } from '../extensionsStore.js';
 import { scanProjectEntries } from '../agent/project-context.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry.js';
 import { createLogger } from '../logger.js';
+import { appDataDir } from '../appPaths.js';
 
 const log = createLogger('extensions');
 
 // Singleton — created on first import (after app.whenReady, since this module
 // is imported lazily from main.ts inside the whenReady callback).
-const store = createExtensionsStore(app.getPath('userData'));
+const store = createExtensionsStore(appDataDir());
 
 export interface AgentEntry {
   name: string;

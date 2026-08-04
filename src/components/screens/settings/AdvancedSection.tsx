@@ -51,7 +51,7 @@ export function AdvancedSection() {
               </Button>
             </div>
           </SettingsRow>
-          <SettingsRow title="MCP servers" description="User-installed MCP server configs." last>
+          <SettingsRow title="MCP" description="User-installed MCP server configs." last>
             <div className="flex items-center gap-1.5">
               <code className="font-mono text-[11px] px-2 py-0.5 bg-primary rounded text-muted-foreground max-w-[14rem] truncate">
                 ~/Library/Application Support/Tide/mcp

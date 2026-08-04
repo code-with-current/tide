@@ -1,4 +1,4 @@
-import { Check, X, AlertTriangle } from 'lucide-react';
+import { Check, X, AlertTriangle, AlertCircle } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { AsciiSpinner } from '@/components/AsciiSpinner';
@@ -61,18 +61,27 @@ export function TurnHeader({
 
   // Completed states.
   const stopped = stopReason === 'aborted';
-  const Icon = stopped ? X : anyFailed ? AlertTriangle : Check;
+  // A turn is "failed" if stopReason says so, OR if it produced zero content
+  // (no text answer, no tool blocks) — the latter catches old sessions that
+  // were persisted before stopReason was saved.
+  const hasContent = blocks
+    ? blocks.some((b) => b.kind === 'text' || b.kind === 'tool' || b.kind === 'reasoning')
+    : !!(turn?.answer || turn?.commands?.length || turn?.edits?.length || turn?.exploration?.length);
+  const failed = stopReason === 'refusal' || (!hasContent && !stopReason && !stopped);
+  const Icon = stopped ? X : failed ? AlertCircle : anyFailed ? AlertTriangle : Check;
   const tone = stopped
     ? 'text-destructive'
-    : anyFailed
-      ? 'text-warning'
-      : 'text-success';
+    : failed
+      ? 'text-destructive'
+      : anyFailed
+        ? 'text-warning'
+        : 'text-success';
 
   return (
     <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
       <Icon className={cn('size-3', tone)} />
       <span className={tone}>
-        {stopped ? 'Stopped' : anyFailed ? 'Done · Issues' : 'Done'}
+        {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
       </span>
       {duration && <span>· {duration}</span>}
     </div>

@@ -36,9 +36,14 @@ export function resolveModel(provider: Provider, model: Model): LanguageModel {
   switch (provider.apiStyle) {
     case 'anthropic':
       // baseURL empty → undefined so the SDK falls back to api.anthropic.com.
+      // Normalize: the SDK appends `/messages` to baseURL, but only auto-adds
+      // `/v1` for api.anthropic.com. Anthropic-compatible proxies (z.ai, etc.)
+      // need `/v1` in the user-supplied URL — without it, the SDK hits
+      // `/api/anthropic/messages` (404) instead of `/api/anthropic/v1/messages`.
+      // If the URL doesn't already end with a version segment, append `/v1`.
       return createAnthropic({
         apiKey: provider.apiKey,
-        baseURL: provider.baseUrl || undefined,
+        baseURL: normalizeAnthropicBaseURL(provider.baseUrl) || undefined,
         fetch: fetchFn,
       }).languageModel(model.modelId);
 
@@ -201,4 +206,26 @@ function makeDiagnosticFetch(provider: Provider) {
     }
     return resp;
   };
+}
+
+/**
+ * Ensure an Anthropic-protocol base URL ends with `/v1`.
+ *
+ * The @ai-sdk/anthropic SDK appends `/messages` to baseURL, but only auto-adds
+ * the `/v1` version segment for `api.anthropic.com`. Anthropic-compatible
+ * proxies (z.ai at `api.z.ai/api/anthropic`, etc.) need `/v1` in the URL —
+ * the ZAI docs for Claude Code show `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
+ * because Claude Code's own SDK appends `/v1`. But the Vercel AI SDK does NOT,
+ * so a user pasting the ZAI-recommended URL gets `/api/anthropic/messages` → 404.
+ *
+ * This normalizer appends `/v1` when the URL path doesn't already end with a
+ * version segment (e.g. `/v1`, `/v2`). Idempotent — calling it on a URL that
+ * already has `/v1` is a no-op.
+ */
+function normalizeAnthropicBaseURL(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.replace(/\/+$/, ''); // strip trailing slashes
+  // Already ends with a version segment like /v1, /v2 — leave it.
+  if (/\/v\d+$/.test(trimmed)) return trimmed;
+  return `${trimmed}/v1`;
 }

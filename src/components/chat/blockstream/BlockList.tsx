@@ -22,6 +22,10 @@ interface BlockListProps {
   blocks: Block[] | undefined;
   streaming: boolean;
   stopped?: boolean;
+  /** Turn-level stop reason — suppresses the "tool-only" placeholder
+   *  when the turn failed ('refusal') so we don't show a neutral message
+   *  on top of an error. */
+  stopReason?: string | null;
   sessionId: string | null;
   messageId: string;
   onViewFile?: (path: string) => void;
@@ -44,7 +48,7 @@ interface BlockListProps {
  * we leave them alone.
  */
 export const BlockList = memo(function BlockList({
-  blocks, streaming, stopped, sessionId, messageId, onViewFile,
+  blocks, streaming, stopped, stopReason, sessionId, messageId, onViewFile,
 }: BlockListProps) {
   const layout = useMemo(() => deriveLayout(blocks), [blocks]);
 
@@ -138,6 +142,7 @@ export const BlockList = memo(function BlockList({
           text={layout.answer?.text ?? ''}
           streaming={streaming}
           stopped={stopped}
+          failed={stopReason === 'refusal'}
           hasProcessContent={hasProcessContent}
         />
       </div>
@@ -161,6 +166,7 @@ export const BlockList = memo(function BlockList({
   prev.blocks === next.blocks &&
   prev.streaming === next.streaming &&
   prev.stopped === next.stopped &&
+  prev.stopReason === next.stopReason &&
   prev.sessionId === next.sessionId &&
   prev.messageId === next.messageId
 );

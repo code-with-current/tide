@@ -25,11 +25,13 @@ import type {
   DiffHunk,
   Provider,
   ProviderModelMeta,
+  RagDownloadProgressEvent,
   RagInitProgressEvent,
   RagInitResult,
   RagStatus,
   RagWorkspaceOpResult,
   Workspace,
+  WorkspaceScript,
 } from '@/types';
 
 // ── Electron detection ──────────────────────────────────────────
@@ -64,6 +66,13 @@ export async function readExternalFile(filePath: string): Promise<{ content: str
   return null;
 }
 
+/** Read an image as a base64 data URL for <img> rendering in the viewer.
+ *  Accepts an absolute path (external attachment) or workspace+relPath. */
+export async function readImageFile(input: { absPath?: string; workspaceId?: string; relPath?: string }): Promise<{ dataUrl: string; bytes: number } | null> {
+  if (ipc) return ipc.readImageFile(input);
+  return null;
+}
+
 export interface GitRepoInfo {
   branch: string;
   headCommit: string;
@@ -81,6 +90,8 @@ export async function addWorkspace(input: {
   name?: string;
   repository?: string;
   template?: import('@/lib/templates').TemplateId;
+  scripts?: WorkspaceScript[];
+  initGit?: boolean;
 }): Promise<Workspace> {
   if (ipc) return ipc.addWorkspace(input);
   await delay(300);
@@ -93,7 +104,7 @@ export async function addWorkspace(input: {
     isDefault: false,
     fileCount: 0,
     worktreeLocation: '.agent/worktrees/',
-    scripts: [],
+    scripts: input.scripts ?? [],
   };
 }
 
@@ -230,8 +241,13 @@ export async function updateSessionSettings(
   await delay(50);
 }
 
-export async function addMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
-  if (ipc) return ipc.addMessage(sessionId, role, content);
+export async function addMessage(
+  sessionId: string,
+  role: 'user' | 'assistant' | 'system',
+  content: string,
+  extra?: { attachments?: any[]; mentions?: any[] },
+): Promise<void> {
+  if (ipc) return ipc.addMessage(sessionId, role, content, extra);
 }
 
 /**
@@ -273,9 +289,18 @@ export async function addSessionUsage(
     calls?: number;
     costUsd?: number;
   },
+  lastStepUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    reasoningTokens?: number;
+    calls?: number;
+    costUsd?: number;
+  },
 ): Promise<void> {
   if (ipc && (ipc as any).addSessionUsage) {
-    return (ipc as any).addSessionUsage(sessionId, delta);
+    return (ipc as any).addSessionUsage(sessionId, delta, lastStepUsage);
   }
 }
 
@@ -550,6 +575,10 @@ export async function downloadRagModel(): Promise<RagWorkspaceOpResult> {
   if (ipc && ipc.downloadRagModel) return ipc.downloadRagModel();
   return { ok: false, error: 'IPC unavailable (browser dev mode)' };
 }
+export async function ragModelExists(): Promise<boolean> {
+  if (ipc && ipc.ragModelExists) return ipc.ragModelExists();
+  return false;
+}
 export async function enableRagWorkspace(workspaceId: string): Promise<RagWorkspaceOpResult> {
   if (ipc && ipc.enableRagWorkspace) return ipc.enableRagWorkspace(workspaceId);
   return { ok: false, error: 'IPC unavailable (browser dev mode)' };
@@ -565,4 +594,36 @@ export async function initRagWorkspace(workspaceId: string): Promise<RagInitResu
 export function subscribeRagInitProgress(cb: (e: RagInitProgressEvent) => void): () => void {
   if (ipc && ipc.onRagInitProgress) return ipc.onRagInitProgress(cb as (e: unknown) => void);
   return () => {};
+}
+export function subscribeRagDownloadProgress(cb: (e: RagDownloadProgressEvent) => void): () => void {
+  if (ipc && ipc.onRagDownloadProgress) return ipc.onRagDownloadProgress(cb as (e: unknown) => void);
+  return () => {};
+}
+
+// ============================================================
+// macOS permissions (consent screen) — no-op on non-mac.
+// ============================================================
+
+export type PermissionStatus = {
+  platform: 'mac' | 'other';
+  accessibility: 'authorized' | 'denied' | 'restricted' | 'not determined' | null;
+  fullDiskAccess: 'authorized' | 'denied' | 'restricted' | 'not determined' | null;
+  folders: 'unknown' | null;
+};
+export type PermissionType = 'accessibility' | 'fullDiskAccess' | 'folders';
+
+export async function getPermissionStatus(): Promise<PermissionStatus> {
+  if (ipc) return ipc.permissionStatus();
+  // Browser dev fallback — treated as non-mac so the consent screen won't show.
+  return { platform: 'other', accessibility: null, fullDiskAccess: null, folders: null };
+}
+
+export async function requestPermission(type: PermissionType): Promise<'opened' | 'unavailable'> {
+  if (ipc) return ipc.requestPermission(type);
+  return 'unavailable';
+}
+
+export async function shouldShowConsent(): Promise<boolean> {
+  if (ipc) return ipc.shouldShowConsent();
+  return false;
 }

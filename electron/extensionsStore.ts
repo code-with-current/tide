@@ -27,6 +27,19 @@ export interface ExtensionsFile {
 
 const EMPTY: ExtensionsConfig = { agents: [], skills: [], mcp: [] };
 
+/**
+ * Built-in MCP servers that are disabled by default. Seeded into the disabled
+ * list ONLY on first run (when extensions.json doesn't exist yet). After that,
+ * the user's choices are respected — if they toggle a server on (removing it
+ * from the disabled list), it stays on across restarts.
+ */
+const DEFAULT_DISABLED_MCP = ['tide-filesystem'];
+
+/** Build the initial config for first run — seeds default-disabled builtins. */
+function firstRunConfig(): ExtensionsConfig {
+  return { agents: [], skills: [], mcp: [...DEFAULT_DISABLED_MCP] };
+}
+
 export function createExtensionsStore(rootDir: string) {
   const filePath = path.join(rootDir, 'extensions.json');
   let cache: ExtensionsConfig | null = null;
@@ -43,8 +56,8 @@ export function createExtensionsStore(rootDir: string) {
       };
       return cache;
     } catch {
-      // File doesn't exist or is corrupt — treat as empty config.
-      cache = { agents: [], skills: [], mcp: [] };
+      // File doesn't exist or is corrupt — first run. Seed defaults.
+      cache = firstRunConfig();
       return cache;
     }
   }

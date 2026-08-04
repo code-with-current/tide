@@ -88,6 +88,9 @@ if (!fs.existsSync(DIST_MODEL)) {
 }
 
 try {
+  // Bundle system prompt .md files into _system-prompt-bundle.ts before any build.
+  run('node', ['build/promptMarkdownUtils.mjs'], 'bundle prompts');
+
   if (needBuild) {
     // Build the electron main + preload + embedder-process entries.
     run('vite', ['build', '--config', 'vite.electron.config.ts'], 'electron build');
@@ -97,11 +100,19 @@ try {
   } else if (needGrammars) {
     run('node', ['build/copy-tree-sitter-grammars.mjs', '--dist'], 'stage grammars');
   }
-  // needModel: the model is a large vendored ONNX file copied by the electron
-  // build's assets pipeline; a `vite build` above stages it. If the build was
-  // skipped AND the model is missing, force one build to stage it.
-  if (needModel && !needBuild) {
-    run('vite', ['build', '--config', 'vite.electron.config.ts'], 'electron build (stage model)');
+  // needModel: stage the vendored ONNX model from the source tree for dev.
+  // Production builds no longer bundle the model (lazy-downloaded from
+  // HuggingFace on first RAG enable), but dev uses the source copy at
+  // electron/rag/models/ to avoid a download on every dev launch.
+  if (needModel) {
+    const MODEL_SRC = path.join(ROOT, 'electron', 'rag', 'models');
+    const MODEL_DEST = path.join(ROOT, 'dist-electron', 'models');
+    if (fs.existsSync(MODEL_SRC)) {
+      fs.cpSync(MODEL_SRC, MODEL_DEST, { recursive: true });
+      console.log('[dev] staged model to dist-electron/models/');
+    } else {
+      console.log('[dev] WARNING: source model missing — RAG will need a download');
+    }
   }
 
   if (!needBuild && !needGrammars && !needModel) {

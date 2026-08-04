@@ -1,27 +1,39 @@
 /**
- * Rule-based permission rules — `.agent/settings.json` + session-scoped.
+ * Rule-based permission rules — `.agents/settings.json`.
  *
- * Modeled on `loadHookConfig` (../hooks/hook-config.ts): read project + user
- * JSON files, return empty on missing/malformed, re-read each turn.
+ * Rule format: `"ToolName(argPattern)"` — e.g. `"bash(pnpm i)"`,
+ * `"bash(npx:*)"`, `"edit_file(src/)"`. Tool name matches case-insensitively
+ * via `'*'` / exact / `'prefix:*'`.
  *
- * Rule format: `"ToolName(argPattern)"` — e.g. `"Bash(pnpm i)"`,
- * `"EditFile(src/)"`. Tool name matches case-insensitively via `'*'` / exact /
- * `'prefix:*'` (so Claude-Code-style `"Bash"` matches Tide's `bash`).
- * argPattern is a **prefix match** (v1) on the tool's primary arg (command for
- * bash, path for file tools). A bare `"ToolName"` (no parens) matches any args.
+ * argPattern matching:
+ *   - Bare `"ToolName"` (no parens) = match any args
+ *   - `"ToolName(prefix)"` = prefix match on the tool's primary arg
+ *   - `"ToolName(prefix:*)"` = glob match — prefix up to `:*` matches anything after
+ *   - `"ToolName(*suffix)"` = suffix glob match
+ *   - `"ToolName(*middle*)"` = contains glob match
  *
- * Precedence (in withPermission): deny (any scope) always rejects; allow
- * upgrades an `'ask'` decision to auto; allow does NOT bypass plan-mode
- * blocking (`'blocked'`) — plan mode is a hard no-mutation contract.
+ * Precedence: deny always rejects; allow upgrades an 'ask' decision to auto;
+ * allow does NOT bypass plan-mode blocking.
+ *
+ * Rules persist in `{workspaceRoot}/.agents/settings.json`:
+ * {
+ *   "permissions": {
+ *     "allow": ["bash(npm:*)", "edit_file(src/*)"],
+ *     "deny": []
+ *   }
+ * }
+ *
+ * There is no separate "session" vs "project" scope — all rules are project-level
+ * and persist across sessions. This matches Claude Code's behavior.
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { minimatch } from 'minimatch';
 
 export interface Rule {
   /** Tool-name pattern: '*' | 'bash' | 'edit:*' (case-insensitive). */
   tool: string;
-  /** Prefix on the tool's primary arg; null = match any args. */
+  /** Pattern on the tool's primary arg; null = match any args. */
   argPattern: string | null;
 }
 
@@ -61,16 +73,13 @@ function loadFile(filePath: string): RuleSet {
     const perms = (parsed as { permissions?: { allow?: unknown; deny?: unknown } }).permissions ?? {};
     return { allow: parseList(perms.allow), deny: parseList(perms.deny) };
   } catch {
-    return EMPTY; // missing or malformed — rules are opt-in, absence is not an error
+    return EMPTY;
   }
 }
 
-/** Load project (`<root>/.agent/settings.json`) + user (`~/.agent/settings.json`) rules. */
+/** Load project rules from `<root>/.agents/settings.json`. */
 export function loadPermissionRules(workspaceRoot: string): RuleSet {
-  const project = loadFile(path.join(workspaceRoot, '.agent', 'settings.json'));
-  const user = loadFile(path.join(os.homedir(), '.agent', 'settings.json'));
-  // Project first within the merged list (precedence on equal specificity).
-  return { allow: [...project.allow, ...user.allow], deny: [...project.deny, ...user.deny] };
+  return loadFile(path.join(workspaceRoot, '.agents', 'settings.json'));
 }
 
 /** The primary arg used for argPattern matching, per tool. */
@@ -104,47 +113,86 @@ function toolNameMatches(pattern: string, toolName: string): boolean {
   const t = toolName.toLowerCase();
   if (p === '*') return true;
   if (p === t) return true;
-  if (p.endsWith(':*')) return t.startsWith(p.slice(0, -2)); // 'edit:*' → 'edit_file' etc.
+  if (p.endsWith(':*')) return t.startsWith(p.slice(0, -2));
   return false;
+}
+
+/**
+ * Does an arg pattern match a value? Supports:
+ *   - Plain prefix: "npm install" matches "npm install --force"
+ *   - Glob suffix: "npx:*" matches "npx create-react-app" (anything after npx )
+ *   - Glob path: "src/*" matches "src/components/Foo.ts"
+ *   - Glob wildcard: "*" matches anything
+ */
+function argPatternMatches(pattern: string, value: string): boolean {
+  // If the pattern contains glob chars (* or ? or [), use minimatch.
+  if (/[*?\[]/.test(pattern)) {
+    return minimatch(value, pattern, { dot: true });
+  }
+  // Plain prefix match.
+  return value.startsWith(pattern);
 }
 
 /** Does a rule match a specific tool call? */
 export function ruleMatches(rule: Rule, toolName: string, args: Record<string, unknown>): boolean {
   if (!toolNameMatches(rule.tool, toolName)) return false;
-  if (rule.argPattern === null) return true; // bare tool name = any args
+  if (rule.argPattern === null) return true;
   const arg = primaryArg(toolName, args);
   if (arg === null) return false;
-  return arg.startsWith(rule.argPattern); // v1: prefix match (glob is a follow-up)
+  return argPatternMatches(rule.argPattern, arg);
 }
 
-/** Evaluate combined session + project rules. 'deny' wins; else 'allow'; else null. */
+/** Evaluate rules. 'deny' wins; else 'allow'; else null. */
 export function evaluateRules(
-  session: RuleSet,
-  project: RuleSet,
+  rules: RuleSet,
   toolName: string,
   args: Record<string, unknown>,
 ): 'deny' | 'allow' | null {
-  for (const r of session.deny) if (ruleMatches(r, toolName, args)) return 'deny';
-  for (const r of project.deny) if (ruleMatches(r, toolName, args)) return 'deny';
-  for (const r of session.allow) if (ruleMatches(r, toolName, args)) return 'allow';
-  for (const r of project.allow) if (ruleMatches(r, toolName, args)) return 'allow';
+  for (const r of rules.deny) if (ruleMatches(r, toolName, args)) return 'deny';
+  for (const r of rules.allow) if (ruleMatches(r, toolName, args)) return 'allow';
   return null;
 }
 
-/** Heuristic rule spec for "Always allow" — derivable from the approved call. */
+/**
+ * Derive a rule spec for "Always Allow" from the approved call.
+ * Generates smart glob patterns:
+ *   - bash: "bash(npx:*)" for npx commands, "bash(npm install)" for npm
+ *   - file tools: "edit_file(src/*)" for path-based tools
+ *   - bare tool name if no recognizable arg
+ */
 export function deriveRuleSpec(toolName: string, args: Record<string, unknown>): string {
   const arg = primaryArg(toolName, args);
-  if (arg === null) return toolName; // bare tool name
-  // For bash, the first 1-2 tokens are a stable command prefix
-  // ("pnpm i --filter x" → "pnpm i"). For file tools, the path prefix-matches.
+  if (arg === null) return toolName;
+
   if (toolName === 'bash') {
-    const head = arg.split(/\s+/).slice(0, 2).join(' ');
+    // For npx commands, use a glob: "npx package-name" → "bash(npx package-name:*)"
+    if (arg.startsWith('npx ')) {
+      const pkg = arg.split(/\s+/).slice(0, 2).join(' '); // "npx package-name"
+      return `${toolName}(${pkg}:*)`;
+    }
+    // For npm/yarn/pnpm commands, keep first 2 tokens as prefix.
+    if (/^(npm|yarn|pnpm|bun|deno)\s/.test(arg)) {
+      const head = arg.split(/\s+/).slice(0, 2).join(' ');
+      return `${toolName}(${head})`;
+    }
+    // Other commands: first token only.
+    const head = arg.split(/\s+/)[0];
     return `${toolName}(${head})`;
   }
+
+  // File tools: use the directory as a prefix glob.
+  if (arg.includes('/')) {
+    const dir = arg.substring(0, arg.lastIndexOf('/'));
+    return `${toolName}(${dir}/*)`;
+  }
+
   return `${toolName}(${arg})`;
 }
 
-// ─── Session-scoped rule store (in-memory; cleared on session end) ─────
+// ─── In-memory cache (refreshed each turn via loadPermissionRules) ─────
+// Session-scoped rules are still in-memory for the current turn (so a rule
+// written mid-turn is immediately visible without re-reading the file).
+// They're also persisted to .agents/settings.json by addPermissionRule.
 const sessionRules = new Map<string, RuleSet>();
 
 export function addSessionRule(sessionId: string, scope: 'allow' | 'deny', rule: Rule): void {
@@ -161,12 +209,30 @@ export function clearSessionRules(sessionId: string): void {
   sessionRules.delete(sessionId);
 }
 
-// ─── Project file writer (for "Always allow — this project") ───────────
-/** Append a rule spec to `<root>/.agent/settings.json`, preserving existing
- *  content. Best-effort: missing/malformed file is (re)created; non-writable
- *  roots silently fail (the in-memory turn still proceeds). */
-export function addProjectRule(workspaceRoot: string, scope: 'allow' | 'deny', spec: string): void {
-  const file = path.join(workspaceRoot, '.agent', 'settings.json');
+// ─── Unified rule writer (replaces addSessionRule + addProjectRule) ────
+
+/**
+ * Add an "always allow" rule to `.agents/settings.json`. Also adds it to the
+ * in-memory session rules so it takes effect immediately without a file re-read.
+ *
+ * The rule is derived from the approved tool call via deriveRuleSpec, producing
+ * smart glob patterns (e.g. bash(npx:*) for npx commands).
+ */
+export function addPermissionRule(
+  sessionId: string,
+  workspaceRoot: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): string | null {
+  const spec = deriveRuleSpec(toolName, args);
+  const rule = parseRule(spec);
+  if (!rule) return null;
+
+  // Add to in-memory session rules (immediate effect this turn).
+  addSessionRule(sessionId, 'allow', rule);
+
+  // Persist to .agents/settings.json (survives across sessions).
+  const file = path.join(workspaceRoot, '.agents', 'settings.json');
   let cfg: { permissions: { allow: string[]; deny: string[] } } = {
     permissions: { allow: [], deny: [] },
   };
@@ -180,14 +246,17 @@ export function addProjectRule(workspaceRoot: string, scope: 'allow' | 'deny', s
       if (!Array.isArray(cfg.permissions.deny)) cfg.permissions.deny = [];
     }
   } catch {
-    // missing/malformed — start fresh below.
+    // missing/malformed — start fresh.
   }
-  const list = cfg.permissions[scope];
-  if (!list.includes(spec)) list.push(spec);
+  if (!cfg.permissions.allow.includes(spec)) {
+    cfg.permissions.allow.push(spec);
+  }
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
   } catch {
     // best-effort — don't fail the turn over a rule write.
   }
+
+  return spec;
 }

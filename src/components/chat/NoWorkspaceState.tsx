@@ -46,7 +46,7 @@ export function NoWorkspaceState() {
             onClick={() => openDialog('addWorkspace')}
             className="inline-flex items-center gap-2 rounded-lg bg-primary text-white text-sm font-medium px-4 py-2 hover:bg-accent/90 transition-colors"
           >
-            <Plus className="size-4" /> Add workspace
+            <Plus className="size-4" /> Add Workspace
           </Button>
           {hasWorkspaces && (
             <Button

@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useUi } from "@/lib/stores/ui";
 import { useExternalApps } from "@/lib/useExternalApps";
+import { Tip } from "../ui/quick-tooltip";
 
 export function OpenInAppMenu() {
   const activeSessionId = useUi((s) => s.activeSessionId);
@@ -50,6 +51,9 @@ export function OpenInAppMenu() {
   const disabled = !activeSessionId;
 
   return (
+  <Tip
+    label={`Open with`}
+  >
     <ButtonGroup>
       {/* Primary: open in the default app immediately. */}
       <Button
@@ -101,6 +105,7 @@ export function OpenInAppMenu() {
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-    </ButtonGroup>
+      </ButtonGroup>
+  </Tip>
   );
 }

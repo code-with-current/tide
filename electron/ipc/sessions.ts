@@ -37,6 +37,7 @@ import { clearSessionRules } from '../agent/permissions/rules.js';
 import { clearSession as clearPermissionSession } from '../agent/permission-resolver.js';
 import type { Block } from '../../src/types/block.js';
 import type { ActivityEvent } from '../../src/types/index.js';
+import { appDataDir } from '../appPaths.js';
 
 // Re-export types so existing callers don't break.
 export type { StoredMessage, StoredSession, ArchivedHeader };
@@ -61,7 +62,7 @@ function hydrate(s: StoredSession): HydratedSession {
     thinkingLevel: s.thinkingLevel ?? 'medium',
     status: 'idle',
     usage: s.usage ?? { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, calls: 0, costUsd: 0 },
-    costUsd: 0,
+    costUsd: s.costUsd ?? s.usage?.costUsd ?? 0,
     contextFiles: [],
     // Preserve persisted activity (sessionStore.addActivity) instead of
     // wiping to [] on every hydrate — otherwise the feed never survives a reload.
@@ -75,7 +76,7 @@ function hydrate(s: StoredSession): HydratedSession {
 let _store: SessionStore | null = null;
 function store(): SessionStore {
   if (!_store) {
-    _store = createSessionStore(app.getPath('userData'));
+    _store = createSessionStore(appDataDir());
     _store.loadAll();
     // Wire the delete cascade: when a session with a worktree is deleted,
     // remove the worktree dir + branch before the JSON is unlinked. Without
@@ -271,8 +272,8 @@ export function updateSessionSettings(
   store().updateSessionSettings(sessionId, patch);
 }
 
-export function addMessage(sessionId: string, role: StoredMessage['role'], content: string): void {
-  store().addMessage(sessionId, role, content);
+export function addMessage(sessionId: string, role: StoredMessage['role'], content: string, extra?: { attachments?: any[]; mentions?: any[] }): void {
+  store().addMessage(sessionId, role, content, extra);
 }
 
 export function deleteSession(id: string): void {
@@ -335,8 +336,17 @@ export function addUsage(
     calls?: number;
     costUsd?: number;
   },
+  lastStepUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    reasoningTokens?: number;
+    calls?: number;
+    costUsd?: number;
+  },
 ): void {
-  store().addUsage(sessionId, delta);
+  store().addUsage(sessionId, delta, lastStepUsage);
 }
 
 /** Append an audit event to the session's activity feed. Used by tools that

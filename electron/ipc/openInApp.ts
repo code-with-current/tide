@@ -309,7 +309,7 @@ function resolveSessionPath(sessionId?: string): string {
   } catch {
     /* fall through to HOME */
   }
-  return process.env.HOME || '/';
+  return os.homedir();
 }
 
 // ─── Open in target app ─────────────────────────────────────────────────

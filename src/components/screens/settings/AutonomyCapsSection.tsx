@@ -8,15 +8,12 @@ import {
   Timer,
   Lock,
   Check,
-  DollarSign,
-  Brain,
   ScrollText,
   AlertTriangle,
-  Pause,
+  GitCommitHorizontal,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Segmented } from '@/components/ui/segmented';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
 import { cn } from '@/lib/utils';
 import type { AutonomyMode } from '@/types';
@@ -27,6 +24,9 @@ type AgentSettingsState = {
   permissionTimeoutMin: number;
   planModeDryRun: boolean;
   auditShellCommands: boolean;
+  compactionEnabled: boolean;
+  compactionThreshold: number;
+  compactionKeepTurns: number;
 };
 
 // Risk-tier metadata drives both the visual accent and the helper copy.
@@ -42,7 +42,7 @@ const MODES: {
   { value: 'plan', icon: Map, label: 'Plan only', hint: 'Proposes changes, never executes', tier: 'info' },
   { value: 'ask', icon: Shield, label: 'Ask', hint: 'Confirm every edit & shell call', tier: 'success', recommended: true },
   { value: 'edit', icon: Pencil, label: 'Edit', hint: 'Auto-edits files, asks before shell', tier: 'warning' },
-  { value: 'full', icon: Zap, label: 'Full access', hint: 'Direct access to this machine', tier: 'danger' },
+  { value: 'full', icon: Zap, label: 'Full Access', hint: 'Direct access to this machine', tier: 'danger' },
 ];
 
 const TIERStyles: Record<
@@ -84,7 +84,22 @@ export function AutonomyCapsSection() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   useEffect(() => {
-    window.tideIpc?.getAgentSettings().then((s) => setSettings(s as AgentSettingsState));
+    window.tideIpc?.getAgentSettings().then((s) => {
+      const raw = s as Record<string, unknown>;
+      // Normalize: old config files won't have the compaction fields.
+      // Without this, Switch/Slider get undefined → uncontrolled→controlled
+      // warning and NaN for value attribute.
+      setSettings({
+        defaultAutonomy: (raw.defaultAutonomy as AgentSettingsState['defaultAutonomy']) ?? 'ask',
+        maxSteps: (raw.maxSteps as number) ?? 100,
+        permissionTimeoutMin: (raw.permissionTimeoutMin as number) ?? 10,
+        planModeDryRun: (raw.planModeDryRun as boolean) ?? true,
+        auditShellCommands: (raw.auditShellCommands as boolean) ?? true,
+        compactionEnabled: (raw.compactionEnabled as boolean) ?? true,
+        compactionThreshold: (raw.compactionThreshold as number) ?? 0.75,
+        compactionKeepTurns: (raw.compactionKeepTurns as number) ?? 3,
+      });
+    });
   }, []);
 
   // Auto-save: whenever a field changes, persist it. The savingKey flag drives
@@ -100,13 +115,13 @@ export function AutonomyCapsSection() {
   };
 
   if (!settings) {
-    return <SettingsHeader title="Permissions & caps" description="Loading…" />;
+    return <SettingsHeader title="Permissions & Caps" description="Loading…" />;
   }
 
   return (
     <>
       <SettingsHeader
-        title="Permissions & caps"
+        title="Permissions & Caps"
         description="How much the agent can do without asking, and the limits that catch runaway turns."
       />
 
@@ -174,7 +189,7 @@ export function AutonomyCapsSection() {
         )}
       </SettingsGroup>
 
-      {/* ── Active limits ── the two caps that are actually enforced today */}
+      {/* ── Active limits ── the two Caps that are actually enforced today */}
       <SettingsGroup title="Limits">
         <Card>
           <SettingsRow
@@ -205,6 +220,56 @@ export function AutonomyCapsSection() {
         </Card>
       </SettingsGroup>
 
+      {/* ── Context management ── autocompact settings */}
+      <SettingsGroup title="Context management">
+        <Card>
+          <SettingsRow
+            title="Auto-compact when context is full"
+            description="Summarize older turns so long sessions don't hit the context window limit."
+          >
+            <div className="flex items-center gap-2">
+              {savingKey === 'compactionEnabled' && <SavedDot />}
+              <Switch
+                checked={settings.compactionEnabled}
+                onCheckedChange={(v) => update('compactionEnabled', v)}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow
+            title="Compaction threshold"
+            description="Context fill % that triggers summarization."
+            disabled={!settings.compactionEnabled}
+          >
+            <NumberField
+              icon={<GitCommitHorizontal className="size-3.5" />}
+              value={Math.round(settings.compactionThreshold * 100)}
+              unit="%"
+              saved={savingKey === 'compactionThreshold'}
+              disabled={!settings.compactionEnabled}
+              onChange={(v) => {
+                const clamped = Math.min(95, Math.max(50, v));
+                update('compactionThreshold', clamped / 100);
+              }}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title="Keep recent turns"
+            description="Number of user/assistant pairs preserved verbatim after compaction."
+            disabled={!settings.compactionEnabled}
+            last
+          >
+            <NumberField
+              icon={<Repeat className="size-3.5" />}
+              value={settings.compactionKeepTurns}
+              unit="turns"
+              saved={savingKey === 'compactionKeepTurns'}
+              disabled={!settings.compactionEnabled}
+              onChange={(v) => v > 0 && update('compactionKeepTurns', v)}
+            />
+          </SettingsRow>
+        </Card>
+      </SettingsGroup>
+
       {/* ── Safety nets ── */}
       <SettingsGroup title="Safety nets">
         <Card>
@@ -221,7 +286,7 @@ export function AutonomyCapsSection() {
             </div>
           </SettingsRow>
           <SettingsRow
-            title="Audit log in Full access"
+            title="Audit log in Full Access"
             description="Persist every shell command to a tamper-evident, append-only log."
             last
           >
@@ -232,60 +297,6 @@ export function AutonomyCapsSection() {
                 onCheckedChange={(v) => update('auditShellCommands', v)}
               />
             </div>
-          </SettingsRow>
-        </Card>
-      </SettingsGroup>
-
-      {/* ── Coming soon ── spend & token caps that aren't wired yet */}
-      <SettingsGroup
-        title="Spend & reasoning caps"
-        hint={
-          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/45 font-semibold">
-            <Pause className="size-2.5" /> Coming soon
-          </span>
-        }
-      >
-        <Card className="opacity-60">
-          <SettingsRow title="Spend cap per session" description="Pauses the loop when the running usage total crosses this.">
-            <NumberField icon={<DollarSign className="size-3.5" />} value={5} unit="USD" disabled onChange={() => {}} />
-          </SettingsRow>
-          <SettingsRow title="Daily spend cap" description="Hard stop across all sessions on this machine.">
-            <NumberField icon={<DollarSign className="size-3.5" />} value={20} unit="USD" disabled onChange={() => {}} />
-          </SettingsRow>
-          <SettingsRow
-            title="Reasoning token cap per turn"
-            description="Pause if a single turn blows through this many reasoning tokens."
-            last
-          >
-            <NumberField icon={<Brain className="size-3.5" />} value={20000} unit="tok" disabled onChange={() => {}} />
-          </SettingsRow>
-        </Card>
-      </SettingsGroup>
-
-      {/* ── Behavior on cap hit ── also not wired; group with the other soons */}
-      <SettingsGroup title="On cap hit">
-        <Card className="opacity-60">
-          <SettingsRow title="Iteration cap" description="Behavior when the iteration limit is reached.">
-            <Segmented
-              size="sm"
-              value="wrap"
-              onChange={() => {}}
-              options={[
-                { value: 'wrap', label: 'Wrap up' },
-                { value: 'abort', label: 'Abort' },
-              ]}
-            />
-          </SettingsRow>
-          <SettingsRow title="Spend cap" description="Behavior when running spend crosses the cap." last>
-            <Segmented
-              size="sm"
-              value="pause"
-              onChange={() => {}}
-              options={[
-                { value: 'pause', label: 'Pause & ask' },
-                { value: 'abort', label: 'Abort turn' },
-              ]}
-            />
           </SettingsRow>
         </Card>
       </SettingsGroup>
@@ -309,7 +320,7 @@ export function AutonomyCapsSection() {
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-[var(--error)]/30 bg-[var(--error)]/5 px-3 py-2">
           <AlertTriangle className="size-3.5 text-[var(--error)] mt-px shrink-0" />
           <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-            Full access is on without an audit log. Consider enabling the audit log above so every
+            Full Access is on without an audit log. Consider enabling the audit log above so every
             shell command is recorded.
           </p>
         </div>
@@ -320,7 +331,7 @@ export function AutonomyCapsSection() {
 
 // ── NumberField ── a compact numeric input with a leading icon and a
 // trailing unit chip. Built inline (not shared) because the layout is
-// specific to caps: icon | input | unit | optional saved pulse.
+// specific to Caps: icon | input | unit | optional saved pulse.
 function NumberField({
   icon,
   value,

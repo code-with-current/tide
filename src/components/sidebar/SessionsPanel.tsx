@@ -157,13 +157,13 @@ export function SessionsPanel() {
         </div>
         <Button
           size="sm"
-          className="w-full"
+          className="w-full align-middle font-medium"
           onClick={() => {
             setActiveSession(null);
             setMainView("new");
           }}
         >
-          <Plus className="size-3.5" /> New session
+          <Plus/> New Session
           <span className="ml-auto flex items-center gap-0.5 pointer-events-none">
             {newSessionKbd.map((k) => (
               <Kbd key={k}>{k}</Kbd>
@@ -269,6 +269,9 @@ function SessionItem({
   // session itself. For active rows, Session has workspaceId; for archived
   // rows, ArchivedHeader has workspaceId. Both shapes carry it.
   const workspaceId = session.workspaceId;
+  // Shimmer the title while its LLM-generated name is in flight. Subscribed
+  // per-item so only the generating row re-renders.
+  const titleGenerating = useUi((s) => s.titleGeneratingSessionIds.has(session.id));
   const renameSession = useRenameSession(workspaceId);
   const archiveSession = useArchiveSession(workspaceId);
   const unarchiveSession = useUnarchiveSession(workspaceId);
@@ -379,6 +382,7 @@ function SessionItem({
                   "text-[0.9rem] flex-1 truncate",
                   active && "text-foreground",
                   archived && "text-muted-foreground/60",
+                  titleGenerating && "animate-shimmer-title",
                 )}
               >
                 {title}
@@ -505,9 +509,9 @@ function SessionItem({
       </ContextMenuTrigger>
       {/* Right-click context menu — mirrors the ⋯ dropdown actions 1:1
         (same handlers, same archived gating, same delete-confirmation flow),
-        plus an "Open with…" submenu listing detected external apps. */}
+        plus an "Open with" submenu listing detected external apps. */}
       <ContextMenuContent className="w-40">
-        {/* Open with… — submenu of detected apps (Finder/File Explorer,
+        {/* Open with — submenu of detected apps (Finder/File Explorer,
           Terminal, VSCode, Zed). Opens THIS session's folder; picking one
           promotes it to the persisted default (shared with the top-bar menu). */}
 
@@ -543,7 +547,7 @@ function SessionItem({
         <ContextMenuSub>
           <ContextMenuSubTrigger className="gap-2">
             <FolderOpen className="size-3.5" />
-            <span>Open with…</span>
+            <span>Open with</span>
           </ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-44">
             {visibleApps.length === 0 ? (

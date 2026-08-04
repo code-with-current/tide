@@ -1,5 +1,5 @@
 import {
-  FolderGit2,
+  FolderCode,
   Folder,
   Sparkles,
   FilePlus2,
@@ -10,8 +10,9 @@ import {
   HardDrive,
   Globe,
   Loader2,
-  X,
   AlertCircle,
+  Terminal,
+  TriangleAlert,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -29,7 +30,9 @@ import tanstackLogo from '@/assets/stack/tanstack.svg';
 import { useUi } from '@/lib/stores/ui';
 import { qk } from '@/lib/queries';
 import * as api from '@/lib/api/client';
+import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
+import type { Workspace, WorkspaceScript } from '@/types';
 import { TEMPLATES, type TemplateId } from '@/lib/templates';
 import { cn } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
@@ -81,6 +84,17 @@ export function AddWorkspaceDialog() {
   const [remoteUrl, setRemoteUrl] = useState('');
   const [cloneDir, setCloneDir] = useState('');
   const [enableRag, setEnableRag] = useState(true);
+  // Existing Project flow: optional install (setup) + running (run) scripts,
+  // saved onto the new workspace. Off by default so the simple open-repo case
+  // isn't cluttered. install fires on first open (existing setup-kind
+  // behavior); running becomes the Run button's command.
+  const [addScript, setAddScript] = useState(false);
+  const [installCmd, setInstallCmd] = useState('');
+  const [runCmd, setRunCmd] = useState('');
+  // Local-open flow: when the chosen folder isn't a git repo, offer to init
+  // one. Defaults on — git tracking is the expected baseline, and the warning
+  // makes the missing state explicit. Ignored for the clone flow.
+  const [initGit, setInitGit] = useState(true);
   const [phase, setPhase] = useState<Phase>('choice');
   const [phaseError, setPhaseError] = useState<string | null>(null);
 
@@ -183,7 +197,16 @@ export function AddWorkspaceDialog() {
       setPhase('form');
       return;
     }
-    await createWorkspace(path, source === 'remote' ? remoteUrl : undefined);
+    // Assemble scripts from the Existing Project fields (install → setup,
+    // running → run). Only non-empty commands are kept.
+    const scripts: WorkspaceScript[] = [];
+    if (installCmd.trim()) scripts.push({ kind: 'setup', command: installCmd.trim() });
+    if (runCmd.trim()) scripts.push({ kind: 'run', command: runCmd.trim() });
+    // init-git only applies to the local-open flow (clone always yields a
+    // repo) — and only matters when the folder isn't already a repo. Pass it
+    // through so the backend can `git init` before detection.
+    const shouldInitGit = source === 'local' && initGit;
+    await createWorkspace(path, source === 'remote' ? remoteUrl : undefined, undefined, scripts, shouldInitGit);
   };
 
   /** New Project flow: synthesize <parent>/<name> and let the backend mkdir +
@@ -223,6 +246,8 @@ export function AddWorkspaceDialog() {
     path: string,
     repository: string | undefined,
     template?: TemplateId,
+    scripts?: WorkspaceScript[],
+    initGit?: boolean,
   ) => {
     // Determine which steps apply to this flow so the checklist only shows
     // relevant rows. Existing/clone: the repo already has files + git, so
@@ -238,16 +263,25 @@ export function AddWorkspaceDialog() {
     setSteps({ folder: 'pending', template: 'pending', git: 'pending', rag: 'pending' });
     setStep('folder', 'active');
 
-    let ws;
+    let ws: Workspace | undefined;
     try {
       // Build the input conditionally — only include `template` when set and
       // not 'empty' (Empty == no scaffold, equivalent to the New Project flow).
+      // The Existing Project flow (clone OR local) carries optional scripts;
+      // the local-open flow additionally carries initGit.
       const input: Parameters<typeof api.addWorkspace>[0] = repository
-        ? { path, repository }
+        ? { path, repository, ...(scripts?.length ? { scripts } : {}) }
         : template && template !== 'empty'
           ? { path, template }
-          : { path };
+          : { path, ...(scripts?.length ? { scripts } : {}), ...(initGit ? { initGit } : {}) };
       ws = await api.addWorkspace(input);
+      // Instantly place the returned workspace into the list cache so it
+      // appears in the sidebar the moment creation resolves — not a refetch
+      // round-trip later. invalidateQueries then reconciles with server truth.
+      const created = ws;
+      qc.setQueryData<Workspace[]>(qk.workspaces, (old) =>
+        old ? [...old, created] : [created],
+      );
       qc.invalidateQueries({ queryKey: qk.workspaces });
       // addWorkspace did mkdir (+ scaffold + git init) server-side. Mark the
       // file/template/git steps done in sequence — they're already complete,
@@ -258,6 +292,10 @@ export function AddWorkspaceDialog() {
     } catch (e: unknown) {
       setPhase('error');
       setPhaseError(e instanceof Error ? e.message : 'Failed to create workspace');
+      // Toast reinforces the failure + survives dialog close/reopen.
+      toast.error('Workspace creation failed', {
+        description: e instanceof Error ? e.message : undefined,
+      });
       return;
     }
 
@@ -301,7 +339,7 @@ export function AddWorkspaceDialog() {
     }
 
     // Enter the workspace + flip to the 'done' phase. The dialog stays open
-    // showing the completed checklist until the user clicks "Open workspace"
+    // showing the completed checklist until the user clicks "Open Workspace"
     // — no auto-dismiss, so the user controls when to leave and can verify
     // every step turned green (or skipped) first.
     setActive(ws.id);
@@ -313,6 +351,10 @@ export function AddWorkspaceDialog() {
     useUi.getState().setSessionsPanel(false);
     useUi.getState().setRightPanel(false);
     setPhase('done');
+    // Outcome confirmation — the checklist already shows progress, this
+    // confirms completion (and survives if the user dismisses the dialog).
+    toast.success('Workspace added');
+    if (initGit) toast.success('Git repository initialized');
   };
 
   /** Clear all form state so the next open starts clean. */
@@ -320,6 +362,10 @@ export function AddWorkspaceDialog() {
     setLocalPath('');
     setRemoteUrl('');
     setCloneDir('');
+    setAddScript(false);
+    setInstallCmd('');
+    setRunCmd('');
+    setInitGit(true);
     setNewName('');
     setNewParent('');
     setTemplateId('empty');
@@ -330,7 +376,7 @@ export function AddWorkspaceDialog() {
     setSteps({ folder: 'pending', template: 'pending', git: 'pending', rag: 'pending' });
   };
 
-  /** Close handler for the "Open workspace" button on the done screen.
+  /** Close handler for the "Open Workspace" button on the done screen.
    *  Resets + closes; the workspace is already active (setActive ran during
    *  the flow), so the main UI is showing it underneath. */
   const finishAndClose = () => {
@@ -348,7 +394,7 @@ export function AddWorkspaceDialog() {
         // Allow closing from any non-async phase (choice/form/newProject/
         // template/done). While creating/indexing the user shouldn't be able
         // to dismiss mid-operation. 'done' is included so X/Esc works after
-        // the checklist completes — same effect as the Open workspace button.
+        // the checklist completes — same effect as the Open Workspace button.
         if (!o && phase !== 'creating' && phase !== 'indexing' && phase !== 'error') {
           resetAll();
           close('addWorkspace');
@@ -362,12 +408,12 @@ export function AddWorkspaceDialog() {
             className={cn(
               'size-9 rounded-[10px] flex items-center justify-center shrink-0',
               phase === 'done'
-                ? 'bg-emerald-500/10 border border-emerald-500/20'
+                ? 'bg-success/10 border border-success/20'
                 : 'border',
             )}
             style={
               phase !== 'done'
-                ? { background: 'rgba(217,119,87,0.1)', borderColor: 'rgba(217,119,87,0.2)' }
+                ? { background: 'rgba(--primary)', borderColor: 'rgba(--primary)' }
                 : undefined
             }
           >
@@ -376,7 +422,7 @@ export function AddWorkspaceDialog() {
             ) : phase === 'error' ? (
               <AlertCircle className="size-4 text-destructive" />
             ) : (
-              <FolderGit2 className="size-4 text-primary" />
+              <FolderCode className="size-4 text-primary" />
             )}
           </div>
           <div className="flex-1">
@@ -385,9 +431,9 @@ export function AddWorkspaceDialog() {
                 : phase === 'indexing' ? 'Indexing codebase…'
                 : phase === 'done' ? 'Workspace ready'
                 : phase === 'error' ? 'Failed'
-                : phase === 'newProject' ? 'New project'
+                : phase === 'newProject' ? 'New Project'
                 : phase === 'template' ? 'From Template'
-                : 'New workspace'}
+                : 'New Workspace'}
             </DialogTitle>
             <p className="text-[11px] text-muted-foreground/60 mt-0.5">
               {phase === 'creating' ? 'Setting up the workspace.'
@@ -437,7 +483,7 @@ export function AddWorkspaceDialog() {
                 to leave, after verifying every step is green/skipped. */}
             {phase === 'done' && (
               <Button variant="default" size="sm" className="w-full gap-1.5" onClick={finishAndClose}>
-                <Check className="size-3.5" /> Open workspace
+                <Check className="size-3.5" /> Open Workspace
               </Button>
             )}
           </div>
@@ -535,7 +581,7 @@ export function AddWorkspaceDialog() {
                 <ArrowLeft className="size-3.5" /> Back
               </Button>
               <Button variant="default" size="sm" disabled={!canOpenNew} onClick={handleOpenNewProject} className="gap-1.5">
-                <Check className="size-3.5" /> Create project
+                <Check className="size-3.5" /> Create Project
               </Button>
             </div>
           </>
@@ -641,7 +687,7 @@ export function AddWorkspaceDialog() {
                 className="gap-1.5"
               >
                 <ChevronRight className="size-3.5" />
-                {templateId === 'empty' ? 'Create project' : `Scaffold ${TEMPLATES.find((t) => t.id === templateId)?.label}`}
+                {templateId === 'empty' ? 'Create Project' : `Scaffold ${TEMPLATES.find((t) => t.id === templateId)?.label}`}
               </Button>
             </div>
           </>
@@ -671,7 +717,7 @@ export function AddWorkspaceDialog() {
           {source === 'local' && (
             <>
               <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Repository path</label>
-              <div className="flex gap-2 mb-2.5">
+              <div className="flex gap-2 mb-3">
                 <Input
                   className="font-mono text-[12px] flex-1 h-[34px]"
                   value={localPath}
@@ -707,12 +753,20 @@ export function AddWorkspaceDialog() {
                   <code className="font-mono text-[10px] opacity-80">{gitInfo.fileCount.toLocaleString()} files</code>
                 </div>
               )}
-              {localPath && !gitChecking && gitError && (
-                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[11px] text-warning border border-warning/20 bg-warning/[0.06]">
-                  <X className="size-3.5" />
-                  <span>{gitError}</span>
-                  <span className="text-muted-foreground/50">— Tide works best with git repositories</span>
-                </div>
+                {localPath && !gitChecking && gitError && (
+                  <div className="rounded-[10px] p-3.5 border border-warning bg-warning/10 flex items-start gap-3">
+                    <div className="size-8 rounded-lg bg-warning/20 flex items-center justify-center shrink-0 text-warning">
+                      <TriangleAlert className="size-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-semibold">{gitError}</div>
+                      <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                        Initialize git repo on this folder.
+                      </div>
+
+                    </div>
+                    <Switch checked={initGit} onCheckedChange={setInitGit} className="mt-1.5" />
+                  </div>
               )}
             </>
           )}
@@ -731,7 +785,7 @@ export function AddWorkspaceDialog() {
               </div>
 
               <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Clone destination</label>
-              <div className="flex gap-2 mb-1.5">
+              <div className="flex gap-2 mb-2">
                 <Input
                   className="font-mono text-[12px] flex-1 h-[34px]"
                   value={cloneDir}
@@ -753,7 +807,50 @@ export function AddWorkspaceDialog() {
             </>
           )}
 
-          <div className="h-4" />
+          {/* Script + RAG sections appear only once a project folder is in
+              place — empty-prompts for repo path / clone destination stay the
+              focus until the user has actually pointed at a project. */}
+          {canOpen && (
+            <>
+          <div className="h-3" />
+
+          <div className="rounded-[10px] p-3.5 border border-border bg-card flex items-start gap-3">
+            <div className="size-8 rounded-lg bg-secondary flex items-center justify-center shrink-0 text-muted-foreground">
+              <Terminal className="size-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-semibold">Add Script</div>
+              <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                Bind Install & Run commands to this workspace.
+              </div>
+              {addScript && (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Install</label>
+                    <Input
+                      className="font-mono text-[12px] h-[34px]"
+                      value={installCmd}
+                      onChange={(e) => setInstallCmd(e.target.value)}
+                      placeholder="npm install"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Running</label>
+                    <Input
+                      className="font-mono text-[12px] h-[34px]"
+                      value={runCmd}
+                      onChange={(e) => setRunCmd(e.target.value)}
+                      placeholder="npm run dev"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            <Switch checked={addScript} onCheckedChange={setAddScript} className="mt-1.5" />
+                </div>
+
+
+          <div className="h-3" />
 
           {/* RAG enable card */}
           <div className="rounded-[10px] p-3.5 border border-emerald-500/15 bg-emerald-500/[0.04] flex items-start gap-3 mb-3">
@@ -771,6 +868,8 @@ export function AddWorkspaceDialog() {
             </div>
             <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1.5" />
           </div>
+            </>
+          )}
         </div>
         )}
 
@@ -785,7 +884,7 @@ export function AddWorkspaceDialog() {
               Cancel
             </Button>
             <Button variant="default" size="sm" disabled={!canOpen} onClick={handleOpen} className="gap-1.5">
-              <Check className="size-3.5" /> Open workspace
+              <Check className="size-3.5" /> Open Workspace
             </Button>
           </div>
         </div>

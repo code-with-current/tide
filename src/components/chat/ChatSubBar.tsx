@@ -87,6 +87,33 @@ export function ChatSubBar() {
     return undefined;
   }, [allTerminals, primaryRunName]);
   const isPrimaryRunActive = !!runTerminal;
+
+  // PID-based liveness — the source of truth for whether the Run script is
+  // ACTUALLY still running. The `scriptRunning` flag flips correctly on a
+  // user Stop, but can't detect a crashed/killed dev server. So when a run
+  // terminal exists, poll its pid: if the process died (crash, external
+  // kill, OS shutdown), clear scriptRunning so the button reverts to Run
+  // and port badges clear — without waiting for the user to notice.
+  useEffect(() => {
+    const tid = runTerminal?.id;
+    if (!tid) return;
+    let cancelled = false;
+    const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
+    const poll = async () => {
+      if (cancelled || !ipc) return;
+      const pid = await ipc.terminalGetPid(tid);
+      if (cancelled || !pid) return;
+      const alive = await ipc.processIsAlive(pid);
+      if (cancelled) return;
+      if (!alive) {
+        // Process died without a user Stop — sync the UI to reality.
+        useUi.getState().markTerminalStopped(tid);
+      }
+    };
+    poll(); // immediate check
+    const interval = setInterval(poll, 2000); // then every 2s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [runTerminal?.id]);
   // Aggregate ports from ALL terminals across ALL sessions — multiple
   // scripts can run side by side, each exposing its own dev-server port.
   // Detection is backend-driven (per-PTY output scanning) so it fires
@@ -95,14 +122,17 @@ export function ChatSubBar() {
   // Each badge is stamped with the source terminal's name so the user
   // can tell which script is exposing which port when several are live.
   const aggregatedPorts = useMemo(() => {
-    const nameByTid = new Map<string, string>();
-    for (const list of Object.values(allTerminals)) {
-      for (const t of list) nameByTid.set(t.id, t.name);
+    // Scope to the ACTIVE session's terminals only — otherwise a port
+    // detected in session A's terminal leaks into session B's sub-bar.
+    const activeTids = new Set<string>();
+    for (const t of allTerminals[activeSessionId ?? ''] ?? []) {
+      activeTids.add(t.id);
     }
     const seen = new Set<number>();
     const out: { port: number; url: string; label: string }[] = [];
     for (const [tid, ports] of Object.entries(terminalPorts)) {
-      const tname = nameByTid.get(tid);
+      if (!activeTids.has(tid)) continue; // port belongs to another session
+      const tname = (allTerminals[activeSessionId ?? ''] ?? []).find((t) => t.id === tid)?.name;
       for (const p of ports ?? []) {
         if (seen.has(p.port)) continue;
         seen.add(p.port);
@@ -113,7 +143,7 @@ export function ChatSubBar() {
       }
     }
     return out.sort((a, b) => a.port - b.port);
-  }, [terminalPorts, allTerminals]);
+  }, [terminalPorts, allTerminals, activeSessionId]);
 
   const stopRunTerminal = useCallback(() => {
     if (!runTerminal) return;
@@ -226,12 +256,12 @@ export function ChatSubBar() {
   return (
     <div className="h-10 flex items-center px-4 gap-2 bg-background border-b border-input flex-shrink-0 min-w-0">
       {/* Breadcrumb: workspace › session title */}
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground/60 flex-1 min-w-0">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground/60 flex-1 min-w-0">
         {activeWorkspace && (
           <>
-            <FolderGit2 className="size-5 flex-shrink-0" style={{ opacity: 0.6 }} />
+            <FolderGit2 className="size-4 flex-shrink-0" style={{ opacity: 0.6 }} />
             <span className="text-[0.8rem] text-muted-foreground truncate">{activeWorkspace.name}</span>
-            <ChevronRight className="size-5 flex-shrink-0" style={{ opacity: 0.4 }} />
+            <ChevronRight className="size-4 flex-shrink-0" style={{ opacity: 0.6 }} />
           </>
         )}
         <span className="text-[0.8rem] text-foreground truncate">{sessionTitle}</span>
@@ -243,8 +273,8 @@ export function ChatSubBar() {
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {/* Git branch badge */}
         {gitBranch && (
-          <div className="h-8 flex items-center gap-1 text-muted-foreground/60 font-mono bg-secondary rounded-lg px-2 py-1">
-            <GitBranch className="size-5" style={{ opacity: 0.6 }} />
+          <div className="h-7 flex items-center gap-1 text-muted-foreground/60 font-mono bg-secondary rounded-lg px-2 py-1">
+            <GitBranch className="size-4" style={{ opacity: 0.6 }} />
             <span className="truncate text-[0.8rem] max-w-[120px]">{gitBranch}</span>
           </div>
         )}
@@ -258,7 +288,7 @@ export function ChatSubBar() {
             <Button
               variant={isPrimaryRunActive ? 'destructive' : 'secondary'}
               size="lg"
-              className="h-8 gap-1 px-2 text-[0.8rem]"
+              className="h-7 gap-1 px-2 text-[0.8rem]"
               onClick={() =>
                 isPrimaryRunActive ? stopRunTerminal() : runScriptInTerminal(primaryRun.command)
               }
@@ -281,9 +311,8 @@ export function ChatSubBar() {
               href={p.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 h-6 px-1.5 text-[10px] font-mono text-success bg-success/10 border border-success/25 hover:bg-success/15 transition-colors"
+              className="h-7 inline-flex items-center gap-1 px-1.5 text-[0.8rem] font-mono rounded-lg text-success bg-success/10 border border-success/25 hover:bg-success/15 transition-colors"
             >
-              <span className="size-1.5 bg-success animate-pulse-soft" />
               :{p.port}
             </a>
           </Tip>
@@ -293,7 +322,7 @@ export function ChatSubBar() {
         {activeWorkspace && scripts.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-9 gap-0.5 text-[0.8rem] px-1.5 text-muted-foreground">
+              <Button variant="ghost" size="sm" className="h-7 gap-0.5 text-[0.8rem] px-1.5 text-muted-foreground">
                 <Hammer className="size-3" />
                 <ChevronDown className="size-3" />
               </Button>

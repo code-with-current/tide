@@ -15,6 +15,10 @@
 export function stripCommandPrefix(msg: string): string {
   return msg
     .trim()
+    // Strip leading attachment / @file link blocks ([/label/](target))
+    // introduced by the composer's display format — they carry no
+    // semantic value for a session title.
+    .replace(/(?:^|\n)\s*\[\/[^\]]*\/\]\([^)]*\)\s*/g, ' ')
     .replace(/^\/[A-Za-z0-9_-]+(?:\s+|$)/, '')
     .replace(/^@[A-Za-z0-9_-]+(?:\s+|$)/, '')
     .trim();

@@ -1,11 +1,11 @@
 /**
  * RAG IPC — handlers + event channel backing the Memory & RAG panel.
  *   tide:rag:status            read-only snapshot
- *   tide:rag:downloadModel     pre-fetch ONNX model (no workspace mutation)
+ *   tide:rag:downloadModel     download embedding model from HuggingFace (lazy)
  *   tide:rag:enableWorkspace   download-if-needed + add to enabled list
  *   tide:rag:disableWorkspace  remove from enabled list
  *   tide:rag:initWorkspace     ingestion pipeline (background)
- * Events: tide:rag:initProgress
+ * Events: tide:rag:initProgress, tide:rag:downloadProgress
  */
 import { ipcMain, BrowserWindow, app } from 'electron';
 import * as fs from 'node:fs';
@@ -14,9 +14,11 @@ import Database from 'better-sqlite3';
 import * as store from '../store.js';
 import { hydrateRagConfig } from '../configStore.js';
 import { isRagCloudConfigured } from '../agent/system-model.js';
-import { LocalOnnxEmbedder, localModelExists } from '../rag/local-onnx-embedder.js';
+import { localModelExists } from '../rag/local-onnx-embedder.js';
+import { downloadModel } from '../rag/model-downloader.js';
 import { ingestWorkspace } from '../rag/ingest.js';
 import { createLogger } from '../logger.js';
+import { appDataDir } from '../appPaths.js';
 import type {
   RagStatus,
   RagWorkspaceOpResult,
@@ -25,7 +27,6 @@ import type {
 } from '../../src/types';
 
 const log = createLogger('rag');
-const localProbe = new LocalOnnxEmbedder();
 const runningInits = new Map<string, Promise<unknown>>();
 
 const EMPTY_STATUS: RagStatus = {
@@ -84,7 +85,7 @@ export function getRagStatus(workspaceId: string): RagStatus {
 }
 
 function readIngestState(workspaceId: string): { chunkCount: number; lastIngestedAt: number | null } {
-  const dbPath = path.join(app.getPath('userData'), 'rag', workspaceId, 'index.db');
+  const dbPath = path.join(appDataDir(), 'rag', workspaceId, 'index.db');
   if (!fs.existsSync(dbPath)) return { chunkCount: 0, lastIngestedAt: null };
   try {
     const db = new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -103,11 +104,35 @@ function readIngestState(workspaceId: string): { chunkCount: number; lastIngeste
 export async function downloadRagModel(): Promise<RagWorkspaceOpResult> {
   if (localModelExists()) return { ok: true };
   try {
-    await localProbe.embed(['tide-warmup']);
+    await downloadModel((progress) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        w.webContents.send('tide:rag:downloadProgress', {
+          received: progress.received,
+          total: progress.total,
+          phase: 'downloading' as const,
+        });
+      }
+    });
+    // Final event — signals completion.
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('tide:rag:downloadProgress', {
+        received: 0,
+        total: 0,
+        phase: 'done' as const,
+      });
+    }
     return { ok: true };
   } catch (e: unknown) {
     const error = e instanceof Error ? e.message : String(e);
     log.error('model download failed', { err: e });
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('tide:rag:downloadProgress', {
+        received: 0,
+        total: 0,
+        phase: 'failed' as const,
+        error,
+      });
+    }
     return { ok: false, error };
   }
 }
@@ -159,6 +184,7 @@ export function registerRagHandlers(): void {
     }
   });
   ipcMain.handle('tide:rag:downloadModel', async () => downloadRagModel());
+  ipcMain.handle('tide:rag:modelExists', () => localModelExists());
   ipcMain.handle('tide:rag:enableWorkspace', async (_e: unknown, workspaceId: string) => enableRagWorkspace(workspaceId));
   ipcMain.handle('tide:rag:disableWorkspace', (_e: unknown, workspaceId: string) => disableRagWorkspace(workspaceId));
   ipcMain.handle('tide:rag:initWorkspace', (_e: unknown, workspaceId: string) => initRagWorkspace(workspaceId));

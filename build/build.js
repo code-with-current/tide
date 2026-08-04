@@ -2,6 +2,12 @@
 
 import builder from 'electron-builder'
 import { execSync } from 'child_process'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(__dirname, '..')
 
 /**
 * @type {import('electron-builder').Configuration}
@@ -240,6 +246,9 @@ if (params.target != 'dir' && params.type == null) throw new Error('Missing type
 // vendor tree-sitter grammars into dist-electron/grammars/. The chunker
 // is bundled into main.mjs, so __dirname at runtime is dist-electron/
 // and it loads grammars from there. Skipping any step ships a broken app.
+console.log('Bundling system prompt...')
+execSync('node build/promptMarkdownUtils.mjs', { stdio: 'inherit' })
+
 console.log('Building renderer (dist/)...')
 execSync('npm run build', { stdio: 'inherit' })
 
@@ -252,8 +261,22 @@ execSync('npx vite build --config vite.electron.config.ts', { stdio: 'inherit' }
 console.log('Vendoring tree-sitter grammars into dist-electron/grammars/...')
 execSync('node build/copy-tree-sitter-grammars.mjs --dist', { stdio: 'inherit' })
 
-console.log(params.target, params.arch, params.type, params.publish ?? '')
-build(params.target, params.arch, params.type, params.publish)
+// Remove any stale model from dist-electron/models/ — the embedding model
+// is lazy-downloaded from HuggingFace at runtime (see electron/rag/model-downloader.ts),
+// so it must NOT ship in the bundle. A stale copy from dev builds may linger
+// here because vite.electron.config.ts sets emptyOutDir:false (to preserve
+// grammars). This guard ensures production builds never carry the 22 MB model.
+const staleModel = path.join(ROOT, 'dist-electron', 'models')
+if (fs.existsSync(staleModel)) {
+  console.log('Removing stale model from dist-electron/models/ (lazy-downloaded at runtime)...')
+  fs.rmSync(staleModel, { recursive: true, force: true })
+}
+
+// electron-builder accepts: "onTag", "onTagOrDraft", "always", "never".
+// Map "none" (used in npm scripts) to "never".
+const publishParam = params.publish === 'none' || !params.publish ? 'never' : params.publish
+console.log(params.target, params.arch, params.type, publishParam)
+build(params.target, params.arch, params.type, publishParam)
   .then(() => console.log('Build completed!'))
   .catch(err => {
     console.error('Build failed:', err)

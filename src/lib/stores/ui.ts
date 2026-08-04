@@ -7,7 +7,7 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('ui');
 
-export type ScreenName = 'splash' | 'onboarding' | 'main' | 'settings';
+export type ScreenName = 'splash' | 'onboarding' | 'consent' | 'main' | 'settings';
 
 // Re-export for back-compat — ThinkingLevel now lives in @/types (with 'off' added).
 export type { ThinkingLevel };
@@ -73,6 +73,44 @@ export interface OpenFile {
   changedLines?: number[];
   /** When present, the viewer renders a diff (DiffView) instead of file content. */
   diffHunks?: DiffHunk[];
+  /** When present, the viewer renders this content directly instead of
+   *  reading from disk. Used for composer attachments whose inline content
+   *  was already read (pasted files, browsed external files) and that may
+   *  live outside the workspace. */
+  inlineContent?: string;
+  /** True when the file originated as a composer attachment (browsed or
+   *  pasted), NOT a workspace file. The viewer must NEVER attempt a
+   *  workspace disk read for these — they may live outside the workspace,
+   *  and after a reload their inline content is gone (attachments aren't
+   *  persisted). Distinct from inlineContent: an image attachment sets
+   *  external=true with no inlineContent, and the viewer shows a
+   *  placeholder instead of erroring on a disk read. */
+  external?: boolean;
+  /** Byte count of the original file, when known (shown in the header). */
+  bytes?: number;
+  /** True when the file is a binary image — the viewer renders an <img>
+   *  preview instead of a text/code block. */
+  isImage?: boolean;
+  /** Absolute on-disk path for external files (browsed/pasted attachments).
+   *  When set with external=true, the viewer reads via readExternalFile
+   *  (no workspace sandbox). Survives reload because it's encoded in the
+   *  content link target. */
+  absPath?: string;
+}
+
+/** A file attached to the composer (browsed or pasted). Mirrors AttachedFile
+ *  from the composer's AttachButton module; redeclared here so the store
+ *  doesn't import from a component. */
+export interface ComposerAttachment {
+  path: string;
+  kind: 'code' | 'image' | 'text' | 'paste';
+  content?: string;
+  bytes?: number;
+  truncated?: boolean;
+  /** Absolute on-disk path (when known). Browsed/pasted files keep it so the
+   *  viewer can re-read the file via readExternalFile even after a reload,
+   *  when the inline content is gone. The short display name stays in `path`. */
+  absPath?: string;
 }
 
 /** Default empty stream state. Used as the fallback when no entry exists
@@ -87,11 +125,13 @@ export const EMPTY_STREAM: SessionStream = Object.freeze({
   blocks: [],
   toolBlockIndex: {},
   turn: undefined,
-  usage: null,
+  usage: null, sessionCostUsd: 0,
   iteration: 0,
   permissionRequest: null,
   isStreaming: false,
   error: null,
+  retry: null,
+  compacting: false,
   stopReason: null,
   finalMessage: null,
 });
@@ -124,9 +164,9 @@ export function freshStream(): SessionStream {
     text: '', reasoning: '', toolCalls: [], timeline: [],
     blocks: [], toolBlockIndex: {},
     turn: undefined,
-    usage: null, iteration: 0,
-    permissionRequest: null, isStreaming: false, error: null,
-    stopReason: null, finalMessage: null,
+    usage: null, sessionCostUsd: 0, iteration: 0,
+    permissionRequest: null, isStreaming: false, error: null, retry: null,
+    compacting: false, stopReason: null, finalMessage: null,
   };
 }
 
@@ -240,6 +280,27 @@ interface UiState {
   /** Per-session file tabs opened in the right-panel viewer. */
   openFiles: Record<string, OpenFile[]>;
   activeOpenFile: Record<string, string | undefined>;
+
+  /** Composer attachments shared across the two ChatComposer instances
+   *  (chat view + empty/new-session view) so pasted/attached files survive
+   *  switching sessions/workspaces, which remounts the composer. */
+  composerAttachments: ComposerAttachment[];
+  /** In-flight paste-file reads; send is gated on this reaching 0. */
+  composerPendingReads: number;
+
+  /** Session ids whose title is currently being LLM-generated. Drives a
+   *  shimmer animation on the sidebar title while the fire-and-forget
+   *  generateSessionTitle call is in flight. */
+  titleGeneratingSessionIds: Set<string>;
+
+  // Composer attachment actions
+  addComposerAttachment: (f: ComposerAttachment) => void;
+  removeComposerAttachment: (path: string) => void;
+  clearComposerAttachments: () => void;
+  bumpComposerPendingReads: (delta: number) => void;
+  /** Title-generation flag actions (shimmer on the sidebar title). */
+  addTitleGenerating: (sessionId: string) => void;
+  removeTitleGenerating: (sessionId: string) => void;
 
   // Actions
   setScreen: (s: ScreenName) => void;
@@ -390,10 +451,41 @@ export const useUi = create<UiState>()(
   terminalPorts: {},
   openFiles: {},
   activeOpenFile: {},
+  composerAttachments: [],
+  composerPendingReads: 0,
+  titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
 
   setScreen: (screen) => set({ screen }),
   setMainView: (mainView) => set({ mainView }),
+  addComposerAttachment: (f) =>
+    set((state) => ({
+      composerAttachments: state.composerAttachments.some((x) => x.path === f.path)
+        ? state.composerAttachments
+        : [...state.composerAttachments, f],
+    })),
+  removeComposerAttachment: (path) =>
+    set((state) => ({
+      composerAttachments: state.composerAttachments.filter((x) => x.path !== path),
+    })),
+  clearComposerAttachments: () => set({ composerAttachments: [] }),
+  bumpComposerPendingReads: (delta) =>
+    set((state) => ({ composerPendingReads: Math.max(0, state.composerPendingReads + delta) })),
+  // Set-based add/remove so the sidebar title re-renders (and starts/stops
+  // shimmering) the instant the flag flips. New Set identity each update so
+  // Zustand's shallow-equality subscribers detect the change.
+  addTitleGenerating: (sessionId) =>
+    set((state) => {
+      if (state.titleGeneratingSessionIds.has(sessionId)) return {};
+      return { titleGeneratingSessionIds: new Set(state.titleGeneratingSessionIds).add(sessionId) };
+    }),
+  removeTitleGenerating: (sessionId) =>
+    set((state) => {
+      if (!state.titleGeneratingSessionIds.has(sessionId)) return {};
+      const next = new Set(state.titleGeneratingSessionIds);
+      next.delete(sessionId);
+      return { titleGeneratingSessionIds: next };
+    }),
   setActiveWorkspace: (activeWorkspaceId) =>
     set({ activeWorkspaceId, activeSessionId: null, mainView: 'new', sessionsPanelOpen: true }),
   setActiveSession: (activeSessionId) => {
@@ -680,6 +772,13 @@ export const useUi = create<UiState>()(
                 t.id === terminalId ? { ...t, scriptRunning: false } : t,
               ),
             },
+            // Clear this terminal's ports too — the process is dead, so its
+            // exposed dev-server port is no longer reachable. Keeps port
+            // badges in sync when a process dies (crash / external kill),
+            // not just on a user-initiated Stop.
+            terminalPorts: Object.fromEntries(
+              Object.entries(s.terminalPorts).filter(([k]) => k !== terminalId),
+            ),
           };
         }
       }
@@ -783,7 +882,7 @@ export const useUi = create<UiState>()(
   fontScale: 14,
   reduceMotion: false,
   terminalTheme: 'tide-dark',
-  terminalFontSize: 14,
+  terminalFontSize: 11,
   appTheme: 'tide',
   setAppearance: (patch) => {
     set(patch);
@@ -878,4 +977,3 @@ export const useUi = create<UiState>()(
     },
   ),
 );
-

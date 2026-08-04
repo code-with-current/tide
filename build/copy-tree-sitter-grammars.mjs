@@ -74,18 +74,9 @@ if (process.argv.includes('--dist')) {
   fs.mkdirSync(DIST_DIR, { recursive: true });
   stage(DIST_DIR, 'dist');
 
-  // Stage the bundled ONNX model — skip if already present (it never
-  // changes after bundling). The 22MB cpSync was the main startup
-  // bottleneck when it ran unconditionally on every dev launch.
-  const MODEL_SRC = path.join(ROOT, 'electron', 'rag', 'models');
-  const MODEL_DEST = path.join(ROOT, 'dist-electron', 'models');
-  const MODEL_ONNX = path.join(MODEL_DEST, 'isuruwijesiri/all-MiniLM-L6-v2-code-search-512/onnx/model_quantized.onnx');
-  if (fs.existsSync(MODEL_SRC) && !fs.existsSync(MODEL_ONNX)) {
-    fs.mkdirSync(MODEL_DEST, { recursive: true });
-    fs.cpSync(MODEL_SRC, MODEL_DEST, { recursive: true });
-    console.log('[model] staged to dist-electron/models/');
-  } else {
-    console.log('[model] already staged — skipping.');
-  }
+  // NOTE: The ONNX model is no longer staged here for production builds.
+  // It is lazy-downloaded from HuggingFace on first RAG enable (see
+  // electron/rag/model-downloader.ts). Dev builds stage it separately via
+  // smart-dev.mjs so dev never needs a download.
 }
 

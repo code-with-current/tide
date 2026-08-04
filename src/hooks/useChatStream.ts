@@ -47,7 +47,7 @@ function removePendingPermissionCards(sessionId: string, ids: string[]): void {
 export function useChatStream(): {
   start: (args: ChatStreamStartArgs) => Promise<void>;
   abort: (sessionId: string) => void;
-  approveToolCalls: (sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: 'session' | 'project') => void;
+  approveToolCalls: (sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   rejectToolCalls: (sessionId: string, toolCallIds: string[], reason?: string) => void;
   submitFollowup: (sessionId: string, toolCallId: string, answer: string) => void;
 } {
@@ -76,7 +76,19 @@ export function useChatStream(): {
           error: err?.message || 'Failed to start turn',
           isStreaming: false,
         });
+      } finally {
+        // Always clear the running indicator when the turn's IPC call
+        // returns — covers the case where the turn ends with no result and
+        // no throw (no finalMessage, so the MainScreen freeze effect never
+        // fires). Without this, the session chat indicator stays stuck on
+        // "processing" after a no-result turn. setSessionRunning is a no-op
+        // when the state already matches, so this is safe alongside the
+        // finalMessage effect's own clear.
         useUi.getState().setSessionRunning(args.sessionId, false);
+        // Also ensure isStreaming clears if no turn_end event arrived.
+        if (useUi.getState().streams[args.sessionId]?.isStreaming) {
+          useUi.getState().patchStream(args.sessionId, { isStreaming: false });
+        }
       }
     },
     [ipc],
@@ -102,7 +114,7 @@ export function useChatStream(): {
       sessionId: string,
       toolCallIds: string[],
       newMode?: 'plan' | 'ask' | 'edit' | 'full',
-      remember?: 'session' | 'project',
+      remember?: boolean,
     ) => {
       if (!ipc) return;
       ipc.approveToolCalls(sessionId, toolCallIds, newMode, remember);
@@ -189,6 +201,7 @@ export function useChatStream(): {
     ipc.onAgentEvent((event: AgentEvent) => {
       const sid = event.sessionId;
       const urgent = event.type === 'turn_end' || event.type === 'error'
+                  || event.type === 'retry'
                   || event.type === 'permission_required'
                   || event.type === 'followup_required';
       const arr = queues.get(sid) ?? [];
@@ -231,8 +244,10 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
   switch (event.type) {
     case 'delta': {
       // Append to legacy `text` + maintain the timeline's last text entry.
+      // Clear the compacting flag — compaction finished, the model is now
+      // streaming the next step.
       const timeline = appendTextToTimeline(state.timeline, event.text);
-      return { ...state, text: state.text + event.text, timeline };
+      return { ...state, text: state.text + event.text, timeline, compacting: false };
     }
     case 'reasoning':
       return { ...state, reasoning: state.reasoning + event.delta };
@@ -310,7 +325,12 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
         ),
       };
     case 'usage':
-      return { ...state, usage: event.tokens, iteration: event.iteration };
+      return {
+        ...state,
+        usage: event.tokens,
+        iteration: event.iteration,
+        sessionCostUsd: event.runningTotalUsd ?? state.sessionCostUsd,
+      };
     case 'permission_required': {
       // Append (dedupe by id) — parallel gated tools in one step each emit
       // their own permission_required; accumulate so all cards render and
@@ -344,6 +364,8 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
         isStreaming: false,
         stopReason: event.stopReason,
         permissionRequest: null,
+        retry: null,
+        compacting: false,
         finalMessage: {
           content: event.content ?? '',
           timeline: event.timeline,
@@ -352,11 +374,23 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
           reasoningTokens: event.reasoningTokens,
           toolCalls: event.toolCalls,
           usage: event.usage,
+          lastStepUsage: event.lastStepUsage,
         },
       };
     }
+    case 'retry':
+      // Orchestrator is retrying — keep streaming, clear the error, track the attempt.
+      return {
+        ...state,
+        error: null,
+        isStreaming: true,
+        retry: { attempt: event.attempt, maxAttempts: event.maxAttempts, reason: event.reason },
+      };
+    case 'compacting':
+      // Autocompact is summarizing the conversation. Show a brief indicator.
+      return { ...state, compacting: true };
     case 'error':
-      return { ...state, error: event.message, isStreaming: false, permissionRequest: null };
+      return { ...state, error: event.message, isStreaming: false, retry: null, permissionRequest: null };
     default:
       return state;
   }
@@ -364,20 +398,23 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
 
 /** Append a text chunk to the live timeline. If the last timeline entry is
  *  a tool (or empty), start a new text entry. Returns a new array; never
- *  mutates the input. */
+ *  mutates the input.
+ *
+ *  Performance: only the LAST entry is copied — the rest are reused by
+ *  reference. This avoids O(N) object allocations per delta on long
+ *  conversations with many timeline entries. */
 function appendTextToTimeline(
   timeline: SessionStream['timeline'],
   chunk: string,
 ): SessionStream['timeline'] {
   if (!chunk) return timeline;
-  const next = timeline.map((e) =>
-    e.type === 'text' ? { type: 'text' as const, text: e.text } : { ...e },
-  );
-  const last = next[next.length - 1];
+  const last = timeline[timeline.length - 1];
   if (last && last.type === 'text') {
-    last.text += chunk;
-    return next;
+    // Reuse all but the last entry (same reference); only clone the last.
+    return [
+      ...timeline.slice(0, -1),
+      { type: 'text' as const, text: last.text + chunk },
+    ];
   }
-  next.push({ type: 'text', text: chunk });
-  return next;
+  return [...timeline, { type: 'text', text: chunk }];
 }

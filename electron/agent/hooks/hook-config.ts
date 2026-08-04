@@ -7,15 +7,15 @@
  * continuation.
  *
  * Config sources (in priority order):
- *   1. Project: `.agent/hooks.json` in the workspace root
- *   2. User: `~/.agent/hooks.json`
+ *   1. Project: `.agents/hooks.json` in the workspace root
+ *   2. User: `~/.tide/hooks.json` (or `~/.tide-dev/hooks.json` in dev)
  *
  * Both are merged; project hooks take precedence for the same event+tool
  * pattern.
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { appDataDir } from '../../appPaths.js';
 
 /** A single hook entry. */
 export interface HookEntry {
@@ -45,8 +45,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  * not an error).
  */
 export function loadHookConfig(workspaceRoot: string): HookConfig {
-  const projectPath = path.join(workspaceRoot, '.agent', 'hooks.json');
-  const userPath = path.join(os.homedir(), '.agent', 'hooks.json');
+  const projectPath = path.join(workspaceRoot, '.agents', 'hooks.json');
+  const userPath = path.join(appDataDir(), 'hooks.json');
 
   const project = loadHookFile(projectPath);
   const user = loadHookFile(userPath);
