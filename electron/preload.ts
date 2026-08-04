@@ -97,6 +97,10 @@ contextBridge.exposeInMainWorld('tideIpc', {
   removeAllMcpListeners: () => {
     ipcRenderer.removeAllListeners('tide:mcp:statusChanged');
   },
+  // Notification click → switch to the session that completed.
+  onNavigateToSession: (callback: (sessionId: string) => void) => {
+    ipcRenderer.on('tide:navigateToSession', (_e, sessionId: string) => callback(sessionId));
+  },
   // Reveal a file/folder in the OS file manager (Finder/Explorer).
   showItemInFolder: (fullPath: string) => {
     const { shell } = require('electron');
@@ -159,6 +163,10 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:getAgentSettings'),
   updateAgentSettings: (patch: Record<string, unknown>) =>
     ipcRenderer.invoke('tide:updateAgentSettings', patch),
+  getGeneralSettings: () =>
+    ipcRenderer.invoke('tide:getGeneralSettings'),
+  updateGeneralSettings: (patch: Record<string, unknown>) =>
+    ipcRenderer.invoke('tide:updateGeneralSettings', patch),
   archiveSession: (sessionId: string) =>
     ipcRenderer.invoke('tide:archiveSession', sessionId),
   unarchiveSession: (sessionId: string) =>

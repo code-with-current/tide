@@ -154,6 +154,7 @@ declare global {
       mcpWorkspaceActivated(workspaceId: string, workspaceRoot: string): Promise<{ ok: boolean }>;
       onMcpStatusChanged(callback: () => void): void;
       removeAllMcpListeners(): void;
+      onNavigateToSession(callback: (sessionId: string) => void): void;
       showItemInFolder(fullPath: string): void;
       /** Open an http(s) URL in the system browser. No-op for other schemes. */
       openExternal(url: string): void;
@@ -211,6 +212,8 @@ declare global {
       generateSessionTitle(sessionId: string): Promise<string | null>;
       getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean }>;
       updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean }>;
+      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string }>;
+      updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string }>;
       archiveSession(sessionId: string): Promise<void>;
       unarchiveSession(sessionId: string): Promise<void>;
       listArchivedSessions(workspaceId: string): Promise<import('./index').ArchivedHeader[]>;

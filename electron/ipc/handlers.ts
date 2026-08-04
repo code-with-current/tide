@@ -25,7 +25,7 @@ import { registerRagHandlers } from './rag.js';
 
 import { forwardLog, createLogger } from '../logger.js';
 import type { Workspace, FileNode, ProviderModelMeta } from '../../src/types';
-import type { AgentSettings } from '../configStore.js';
+import type { AgentSettings, GeneralSettings } from '../configStore.js';
 import { appDataDir } from '../appPaths.js';
 
 const log = createLogger('ipc');
@@ -847,6 +847,24 @@ export function registerIpcHandlers() {
     log.info('agent settings updated', { keys: Object.keys(patch) });
     store.updateAgentSettings(patch);
     return store.getAgentSettings();
+  });
+
+  // ── General settings (Settings → General) ─────────────────────
+  ipcMain.handle('tide:getGeneralSettings', async () => {
+    return store.getGeneralSettings();
+  });
+  ipcMain.handle('tide:updateGeneralSettings', async (_e, patch: Partial<GeneralSettings>) => {
+    log.info('general settings updated', { keys: Object.keys(patch) });
+    store.updateGeneralSettings(patch);
+    // Side-effect: apply login item immediately.
+    if ('startAtLogin' in patch) {
+      try {
+        app.setLoginItemSettings({ openAtLogin: !!patch.startAtLogin });
+      } catch (e) {
+        log.warn('failed to set login item', { err: e });
+      }
+    }
+    return store.getGeneralSettings();
   });
 
   handle('tide:archiveSession', async (_e, sessionId: string) => {

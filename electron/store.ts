@@ -96,6 +96,8 @@ export const getSecret = (...a: Parameters<ReturnType<typeof createConfigStore>[
 export const setSecret = (...a: Parameters<ReturnType<typeof createConfigStore>['setSecret']>) => getStore().setSecret(...a);
 export const getAgentSettings = (...a: Parameters<ReturnType<typeof createConfigStore>['getAgentSettings']>) => getStore().getAgentSettings(...a);
 export const updateAgentSettings = (...a: Parameters<ReturnType<typeof createConfigStore>['updateAgentSettings']>) => getStore().updateAgentSettings(...a);
+export const getGeneralSettings = (...a: Parameters<ReturnType<typeof createConfigStore>['getGeneralSettings']>) => getStore().getGeneralSettings(...a);
+export const updateGeneralSettings = (...a: Parameters<ReturnType<typeof createConfigStore>['updateGeneralSettings']>) => getStore().updateGeneralSettings(...a);
 export const listRagEnabledWorkspaces = (...a: Parameters<ReturnType<typeof createConfigStore>['listRagEnabledWorkspaces']>) => getStore().listRagEnabledWorkspaces(...a);
 export const addRagEnabledWorkspace = (...a: Parameters<ReturnType<typeof createConfigStore>['addRagEnabledWorkspace']>) => getStore().addRagEnabledWorkspace(...a);
 export const removeRagEnabledWorkspace = (...a: Parameters<ReturnType<typeof createConfigStore>['removeRagEnabledWorkspace']>) => getStore().removeRagEnabledWorkspace(...a);

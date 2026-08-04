@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'child_process';
-import { toolEnv } from './tool-env';
+import { toolEnv, killProcessTree } from './tool-env';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { resolveInsideWorkspace } from '../path-safety';
@@ -19,6 +19,8 @@ import { getToolMeta } from './tool-meta';
 import type { ToolResult, ToolRegistration } from './types';
 import type { ToolContext } from './tool-context';
 import { withPermission } from '../permission-wrapper';
+import { createConfigStore } from '../../configStore.js';
+import { appDataDir } from '../../appPaths.js';
 
 const MAX_OUTPUT = 50 * 1024;
 
@@ -86,11 +88,65 @@ export async function runGit(
     }
   }
 
+  // ── Co-authoring: when gitCoAuthored is enabled in General settings,
+  //    append a Co-authored-by trailer to commit messages. The trailer
+  //    uses the user-configurable name + email (defaults to Tide /
+  //    309788114+code-with-current@users.noreply.github.com).
+  let effectiveArgv = argv;
+  if (sub === 'commit') {
+    try {
+      const store = createConfigStore(appDataDir());
+      const gs = store.getGeneralSettings();
+      if (gs.gitCoAuthored) {
+        const trailer = `\n\nCo-authored-by: ${gs.gitCoAuthorName} <${gs.gitCoAuthorEmail}>`;
+        effectiveArgv = argv.map((arg) => {
+          // -m "message" → append trailer inside the quotes
+          if (arg.startsWith('-m "') && arg.endsWith('"')) {
+            return arg.slice(0, -1) + trailer + '"';
+          }
+          // -m "message (unterminated quote — skip)
+          if (arg === '-m') return arg; // next arg is the message, handled below
+          return arg;
+        });
+        // Handle the case where -m and the message are separate args:
+        // ["commit", "-m", "my message"] → append trailer to the message arg
+        const mIdx = effectiveArgv.indexOf('-m');
+        if (mIdx >= 0 && mIdx + 1 < effectiveArgv.length) {
+          const msgArg = effectiveArgv[mIdx + 1];
+          if (!msgArg.startsWith('-')) {
+            effectiveArgv[mIdx + 1] = msgArg + trailer;
+          }
+        }
+        // Handle --message="..." form
+        effectiveArgv = effectiveArgv.map((arg) => {
+          if (arg.startsWith('--message=') && !arg.includes('Co-authored-by')) {
+            return arg + trailer.replace(/\n/g, '\\n');
+          }
+          return arg;
+        });
+      }
+    } catch { /* config unreadable — skip co-authoring */ }
+  }
+
   return new Promise((resolve) => {
     const start = Date.now();
-    const child = spawn('git', argv, {
+    // Performance env flags for git: disable optional locks (faster on large
+    // repos), disable external diff tools (prevents spawning slow subprocesses),
+    // and cap rename detection (the most expensive part of git diff).
+    const gitEnv = {
+      ...toolEnv(),
+      GIT_OPTIONAL_LOCKS: '0',
+      GIT_NO_REPLACE_OBJECTS: '1',
+    };
+    // Inject performance flags for diff specifically — --no-ext-diff prevents
+    // spawning an external diff tool, --no-rename skips rename detection.
+    let finalArgv = effectiveArgv;
+    if (sub === 'diff' && !effectiveArgv.includes('--no-ext-diff')) {
+      finalArgv = ['diff', '--no-ext-diff', '--no-color', ...effectiveArgv.slice(1)];
+    }
+    const child = spawn('git', finalArgv, {
       cwd,
-      env: toolEnv(),
+      env: gitEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
     });
@@ -101,7 +157,12 @@ export async function runGit(
 
     const timer = setTimeout(() => {
       killed = true;
-      try { child.kill('SIGKILL'); } catch { /* dead */ }
+      // Use killProcessTree (not child.kill) so spawned sub-processes
+      // (diff tools, hooks, etc.) are also terminated.
+      killProcessTree(child.pid, 'SIGTERM');
+      if (process.platform !== 'win32') {
+        setTimeout(() => killProcessTree(child.pid, 'SIGKILL'), 500);
+      }
     }, timeoutMs);
 
     child.stdout?.on('data', (d: Buffer) => {

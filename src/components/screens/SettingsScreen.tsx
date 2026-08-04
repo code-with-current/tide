@@ -3,7 +3,7 @@ import {
   ArrowLeft,
   KeyRound,
   Shield,
-  Palette,
+  Settings,
   Keyboard,
   Info,
   Bot,
@@ -18,6 +18,7 @@ import { cn, isMac } from "@/lib/utils";
 import { ProvidersSection } from "./settings/ProvidersSection";
 import { AutonomyCapsSection } from "./settings/AutonomyCapsSection";
 import { AppearanceSection } from "./settings/AppearanceSection";
+import { GeneralSection } from "./settings/GeneralSection";
 import { ShortcutsSection } from "./settings/ShortcutsSection";
 import { AboutSection } from "./settings/AboutSection";
 import { WorkspaceSettingsSection } from "./settings/WorkspaceSettingsSection";
@@ -29,6 +30,7 @@ type SectionId =
   | "providers"
   | "autonomy"
   | "workspace"
+  | "general"
   | "appearance"
   | "shortcuts"
   | "updates"
@@ -44,7 +46,7 @@ type NavGroup = { label?: string | undefined; items: NavItem[] };
 const NAV_GROUPS: NavGroup[] = [
   {
     items: [
-      { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "general", label: "General", icon: Settings },
       { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
     ],
   },
@@ -175,8 +177,9 @@ export function SettingsScreen() {
             {section === "providers" && <ProvidersSection />}
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto px-8 py-6">
+          <div className="max-w-5xl mx-auto px-8 py-6">
             {section === "autonomy" && <AutonomyCapsSection />}
+            {section === "general" && <GeneralSection />}
             {section === "appearance" && <AppearanceSection />}
             {section === "shortcuts" && <ShortcutsSection />}
             {section === "agents" && <AgentsSection />}

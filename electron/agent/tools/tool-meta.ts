@@ -36,7 +36,7 @@ export const toolMeta: Record<ToolName, ToolMeta> = {
   bash:          { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 120_000, category: 'commands' },
   bash_output:   { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 5_000,   category: 'commands' },
   kill_shell:    { riskTier: 'write',       autoApproveIn: WRITE_MODES, timeoutMs: 5_000, category: 'commands' },
-  git:           { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 30_000,  category: 'commands' },
+  git:           { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 15_000,  category: 'commands' },
 
   // ─── Edits ──────────────────────────────────────────────────────────
   edit_file:     { riskTier: 'write',       autoApproveIn: WRITE_MODES, timeoutMs: 30_000, category: 'edits' },

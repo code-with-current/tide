@@ -48,6 +48,8 @@ import { askFollowupTool } from './ask-followup';
 import { exitPlanModeTool } from './exit-plan-mode';
 import { compactTool } from './compact';
 import { slashCommandTool } from './slash-command';
+import { directoryTreeTool } from './directory-tree';
+import { readMediaFileTool } from './read-media-file';
 
 // New SDK factory imports (Phase 2+). Aliased to avoid colliding with the
 // legacy ToolContext shape from ./types.
@@ -71,6 +73,8 @@ import { createLoadSkillTool } from './load-skill';
 import { createDispatchAgentTool } from './dispatch-agent';
 import { createAskFollowupTool } from './ask-followup';
 import { createCompactTool } from './compact';
+import { createDirectoryTreeTool } from './directory-tree';
+import { createReadMediaFileTool } from './read-media-file';
 import { memoryTool, createMemoryTool } from './memory';
 import type { ToolContext as SdkToolContext } from './tool-context';
 import { withToolHooks } from '../hooks/with-tool-hooks';
@@ -83,6 +87,8 @@ const REGISTRY: Record<string, ToolRegistration> = {
   // File system
   read_file: readFileTool,
   list_dir: listDirTool,
+  directory_tree: directoryTreeTool,
+  read_media_file: readMediaFileTool,
   glob: globTool,
   grep: grepTool,
   edit_file: editFileTool,
@@ -178,6 +184,8 @@ const FACTORIES = {
   bash: createBashTool,
   read_file: createReadFileTool,
   list_dir: createListDirTool,
+  directory_tree: createDirectoryTreeTool,
+  read_media_file: createReadMediaFileTool,
   write_file: createWriteFileTool,
   edit_file: createEditFileTool,
   glob: createGlobTool,
@@ -222,6 +230,17 @@ const TOOL_ALIASES: Record<string, string> = {
   create_file: 'write_file',
   read_file_content: 'read_file',
   file_search: 'glob',
+  // Former MCP filesystem server tools → now native built-ins
+  'mcp__tide-filesystem__directory_tree': 'directory_tree',
+  'mcp__tide-filesystem__read_file': 'read_file',
+  'mcp__tide-filesystem__write_file': 'write_file',
+  'mcp__tide-filesystem__edit_file': 'edit_file',
+  'mcp__tide-filesystem__list_directory': 'list_dir',
+  'mcp__tide-filesystem__read_media_file': 'read_media_file',
+  'mcp__tide-filesystem__move_file': 'bash',
+  'mcp__tide-filesystem__create_directory': 'bash',
+  'mcp__tide-filesystem__search_files': 'glob',
+  'mcp__tide-filesystem__get_file_info': 'bash',
   // Search
   regex_search: 'grep',
   content_search: 'grep',

@@ -2,8 +2,6 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
 import { useUi } from '@/lib/stores/ui';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 
 const THEMES = [
   { id: 'tide', label: 'Tide', bg: '#0a0a0b', accent: '#e4e4e7' },
@@ -47,33 +45,34 @@ export function getTerminalTheme(themeId: string): Record<string, string> {
   return TERMINAL_THEMES[themeId]?.theme ?? TERMINAL_THEMES['tide-dark'].theme;
 }
 
-export function AppearanceSection() {
+/** The content without the header — used by GeneralSection's right column. */
+export function AppearanceContent() {
   const { fontScale, reduceMotion, terminalTheme, terminalFontSize, appTheme, setAppearance } = useUi();
 
   return (
     <>
-      <SettingsHeader title="Appearance" description="Theme, typography, and terminal. Changes apply instantly." />
-
       <SettingsGroup title="Theme">
         <Card>
           <SettingsRow title="Base theme" description="Color palette for the entire app." last>
-            <div className="flex items-center gap-2 flex-wrap">
-              {THEMES.map((t) => (
-                <Button
-                  key={t.id}
-                  title={t.label}
-                  onClick={() => setAppearance({ appTheme: t.id })}
-                  className={cn(
-                    'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-all',
-                    appTheme === t.id ? 'border-accent ring-1 ring-ring/30' : 'border-border hover:border-faint',
-                  )}
-                  style={{ background: t.bg }}
-                >
-                  <span className="w-3 h-3 rounded-full" style={{ background: t.accent }} />
-                  <span style={{ color: t.bg === '#f8f9fa' ? '#1a1a2e' : '#f5f5f4' }}>{t.label}</span>
-                </Button>
-              ))}
-            </div>
+            <Select
+              value={appTheme}
+              onValueChange={(v) => setAppearance({ appTheme: v })}
+            >
+              <SelectTrigger className="w-[10rem] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {THEMES.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full border border-border/40" style={{ background: t.bg }} />
+                      <span className="w-2 h-2 rounded-full" style={{ background: t.accent }} />
+                      {t.label}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingsRow>
         </Card>
       </SettingsGroup>
@@ -144,6 +143,16 @@ export function AppearanceSection() {
           </SettingsRow>
         </Card>
       </SettingsGroup>
+    </>
+  );
+}
+
+/** Full section with header — kept for backward compat. GeneralSection uses AppearanceContent directly. */
+export function AppearanceSection() {
+  return (
+    <>
+      <SettingsHeader title="Appearance" description="Theme, typography, and terminal. Changes apply instantly." />
+      <AppearanceContent />
     </>
   );
 }

@@ -686,21 +686,6 @@ body {
   border-radius: 0.25rem;
 }
 
-/* ── Fenced code blocks ─────────────────────────────────────────────
-   Streamdown structure:
-     [data-streamdown="code-block"]            outer wrapper (we strip chrome)
-       ├─ [data-streamdown="code-block-header"] language bar (hidden)
-       ├─ <div> (sticky actions bar, no data attr)
-       │    └─ [data-streamdown="code-block-actions"]  copy/download cluster
-       │         └─ [data-streamdown="code-block-copy-button"]
-       └─ [data-streamdown="code-block-body"]   the surface (border, bg, Shiki)
-            └─ <pre><code> Shiki tokens, one <span class="block"> per line
-
-   Goal: flat, chromeless surface — no outer border/bg-sidebar, no header bar.
-   Language label floats bottom-right; copy button floats top-right and
-   reveals on hover. Line numbers via CSS counters (Streamdown emits the
-   before: utilities but our Tailwind build doesn't generate them, so we
-   hand-roll the equivalent). Shiki github-dark/light theme untouched. */
 
 /* Outer wrapper — flatten Streamdown's rounded-xl border bg-sidebar p-2. */
 .prose-chat [data-streamdown="code-block"] {
@@ -725,7 +710,7 @@ body {
 }
 /* Generous, even padding; room at the bottom for the language badge. */
 .prose-chat [data-streamdown="code-block-body"] pre {
-  padding: 0.85rem 1rem 1.5rem;
+  padding: 0.85rem 1rem 1.5rem 0.5rem;
 }
 
 /* ── Line numbers ───────────────────────────────────────────────────

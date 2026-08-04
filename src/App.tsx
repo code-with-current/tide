@@ -31,6 +31,16 @@ function App() {
     useUi.getState().loadShortcuts();
   }, []);
 
+  // Notification click → switch to the session that completed. The main
+  // process fires `tide:navigateToSession` when the user clicks an OS
+  // notification. We route to that session + ensure we're on the main screen.
+  useEffect(() => {
+    window.tideIpc?.onNavigateToSession((sessionId) => {
+      useUi.getState().setActiveSession(sessionId);
+      useUi.getState().setScreen('main');
+    });
+  }, []);
+
   // Global keyboard shortcuts. For each registered shortcut, check whether
   // the event matches its effective binding (user override → platform default
   // → hardcoded fallback) and, on first match, dispatch the action. Reads

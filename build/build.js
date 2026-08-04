@@ -78,6 +78,41 @@ const linuxOptions = {
  * @type {import('electron-builder').Configuration}
  * @see https://www.electron.build/configuration/configuration
  */
+// Ad-hoc signing hook. `identity: null` makes electron-builder skip its own
+// signing pass; this hook then signs the finished .app (and every nested
+// binary — node-pty, better-sqlite3, sharp, sqlite-vec) with an ad-hoc
+// identity. No Apple Developer cert needed. Satisfies the Apple Silicon
+// "all executables must be signed" requirement so the app launches on
+// M-series Macs; does NOT silence Gatekeeper for other users (they still
+// need `xattr -cr` or right-click → Open on first launch).
+//
+// afterPack fires for every target this config applies to. macOptions is
+// only spread into the build config on `target=mac` (see build() below),
+// so in practice this only runs on mac legs — the darwin guard is here
+// purely as a safety net for the `target=dir` path, which merges all
+// platform options at once.
+const adHocSignMacApp = (context) => {
+  if (process.platform !== 'darwin') return
+  if (context.electronPlatformName !== 'darwin' && context.electronPlatformName !== 'mas') return
+
+  // context.appOutDir is electron-builder's output dir for this leg; the
+  // .app sits directly inside it. Glob rather than reconstruct from
+  // productName so a name/appId mismatch can't break the path.
+  const apps = fs.readdirSync(context.appOutDir).filter((f) => f.endsWith('.app'))
+  if (apps.length === 0) {
+    console.warn(`ad-hoc sign: no .app found in ${context.appOutDir}, skipping`)
+    return
+  }
+  for (const app of apps) {
+    const appPath = path.join(context.appOutDir, app)
+    console.log(`ad-hoc signing ${appPath} ...`)
+    execSync(`codesign --deep --force --sign - "${appPath}"`, { stdio: 'inherit' })
+    // Verify every Mach-O in the bundle carries a signature.
+    execSync(`codesign --verify --deep --strict "${appPath}"`, { stdio: 'inherit' })
+    console.log(`ad-hoc sign: ${app} OK`)
+  }
+}
+
 const macOptions = {
   mac: {
     identity: null,
@@ -85,6 +120,7 @@ const macOptions = {
     category: 'public.app-category.productivity',
     target: ['dmg', 'zip'],
   },
+  afterPack: adHocSignMacApp,
   dmg: {
     window: {
       width: 530,

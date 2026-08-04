@@ -26,13 +26,7 @@ export interface BuiltinMcpServer {
 }
 
 export const BUILTIN_MCP_SERVERS: Record<string, BuiltinMcpServer> = {
-  'tide-filesystem': {
-    label: 'Filesystem',
-    description: 'Read/write files anywhere on your system via the MCP filesystem server.',
-    config: {
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/'],
-    },
-  },
+  // tide-filesystem removed — replaced by native built-in tools:
+  // directory_tree, read_media_file (plus existing read_file, write_file,
+  // edit_file, list_dir, glob, grep). No MCP overhead, no npx spawn.
 };

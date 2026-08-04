@@ -53,7 +53,8 @@ import { streamText, isStepCount } from 'ai';
 // public surface, so runStream returns the broader ModelMessage[] instead.)
 import type { LanguageModelUsage, ModelMessage } from 'ai';
 import type { WebContents } from 'electron';
-import { app } from 'electron';
+import { app, BrowserWindow, Notification } from 'electron';
+import { execFile } from 'node:child_process';
 import * as fs from 'fs';
 import * as store from '../store.js';
 import * as sessions from '../ipc/sessions.js';
@@ -66,6 +67,7 @@ import { runLoadSkill } from './tools/load-skill.js';
 import { getSessionTodos } from './tools/todo-write.js';
 import { scanProjectEntries } from './project-context.js';
 import { createExtensionsStore } from '../extensionsStore.js';
+import { createConfigStore } from '../configStore.js';
 import {
   createTurnController,
   parseSkillMetadata,
@@ -1713,6 +1715,89 @@ function emitTurnEnd(wc: WebContents, turn: SdkTurn, stopReason: TurnEndStopReas
     // turn.usage to avoid showing 200%+ on multi-step turns.
     lastStepUsage: turn.lastStepUsage ?? undefined,
   });
+
+  // ── OS Notification ──
+  // Fire when the window is NOT focused (user is away) and notifications are
+  // enabled. Skips aborted turns (user-initiated stop — no point notifying).
+  fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+/** Fire an OS notification on turn completion if the user has enabled it
+ *  and the Tide window isn't focused (no point notifying an active user).
+ *  On click, shows the window and tells the renderer to switch to the
+ *  session that completed. */
+function fireTurnEndNotification(wc: WebContents, sessionId: string, stopReason: TurnEndStopReason) {
+  const win = BrowserWindow.fromWebContents(wc);
+  log.info('fireTurnEndNotification', {
+    stopReason,
+    sessionId,
+    hasWin: !!win,
+    focused: win?.isFocused(),
+    visible: win?.isVisible(),
+    minimized: win?.isMinimized(),
+    supported: Notification.isSupported(),
+  });
+  if (stopReason === 'aborted') return;
+  if (win?.isFocused()) return;
+  if (!Notification.isSupported()) return;
+
+  try {
+    const cfgStore = createConfigStore(appDataDir());
+    const gs = cfgStore.getGeneralSettings();
+    if (!gs.notifications) {
+      log.debug('notification skipped: disabled in settings');
+      return;
+    }
+
+    const title =
+      stopReason === 'refusal' ? 'Tide — turn failed'
+      : stopReason === 'max_tokens' ? 'Tide — context limit reached'
+      : stopReason === 'iteration_limit' ? 'Tide — step limit reached'
+      : 'Tide — done';
+    const body =
+      stopReason === 'refusal' ? 'The turn ended with an error.'
+      : stopReason === 'max_tokens' ? 'The model hit the token limit.'
+      : stopReason === 'iteration_limit' ? 'The agent reached the step cap.'
+      : 'Your request has completed.';
+
+    // Try native Notification first. On macOS dev builds, this can fail
+    // because the "Electron" bundle isn't code-signed/registered for
+    // notifications. Fall back to `osascript display notification` which
+    // works on every macOS without signing.
+    const notif = new Notification({ title, body, silent: false });
+    let nativeFailed = false;
+    notif.on('click', () => {
+      win?.show();
+      win?.focus();
+      if (!wc.isDestroyed()) {
+        wc.send('tide:navigateToSession', sessionId);
+      }
+    });
+    notif.on('failed', () => {
+      nativeFailed = true;
+      // Fallback: osascript works without code signing on macOS.
+      if (process.platform === 'darwin') {
+        execFile('osascript', ['-e', `display notification "${body.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"`], (err) => {
+          if (err) {
+            log.warn('notification fallback (osascript) also failed', { error: String(err) });
+          } else {
+            log.info('notification shown via osascript fallback', { title });
+          }
+        });
+      } else {
+        log.warn('notification failed (no fallback on this platform)', { title });
+      }
+    });
+    notif.show();
+    // Give native a brief moment — if it doesn't fail, skip the log below.
+    setTimeout(() => {
+      if (!nativeFailed) {
+        log.info('notification shown (native)', { title, sessionId });
+      }
+    }, 100);
+  } catch (e) {
+    log.warn('notification error', { error: String(e) });
+  }
 }
 
 /**

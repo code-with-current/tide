@@ -34,6 +34,7 @@ export interface Config {
   lastWorkspaceId?: string | null;
   secrets?: Record<string, string>;
   agentSettings?: AgentSettings;
+  generalSettings?: GeneralSettings;
   ragEnabledWorkspaces?: string[];
 }
 
@@ -74,6 +75,27 @@ export const DEFAULT_CONFIG: Config = {
   lastWorkspaceId: null,
   secrets: {},
   ragEnabledWorkspaces: [],
+};
+
+export interface GeneralSettings {
+  /** Launch Tide automatically when the user logs in (OS login items). */
+  startAtLogin: boolean;
+  /** Show OS notifications for turn completion, errors, etc. */
+  notifications: boolean;
+  /** Append Co-authored-by trailer to git commits made by the agent. */
+  gitCoAuthored: boolean;
+  /** Co-author display name (default: "Tide"). */
+  gitCoAuthorName: string;
+  /** Co-author email — GitHub no-reply format for attribution. */
+  gitCoAuthorEmail: string;
+}
+
+export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
+  startAtLogin: false,
+  notifications: true,
+  gitCoAuthored: true,
+  gitCoAuthorName: 'Tide',
+  gitCoAuthorEmail: '309788114+code-with-current@users.noreply.github.com',
 };
 
 // ── RAG config hydration ──────────────────────────────────────────────
@@ -388,6 +410,18 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     write(cfg);
   }
 
+  function getGeneralSettings(): GeneralSettings {
+    const cfg = read();
+    return { ...DEFAULT_GENERAL_SETTINGS, ...cfg.generalSettings };
+  }
+
+  function updateGeneralSettings(patch: Partial<GeneralSettings>): void {
+    const cfg = read();
+    const current = { ...DEFAULT_GENERAL_SETTINGS, ...cfg.generalSettings };
+    cfg.generalSettings = { ...current, ...patch };
+    write(cfg);
+  }
+
   return {
     listProviders,
     addProvider,
@@ -405,6 +439,8 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     setSecret,
     getAgentSettings,
     updateAgentSettings,
+    getGeneralSettings,
+    updateGeneralSettings,
     listRagEnabledWorkspaces,
     addRagEnabledWorkspace,
     removeRagEnabledWorkspace,

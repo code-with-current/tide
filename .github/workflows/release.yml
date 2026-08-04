@@ -12,9 +12,15 @@
 #     them all and creates + publishes the GitHub Release in one shot.
 #     This is the only step that talks to the Releases API.
 #
-# Builds are unsigned. To enable signing later, add Apple notarization
-# secrets and drop the CSC_IDENTITY_AUTO_DISCOVERY override on the mac
-# legs; add a Windows cert (CSC_LINK/CSC_KEY_PASSWORD) for authenticode.
+# mac builds are ad-hoc signed (no Apple Developer cert) via an afterPack
+# hook in build/build.js — the .app and every nested binary (node-pty,
+# better-sqlite3, sharp, sqlite-vec) is signed with codesign --sign -.
+# This satisfies the Apple Silicon "all executables must be signed" rule so
+# the app launches on M-series Macs; it does NOT silence Gatekeeper for
+# other users (they still see "unidentified developer" on first launch).
+# Win/linux are unsigned. To upgrade mac to a real Developer ID +
+# notarization later: add Apple secrets, set mac.identity in build.js to
+# the cert name, and drop CSC_IDENTITY_AUTO_DISCOVERY on the mac legs.
 name: Release
 
 on:
@@ -75,11 +81,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # build/build.js runs: renderer build → electron entry build →
-      # grammar staging, then electron-builder. With publish=never the
-      # installer lands in release/ and no Release API call is made.
+      # grammar staging, then electron-builder. The mac config sets
+      # identity:null and an afterPack hook ad-hoc signs the finished
+      # .app (codesign --deep --force --sign -), so no Apple Developer
+      # cert is needed. Win/linux legs stay unsigned.
       - name: Build installer
         env:
-          # Suppress mac code-sign identity auto-discovery (unsigned builds).
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: ${{ matrix.cmd }}
 

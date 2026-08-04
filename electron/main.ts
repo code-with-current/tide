@@ -200,6 +200,14 @@ if (!gotLock) {
     // getPath('userData') at registration time. Fresh start, no migration.
     setUserDataPath(isDev);
 
+    // Set the AppUserModelID so Windows notifications display with the correct
+    // app name + icon. Required for toast notifications to appear at all on
+    // Windows; harmless on macOS/Linux. electron-builder sets this for
+    // production installs, but we need it for dev/unsigned builds too.
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.tide.app');
+    }
+
     // Claim the `tide://` protocol so the OS routes OAuth callbacks here.
     // On macOS, the browser hands the URL to the running instance via the
     // `open-url` event; on Windows/Linux a second instance is launched with
@@ -260,6 +268,19 @@ if (!gotLock) {
       registerExtensionsHandlers();
       // Migrate old separate OAuth files into unified mcp.json (one-time).
       migrateOAuthFiles();
+
+      // Apply Start at Login setting from stored config on boot — the toggle
+      // in Settings applies it immediately, but if the user reinstalls or
+      // edits config.json directly, the OS login item could drift. This
+      // sync ensures the login item always matches the stored preference.
+      try {
+        const { createConfigStore } = require('./configStore.js') as typeof import('./configStore.js');
+        const cfgStore = createConfigStore(appDataDir());
+        const gs = cfgStore.getGeneralSettings();
+        app.setLoginItemSettings({ openAtLogin: gs.startAtLogin });
+      } catch (e) {
+        log.warn('failed to apply startAtLogin on boot', { err: String(e) });
+      }
       // MCP pool — boot user-scoped servers (~/.tide/mcp.json). Project-scoped
       // servers are connected lazily when the renderer signals the active
       // workspace via `tide:mcp:workspaceActivated`. Init is fire-and-forget;
