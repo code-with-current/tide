@@ -7,6 +7,7 @@ import { SHORTCUTS, comboMatches, getEffectiveKeys } from '@/lib/shortcuts';
 import { dispatchShortcut } from '@/lib/shortcutActions';
 import { SplashScreen } from '@/components/screens/SplashScreen';
 import { OnboardingScreen } from '@/components/screens/OnboardingScreen';
+import { ConsentScreen } from '@/components/screens/ConsentScreen';
 import { MainScreen } from '@/components/screens/MainScreen';
 import { SettingsScreen } from '@/components/screens/SettingsScreen';
 import { AddWorkspaceDialog } from '@/components/modals/AddWorkspaceDialog';
@@ -70,6 +71,7 @@ function App() {
           <div className="flex-1 flex min-h-0">
             {screen === 'splash' && <SplashScreen />}
             {screen === 'onboarding' && <OnboardingScreen />}
+            {screen === 'consent' && <ConsentScreen />}
             {/* MainScreen is ALWAYS MOUNTED (CSS-hidden when not active). It
                 owns the TerminalPanel + xterm canvases — unmounting it on
                 every screen switch (e.g. to Settings) destroys the terminal

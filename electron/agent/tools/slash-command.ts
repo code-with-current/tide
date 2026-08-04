@@ -20,9 +20,10 @@ import type { ToolResult, ToolRegistration } from './types';
 import type { ToolContext } from './tool-context';
 import { withPermission } from '../permission-wrapper';
 import * as sessions from '../../ipc/sessions';
+import { appDataDir } from '../../appPaths.js';
 
 function commandsDir(): string {
-  return path.join(app.getPath('userData'), 'commands');
+  return path.join(appDataDir(), 'commands');
 }
 
 /** List available slash commands (name + description). */

@@ -31,11 +31,12 @@ export interface McpConfig {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
   auth?: 'oauth';
 }
 
-/** Where the server is stored: 'user' (global ~/.tide/mcp.json) or 'project'. */
-export type McpScope = 'user' | 'project';
+/** Where the server is stored: 'user' (global ~/.tide/mcp.json), 'project', or 'builtin'. */
+export type McpScope = 'user' | 'project' | 'builtin';
 
 export interface McpServerDialogProps {
   open: boolean;
@@ -62,6 +63,7 @@ const EMPTY_FORM: FormState = {
   argsText: '',
   envText: '',
   url: '',
+  headersText: '',
   auth: 'none',
 };
 
@@ -73,6 +75,8 @@ interface FormState {
   argsText: string;
   envText: string;
   url: string;
+  /** JSON string of custom HTTP headers (e.g. {"Authorization": "Bearer xxx"}). */
+  headersText: string;
   auth: Auth;
 }
 
@@ -453,6 +457,14 @@ function FormBody({
               <TransportTab active={form.auth === 'oauth'} onClick={() => patch({ auth: 'oauth' })} icon={<KeyRound className="size-3.5" />} label="OAuth" />
             </div>
           </div>
+          <FormField id="mcp-headers" label="Headers (JSON)">
+            <Textarea
+              className="font-mono text-[11px] min-h-[60px] resize-y"
+              value={form.headersText}
+              placeholder={"{\n  \"Authorization\": \"Bearer YOUR_KEY\"\n}"}
+              onChange={(e) => patch({ headersText: e.target.value })}
+            />
+          </FormField>
         </section>
       )}
     </div>
@@ -572,11 +584,32 @@ function JsonBody({
 }`}</pre>
             </div>
             <div>
-              <p className="text-muted-foreground/60 mb-0.5">HTTP server:</p>
+              <p className="text-muted-foreground/60 mb-0.5">HTTP with headers (type inferred):</p>
               <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
-  "supabase": {
+  "context7": {
     "type": "http",
-    "url": "https://mcp.supabase.com/mcp?project_ref=xxx"
+    "url": "https://mcp.context7.com/mcp",
+    "headers": {
+      "Authorization": "Bearer YOUR_API_KEY"
+    }
+  }
+}`}</pre>
+            </div>
+            <div>
+              <p className="text-muted-foreground/60 mb-0.5">HTTP (type inferred from url):</p>
+              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+  "vue-docs": {
+    "url": "https://mcp.vue-mcp.org/mcp"
+  }
+}`}</pre>
+            </div>
+            <div>
+              <p className="text-muted-foreground/60 mb-0.5">stdio with env (type inferred):</p>
+              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+  "firecrawl-mcp": {
+    "command": "npx",
+    "args": ["-y", "firecrawl-mcp"],
+    "env": { "FIRECRAWL_API_KEY": "YOUR-API-KEY" }
   }
 }`}</pre>
             </div>
@@ -632,18 +665,39 @@ function argsToText(args?: string[]): string {
   return args?.join('\n') ?? '';
 }
 
-/** Build a FormState from an existing config (used in edit mode). */
+/** Build a FormState from an existing config (used in edit mode).
+ *  Infers transport type if missing (command → stdio, url → http). */
 function configToForm(config: McpConfig, scope: McpScope, name: string): FormState {
+  const transport: Transport =
+    config.type === 'sse' ? 'sse'
+    : config.type === 'http' ? 'http'
+    : config.command ? 'stdio'
+    : config.url ? 'http'
+    : 'stdio';
   return {
     name,
     scope,
-    transport: config.type,
+    transport,
     command: config.command ?? '',
     argsText: argsToText(config.args),
     envText: envToText(config.env),
     url: config.url ?? '',
+    headersText: config.headers ? JSON.stringify(config.headers, null, 2) : '',
     auth: config.auth === 'oauth' ? 'oauth' : 'none',
   };
+}
+
+/** Parse a JSON string of headers. Returns undefined if empty or invalid. */
+function parseHeaders(text: string): Record<string, string> | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch { /* invalid JSON — return undefined */ }
+  return undefined;
 }
 
 /** Build a config from a FormState. Returns null if required fields are missing. */
@@ -666,6 +720,8 @@ function formToConfig(form: FormState): McpConfig | null {
     type: form.transport,
     url: form.url.trim(),
   };
+  const headers = parseHeaders(form.headersText);
+  if (headers) cfg.headers = headers;
   if (form.auth === 'oauth') cfg.auth = 'oauth';
   return cfg;
 }
@@ -677,9 +733,12 @@ function configToJson(form: FormState): string {
 }
 
 /** Try to parse a JSON string as a server config.
- *  Handles two shapes:
- *    1. Bare config:  { "type": "http", "url": "..." }
- *    2. Wrapped:      { "server-name": { "type": "http", "url": "..." } }
+ *  Handles these shapes:
+ *    1. Bare config:    { "type": "http", "url": "..." }
+ *    2. Wrapped:        { "server-name": { "type": "http", "url": "..." } }
+ *    3. No type field:  { "command": "npx", ... } → inferred as stdio
+ *    4. No type field:  { "url": "https://..." } → inferred as http
+ *
  *  When wrapped, extracts the inner config AND returns the server name so
  *  the caller can auto-fill the Name field.
  */
@@ -701,13 +760,15 @@ function tryParseConfig(text: string):
   let extractedName: string | undefined;
 
   // Detect the wrapped format: { "server-name": { ...config } }
-  // If the top-level object has no "type" but has exactly one key whose
-  // value is an object with a "type", unwrap it.
-  const keys = Object.keys(o);
-  if (!('type' in o) && keys.length >= 1) {
+  // Unwrap if the top-level has no transport/config keys but has exactly
+  // one key whose value is an object.
+  const configKeys = ['type', 'command', 'url', 'args', 'env', 'headers', 'auth'];
+  const hasConfigKey = configKeys.some((k) => k in o);
+  if (!hasConfigKey) {
+    const keys = Object.keys(o);
     for (const k of keys) {
       const v = o[k];
-      if (v && typeof v === 'object' && !Array.isArray(v) && 'type' in v) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
         o = v as Record<string, unknown>;
         extractedName = k;
         break;
@@ -715,14 +776,22 @@ function tryParseConfig(text: string):
     }
   }
 
-  const type = o.type;
+  // Infer type if missing.
+  let type = o.type as string | undefined;
   if (type !== 'stdio' && type !== 'sse' && type !== 'http') {
-    return {
-      ok: false,
-      error: '"type" must be one of "stdio", "sse", or "http". Paste just the config object (not the server-name wrapper), e.g.:\n{ "type": "http", "url": "..." }',
-    };
+    if (typeof o.command === 'string') {
+      type = 'stdio';
+    } else if (typeof o.url === 'string') {
+      type = 'http'; // default remote transport
+    } else {
+      return {
+        ok: false,
+        error: 'Missing "type". Expected "stdio", "sse", or "http". Type is inferred from "command" (stdio) or "url" (http) when omitted.',
+      };
+    }
   }
-  const config: McpConfig = { type };
+
+  const config: McpConfig = { type: type as McpConfig['type'] };
   if (typeof o.command === 'string') config.command = o.command;
   if (Array.isArray(o.args) && o.args.every((a) => typeof a === 'string')) {
     config.args = o.args as string[];
@@ -735,6 +804,13 @@ function tryParseConfig(text: string):
     if (Object.keys(env).length) config.env = env;
   }
   if (typeof o.url === 'string') config.url = o.url;
+  if (o.headers && typeof o.headers === 'object' && !Array.isArray(o.headers)) {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(o.headers as Record<string, unknown>)) {
+      if (typeof v === 'string') headers[k] = v;
+    }
+    if (Object.keys(headers).length) config.headers = headers;
+  }
   if (o.auth === 'oauth') config.auth = 'oauth';
   return { ok: true, config, extractedName };
 }

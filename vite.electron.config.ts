@@ -61,10 +61,13 @@ export default defineConfig({
         id === 'sqlite-vec' ||
         id === 'web-tree-sitter' ||
         id === 'onnxruntime-node' ||
-        id === 'onnxruntime-web' ||
         id === 'onnxruntime-common' ||
         id === '@xenova/transformers' ||
         id === 'sharp' ||
+        // macOS-only native module (optionalDependency) — no bindings on
+        // Windows/Linux, so it must stay external and be require()'d with a
+        // platform guard + try/catch at the call site (see electron/permissions.ts).
+        id === 'node-mac-permissions' ||
         // MCP SDK uses child_process (cross-spawn) internally — must be
         // externalized, not bundled. Bundling breaks because the SDK's CJS
         // require('child_process') can't resolve in the ESM output.
@@ -85,6 +88,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // @xenova/transformers statically imports onnxruntime-web in its
+      // backend selector (src/backends/onnx.js), but in the Electron
+      // utility process the Node branch (onnxruntime-node) is always
+      // selected — onnxruntime-web (≈66 MB of WASM + JS) is imported
+      // yet never read. Aliasing it to this stub satisfies the import
+      // without bundling the dead weight. See onnxruntime-web-stub.ts.
+      'onnxruntime-web': path.resolve(__dirname, 'electron/rag/onnxruntime-web-stub.ts'),
     },
   },
 });

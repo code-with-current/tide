@@ -24,6 +24,7 @@ import {
   useDownloadRagModel,
   useInitRagWorkspace,
   useRagInitProgress,
+  useRagDownloadProgress,
   useWorkspaces,
 } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
@@ -43,6 +44,7 @@ export function MemoryRagSection() {
   const downloadModel = useDownloadRagModel(effectiveWsId);
   const initWorkspace = useInitRagWorkspace(effectiveWsId);
   const initProgress = useRagInitProgress(effectiveWsId);
+  const downloadProgress = useRagDownloadProgress();
 
   const status: RagStatus | undefined =
     data && 'embedderId' in data ? data : undefined;
@@ -136,9 +138,28 @@ export function MemoryRagSection() {
             </Button>
           )}
           {downloading && (
-            <p className="mt-1 px-1 text-[10px] leading-snug text-muted-foreground/40">
-              ~30s for 22 MB
-            </p>
+            <div className="mt-1.5 px-1 space-y-1">
+              {downloadProgress && downloadProgress.phase === 'downloading' && downloadProgress.total > 0 && (
+                <>
+                  <div className="h-1 rounded-full bg-secondary overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-300 bg-blue-400"
+                      style={{
+                        width: `${Math.min(100, (downloadProgress.received / downloadProgress.total) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-[10px] leading-snug text-muted-foreground/40 font-mono">
+                    {(downloadProgress.received / 1048576).toFixed(1)} / {(downloadProgress.total / 1048576).toFixed(1)} MB
+                  </p>
+                </>
+              )}
+              {(!downloadProgress || downloadProgress.total === 0) && (
+                <p className="text-[10px] leading-snug text-muted-foreground/40">
+                  Fetching from huggingface.co…
+                </p>
+              )}
+            </div>
           )}
         </div>
       </aside>

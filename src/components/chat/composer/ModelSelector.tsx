@@ -86,7 +86,7 @@ export function ModelSelector({ compact = false }: { compact?: boolean }) {
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
+      <DropdownMenuContent align="start" side="top"  className="w-[300px] p-0 overflow-hidden">
         {/* ── Search box ── */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 sticky top-0 bg-popover z-10">
           <Search className="size-4 text-muted-foreground/50 shrink-0" />

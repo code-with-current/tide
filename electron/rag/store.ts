@@ -24,11 +24,12 @@
  * migrations run.
  */
 import Database from 'better-sqlite3';
-import { load as loadSqliteVec } from 'sqlite-vec';
+import { getLoadablePath as getSqliteVecPath } from 'sqlite-vec';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { app } from 'electron';
 import type { Database as DB } from 'better-sqlite3';
+import { appDataDir } from '../appPaths.js';
 
 /** A single AST-symbol chunk waiting to be embedded + stored. */
 export interface ChunkRow {
@@ -70,18 +71,22 @@ const EMBED_DIM = 384;
  *  runs migrations idempotently, prepares statements on the instance
  *  for fast repeated calls. */
 export function openRagStore(workspaceId: string): RagStore {
-  const root = path.join(app.getPath('userData'), 'rag', workspaceId);
+  const root = path.join(appDataDir(), 'rag', workspaceId);
   fs.mkdirSync(root, { recursive: true });
   const dbPath = path.join(root, 'index.db');
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
-  // sqlite-vec loads as a SQLite extension. Throws on incompatible
-  // runtimes — surface immediately rather than letting writes silently
-  // fail later.
+  // sqlite-vec loads as a SQLite extension. The native .dylib/.so/.dll must
+  // be unpacked from app.asar (asarUnpack in package.json) — otherwise the
+  // path resolves inside the archive and SQLite can't dlopen it. Fix the
+  // path: replace app.asar with app.asar.unpacked so it points to the real
+  // file on disk.
   try {
-    loadSqliteVec(db);
+    const vecPath = getSqliteVecPath();
+    const realPath = vecPath.replace('app.asar', 'app.asar.unpacked');
+    db.loadExtension(realPath);
   } catch (e) {
     db.close();
     throw new Error(

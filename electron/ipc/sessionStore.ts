@@ -65,6 +65,17 @@ export interface StoredSession {
     calls: number;
     costUsd: number;
   };
+  /** Usage from the last completed turn only — used by the context-window
+   *  meter. `usage` above is cumulative (sum across all turns). */
+  lastTurnUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoningTokens: number;
+    calls: number;
+    costUsd: number;
+  };
   /** Audit trail of notable per-turn events (file loads, permission asks,
    *  tool reads/executions). Appended by addActivity; shown in the Inspector. */
   activity?: ActivityRecord[];
@@ -129,7 +140,7 @@ export interface SessionStore {
       providerId?: string;
     },
   ): void;
-  addMessage(sessionId: string, role: StoredMessage['role'], content: string): void;
+  addMessage(sessionId: string, role: StoredMessage['role'], content: string, extra?: { attachments?: any[]; mentions?: any[] }): void;
   addAssistantMessage(
     sessionId: string,
     message: {
@@ -146,6 +157,15 @@ export interface SessionStore {
   addUsage(
     sessionId: string,
     delta: {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      reasoningTokens?: number;
+      calls?: number;
+      costUsd?: number;
+    },
+    lastStepUsage?: {
       inputTokens?: number;
       outputTokens?: number;
       cacheRead?: number;
@@ -377,6 +397,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     sessionId: string,
     role: StoredMessage['role'],
     content: string,
+    extra?: { attachments?: any[]; mentions?: any[] },
   ): void {
     ensureLoaded();
     const s = cache.get(sessionId);
@@ -387,6 +408,11 @@ export function createSessionStore(rootDir: string): SessionStore {
       role,
       content,
       createdAt: now,
+      // Persist attachments + mentions so chips survive reload — without
+      // these, handleChipOpen can't match attachments (no absPath/isImage)
+      // and the viewer can't reopen attached files.
+      ...(extra?.attachments?.length ? { attachments: extra.attachments } : {}),
+      ...(extra?.mentions?.length ? { mentions: extra.mentions } : {}),
     });
     s.updatedAt = now;
     if (s.title === 'New session' && role === 'user') {
@@ -440,6 +466,18 @@ export function createSessionStore(rootDir: string): SessionStore {
       calls?: number;
       costUsd?: number;
     },
+    /** The LAST step's actual usage — what the model's most recent request
+     *  consumed. Stored as lastTurnUsage for the context meter. If omitted,
+     *  falls back to the delta (for single-step turns they are the same). */
+    lastStepUsage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      reasoningTokens?: number;
+      calls?: number;
+      costUsd?: number;
+    },
   ): void {
     ensureLoaded();
     const s = cache.get(sessionId);
@@ -460,6 +498,21 @@ export function createSessionStore(rootDir: string): SessionStore {
     // Also update the top-level session.costUsd — the SessionHero displays
     // THIS field (not s.usage.costUsd). Both stay in sync.
     s.costUsd = s.usage.costUsd;
+    // Store the last step's usage as lastTurnUsage — the context-window meter
+    // reads THIS (not the cumulative s.usage) to show "how full is the context
+    // right now". For multi-step turns, lastStepUsage is the final LLM call's
+    // input tokens (the actual context fill). Falls back to delta for
+    // single-step turns or older callers that don't pass lastStepUsage.
+    const src = lastStepUsage ?? delta;
+    s.lastTurnUsage = {
+      inputTokens: src.inputTokens ?? 0,
+      outputTokens: src.outputTokens ?? 0,
+      cacheRead: src.cacheRead ?? 0,
+      cacheWrite: src.cacheWrite ?? 0,
+      reasoningTokens: src.reasoningTokens ?? 0,
+      calls: src.calls ?? 1,
+      costUsd: src.costUsd ?? 0,
+    };
     s.updatedAt = new Date().toISOString();
     writeSession(s);
   }

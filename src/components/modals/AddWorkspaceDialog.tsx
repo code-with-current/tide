@@ -1,5 +1,5 @@
 import {
-  FolderGit2,
+  FolderCode,
   Folder,
   Sparkles,
   FilePlus2,
@@ -339,7 +339,7 @@ export function AddWorkspaceDialog() {
     }
 
     // Enter the workspace + flip to the 'done' phase. The dialog stays open
-    // showing the completed checklist until the user clicks "Open workspace"
+    // showing the completed checklist until the user clicks "Open Workspace"
     // — no auto-dismiss, so the user controls when to leave and can verify
     // every step turned green (or skipped) first.
     setActive(ws.id);
@@ -376,7 +376,7 @@ export function AddWorkspaceDialog() {
     setSteps({ folder: 'pending', template: 'pending', git: 'pending', rag: 'pending' });
   };
 
-  /** Close handler for the "Open workspace" button on the done screen.
+  /** Close handler for the "Open Workspace" button on the done screen.
    *  Resets + closes; the workspace is already active (setActive ran during
    *  the flow), so the main UI is showing it underneath. */
   const finishAndClose = () => {
@@ -394,7 +394,7 @@ export function AddWorkspaceDialog() {
         // Allow closing from any non-async phase (choice/form/newProject/
         // template/done). While creating/indexing the user shouldn't be able
         // to dismiss mid-operation. 'done' is included so X/Esc works after
-        // the checklist completes — same effect as the Open workspace button.
+        // the checklist completes — same effect as the Open Workspace button.
         if (!o && phase !== 'creating' && phase !== 'indexing' && phase !== 'error') {
           resetAll();
           close('addWorkspace');
@@ -408,12 +408,12 @@ export function AddWorkspaceDialog() {
             className={cn(
               'size-9 rounded-[10px] flex items-center justify-center shrink-0',
               phase === 'done'
-                ? 'bg-emerald-500/10 border border-emerald-500/20'
+                ? 'bg-success/10 border border-success/20'
                 : 'border',
             )}
             style={
               phase !== 'done'
-                ? { background: 'rgba(217,119,87,0.1)', borderColor: 'rgba(217,119,87,0.2)' }
+                ? { background: 'rgba(--primary)', borderColor: 'rgba(--primary)' }
                 : undefined
             }
           >
@@ -422,7 +422,7 @@ export function AddWorkspaceDialog() {
             ) : phase === 'error' ? (
               <AlertCircle className="size-4 text-destructive" />
             ) : (
-              <FolderGit2 className="size-4 text-primary" />
+              <FolderCode className="size-4 text-primary" />
             )}
           </div>
           <div className="flex-1">
@@ -431,9 +431,9 @@ export function AddWorkspaceDialog() {
                 : phase === 'indexing' ? 'Indexing codebase…'
                 : phase === 'done' ? 'Workspace ready'
                 : phase === 'error' ? 'Failed'
-                : phase === 'newProject' ? 'New project'
+                : phase === 'newProject' ? 'New Project'
                 : phase === 'template' ? 'From Template'
-                : 'New workspace'}
+                : 'New Workspace'}
             </DialogTitle>
             <p className="text-[11px] text-muted-foreground/60 mt-0.5">
               {phase === 'creating' ? 'Setting up the workspace.'
@@ -483,7 +483,7 @@ export function AddWorkspaceDialog() {
                 to leave, after verifying every step is green/skipped. */}
             {phase === 'done' && (
               <Button variant="default" size="sm" className="w-full gap-1.5" onClick={finishAndClose}>
-                <Check className="size-3.5" /> Open workspace
+                <Check className="size-3.5" /> Open Workspace
               </Button>
             )}
           </div>
@@ -581,7 +581,7 @@ export function AddWorkspaceDialog() {
                 <ArrowLeft className="size-3.5" /> Back
               </Button>
               <Button variant="default" size="sm" disabled={!canOpenNew} onClick={handleOpenNewProject} className="gap-1.5">
-                <Check className="size-3.5" /> Create project
+                <Check className="size-3.5" /> Create Project
               </Button>
             </div>
           </>
@@ -687,7 +687,7 @@ export function AddWorkspaceDialog() {
                 className="gap-1.5"
               >
                 <ChevronRight className="size-3.5" />
-                {templateId === 'empty' ? 'Create project' : `Scaffold ${TEMPLATES.find((t) => t.id === templateId)?.label}`}
+                {templateId === 'empty' ? 'Create Project' : `Scaffold ${TEMPLATES.find((t) => t.id === templateId)?.label}`}
               </Button>
             </div>
           </>
@@ -884,7 +884,7 @@ export function AddWorkspaceDialog() {
               Cancel
             </Button>
             <Button variant="default" size="sm" disabled={!canOpen} onClick={handleOpen} className="gap-1.5">
-              <Check className="size-3.5" /> Open workspace
+              <Check className="size-3.5" /> Open Workspace
             </Button>
           </div>
         </div>

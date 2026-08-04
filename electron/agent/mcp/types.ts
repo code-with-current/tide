@@ -20,6 +20,9 @@ export interface McpServerConfig {
 
   // ── remote fields (type === 'sse' | 'http') ──
   url?: string;
+  /** Custom HTTP headers sent on every request to the MCP server.
+   *  Used for bearer tokens, API keys, etc. e.g. { "Authorization": "Bearer xxx" } */
+  headers?: Record<string, string>;
 
   // ── auth ──
   /** Set to 'oauth' for OAuth-protected remote servers. */
@@ -30,7 +33,7 @@ export interface McpServerConfig {
 export type McpConfigFile = Record<string, McpServerConfig>;
 
 /** Where a server config lives — determines connection lifecycle. */
-export type McpScope = 'user' | 'project';
+export type McpScope = 'user' | 'project' | 'builtin';
 
 /** A discovered MCP tool from a connected server. */
 export interface McpTool {

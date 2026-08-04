@@ -39,14 +39,13 @@ type SectionId =
   | "about";
 
 type NavItem = { id: SectionId; label: string; icon: typeof KeyRound };
-type NavGroup = { label: string; items: NavItem[] };
+type NavGroup = { label?: string | undefined; items: NavItem[] };
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "AI",
     items: [
-      { id: "providers", label: "LLM Providers", icon: KeyRound },
-      { id: "autonomy", label: "Permissions & caps", icon: Shield },
+      { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
     ],
   },
   {
@@ -54,10 +53,10 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "workspace", label: "Workspaces", icon: FolderCode }],
   },
   {
-    label: "App",
+    label: "AI",
     items: [
-      { id: "appearance", label: "Appearance", icon: Palette },
-      { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
+      { id: "providers", label: "LLM Providers", icon: KeyRound },
+      { id: "autonomy", label: "Permissions & Caps", icon: Shield },
     ],
   },
   {
@@ -116,8 +115,8 @@ export function SettingsScreen() {
 
       {/* Sidebar */}
       <aside className="flex flex-col flex-shrink-0 p-2" style={{ width: 220 }}>
-{isMac && <div className="h-8 flex-shrink-0" />}
-<div className="px-3 py-2.5 flex items-center justify-between border-input flex-shrink-0 border-b ">
+{isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+<div className={cn("px-3 py-2.5 flex items-center justify-between border-input flex-shrink-0 border-b ", !isMac && "drag-region")}>
           <div className="text-[1rem] uppercase tracking-wider text-foreground/80 font-bold font-stretch-semi-expanded">
             Settings
           </div>

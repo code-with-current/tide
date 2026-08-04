@@ -85,19 +85,22 @@ export function McpImportDialog({
     const selected = servers.filter((s) => checked.has(s.name));
     if (selected.length === 0) return;
     setImporting(true);
-    await onImport(
-      selected.map((s) => ({ name: s.name, config: s.config })),
-      scope,
-    );
-    setImporting(false);
-    onClose();
+    try {
+      await onImport(
+        selected.map((s) => ({ name: s.name, config: s.config })),
+        scope,
+      );
+    } finally {
+      setImporting(false);
+      onClose();
+    }
   }
 
   return (
     <Dialog
       open={open}
       onOpenChange={(o) => {
-        if (!o) onClose();
+        if (!o && !importing) onClose();
       }}
     >
       <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
@@ -146,14 +149,14 @@ export function McpImportDialog({
                 const allChecked = importable.length > 0 && importable.every((s) => checked.has(s.name));
                 return (
                   <div key={source}>
-                    {/* Source group header — mirrors the ExtensionCard header,
-                        with a select-all checkbox for the group. */}
+                    {/* Source group header — shows the source tool name + config file path. */}
                     <div className="flex items-center justify-between mb-1.5 px-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleAllInGroup(sourceServers)}
-                        disabled={importable.length === 0}
-                        className="flex items-center gap-1.5 group"
+                      <div
+                        role="button"
+                        tabIndex={importable.length === 0 ? -1 : 0}
+                        onClick={() => importable.length > 0 && toggleAllInGroup(sourceServers)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAllInGroup(sourceServers); } }}
+                        className={`flex items-center gap-1.5 ${importable.length === 0 ? '' : 'cursor-pointer'}`}
                       >
                         <Checkbox
                           checked={allChecked}
@@ -164,39 +167,57 @@ export function McpImportDialog({
                         <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium">
                           {source}
                         </h3>
-                      </button>
+                      </div>
+                      {sourceServers[0]?.sourceFile && (
+                        <span className="text-[9px] text-muted-foreground/30 font-mono truncate max-w-[180px]" title={sourceServers[0].sourceFile}>
+                          {sourceServers[0].sourceFile.replace(/^.*\//, '~/')}
+                        </span>
+                      )}
                       <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
                         {sourceServers.length}
                       </span>
                     </div>
 
                     {/* Server rows */}
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       {sourceServers.map((s) => {
                         const isImported = alreadyImported.has(s.name);
                         const isChecked = checked.has(s.name);
+                        const cmd = s.config.command || s.config.url || '';
+                        const argSummary = s.config.args?.length ? ' ' + s.config.args.filter(a => !a.startsWith('-')).slice(0, 2).join(' ') : '';
                         return (
                           <label
                             key={s.name}
-                            className={`flex items-center gap-2.5 px-2 py-2 rounded-md transition-colors ${
-                              isImported ? 'opacity-40 cursor-default' : 'cursor-pointer hover:bg-secondary/60'
+                            className={`flex items-start gap-2.5 px-2.5 py-2 rounded-lg border transition-colors ${
+                              isImported
+                                ? 'opacity-40 cursor-default border-transparent'
+                                : isChecked
+                                  ? 'cursor-pointer border-primary/30 bg-primary/[0.04]'
+                                  : 'cursor-pointer border-border/50 hover:bg-secondary/50 hover:border-border'
                             }`}
                           >
                             <Checkbox
                               checked={isChecked}
                               disabled={isImported}
                               onCheckedChange={() => toggle(s.name)}
-                              className="size-4 shrink-0"
+                              className="size-4 shrink-0 mt-0.5"
                             />
                             <div className="min-w-0 flex-1">
-                              <span className="text-xs font-medium">{s.name}</span>
-                              {isImported && (
-                                <span className="text-[10px] text-muted-foreground/50 ml-1.5">(already in Tide)</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium">{s.name}</span>
+                                {isImported && (
+                                  <span className="text-[9px] text-muted-foreground/50">(already in Tide)</span>
+                                )}
+                                <span className="text-[8px] uppercase tracking-wide text-muted-foreground/40 font-mono shrink-0 px-1 py-0.5 rounded bg-muted/40">
+                                  {s.config.type}
+                                </span>
+                              </div>
+                              {cmd && (
+                                <div className="text-[10px] text-muted-foreground/50 font-mono truncate mt-0.5" title={cmd + argSummary}>
+                                  {cmd}<span className="text-muted-foreground/30">{argSummary}</span>
+                                </div>
                               )}
                             </div>
-                            <span className="text-[9px] uppercase tracking-wide text-muted-foreground/40 font-mono shrink-0">
-                              {s.config.type}
-                            </span>
                           </label>
                         );
                       })}
@@ -253,8 +274,8 @@ export function McpImportDialog({
               disabled={checked.size === 0 || importing}
               className="gap-1.5"
             >
-              <Download className="size-3.5" />
-              {importing ? 'Importing…' : `Import${checked.size > 0 ? ` ${checked.size}` : ''}`}
+              {importing ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+              {importing ? `Importing ${checked.size}…` : `Import${checked.size > 0 ? ` ${checked.size}` : ''}`}
             </Button>
           </div>
         </DialogFooter>

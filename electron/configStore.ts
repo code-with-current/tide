@@ -48,6 +48,12 @@ export interface AgentSettings {
   planModeDryRun: boolean;
   /** Append-only audit log of every shell command in full mode. */
   auditShellCommands: boolean;
+  /** Compaction: summarize old turns when context approaches the window limit. */
+  compactionEnabled: boolean;
+  /** Fraction of context window that triggers compaction. Range [0.5, 0.95]. */
+  compactionThreshold: number;
+  /** Number of user/assistant pairs preserved verbatim at the tail. */
+  compactionKeepTurns: number;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -56,6 +62,9 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   permissionTimeoutMin: 10,
   planModeDryRun: true,
   auditShellCommands: true,
+  compactionEnabled: true,
+  compactionThreshold: 0.75,
+  compactionKeepTurns: 3,
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -138,10 +147,27 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
 
   function write(cfg: Config): void {
     cache = cfg;
+    const serialized = JSON.stringify(cfg, null, 2);
     try {
-      fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
-    } catch (e) {
-      log.error('failed to write config', { err: e });
+      fs.writeFileSync(configPath, serialized, 'utf-8');
+    } catch (firstErr) {
+      // The config dir may have been deleted/moved under us (e.g. the user
+      // wiped ~/.tide while the app ran). Recreate it once and retry so the
+      // write self-heals instead of silently dropping the user's change.
+      try {
+        fs.mkdirSync(rootDir, { recursive: true });
+        fs.writeFileSync(configPath, serialized, 'utf-8');
+        log.warn('config write failed then recovered after recreating dir', { rootDir });
+      } catch (e) {
+        // Genuinely unwritable (permissions, disk full). Log prominently —
+        // the in-memory cache still serves the session, so the app keeps
+        // working, but the change will be lost on restart.
+        log.error('failed to write config and could not recover', {
+          rootDir,
+          firstErr,
+          err: e,
+        });
+      }
     }
   }
 

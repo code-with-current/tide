@@ -348,6 +348,31 @@ body {
   100% { background-position: -200% 0; }
 }
 
+/* Title shimmer — applied to a session title while its LLM-generated name is
+   in flight. A muted→ink→muted gradient sweeps across clipped text so the
+   title reads as "thinking" without a spinner. */
+.animate-shimmer-title {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-muted-foreground) 20%,
+    var(--color-ink, currentColor) 40%,
+    var(--color-muted-foreground) 60%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer-title {
+    animation: none;
+    background-image: none;
+    color: var(--color-muted-foreground);
+    -webkit-background-clip: initial;
+  }
+}
+
 /* Heartbeat — scale + glow pulse for "in-progress" status dots. */
 @keyframes heartbeat {
   0%,
@@ -661,38 +686,269 @@ body {
   border-radius: 0.25rem;
 }
 
-/* Fenced code blocks — scrollable, distinct surface, no max height. */
-.prose-chat pre {
-  margin: 0.4em 0;
-  padding: 0.75em 0.9em;
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-line-soft);
-  border-radius: 0.5rem;
-  overflow-x: auto;
+/* ── Fenced code blocks ─────────────────────────────────────────────
+   Streamdown structure:
+     [data-streamdown="code-block"]            outer wrapper (we strip chrome)
+       ├─ [data-streamdown="code-block-header"] language bar (hidden)
+       ├─ <div> (sticky actions bar, no data attr)
+       │    └─ [data-streamdown="code-block-actions"]  copy/download cluster
+       │         └─ [data-streamdown="code-block-copy-button"]
+       └─ [data-streamdown="code-block-body"]   the surface (border, bg, Shiki)
+            └─ <pre><code> Shiki tokens, one <span class="block"> per line
+
+   Goal: flat, chromeless surface — no outer border/bg-sidebar, no header bar.
+   Language label floats bottom-right; copy button floats top-right and
+   reveals on hover. Line numbers via CSS counters (Streamdown emits the
+   before: utilities but our Tailwind build doesn't generate them, so we
+   hand-roll the equivalent). Shiki github-dark/light theme untouched. */
+
+/* Outer wrapper — flatten Streamdown's rounded-xl border bg-sidebar p-2. */
+.prose-chat [data-streamdown="code-block"] {
+  position: relative;
+  margin: 0.7em 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 0;
 }
+.prose-chat [data-streamdown="code-block-header"] {
+  display: none;
+}
+
+/* The surface — keep Streamdown's border + Shiki bg, refine sizing. */
+.prose-chat [data-streamdown="code-block-body"] {
+  position: relative;
+  font-size: 12.5px;
+  line-height: 1.6;
+  border-radius: 0.625rem;
+}
+/* Generous, even padding; room at the bottom for the language badge. */
+.prose-chat [data-streamdown="code-block-body"] pre {
+  padding: 0.85rem 1rem 1.5rem;
+}
+
+/* ── Line numbers ───────────────────────────────────────────────────
+   Streamdown adds class "block" + before:* utilities to each line <span>,
+   and [counter-increment:line_0] [counter-reset:line] on <code>. We write
+   the CSS those utilities would produce. The counter is named "line". */
+.prose-chat [data-streamdown="code-block-body"] code {
+  counter-reset: line;
+}
+.prose-chat [data-streamdown="code-block-body"] code > span.block::before,
+.prose-chat [data-streamdown="code-block-body"] code > span[class*="block"]::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 1.5rem;
+  margin-right: 1rem;
+  text-align: right;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  opacity: 0.35;
+  user-select: none;
+  pointer-events: none;
+  /* tab-size on the gutter so wrapped lines don't shift it */
+  flex-shrink: 0;
+}
+/* The per-line span must be block-level for the ::before to sit in the gutter. */
+.prose-chat [data-streamdown="code-block-body"] code > span.block,
+.prose-chat [data-streamdown="code-block-body"] code > span[class*="block"] {
+  display: block;
+}
+
+/* ── Copy button — top-right floating chip, reveal on hover ──────────
+   Streamdown wraps it in an outer sticky bar (no data attr) + inner
+   code-block-actions chip. The sticky bar is always the first child of
+   code-block when controls are on — target it by position, not :has(). */
+.prose-chat [data-streamdown="code-block"] > div:first-child:where(:not([data-streamdown])) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  margin: 0;
+  height: auto;
+}
+.prose-chat [data-streamdown="code-block-actions"] {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.prose-chat [data-streamdown="code-block-copy-button"] {
+  margin: 0.5rem 0.5rem 0 0;
+  padding: 0.3rem;
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  color: var(--muted-foreground);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.prose-chat [data-streamdown="code-block"]:hover
+  [data-streamdown="code-block-copy-button"],
+.prose-chat [data-streamdown="code-block-copy-button"]:focus-visible {
+  opacity: 1;
+}
+.prose-chat [data-streamdown="code-block-copy-button"]:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+}
+
+/* ── Language badge — bottom-right, quiet, always visible ─────────── */
+.prose-chat [data-streamdown="code-block-body"][data-language]:not([data-language=""])::after {
+  content: attr(data-language);
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.5rem;
+  z-index: 1;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Resets ─────────────────────────────────────────────────────────
+   Strip the inline-code pill from any <code> inside a <pre>. */
 .prose-chat pre code {
   padding: 0;
   background: transparent;
+  color: inherit;
+  border-radius: 0;
+  font-size: inherit;
+}
+/* Bare <pre> fallback (no Streamdown wrapper). Streamdown always wraps
+   its <pre> inside [data-streamdown="code-block-body"], so any <pre> that
+   is NOT a descendant of a [data-streamdown] element is a bare fallback.
+   Simpler than :has() — :not() with descendant context is cacheable. */
+.prose-chat :not([data-streamdown]) > pre {
+  margin: 0.5em 0;
+  padding: 0.85rem 1rem;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 0.625rem;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.prose-chat :not([data-streamdown]) > pre code {
   color: var(--color-ink);
-  font-size: 0.78em;
-  line-height: 1.5;
 }
 
-/* GFM tables — compact, faint borders. */
-.prose-chat table {
+/* ── GFM tables ─────────────────────────────────────────────────────
+   Streamdown wraps tables in:
+     [data-streamdown="table-wrapper"]  (border + bg-sidebar + p-2 + rounded-lg)
+       ├─ <div>  controls row (copy/download/fullscreen) — no data attr
+       └─ <div>  inner scroll container (border + bg-background)
+            └─ <table data-streamdown="table">
+
+   Goal: no wrapper container chrome — the table sits directly in the chat
+   flow with its own border. Controls float top-right and only appear on
+   hover, like the code-block copy button. */
+
+/* Strip the outer wrapper: no border, no bg-sidebar, no padding, no gap.
+   position:relative anchors the floating control cluster. */
+.prose-chat [data-streamdown="table-wrapper"] {
+  position: relative;
+  margin: 0.7em 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 0;
+}
+/* Controls row → absolute top-right overlay, hidden until hover.
+   This is the <div class="flex items-center justify-end gap-1"> that
+   precedes the inner scroll container. It's always the first child of
+   table-wrapper — target by position, not :has(). */
+.prose-chat [data-streamdown="table-wrapper"] > div:first-child {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 0.25rem;
+  gap: 0.125rem;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.prose-chat [data-streamdown="table-wrapper"]:hover > div:first-child {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Style each control button as a quiet translucent chip matching the
+   code-block copy button. */
+.prose-chat [data-streamdown="table-wrapper"] > div:first-child button {
+  padding: 0.3rem;
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.prose-chat [data-streamdown="table-wrapper"] > div:first-child button:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+}
+/* Inner scroll container — strip its border/bg/rounding so the table
+   floats bare in the chat. Keep overflow-x for wide tables. */
+.prose-chat [data-streamdown="table-wrapper"] > div:last-child {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow-x: auto;
+}
+/* The table itself — clean border, readable sizing. */
+.prose-chat [data-streamdown="table"] {
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 0.82em;
+  width: max-content;
+  max-width: 100%;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.prose-chat [data-streamdown="table"] th,
+.prose-chat [data-streamdown="table"] td {
+  border: 1px solid var(--color-line-soft);
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+.prose-chat [data-streamdown="table"] th {
+  background: var(--color-surface-2);
+  font-weight: 600;
+}
+/* Bare <table> without a Streamdown wrapper — fallback styling. */
+.prose-chat table:not(:where([data-streamdown] *)) {
   margin: 0.6em 0;
   border-collapse: collapse;
   font-size: 0.82em;
   width: max-content;
   max-width: 100%;
-}
-.prose-chat th,
-.prose-chat td {
   border: 1px solid var(--color-line-soft);
-  padding: 0.35em 0.6em;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.prose-chat table:not(:where([data-streamdown] *)) th,
+.prose-chat table:not(:where([data-streamdown] *)) td {
+  border: 1px solid var(--color-line-soft);
+  padding: 0.35em 0.7em;
   text-align: left;
 }
-.prose-chat th {
+.prose-chat table:not(:where([data-streamdown] *)) th {
   background: var(--color-surface-2);
   font-weight: 600;
 }

@@ -1,14 +1,14 @@
 import { memo, type ReactNode } from 'react';
 import {
-  CheckCircle2,
+  PlugZap,
+  Unplug,
+  ScanFace,
+  KeyRound,
+  Ban,
   Loader2,
-  AlertCircle,
-  XCircle,
   Pencil,
   Trash2,
   RotateCw,
-  ShieldCheck,
-  KeyRound,
   LogIn,
   Wrench,
   ChevronRight,
@@ -19,6 +19,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmPopover } from '@/components/ui/confirm-popover';
 
 /**
  * Status row for a single MCP server. Mirrors the ExtensionRow pattern:
@@ -48,7 +49,7 @@ export interface McpServerRowProps {
   transport: 'stdio' | 'sse' | 'http';
   error?: string;
   /** Where this server lives. Shown as a source-style badge. */
-  scope: 'user' | 'project';
+  scope: 'user' | 'project' | 'builtin';
   /** Whether the server is enabled (toggle state). */
   enabled: boolean;
   onToggleEnabled: (enabled: boolean) => void;
@@ -76,18 +77,17 @@ export const McpServerRow = memo(function McpServerRow({
   onToggleEnabled,
   onEdit,
   onRemove,
-  onApprove,
   onRetry,
   onReauthorize,
   onAuthenticate,
 }: McpServerRowProps) {
-  const led = statusLed(status);
+  const led = statusLed(status, enabled);
   const statusText = statusLabel(status, error);
   // Connected servers with tools get a clickable chip that opens a popover
   // listing every tool name. Empty/disconnected/error states show no chip.
   const hasTools = status === 'connected' && toolCount > 0;
 
-  const canApprove = status === 'needs_approval' && onApprove;
+  // Approval gate removed — servers auto-connect when enabled.
   const canRetry = (status === 'error' || status === 'needs_credentials') && onRetry;
   const canReauthorize = status === 'needs_oauth' && onReauthorize;
   const canAuthenticate = status === 'needs_oauth' && onAuthenticate;
@@ -106,14 +106,14 @@ export const McpServerRow = memo(function McpServerRow({
         <div className="flex items-center gap-2">
           {/* Status LED inline before the name — replaces ExtensionRow's
               plain name with a name+state read. Fixed width for alignment. */}
-          <span className="shrink-0 size-3.5 flex items-center justify-center" title={led.title}>
+          <span className={`shrink-0 size-8 rounded-lg flex items-center justify-center p-1 ${led.bgClass}`} title={led.title}>
             {led.icon}
           </span>
           <span className="text-sm font-medium truncate">{name}</span>
           <TransportBadge transport={transport} />
           <ScopeBadge scope={scope} />
         </div>
-        <div className="flex items-center gap-1.5 mt-0.5 pl-[22px] min-w-0">
+        <div className="flex items-center gap-1.5 mt-0.5 pl-[35px] min-w-0">
           <p className={`text-xs truncate ${led.textClass}`}>{statusText}</p>
           {/* Clickable tool-count chip → popover with the full tool list.
               Sits on the status line like a badge. */}
@@ -176,16 +176,6 @@ export const McpServerRow = memo(function McpServerRow({
             <LogIn className="size-3" />
           </button>
         )}
-        {canApprove && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onApprove!(); }}
-            title="Approve"
-            className="p-1 rounded hover:bg-muted transition-colors text-accent"
-          >
-            <ShieldCheck className="size-3" />
-          </button>
-        )}
         {canReauthorize && (
           <button
             type="button"
@@ -206,22 +196,36 @@ export const McpServerRow = memo(function McpServerRow({
             <RotateCw className="size-3" />
           </button>
         )}
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onEdit(); }}
-          title="Edit"
-          className="p-1 rounded hover:bg-muted transition-colors"
-        >
-          <Pencil className="size-3" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          title="Remove"
-          className="p-1 rounded hover:bg-muted transition-colors text-destructive"
-        >
-          <Trash2 className="size-3" />
-        </button>
+        {/* Built-in servers can't be edited or removed — only toggled. */}
+        {scope !== 'builtin' && (
+          <>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              title="Edit"
+              className="p-1 rounded hover:bg-muted transition-colors"
+            >
+              <Pencil className="size-3" />
+            </button>
+            <ConfirmPopover
+              trigger={
+                <button
+                  type="button"
+                  onClick={(e) => e.stopPropagation()}
+                  title="Remove"
+                  className="p-1 rounded hover:bg-muted transition-colors text-destructive"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              }
+              title={`Remove ${name}?`}
+              description="This will disconnect the server and delete its config entry."
+              confirmLabel="Remove"
+              destructive
+              onConfirm={onRemove}
+            />
+          </>
+        )}
       </div>
 
       {/* Toggle — Switch (sm) at the far right, identical to ExtensionRow. */}
@@ -235,40 +239,53 @@ export const McpServerRow = memo(function McpServerRow({
   );
 });
 
-function statusLed(status: McpStatusValue): { icon: ReactNode; title: string; textClass: string } {
+function statusLed(status: McpStatusValue, enabled: boolean): { icon: ReactNode; title: string; textClass: string; bgClass: string } {
+  // Disabled servers always show the Ban icon, regardless of connection state.
+  if (!enabled) {
+    return {
+      icon: <Ban className="size-[18px] text-amber-500" />,
+      title: 'Disabled',
+      textClass: 'text-muted-foreground/50',
+      bgClass: 'bg-amber-500/10',
+    };
+  }
   switch (status) {
     case 'connected':
       return {
-        icon: <CheckCircle2 className="size-4 text-emerald-500" />,
+        icon: <PlugZap className="size-[18px] text-emerald-500" />,
         title: 'Connected',
         textClass: 'text-muted-foreground/70',
+        bgClass: 'bg-emerald-500/10',
       };
     case 'connecting':
       return {
-        icon: <Loader2 className="size-4 text-muted-foreground animate-spin" />,
+        icon: <Loader2 className="size-[18px] text-muted-foreground animate-spin" />,
         title: 'Connecting',
         textClass: 'text-muted-foreground/70',
+        bgClass: 'bg-muted-foreground/10',
       };
-    case 'needs_approval':
-    case 'needs_credentials':
     case 'needs_oauth':
       return {
-        icon: <AlertCircle className="size-4 text-amber-500" />,
-        title: 'Action needed',
+        icon: <ScanFace className="size-[18px] text-amber-500" />,
+        title: 'Authentication Required',
         textClass: 'text-amber-600 dark:text-amber-400',
+        bgClass: 'bg-amber-500/10',
+      };
+    case 'needs_credentials':
+      return {
+        icon: <KeyRound className="size-[18px] text-amber-500" />,
+        title: 'Missing API Key',
+        textClass: 'text-amber-600 dark:text-amber-400',
+        bgClass: 'bg-amber-500/10',
       };
     case 'error':
-      return {
-        icon: <AlertCircle className="size-4 text-destructive" />,
-        title: 'Error',
-        textClass: 'text-destructive',
-      };
     case 'disconnected':
     default:
       return {
-        icon: <XCircle className="size-4 text-muted-foreground/40" />,
-        title: 'Disconnected',
-        textClass: 'text-muted-foreground/60',
+        icon: <Unplug className="size-[18px] text-destructive" />,
+        title: status === 'error' ? 'Connection Failed' : 'Disconnected',
+        textClass: 'text-destructive',
+        bgClass: 'bg-destructive/10',
       };
   }
 }
@@ -279,20 +296,20 @@ function statusLabel(
 ): string {
   switch (status) {
     case 'connected':
-      return 'connected';
+      return 'Connected';
     case 'connecting':
-      return 'connecting…';
+      return 'Connecting…';
     case 'needs_approval':
-      return 'needs approval';
+      return 'Connecting…';
     case 'needs_credentials':
-      return 'needs credentials';
+      return 'Missing API key';
     case 'needs_oauth':
-      return 'needs OAuth sign-in';
+      return 'Sign in required';
     case 'error':
-      return error ? `error: ${error}` : 'error';
+      return error ? `Failed: ${error}` : 'Connection failed';
     case 'disconnected':
     default:
-      return 'disconnected';
+      return 'Off';
   }
 }
 
@@ -311,16 +328,22 @@ function TransportBadge({ transport }: { transport: 'stdio' | 'sse' | 'http' }) 
   );
 }
 
-function ScopeBadge({ scope }: { scope: 'user' | 'project' }) {
+function ScopeBadge({ scope }: { scope: 'user' | 'project' | 'builtin' }) {
   const styles: Record<string, string> = {
     user: 'bg-muted/60 text-muted-foreground/80 border-border/60',
     project: 'bg-info/10 text-info border-info/20',
+    builtin: 'bg-primary/10 text-primary border-primary/20',
+  };
+  const labels: Record<string, string> = {
+    user: 'global',
+    project: 'workspace',
+    builtin: 'built-in',
   };
   return (
     <span
       className={`text-[9px] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[scope]}`}
     >
-      {scope === 'user' ? 'global' : 'workspace'}
+      {labels[scope]}
     </span>
   );
 }

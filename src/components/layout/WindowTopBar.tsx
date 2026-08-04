@@ -17,10 +17,10 @@ export function WindowTopBar() {
   const toggleRightPanel = useUi((s) => s.toggleRightPanel);
   const toggleLeftPanel = useUi((s) => s.toggleLeftPanel);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
-  const terminalOpen = useUi((s) => s.terminalOpen);
-  const rightPanelOpen = useUi((s) => s.rightPanelOpen);
-  const leftPanelOpen = useUi((s) => s.leftPanelOpen);
-  const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
+  // const terminalOpen = useUi((s) => s.terminalOpen);
+  // const rightPanelOpen = useUi((s) => s.rightPanelOpen);
+  // const leftPanelOpen = useUi((s) => s.leftPanelOpen);
+  // const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
 
   return (
     <div
@@ -33,7 +33,7 @@ export function WindowTopBar() {
           column starts at 220px so there's no collision. */}
       <div className="flex items-center gap-1.5" style={{ width: 220 }}>
         <Tip
-          label={`Workspaces panel (${leftPanelOpen ? "visible" : "hidden"})`}
+          label={`Workspaces Panel`}
         >
           <Button
             variant="outline"
@@ -45,7 +45,7 @@ export function WindowTopBar() {
           </Button>
         </Tip>
         <Tip
-          label={`Sessions panel (${sessionsPanelOpen ? "visible" : "hidden"})`}
+          label={`Sessions Panel`}
         >
           <Button
             variant="outline"
@@ -69,7 +69,7 @@ export function WindowTopBar() {
         style={{ paddingRight: CAPTION_PAD }}
       >
         <OpenInAppMenu />
-        <Tip label={`Terminal (${terminalOpen ? "open" : "closed"}) · T`}>
+        <Tip label={`Terminal Panel`}>
           <Button
             variant="outline"
             size="sm"
@@ -79,7 +79,7 @@ export function WindowTopBar() {
             <Terminal className="size-3.5" />
           </Button>
         </Tip>
-        <Tip label={`Right panel (${rightPanelOpen ? "open" : "closed"}) · R`}>
+        <Tip label={`Right Panel`}>
           <Button
             variant="outline"
             size="sm"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plug, Plus, Download, ExternalLink, Globe, FolderCode, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plug, Plus, Download, ExternalLink, Globe, FolderCode, Package, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { SettingsHeader, Card } from './shared';
 import { ReloadButton } from './ReloadButton';
@@ -63,7 +63,6 @@ export function McpSection() {
   const workspaceRoot = ws?.path ?? '';
 
   const [servers, setServers] = useState<McpStatus[]>([]);
-  const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<EditingServer | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -76,31 +75,34 @@ export function McpSection() {
     }).catch(() => setImportBadge(0));
   }, []);
 
+  const [reinitializing, setReinitializing] = useState(false);
+
   const refresh = useCallback(async () => {
-    setLoading(true);
     try {
       const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
-      if (result) setServers(result);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeWorkspaceId]);
+      // Don't replace the list with empty during a reinitialize — keep
+      // showing the existing servers so the UI doesn't flash/disappear.
+      if (result && (result.length > 0 || servers.length === 0 || !reinitializing)) {
+        setServers(result);
+      }
+    } catch { /* best-effort */ }
+  }, [activeWorkspaceId, servers.length, reinitializing]);
 
-  // Full re-initialize: disconnect + reconnect ALL servers from their config
-  // files. Picks up added/removed/edited servers and re-runs every connection
-  // (including ones that were failing). The pool broadcasts statusChanged as
-  // each connect resolves, so refresh() re-pulls the list afterwards.
+  // Full re-initialize: disconnect + reconnect user + project servers from
+  // their config files. Built-in servers are NOT affected. The pool broadcasts
+  // statusChanged as each connect resolves, so refresh() re-pulls the list.
   const reinitialize = useCallback(async () => {
-    setLoading(true);
+    setReinitializing(true);
     try {
       await window.tideIpc?.mcpReinitialize();
+      // Force a fresh pull after reinitialize completes.
       const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
       if (result) setServers(result);
-      toast.success('MCP reinitialized');
+      toast.success('MCP servers reloaded');
     } catch (e) {
-      toast.error('Reinitialize failed', { description: e instanceof Error ? e.message : undefined });
+      toast.error('Reload failed', { description: e instanceof Error ? e.message : undefined });
     } finally {
-      setLoading(false);
+      setReinitializing(false);
     }
   }, [activeWorkspaceId]);
 
@@ -122,6 +124,7 @@ export function McpSection() {
 
   const globalServers = useMemo(() => servers.filter((s) => s.scope === 'user'), [servers]);
   const workspaceServers = useMemo(() => servers.filter((s) => s.scope === 'project'), [servers]);
+  const builtinServers = useMemo(() => servers.filter((s) => s.scope === 'builtin'), [servers]);
 
   // ── handlers ────────────────────────────────────────────────────────────
 
@@ -155,6 +158,10 @@ export function McpSection() {
       setDialogOpen(false);
       setEditingServer(null);
       await refresh();
+      // The add/update handlers fire loadServer in the background — the new
+      // server isn't in the pool yet when refresh() runs. Poll once more after
+      // a short delay to catch the server as it enters the pool (connecting).
+      setTimeout(() => void refresh(), 500);
     } catch (e) {
       toast.error('Save failed', { description: e instanceof Error ? e.message : undefined });
     }
@@ -219,9 +226,9 @@ export function McpSection() {
   const addButton = (
     <div className="flex items-center gap-2">
       <ReloadButton
-        loading={loading}
+        loading={reinitializing}
         onClick={() => void reinitialize()}
-        title="Re-initialize all MCP (disconnect + reconnect)"
+        title="Reload MCP servers"
       />
       {/* Split button group: Add (primary) + dropdown caret for Import.
           Import is only offered when the scanner detected importable servers
@@ -272,13 +279,13 @@ export function McpSection() {
     </div>
   );
 
-  const isEmpty = servers.length === 0;
+  const isEmpty = servers.length === 0 && builtinServers.length === 0;
 
   return (
     <>
       <SettingsHeader
         title="MCP"
-        description="Model Context Protocol servers. Add stdio commands or remote endpoints; approve new servers before they can run tools."
+        description="Connect external tools and data sources via Model Context Protocol servers."
         action={addButton}
       />
 
@@ -290,6 +297,21 @@ export function McpSection() {
               icon={<Globe className="size-3.5" />}
               hint="~/.tide/mcp.json · available in all workspaces"
               servers={globalServers}
+              onEdit={handleEdit}
+              onRemove={handleRemove}
+              onApprove={handleApprove}
+              onRetry={handleRetry}
+              onReauthorize={handleReauthorize}
+              onAuthenticate={handleAuthenticate}
+              onToggleEnabled={handleToggleEnabled}
+            />
+          )}
+          {builtinServers.length > 0 && (
+            <ServerCard
+              label="Built-in"
+              icon={<Package className="size-3.5" />}
+              hint="Ships with Tide · toggle to enable"
+              servers={builtinServers}
               onEdit={handleEdit}
               onRemove={handleRemove}
               onApprove={handleApprove}

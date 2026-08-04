@@ -16,14 +16,15 @@
 import { ipcMain, app } from 'electron';
 import { createSettingsStore, type ShortcutOverrides } from '../settingsStore.js';
 import { createLogger } from '../logger.js';
+import { appDataDir } from '../appPaths.js';
 
 const log = createLogger('settings');
 
 // Singleton — created on first import (after app.whenReady, since this module
 // is imported lazily from main.ts inside the whenReady callback). The path
-// comes from app.getPath('userData'), which the userData-relocation step has
+// comes from appDataDir(), which the userData-relocation step has
 // already redirected to ~/.tide (or ~/.tide-dev) by this point.
-const store = createSettingsStore(app.getPath('userData'), process.platform);
+const store = createSettingsStore(appDataDir(), process.platform);
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('tide:settings:get', () => ({

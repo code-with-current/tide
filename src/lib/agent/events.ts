@@ -176,15 +176,43 @@ export interface TurnEndEvent extends AgentEventBase {
    *  final rendered state. Built by the orchestrator. */
   blocks?: Block[];
   /** Aggregate usage for the whole turn (summed across all LLM calls).
-   *  The renderer persists this into session.usage for the context-window
-   *  meter. Optional so older orchestrators that don't emit it still work. */
+   *  Used for cumulative cost accounting. Optional. */
   usage?: Usage;
+  /** The LAST step's usage only (not accumulated). The context-window meter
+   *  reads this to show the current context fill — the model's most recent
+   *  request is what fills the window, not the sum of all steps. */
+  lastStepUsage?: Usage;
 }
 
 /** Network, provider error, or timeout — after retries exhausted. */
 export interface ErrorEvent extends AgentEventBase {
   type: 'error';
   message: string;
+}
+
+/** Emitted between retry attempts so the UI can show "Retrying 2/3…". */
+export interface RetryEvent extends AgentEventBase {
+  type: 'retry';
+  /** Which retry is about to run (1-based). e.g. attempt=1 means "first retry"
+   *  after the initial failure; the total including the initial call is
+   *  attempt + 1. */
+  attempt: number;
+  /** Total number of retry attempts configured (not counting the initial call). */
+  maxAttempts: number;
+  /** The error that caused the retry, so the UI can show what went wrong. */
+  reason: string;
+}
+
+/** Emitted when autocompact fires — the conversation was summarized to fit the
+ *  context window. Lets the UI show a "Compacting…" indicator so the user knows
+ *  why there's a brief pause before the next step streams. */
+export interface CompactingEvent extends AgentEventBase {
+  type: 'compacting';
+  messageId: string;
+  /** Estimated token count before compaction. */
+  tokensBefore: number;
+  /** Whether the user triggered it via /compact (vs auto threshold). */
+  forced: boolean;
 }
 
 export type AgentEvent =
@@ -199,6 +227,8 @@ export type AgentEvent =
   | PermissionRequiredEvent
   | UsageEvent
   | TurnEndEvent
+  | RetryEvent
+  | CompactingEvent
   | ErrorEvent;
 
 /** IPC channel name for the unified agent event stream. */

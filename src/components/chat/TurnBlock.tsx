@@ -32,7 +32,7 @@ export const TurnBlock = memo(function TurnBlock({
   streaming: boolean;
   pendingToolCallIds?: string[];
   stopReason?: string | null;
-  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: 'session' | 'project') => void;
+  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
 }) {
   const activeSessionId = useUi(s => s.activeSessionId);
@@ -77,6 +77,7 @@ export const TurnBlock = memo(function TurnBlock({
           blocks={message.blocks}
           streaming={streaming}
           stopped={stopped}
+          stopReason={stopReason}
           sessionId={activeSessionId}
           messageId={message.id}
           onViewFile={handleViewFile}

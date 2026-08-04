@@ -64,12 +64,24 @@ export function withToolHooks<T extends CoreTool>(
         return result;
       }
 
+      // Check for 'ask' — hook wants the user to approve before running.
+      // (handled after input modifications, below)
+
       // Apply input modifications (merge all updatedInput from hooks)
       let finalArgs = args;
       for (const r of preResults) {
         if (r.updatedInput) {
           finalArgs = { ...finalArgs, ...r.updatedInput };
         }
+      }
+
+      // Now handle 'ask' — attach the hook reason so the permission UI can
+      // display why approval is requested. Falls through to the normal
+      // permission gate (autonomy system shows the approval card).
+      const ask = preResults.find((r) => r.decision === 'ask');
+      if (ask) {
+        const hookReason = ask.reason ?? 'A PreToolUse hook requested approval.';
+        finalArgs = { ...finalArgs, _hookReason: hookReason };
       }
 
       // ── 2+3. Execute the tool (permission + actual work) ──

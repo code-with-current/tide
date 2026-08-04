@@ -22,6 +22,7 @@
  */
 
 import { spawn } from 'child_process';
+import { toolEnv, wrapWithShell, killProcessTree } from './tool-env';
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ToolRegistration } from './types';
@@ -82,29 +83,19 @@ export async function runBash(
   const blocked = blockedReason(trimmed);
   if (blocked) return { status: 'rejected', output: blocked };
 
-  // Use /bin/sh for tool execution — it's a POSIX shell that skips zsh/bash
-  // startup overhead (.zshrc, .bashrc, nvm, conda init, etc.). The user's
-  // interactive SHELL is for the terminal panel, not for tool execution.
-  // CI=1 disables interactive prompts in package managers.
-  const shell = '/bin/sh';
+  // Platform-aware shell wrapping: Unix uses $SHELL -l -c (resolves nvm/fnm),
+  // Windows uses cmd.exe /c. toolEnv() augments PATH for GUI app context.
+  const wrapped = wrapWithShell(trimmed);
+  const isWin = process.platform === 'win32';
 
   return new Promise((resolve) => {
     const start = Date.now();
-    // detached:true puts the child in its own process group (pgid == child.pid)
-    // so a timeout can signal the WHOLE group. Without this, killing the shell
-    // leaves grandchildren alive (e.g. a `grep`/`npm` the shell spawned): they
-    // get reparented, keep the stdout pipe open, and the tool's Promise never
-    // resolves until they finish on their own — the "tool stuck on Running"
-    // failure mode. `process.kill(-child.pid, sig)` reaches the whole tree.
-    const child = spawn(shell, ['-c', trimmed], {
+    const child = spawn(wrapped.command, wrapped.args, {
       cwd: workspaceRoot,
-      env: { ...process.env, CI: '1', SHELL: '/bin/sh' },
+      env: toolEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
+      detached: !isWin, // Unix only — Windows doesn't support process groups
     });
-    const killGroup = (sig: NodeJS.Signals) => {
-      try { if (child.pid) process.kill(-child.pid, sig); } catch { /* already dead */ }
-    };
 
     let stdout = '';
     let stderr = '';
@@ -113,8 +104,8 @@ export async function runBash(
 
     const timer = setTimeout(() => {
       killed = true;
-      killGroup('SIGTERM');
-      setTimeout(() => killGroup('SIGKILL'), 500);
+      killProcessTree(child.pid, 'SIGTERM');
+      if (!isWin) setTimeout(() => killProcessTree(child.pid, 'SIGKILL'), 500);
     }, timeoutMs);
 
     // Early timeout for commands that are likely stuck (no output after 15s
@@ -123,12 +114,9 @@ export async function runBash(
     const earlyKill = setTimeout(() => {
       if (killed) return;
       if (stdout.length === 0 && stderr.length === 0) {
-        // No output at all after 15s — likely stuck. Kill the whole group
-        // early — grandchildren included (see the `detached` note above),
-        // otherwise a reparented grep keeps the pipe open and the tool hangs.
         killed = true;
-        killGroup('SIGTERM');
-        setTimeout(() => killGroup('SIGKILL'), 500);
+        killProcessTree(child.pid, 'SIGTERM');
+        if (!isWin) setTimeout(() => killProcessTree(child.pid, 'SIGKILL'), 500);
       }
     }, 15_000);
 

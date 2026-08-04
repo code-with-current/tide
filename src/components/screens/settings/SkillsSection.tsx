@@ -79,7 +79,7 @@ export function SkillsSection() {
   return (
     <>
       <SettingsHeader
-        title="Extensions → Skills"
+        title="Skills"
         description={`${skills.length} installed · ${activeCount} active`}
         action={
           <ReloadButton

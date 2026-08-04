@@ -11,6 +11,7 @@
  */
 
 import { spawn } from 'child_process';
+import { toolEnv } from './tool-env';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { resolveInsideWorkspace } from '../path-safety';
@@ -89,7 +90,7 @@ export async function runGit(
     const start = Date.now();
     const child = spawn('git', argv, {
       cwd,
-      env: { ...process.env, CI: '1' },
+      env: toolEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
     });

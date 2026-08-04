@@ -9,7 +9,7 @@
  * as servers connect, fail, or get approved).
  *
  * Config paths resolve per call from `getActiveWorkspace()` — the user
- * config lives in `app.getPath('userData')` (always available) and the
+ * config lives in `appDataDir()` (always available) and the
  * project config lives in the active workspace's root (`<root>/.mcp.json`).
  * Handlers that operate on project scope no-op (return without writing)
  * when no workspace is active.
@@ -24,6 +24,7 @@ import {
   onStatusChange,
   loadServer,
   unloadServer,
+  disableServer,
   reinitializeAll,
 } from '../agent/mcp/pool.js';
 import {
@@ -31,20 +32,45 @@ import {
   removeServer,
   validateServerConfig,
 } from '../agent/mcp/config.js';
-import { approveServer } from '../agent/mcp/approvals.js';
+import * as store from '../store.js';
+// Approval system removed — approveServer calls were no-ops; cleaned up.
 import { setSecret, hasSecret, clearSecret } from '../agent/mcp/secrets.js';
 import { clearOAuthTokens } from '../agent/mcp/oauth.js';
 import { scanExternalMcpServers } from '../agent/mcp/scanner.js';
 import { readMcpConfig, writeMcpConfig } from '../agent/mcp/config.js';
+import { BUILTIN_MCP_SERVERS } from '../agent/mcp/builtin.js';
 import { createExtensionsStore } from '../extensionsStore.js';
 import { createLogger } from '../logger.js';
+import { appDataDir } from '../appPaths.js';
 
 const log = createLogger('mcp');
 
 type ActiveWorkspace = { id: string; root: string } | undefined;
 
+/**
+ * Resolve the active workspace — tries the live tracker first, then falls
+ * back to the config store's lastWorkspaceId. Returns the workspace path
+ * so project-scoped MCP configs (.mcp.json) can be written even when the
+ * renderer hasn't fired workspaceActivated yet (e.g. user is on Settings).
+ */
+function resolveWorkspace(getActiveWorkspace: () => ActiveWorkspace): ActiveWorkspace {
+  const live = getActiveWorkspace();
+  if (live?.root) return live;
+  // Fallback: read from the config store.
+  try {
+    const workspaces = store.listWorkspaces();
+    // Try the last session's workspace, else the first workspace with a path.
+    const lastSession = store.getLastSession();
+    const active = (lastSession?.workspaceId
+      ? workspaces.find((w) => w.id === lastSession.workspaceId)
+      : undefined) ?? workspaces.find((w) => w.path);
+    if (active?.path) return { id: active.id, root: active.path };
+  } catch { /* best-effort */ }
+  return undefined;
+}
+
 function userConfigPath(): string {
-  return path.join(app.getPath('userData'), 'mcp.json');
+  return path.join(appDataDir(), 'mcp.json');
 }
 
 function projectConfigPath(root: string): string {
@@ -76,7 +102,7 @@ export function registerMcpHandlers(
         scope === 'user'
           ? userConfigPath()
           : (() => {
-              const ws = getActiveWorkspace();
+              const ws = resolveWorkspace(getActiveWorkspace);
               if (!ws) {
                 return { ok: false, error: 'No active workspace for project-scoped server' };
               }
@@ -84,13 +110,11 @@ export function registerMcpHandlers(
             })();
       if (typeof filePath !== 'string') return filePath;
       addServer(filePath, name, config);
-      // Auto-approve servers added via the UI — the user explicitly added it,
-      // no need for the first-connect security prompt.
-      approveServer(name);
-      // Load the server into the pool so it appears in the UI + connects
-      const ws = getActiveWorkspace();
-      await loadServer(name, config, scope, ws?.id);
-      log.info('server added', { name, scope });
+      // Fire-and-forget the connection so the IPC returns instantly.
+      const ws = resolveWorkspace(getActiveWorkspace);
+      loadServer(name, config, scope, ws?.id)
+        .then(() => log.info('server added', { name, scope }))
+        .catch((err) => log.warn('server add failed', { name, err: err?.message ?? String(err) }));
       return { ok: true };
     },
   );
@@ -98,7 +122,10 @@ export function registerMcpHandlers(
   // Update is identical to add (addServer replaces by name).
   ipcMain.handle(
     'tide:mcp:update',
-    async (_e, name: string, config: any, scope: 'user' | 'project') => {
+    async (_e, name: string, config: any, scope: 'user' | 'project' | 'builtin') => {
+      if (scope === 'builtin') {
+        return { ok: false, error: 'Built-in servers cannot be edited.' };
+      }
       const errors = validateServerConfig(config);
       if (errors.length > 0) {
         return { ok: false, error: errors.join('; ') };
@@ -107,7 +134,7 @@ export function registerMcpHandlers(
         scope === 'user'
           ? userConfigPath()
           : (() => {
-              const ws = getActiveWorkspace();
+              const ws = resolveWorkspace(getActiveWorkspace);
               if (!ws) {
                 return { ok: false, error: 'No active workspace for project-scoped server' };
               }
@@ -115,31 +142,33 @@ export function registerMcpHandlers(
             })();
       if (typeof filePath !== 'string') return filePath;
       addServer(filePath, name, config);
-      // Auto-approve on update too (user is explicitly editing it)
-      approveServer(name);
-      // Reload the server into the pool with the new config
-      const ws = getActiveWorkspace();
-      await loadServer(name, config, scope, ws?.id);
-      log.info('server updated', { name, scope });
+      // Fire-and-forget the reconnection with the new config.
+      const ws = resolveWorkspace(getActiveWorkspace);
+      loadServer(name, config, scope, ws?.id)
+        .then(() => log.info('server updated', { name, scope }))
+        .catch((err) => log.warn('server update failed', { name, err: err?.message ?? String(err) }));
       return { ok: true };
     },
   );
 
   ipcMain.handle(
     'tide:mcp:remove',
-    async (_e, name: string, scope: 'user' | 'project') => {
+    async (_e, name: string, scope: 'user' | 'project' | 'builtin') => {
+      if (scope === 'builtin') {
+        return { ok: false, error: 'Built-in servers cannot be removed.' };
+      }
       const filePath =
         scope === 'user'
           ? userConfigPath()
           : (() => {
-              const ws = getActiveWorkspace();
+              const ws = resolveWorkspace(getActiveWorkspace);
               if (!ws) return null;
               return projectConfigPath(ws.root);
             })();
       if (!filePath) return { ok: false, error: 'No active workspace' };
       removeServer(filePath, name);
       // Remove from the pool so it disappears from the UI
-      const ws = getActiveWorkspace();
+      const ws = resolveWorkspace(getActiveWorkspace);
       await unloadServer(name, scope, ws?.id);
       log.info('server removed', { name, scope });
       return { ok: true };
@@ -153,13 +182,14 @@ export function registerMcpHandlers(
     return { ok: true };
   });
 
-  // ── Retry a failed/error server ──
+  // ── Retry a failed/error server — reconnects with fresh config from disk ──
   ipcMain.handle(
     'tide:mcp:retry',
-    (_e, name: string, scope: 'user' | 'project', workspaceId?: string) => {
-      // Fire-and-forget — retry is async but the UI re-renders off the
-      // statusChanged broadcast when connectServer resolves.
-      retryServer(name, scope, workspaceId).catch((e) =>
+    (_e, name: string, scope: 'user' | 'project' | 'builtin', workspaceId?: string) => {
+      // Re-read the config from disk so external edits (changed args, env, etc.)
+      // are picked up on retry — not the stale cached config.
+      const ws = resolveWorkspace(getActiveWorkspace);
+      retryServer(name, scope, ws?.root, workspaceId).catch((e) =>
         log.warn('retry failed', { name, error: String(e) }),
       );
       return { ok: true };
@@ -185,7 +215,7 @@ export function registerMcpHandlers(
   // added/removed/edited servers and previously-failing ones all get a fresh
   // connect attempt. Fire-and-forget; the UI updates off statusChanged.
   ipcMain.handle('tide:mcp:reinitialize', () => {
-    const ws = getActiveWorkspace();
+    const ws = resolveWorkspace(getActiveWorkspace);
     reinitializeAll(ws ?? undefined).catch((e) =>
       log.warn('reinitialize failed', { error: String(e) }),
     );
@@ -208,10 +238,11 @@ export function registerMcpHandlers(
   // ── Re-authorize OAuth server (clear tokens + retry) ──
   ipcMain.handle(
     'tide:mcp:reauthorize',
-    async (_e, name: string, scope: 'user' | 'project', workspaceId?: string) => {
+    async (_e, name: string, scope: 'user' | 'project' | 'builtin', workspaceId?: string) => {
       clearOAuthTokens(name);
       log.info('oauth tokens cleared for re-auth', { name });
-      retryServer(name, scope, workspaceId).catch((e) =>
+      const ws = resolveWorkspace(getActiveWorkspace);
+      retryServer(name, scope, ws?.root, workspaceId).catch((e) =>
         log.warn('re-auth retry failed', { name, error: String(e) }),
       );
       return { ok: true };
@@ -227,7 +258,7 @@ export function registerMcpHandlers(
   ipcMain.handle(
     'tide:mcp:import',
     async (_e, servers: Array<{ name: string; config: any }>, scope: 'user' | 'project') => {
-      const ws = getActiveWorkspace();
+      const ws = resolveWorkspace(getActiveWorkspace);
       const filePath =
         scope === 'user'
           ? userConfigPath()
@@ -236,12 +267,26 @@ export function registerMcpHandlers(
             : null;
       if (!filePath) return { ok: false, error: 'No active workspace for project scope' };
 
+      // Write config + approve synchronously for all servers, then fire
+      // connections in the BACKGROUND. The IPC returns immediately so the
+      // dialog can close — connections resolve asynchronously and the UI
+      // updates via the statusChanged broadcast. Previously, `await loadServer`
+      // blocked the IPC on each server's connection attempt, which could hang
+      // forever if a server was unreachable (no timeout on client.connect).
       for (const { name, config } of servers) {
         addServer(filePath, name, config);
-        approveServer(name);
-        await loadServer(name, config, scope, ws?.id);
-        log.info('server imported', { name, scope, source: 'import' });
+        // Auto-approve removed — servers connect immediately.
       }
+
+      // Fire connections in the background — don't block the IPC response.
+      // Each server's status (connecting → connected/error) broadcasts via
+      // statusChanged, so the McpSection list updates live.
+      for (const { name, config } of servers) {
+        loadServer(name, config, scope, ws?.id)
+          .then(() => log.info('server imported', { name, scope, source: 'import' }))
+          .catch((err) => log.warn('server import failed', { name, err: err?.message ?? String(err) }));
+      }
+
       return { ok: true, imported: servers.length };
     },
   );
@@ -249,26 +294,35 @@ export function registerMcpHandlers(
   // ── Enable/disable a server (toggle on/off without removing config) ──
   ipcMain.handle(
     'tide:mcp:setEnabled',
-    async (_e, name: string, enabled: boolean, _scope: 'user' | 'project') => {
-      const extStore = createExtensionsStore(app.getPath('userData'));
+    async (_e, name: string, enabled: boolean, _scope: 'user' | 'project' | 'builtin') => {
+      const extStore = createExtensionsStore(appDataDir());
       extStore.setEnabled('mcp', name, enabled);
       log.info('server toggled', { name, enabled });
 
       if (!enabled) {
-        // Disconnect immediately — tools disappear from orchestrator next turn
-        const ws = getActiveWorkspace();
-        await unloadServer(name, 'user', undefined);
-        await unloadServer(name, 'project', ws?.id);
+        // Disconnect but KEEP in the pool with 'disconnected' status so the
+        // server stays visible in the UI (greyed out). The user can toggle
+        // it back on. Contrast with remove which fully deletes the entry.
+        const ws = resolveWorkspace(getActiveWorkspace);
+        await disableServer(name, 'user', undefined);
+        await disableServer(name, 'project', ws?.id);
+        await disableServer(name, 'builtin', undefined);
       } else {
-        // Reconnect — read config + load into pool
-        const userConfig = readMcpConfig(userConfigPath());
-        const ws = getActiveWorkspace();
-        if (userConfig[name]) {
-          await loadServer(name, userConfig[name], 'user');
-        } else if (ws) {
-          const projConfig = readMcpConfig(projectConfigPath(ws.root));
-          if (projConfig[name]) {
-            await loadServer(name, projConfig[name], 'project', ws.id);
+        // Reconnect — find the server config from the appropriate source.
+        // Check builtin registry first, then user config, then project config.
+        const builtin = BUILTIN_MCP_SERVERS[name];
+        if (builtin) {
+          await loadServer(name, builtin.config, 'builtin');
+        } else {
+          const userConfig = readMcpConfig(userConfigPath());
+          const ws = resolveWorkspace(getActiveWorkspace);
+          if (userConfig[name]) {
+            await loadServer(name, userConfig[name], 'user');
+          } else if (ws) {
+            const projConfig = readMcpConfig(projectConfigPath(ws.root));
+            if (projConfig[name]) {
+              await loadServer(name, projConfig[name], 'project', ws.id);
+            }
           }
         }
       }
@@ -282,7 +336,7 @@ export function registerMcpHandlers(
       scope === 'user'
         ? userConfigPath()
         : (() => {
-            const ws = getActiveWorkspace();
+            const ws = resolveWorkspace(getActiveWorkspace);
             return ws ? projectConfigPath(ws.root) : null;
           })();
     if (!filePath) return { ok: false, error: 'No active workspace' };
@@ -295,7 +349,7 @@ export function registerMcpHandlers(
         scope === 'user'
           ? userConfigPath()
           : (() => {
-              const ws = getActiveWorkspace();
+              const ws = resolveWorkspace(getActiveWorkspace);
               return ws ? projectConfigPath(ws.root) : null;
             })();
       if (!filePath) return { ok: false, error: 'No active workspace' };

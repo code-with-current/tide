@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { FileText, X, Loader2, GitCompareArrows, ChevronLeft, ChevronRight, Eye, Code2 } from 'lucide-react';
+import { FileText, X, Loader2, GitCompareArrows, ChevronLeft, ChevronRight, Eye, Code2, Image as ImageIcon } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useUi, type OpenFile } from '@/lib/stores/ui';
 import * as api from '@/lib/api/client';
 import { DiffView } from '@/components/chat/DiffView';
 import { MemoizedMarkdown } from '@/components/chat/MemoizedMarkdown';
+import { Image } from '@/components/ui/image';
 import { resolveLanguage } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
 
@@ -153,12 +154,46 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
   const isDiff = !!(file.diffHunks && file.diffHunks.length > 0);
   const isMarkdown = MD_EXTENSIONS.has(file.language);
   const [mdPreview, setMdPreview] = useState(isMarkdown);
-  const [state, setState] = useState<BodyState>({ loading: true });
+  // Inline content (e.g. a pasted/browsed attachment) skips the disk read
+  // entirely — the bytes are already in hand and the file may live outside
+  // the workspace, so readFileInWorkspace would 404.
+  const hasInline = file.inlineContent !== undefined;
+  const isExternal = file.external === true;
+  const [state, setState] = useState<BodyState>(() =>
+    hasInline
+      ? { loading: false, content: file.inlineContent!, truncated: false }
+      : { loading: true },
+  );
 
   useEffect(() => {
-    if (isDiff) return;
+    // Skip the disk read when we already have inline content or it's a diff.
+    if (isDiff || hasInline) return;
     let cancelled = false;
     setState({ loading: true });
+    // External attachments (browsed/pasted from anywhere on disk) read via
+    // readExternalFile — no workspace sandbox. absPath survives reload
+    // because it's encoded in the content link target, so this works even
+    // after attachments[] is gone from memory.
+    if (isExternal && file.absPath) {
+      api.readExternalFile(file.absPath).then((res) => {
+        if (cancelled) return;
+        if (res == null) {
+          setState({ loading: false, error: 'Could not read file — it may have been moved or deleted.' });
+        } else {
+          setState({ loading: false, content: res.content, truncated: res.truncated });
+        }
+      });
+      return () => { cancelled = true; };
+    }
+    // Images without absPath (or any external file with no absPath and no
+    // inline content) can't be read — fall through to the isImage /
+    // external-placeholder render paths below instead of attempting a
+    // workspace read that would 404.
+    if (isExternal) {
+      setState({ loading: false, content: '', truncated: false });
+      return;
+    }
+    // Workspace file — read via the sandboxed workspace API.
     api.readFileInWorkspace(workspaceId, file.path).then((res) => {
       if (cancelled) return;
       if (res == null || res.ok !== true) {
@@ -168,7 +203,7 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
       }
     });
     return () => { cancelled = true; };
-  }, [workspaceId, file.path, isDiff]);
+  }, [workspaceId, file.path, file.absPath, isDiff, hasInline, isExternal]);
 
   // Diff mode — render DiffView (opened from Source Control).
   if (isDiff) {
@@ -181,6 +216,35 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
         </div>
         <div className="flex-1 overflow-auto scroll">
           <DiffView hunks={file.diffHunks!} />
+        </div>
+      </div>
+    );
+  }
+
+  // Image preview — short-circuits BEFORE the text disk-read/error checks.
+  // Images attach by path and have no text content, so they get their own
+  // loader (readImageFile → base64 data URL) rendered via the Image UI
+  // component. Works for both external attachments (absPath) and workspace
+  // @file mentions (relPath).
+  if (file.isImage) {
+    return <ImageBody file={file} workspaceId={workspaceId} />;
+  }
+
+  // External attachment with no absPath and no inline content — this
+  // happens only for very old sessions saved before absPath was encoded
+  // into the link target. Don't surface the workspace disk-read error;
+  // explain the real reason.
+  if (isExternal && !hasInline && !file.absPath) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[10px] text-muted-foreground/60 flex-shrink-0">
+          <code className="font-mono truncate flex-1" title={file.path}>{file.path}</code>
+          <span className="uppercase">external</span>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground/50 p-6 text-center">
+          <FileText className="size-6" />
+          <span className="text-xs">Attached file content isn't available after reload.</span>
+          <span className="text-[10px]">Re-attach the file to view its contents.</span>
         </div>
       </div>
     );
@@ -250,6 +314,90 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
       )}
     </div>
   );
+}
+
+/**
+ * Image viewer — reads the image as a base64 data URL via the
+ * `readImageFile` IPC (the renderer can't load file:// URLs under
+ * contextIsolation) and renders it with the standard Image UI component.
+ * Handles both external attachments (absPath) and workspace @file mentions
+ * (relPath). Falls back to a friendly error if the file is gone.
+ */
+function ImageBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
+  const [state, setState] = useState<
+    | { loading: true }
+    | { loading: false; dataUrl: string }
+    | { loading: false; error: string }
+  >({ loading: true });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ loading: true });
+    // External attachments carry absPath; workspace mentions carry relPath.
+    const input = file.absPath
+      ? { absPath: file.absPath }
+      : { workspaceId, relPath: file.path };
+    api.readImageFile(input).then((res) => {
+      if (cancelled) return;
+      if (res == null) {
+        setState({ loading: false, error: 'Could not read image — it may have been moved or deleted.' });
+      } else {
+        setState({ loading: false, dataUrl: res.dataUrl });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [file.absPath, file.path, workspaceId]);
+
+  if (state.loading) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <ImageHeader path={file.path} bytes={file.bytes} />
+        <div className="flex-1 flex items-center justify-center text-muted-foreground/50">
+          <Loader2 className="size-4 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+  if ('error' in state) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <ImageHeader path={file.path} bytes={file.bytes} />
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground/50 p-6 text-center">
+          <ImageIcon className="size-6" />
+          <span className="text-xs">{state.error}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      <ImageHeader path={file.path} bytes={file.bytes} />
+      <div className="flex-1 overflow-auto scroll p-4 flex items-start justify-center">
+        <Image
+          src={state.dataUrl}
+          alt={file.path}
+          className="max-w-full max-h-full h-auto shadow-sm"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Shared header bar for image previews — filename + size + "image" tag. */
+function ImageHeader({ path, bytes }: { path: string; bytes?: number }) {
+  const sz = formatBytesStatic(bytes);
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[10px] text-muted-foreground/60 flex-shrink-0">
+      <ImageIcon className="size-3" />
+      <code className="font-mono truncate flex-1" title={path}>{path}</code>
+      {sz && <span className="tabular-nums">{sz}</span>}
+      <span className="uppercase">image</span>
+    </div>
+  );
+}
+
+function formatBytesStatic(b?: number): string | null {
+  return b != null ? (b > 1024 ? `${Math.ceil(b / 1024)}KB` : `${b}B`) : null;
 }
 
 /**

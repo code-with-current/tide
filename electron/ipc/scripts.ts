@@ -18,6 +18,7 @@ import { ipcMain, WebContents } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { wrapWithShell, toolEnv, killProcessTree } from '../agent/tools/tool-env';
 import * as store from '../store.js';
 import { createLogger } from '../logger.js';
 
@@ -122,15 +123,14 @@ function resolveWorkspacePath(workspaceId: string): string | null {
 }
 
 /**
- * Resolve the shell command. Supports simple `npm run X` / `yarn X` / `node X.js`
- * commands. For anything more complex, the command runs via `sh -c`.
+ * Spawn a workspace script (npm run, npx, python, etc.) through the
+ * platform-aware shell wrapper. Uses toolEnv for PATH augmentation.
  */
 function spawnCommand(command: string, cwd: string): ChildProcess {
-  // Use sh -c so pipes, &&, env vars etc. work. On macOS the default shell is zsh.
-  const shell = process.env.SHELL || '/bin/sh';
-  return spawn(shell, ['-c', command], {
+  const wrapped = wrapWithShell(command);
+  return spawn(wrapped.command, wrapped.args, {
     cwd,
-    env: { ...process.env, FORCE_COLOR: '1', CI: undefined },
+    env: toolEnv({ FORCE_COLOR: '1', CI: undefined }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -280,11 +280,11 @@ export function registerScriptHandlers() {
       if (!entry) return { ok: false, reason: 'not running' };
       try {
         log.info('stopping script', { workspace: payload.workspaceId, command: payload.command, pid: entry.proc.pid });
-        entry.proc.kill('SIGTERM');
-        // Force-kill after 3s if still alive.
+        killProcessTree(entry.proc.pid);
+        // Force-kill after 3s if still alive (Unix only — Windows taskkill is already forceful).
         setTimeout(() => {
-          if (!entry.proc.killed) {
-            try { entry.proc.kill('SIGKILL'); } catch { /* already dead */ }
+          if (!entry.proc.killed && process.platform !== 'win32') {
+            killProcessTree(entry.proc.pid, 'SIGKILL');
           }
         }, 3000);
         return { ok: true };
@@ -332,7 +332,7 @@ export function registerScriptHandlers() {
 export function killWorkspaceScripts(workspaceId: string): void {
   for (const [key, entry] of runningProcs.entries()) {
     if (entry.workspaceId === workspaceId) {
-      try { entry.proc.kill('SIGTERM'); } catch { /* dead */ }
+      try { killProcessTree(entry.proc.pid); } catch { /* dead */ }
       runningProcs.delete(key);
     }
   }

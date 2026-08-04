@@ -15,7 +15,7 @@ export interface PermissionSurface {
   onApprove?: (
     id: string,
     newMode?: 'plan' | 'ask' | 'edit' | 'full',
-    remember?: 'session' | 'project',
+    remember?: boolean,
   ) => void;
   onReject?: (id: string, reason?: string) => void;
 }

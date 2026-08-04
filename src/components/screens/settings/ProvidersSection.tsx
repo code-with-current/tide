@@ -47,7 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Dot } from "@/components/primitives";
+import { ProviderLogo } from "@/components/primitives/ProviderLogo";
 import * as api from "@/lib/api/client";
 import { useProviders, useAddProvider } from "@/lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
@@ -210,7 +210,16 @@ function ProviderListItem({
   active: boolean;
   onSelect: () => void;
 }) {
-  const styleLabel = provider.apiStyle === "openai" ? "O" : "A";
+  // Brand tint per protocol — matches StyleAvatar/StyleCard so the list row
+  // reads as the same family as the picker.
+  const isAnthropic = provider.apiStyle === "anthropic";
+  const tint = isAnthropic ? "#d97757" : "#10a37f";
+  const modelCount = provider.models.length;
+  // Short host for the subtitle — strips scheme + path for a compact read.
+  const host = provider.baseUrl
+    ? provider.baseUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
+    : "";
+
   return (
     <div
       role="button"
@@ -229,25 +238,55 @@ function ProviderListItem({
           : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
       )}
     >
+      {/* Brand avatar — real logo mark on the brand-tinted tile. */}
       <span
-        className={cn(
-          "h-4 w-0.5 rounded-full shrink-0",
-          active ? "bg-primary" : "bg-transparent",
-        )}
-      />
-      <span className="text-[11.5px] font-medium flex-1 truncate">
-        {provider.name}
-      </span>
-      {!provider.enabled && (
-        <span className="text-[9px] text-muted-foreground/45">off</span>
-      )}
-      {provider.enabled && <Dot tone="ok" className="size-1 shrink-0" />}
-      <Badge
-        variant="secondary"
-        className="font-mono text-[9px] uppercase px-1 py-0"
+        className="size-5 rounded-md flex items-center justify-center text-white shrink-0"
+        style={
+          isAnthropic
+            ? { background: "linear-gradient(135deg,#d97757,#b8553f)" }
+            : { background: tint }
+        }
       >
-        {styleLabel}
-      </Badge>
+        <ProviderLogo apiStyle={provider.apiStyle} className="size-3" />
+      </span>
+
+      {/* Name + subtitle (host) — two-line read like the Workspace rows. */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11.5px] font-medium truncate">
+            {provider.name}
+          </span>
+        </div>
+        {host && (
+          <span className="block text-[9.5px] text-muted-foreground/45 font-mono truncate -mt-0.5">
+            {host}
+          </span>
+        )}
+      </div>
+
+      {/* Model count — compact mono pill, only when > 0. */}
+      {modelCount > 0 && (
+        <Badge
+          variant="secondary"
+          className="font-mono text-[9px] px-1 py-0 shrink-0"
+          title={`${modelCount} model${modelCount === 1 ? "" : "s"}`}
+        >
+          {modelCount}
+        </Badge>
+      )}
+
+      {/* Status — a brand-tinted dot when enabled, "off" label when not. */}
+      {provider.enabled ? (
+        <span
+          className="size-1.5 rounded-full shrink-0"
+          style={{ background: tint, boxShadow: `0 0 6px ${tint}80` }}
+          title="Enabled"
+        />
+      ) : (
+        <span className="text-[9px] text-muted-foreground/45 shrink-0" title="Disabled">
+          off
+        </span>
+      )}
     </div>
   );
 }
@@ -777,7 +816,7 @@ function ProviderDetail({
           The preview resolves baseUrl + path live, making the API-style↔URL
           relationship concrete (kills the recurring "/v1" confusion). */}
       <div className="flex-1 overflow-y-auto scroll">
-        <div className="px-6 py-5 space-y-6">
+        <div className="w-[70%] mx-auto px-6 py-5 space-y-6">
           {/* API style — the most consequential choice (sets protocol + path),
               so it sits at the top as a prominent selector, not a buried field. */}
           <div className="space-y-2">
@@ -1747,14 +1786,14 @@ function StyleCard({
  *  composer/selector so the protocol reads at a glance. Rounded-full with a
  *  subtle ring on the active card so the selection reads at a glance. */
 function StyleAvatar({ tone, active }: { tone: "anthropic" | "openai"; active: boolean }) {
-  const base = "size-8 rounded-lg flex items-center justify-center text-[12px] font-bold text-white shrink-0 transition-shadow";
+  const base = "size-8 rounded-lg flex items-center justify-center text-white shrink-0 transition-shadow";
   if (tone === "anthropic") {
     return (
       <span
         className={cn(base, active && "shadow-[0_0_0_3px_rgba(217,119,87,0.15)]")}
         style={{ background: "linear-gradient(135deg,#d97757,#b8553f)" }}
       >
-        A
+        <ProviderLogo apiStyle="anthropic" className="size-4" />
       </span>
     );
   }
@@ -1763,7 +1802,7 @@ function StyleAvatar({ tone, active }: { tone: "anthropic" | "openai"; active: b
       className={cn(base, active && "shadow-[0_0_0_3px_rgba(16,163,127,0.15)]")}
       style={{ background: "#10a37f" }}
     >
-      O
+      <ProviderLogo apiStyle="openai" className="size-4" />
     </span>
   );
 }

@@ -16,7 +16,7 @@ export function SettingsHeader({
   return (
     <div className="mb-5 flex items-start justify-between gap-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-xl font-semibold font-stretch-semi-expanded">{title}</h1>
         {description && (
           <p className="text-xs text-muted-foreground mt-1 max-w-prose">
             {description}
@@ -63,17 +63,20 @@ export function SettingsRow({
   description,
   children,
   last,
+  disabled,
 }: {
   title: ReactNode;
   description?: ReactNode;
   children?: ReactNode;
   last?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-4 px-4 py-2.5",
+        "flex items-center gap-4 px-4 py-2.5 transition-opacity",
         !last && "border-b border-input",
+        disabled && "opacity-50 pointer-events-none",
       )}
     >
       <div className="flex-1 min-w-0">

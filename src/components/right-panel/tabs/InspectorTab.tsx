@@ -10,6 +10,8 @@ import {
   GitPullRequestArrow,
   Brain,
   Loader2,
+  Wrench,
+  DollarSign,
 } from 'lucide-react';
 import type { Session } from '@/types';
 import { Avatar } from '@/components/primitives';
@@ -27,6 +29,7 @@ import {
   useRagInitProgress,
   useAgentSettings,
 } from '@/lib/queries';
+import { useShallow } from 'zustand/react/shallow';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { PanelSection } from '../PanelSection';
@@ -230,10 +233,10 @@ function usePendingToolCalls(sessionId: string | undefined) {
 function autonomyLabel(mode: Session['autonomyMode']) {
   return (
     {
-      plan: 'Plan only',
-      ask: 'Ask before changes',
-      edit: 'Edit automatically',
-      full: 'Full access',
+      plan: 'Plan Only',
+      ask: 'Ask Before Changes',
+      edit: 'Edit Automatically',
+      full: 'Full Access',
     }[mode] ?? mode
   );
 }
@@ -290,29 +293,130 @@ function OpenChangesButton({ sessionId, changed }: { sessionId: string; changed:
 // default; the hero carries the summary meter.
 // =============================================================
 
+const CONTEXT_WARN_PCT = 80;
+
 function ContextWindowDetailSection({ session }: { session: Session }) {
-  const u = session.usage;
+  // Subscribe to live stream fields for real-time stats during streaming.
+  const streamFields = useUi(
+    useShallow((s) => {
+      if (!session.id) return null;
+      const st = s.streams[session.id];
+      if (!st) return null;
+      return {
+        isStreaming: st.isStreaming,
+        usage: st.usage,
+        iteration: st.iteration,
+      };
+    }),
+  );
+
+  const { data: agentSettings } = useAgentSettings();
+  const maxSteps = agentSettings?.maxSteps ?? 100;
   const model = useModelOption(null, session.modelId);
   const contextWindow = model?.contextWindow ?? 200_000;
 
-  const segments = [
-    { label: 'Cache read', tokens: u.cacheRead },
-    { label: 'Cache write', tokens: u.cacheWrite },
-    { label: 'Input', tokens: u.inputTokens },
-    { label: 'Reasoning', tokens: u.reasoningTokens },
-    { label: 'Output', tokens: u.outputTokens },
+  // While streaming, use the live step usage; after completion, use the
+  // persisted last-turn usage (the last step's actual input).
+  const u = streamFields?.isStreaming
+    ? (streamFields.usage ?? session.lastTurnUsage ?? session.usage)
+    : (session.lastTurnUsage ?? session.usage);
+
+  // Context window fill = input tokens only.
+  const liveContext = u.inputTokens;
+  const pctUsed = Math.min(100, (liveContext / contextWindow) * 100);
+  const seg = (n: number) => Math.min(100, (n / contextWindow) * 100);
+  const meterSegments = [
+    { label: 'Cache read', tokens: u.cacheRead, pct: seg(u.cacheRead), cls: 'bg-slate-500' },
+    { label: 'Input', tokens: Math.max(0, u.inputTokens - u.cacheRead), pct: seg(Math.max(0, u.inputTokens - u.cacheRead)), cls: 'bg-sky-400' },
+    { label: 'Output', tokens: u.outputTokens, pct: seg(u.outputTokens), cls: 'bg-primary' },
+    { label: 'Reasoning', tokens: u.reasoningTokens, pct: seg(u.reasoningTokens), cls: 'bg-purple-400' },
+  ];
+
+  // Detail breakdown rows (cumulative session usage for cost accounting).
+  // Each row carries a color dot matching its segment in the meter bar.
+  const cu = session.usage;
+  const detailSegments = [
+    { label: 'Cache read', tokens: cu.cacheRead, dot: 'bg-slate-500' },
+    { label: 'Cache write', tokens: cu.cacheWrite, dot: 'bg-slate-600' },
+    { label: 'Input (total)', tokens: cu.inputTokens, dot: 'bg-sky-400' },
+    { label: 'Reasoning (total)', tokens: cu.reasoningTokens, dot: 'bg-purple-400' },
+    { label: 'Output (total)', tokens: cu.outputTokens, dot: 'bg-primary' },
   ];
 
   return (
     <PanelSection
       title="Context Window"
-      defaultOpen={false}
-      badge={<Badge variant="secondary" className="ml-1.5 font-mono font-normal normal-case tracking-normal rounded-md">{formatNumber(contextWindow)}</Badge>}
+      defaultOpen={true}
     >
+      {/* Stat strip — Iteration / Tools / Cost */}
+      <div className="grid grid-cols-3 gap-px bg-border border border-border rounded-md overflow-hidden mb-3">
+        <div className="bg-background px-2.5 py-2">
+          <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Cpu className="size-3" />Iteration
+          </div>
+          <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">
+            {streamFields?.iteration ?? u.calls}<span className="text-[0.75rem] text-muted-foreground font-normal"> / {maxSteps}</span>
+          </div>
+        </div>
+        <div className="bg-background px-2.5 py-2">
+          <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Wrench className="size-3" />Tools
+          </div>
+          <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">
+            {formatNumber(cu.calls)}<span className="text-[0.75rem] text-muted-foreground font-normal"> calls</span>
+          </div>
+        </div>
+        <div className="bg-background px-2.5 py-2">
+          <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
+            <DollarSign className="size-2.5" />Cost
+          </div>
+          <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">
+            {session.costUsd.toFixed(3)}<span className="text-[0.75rem] text-muted-foreground font-normal"> USD</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Context meter */}
+      <div className="mb-3">
+        <div className="flex items-baseline justify-between text-[0.65rem] mb-1.5">
+          <span className="font-semibold uppercase tracking-wider text-muted-foreground">Context fill</span>
+          <span className="font-mono text-muted-foreground">
+            <span className="text-foreground text-[0.75rem] font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(contextWindow)} ·{' '}
+            <span className={pctUsed >= CONTEXT_WARN_PCT ? 'text-amber-300 text-[0.75rem]' : 'text-[0.75rem]'}>{pctUsed.toFixed(1)}%</span>
+          </span>
+        </div>
+        <div
+          className={cn(
+            'relative h-1.5 rounded-full overflow-hidden bg-muted',
+            pctUsed >= CONTEXT_WARN_PCT && 'ring-1 ring-amber-500/40',
+          )}
+          role="progressbar"
+          aria-label="Context window usage"
+          aria-valuenow={Math.round(pctUsed)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div className="absolute inset-0 flex">
+            {meterSegments.map((s, i) => (
+              <div
+                key={i}
+                className={cn('h-full', s.cls)}
+                style={{ width: `${s.pct}%` }}
+                title={`${s.label}: ${formatNumber(s.tokens)} tok`}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Per-class cumulative breakdown */}
       <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
-        {segments.map((s) => (
+        {detailSegments.map((s) => (
           <div key={s.label} className="flex items-center justify-between">
-            <span className="text-muted-foreground">{s.label}</span>
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <span className={cn('size-1.5 rounded-full shrink-0', s.dot)} />
+              {s.label}
+            </span>
             <span className="font-mono text-muted-foreground">{formatNumber(s.tokens)}</span>
           </div>
         ))}

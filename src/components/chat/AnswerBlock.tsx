@@ -5,12 +5,17 @@ export const AnswerBlock = memo(function AnswerBlock({
   text,
   streaming,
   stopped,
+  failed,
   hasProcessContent,
 }: {
   text: string;
   streaming: boolean;
   /** True if the turn was aborted mid-stream — shows the [stopped] marker. */
   stopped?: boolean;
+  /** True if the turn failed (stopReason === 'refusal'). Suppresses the
+   *  "No summary — this turn was tool-only." placeholder so a failed turn
+   *  doesn't show a neutral message on top of the error block. */
+  failed?: boolean;
   /** True when the turn produced thinking, tool calls, or edits — i.e.
    *  there's process content above the answer worth demarcating. Pure
    *  text replies have no separator (nothing above to separate from). */
@@ -23,8 +28,13 @@ export const AnswerBlock = memo(function AnswerBlock({
     ? <div className="border-t border-input my-1" />
     : null;
 
-  // Empty answer — tool-only turn or pre-text phase.
+  // Empty answer — tool-only turn, pre-text phase, or failed turn.
+  // On failure, render nothing (the error block in MainScreen handles it).
+  // Also suppress when there's no text AND no process content (no tools,
+  // no thinking) — that's a failed/empty turn, not a "tool-only" turn.
+  // A real tool-only turn has tool blocks above (hasProcessContent = true).
   if (!text && !streaming) {
+    if (failed || !hasProcessContent) return null;
     return (
       <>
         {Separator}

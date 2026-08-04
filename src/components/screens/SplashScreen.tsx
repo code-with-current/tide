@@ -72,7 +72,12 @@ export function SplashScreen() {
     const t = setTimeout(() => {
       routedRef.current = true;
       if (hasProviders && hasWorkspaces) {
-        setScreen('main');
+        // Before going to main, check whether macOS permissions need consent.
+        // Cheap native call (instant-false on non-mac); shows the consent
+        // screen once if Accessibility/Full Disk Access aren't authorized yet.
+        api.shouldShowConsent().then((showConsent) => {
+          setScreen(showConsent ? 'consent' : 'main');
+        });
       } else {
         setScreen('onboarding');
       }

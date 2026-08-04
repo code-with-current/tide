@@ -1,4 +1,4 @@
-import { ShieldAlert, ShieldBan, Timer, MessageCircleQuestion, Clock, FileClock, PencilLine } from 'lucide-react';
+import { ShieldAlert, ShieldBan, Timer, MessageCircleQuestion, FileClock, PencilLine } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { AutonomyMode, ToolCall } from '@/types';
 import { Chip, type ChipTone } from '@/components/primitives';
@@ -83,7 +83,7 @@ export function PermissionCard({
   timeoutAt?: number;
   /** Approve, optionally escalating the autonomy mode for the turn and/or
    *  adding an "always allow" rule (session = runtime, project = .agent/settings.json). */
-  onApprove?: (newMode?: AutonomyMode, remember?: 'session' | 'project') => void;
+  onApprove?: (newMode?: AutonomyMode, remember?: boolean) => void;
   onReject?: (reason?: string) => void;
   /** 'inline' (default — flat secondary links, used in the chat TurnBlock) or
    *  'split' (secondary actions collapsed into SplitButton dropdowns, used in
@@ -203,13 +203,13 @@ export function PermissionCard({
         {variant === 'split' ? (
           blocked ? (
             // Blocked mode has no Approve variants — render plain buttons
-            // (Cancel + Switch to edit mode), no dropdowns.
+            // (Cancel + Switch to full mode), no dropdowns.
             <div className="flex items-center gap-2 mt-2.5">
               <Button variant="secondary" size="sm" onClick={() => onReject?.('cancelled in plan mode')} disabled={!onReject}>
                 Cancel
               </Button>
-              <Button variant="default" size="sm" className="ml-auto" onClick={() => onApprove?.('edit')} disabled={!onApprove}>
-                Switch to edit mode
+              <Button variant="default" size="sm" className="ml-auto" onClick={() => onApprove?.('full')} disabled={!onApprove}>
+                Switch to full mode
               </Button>
             </div>
           ) : (
@@ -237,22 +237,16 @@ export function PermissionCard({
                 toggleAriaLabel="More approve options"
                 items={[
                   {
-                    label: 'Remember · Session',
-                    hint: 'Auto-approve this call until session ends',
-                    icon: <Clock />,
-                    onSelect: () => onApprove?.(undefined, 'session'),
-                  },
-                  {
-                    label: 'Remember · Project',
-                    hint: 'Write a rule to .agent/settings.json',
+                    label: 'Always Allow',
+                    hint: 'Save rule to .agent/settings.json',
                     icon: <FileClock />,
-                    onSelect: () => onApprove?.(undefined, 'project'),
+                    onSelect: () => onApprove?.(undefined, true),
                   },
                   {
-                    label: 'Switch to Edit Mode',
-                    hint: 'Remaining writes this turn auto-run',
+                    label: 'Switch to Full Mode',
+                    hint: 'Auto-run all tools (bash, edits, git) this turn',
                     icon: <PencilLine />,
-                    onSelect: () => onApprove?.('edit'),
+                    onSelect: () => onApprove?.('full'),
                   },
                 ]}
               />
@@ -280,10 +274,10 @@ export function PermissionCard({
                     variant="default"
                     size="sm"
                     className="@[300px]:ml-auto"
-                    onClick={() => onApprove?.('edit')}
+                    onClick={() => onApprove?.('full')}
                     disabled={!onApprove}
                   >
-                    Switch to edit mode
+                    Switch to full mode
                   </Button>
                 </>
               ) : (
@@ -320,30 +314,21 @@ export function PermissionCard({
                 <span className="text-muted-foreground/30 select-none">·</span>
                 <button
                   type="button"
-                  onClick={() => onApprove?.('edit')}
+                  onClick={() => onApprove?.('full')}
                   disabled={!onApprove}
-                  title="Approve and switch to edit mode — remaining writes this turn auto-run"
+                  title="Approve and switch to full mode — all tools auto-run"
                   className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-50 disabled:pointer-events-none"
                 >
-                  edit mode
+                  full mode
                 </button>
                 <button
                   type="button"
-                  onClick={() => onApprove?.(undefined, 'session')}
+                  onClick={() => onApprove?.(undefined, true)}
                   disabled={!onApprove}
-                  title="Approve and add a session rule — same call won't ask again this session"
+                  title="Always allow — saves a rule to .agent/settings.json"
                   className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-50 disabled:pointer-events-none"
                 >
-                  always · session
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onApprove?.(undefined, 'project')}
-                  disabled={!onApprove}
-                  title="Approve and write a rule to .agent/settings.json — survives restart"
-                  className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  always · project
+                  always allow
                 </button>
               </div>
             )}

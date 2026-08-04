@@ -32,11 +32,33 @@ function buildBlockEntries(content: string) {
 
 /**
  * Detect if a markdown block is a fenced mermaid code block.
- * Returns the inner mermaid source if yes, null if no.
+ * Returns `{ code, closed }` if yes, null if no.
+ *
+ * Handles two shapes:
+ *  - Closed fence:  ```mermaid\n...\n```   (with optional trailing whitespace)
+ *  - Open fence:    ```mermaid\n...        (streaming — closing ``` not yet
+ *                 received). `closed` is false so the caller can route to
+ *                 MermaidDiagram with `streaming=true` (shows a placeholder
+ *                 instead of letting Streamdown render a partial code block).
+ *
+ * The trailing-whitespace tolerance fixes a real bug: when a mermaid block is
+ * the LAST block in the content, parseMarkdownIntoBlocks leaves a trailing
+ * newline after the closing ```, and the old `$` anchor failed to match —
+ * silently dropping the diagram and rendering it as plain code.
  */
-function extractMermaid(text: string): string | null {
-  const match = text.match(/^```mermaid\n([\s\S]*?)```$/);
-  return match ? match[1].trim() : null;
+function extractMermaid(text: string): { code: string; closed: boolean } | null {
+  const trimmedStart = text.replace(/^\s+/, '');
+  if (!trimmedStart.startsWith('```mermaid')) return null;
+
+  // Closed fence — closing ``` followed by optional whitespace.
+  const closed = trimmedStart.match(/^```mermaid\n([\s\S]*?)```\s*$/);
+  if (closed) return { code: closed[1].trim(), closed: true };
+
+  // Open fence (streaming) — everything after the opening line is code.
+  const open = trimmedStart.match(/^```mermaid\n?([\s\S]*?)$/);
+  if (open) return { code: open[1].trim(), closed: false };
+
+  return null;
 }
 
 const MarkdownBlock = memo(
@@ -55,7 +77,10 @@ const MarkdownBlock = memo(
         parseIncompleteMarkdown={isStreamingBlock}
         normalizeHtmlIndentation
         remarkPlugins={[remarkGfm, remarkFilePaths]}
-        controls={false}
+        // Copy button only — no download, no header bar (CSS hides the header
+        // and re-surfaces the language as a floating badge). Line numbers on.
+        controls={{ code: { copy: true, download: false } }}
+        lineNumbers
         animated={!isStreamingBlock}
         className={className}
       >
@@ -99,13 +124,24 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   return (
     <div className={cn('prose-chat flex flex-col gap-3', className)} onClick={handleClick}>
       {blockEntries.map((entry: { key: string; text: string }, i: number) => {
-        const mermaidCode = extractMermaid(entry.text);
+        const mermaid = extractMermaid(entry.text);
 
         // If this block is a mermaid code block, render the diagram
         // directly instead of passing it to Streamdown (which would
         // render it as a syntax-highlighted code block).
-        if (mermaidCode) {
-          return <MermaidDiagram key={entry.key} code={mermaidCode} />;
+        if (mermaid) {
+          // Render as streaming (placeholder) when:
+          //  - the fence is still open (closing ``` not yet received), OR
+          //  - this is the last block and the whole message is still streaming.
+          const isStreaming =
+            !mermaid.closed || (streaming && i === lastIndex);
+          return (
+            <MermaidDiagram
+              key={entry.key}
+              code={mermaid.code}
+              streaming={isStreaming}
+            />
+          );
         }
 
         return (

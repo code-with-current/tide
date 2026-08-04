@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, Check, Heart, Code2, Globe, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TideBrandMark } from '@/components/primitives/TideBrandMark';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
 
 interface Diagnostics {
@@ -44,13 +45,22 @@ export function AboutSection() {
     <>
       <SettingsHeader title="About" />
 
-      {/* Summary */}
-      <Card className="mb-5">
-        <div className="p-6">
-          <div className="text-xl font-semibold tracking-tight">Tide</div>
-          <div className="text-[11px] text-muted-foreground/60 mt-0.5">Code with the current</div>
-          <div className="text-[11px] text-muted-foreground/60 mt-1">
-            Version <span className="font-mono">{diag?.appVersion ?? '—'}</span>
+      {/* Hero — branded mark + wordmark, matching the onboarding language. */}
+      <Card className="mb-5 overflow-hidden">
+        <div className="relative p-6 flex items-center gap-4">
+          {/* Faint brand wash so the hero reads as branded, not a plain card. */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+          />
+          <TideBrandMark size="xl" className="relative" />
+          <div className="relative min-w-0">
+            <div className='flex flex-row items-end gap-2'>
+              <div className="text-xl font-semibold">Tide</div>
+              <div className="text-foreground/60 font-semibold">- Code with the current</div>
+            </div>
+            <div className="text-[11px] text-muted-foreground/60 mt-1.5">
+              Version <span className="font-mono">{diag?.appVersion ?? '—'}</span>
+            </div>
           </div>
         </div>
       </Card>

@@ -48,8 +48,14 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*",
-      "electron/rag/models/**/*"
+      "dist-electron/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/sqlite-vec-*/**",
+      "node_modules/sqlite-vec/**",
+      "node_modules/node-pty/**",
+      "node_modules/better-sqlite3/**",
+      "node_modules/sharp/**"
     ],
     "protocols": [
       {
@@ -80,11 +86,9 @@
     "@ai-sdk/anthropic": "^4.0.18",
     "@ai-sdk/openai": "^4.0.16",
     "@ai-sdk/openai-compatible": "^3.0.14",
-    "@base-ui/react": "^1.6.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@hookform/resolvers": "^5.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@radix-ui/react-slot": "1.3.1",
     "@tanstack/react-query": "^5.101.2",
@@ -100,7 +104,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "date-fns": "^4.4.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^1.25.0",
@@ -109,17 +112,13 @@
     "node-pty": "^1.1.0",
     "onnxruntime-common": "1.14.0",
     "onnxruntime-node": "1.14.0",
-    "onnxruntime-web": "1.14.0",
     "radix-ui": "^1.6.2",
     "react": "^19.2.7",
-    "react-day-picker": "^10.0.1",
     "react-dom": "^19.2.7",
-    "react-hook-form": "^7.82.0",
     "react-markdown": "^10.1.0",
     "react-material-icon-theme": "^1.2.0",
     "react-resizable-panels": "^4.12.2",
     "react-syntax-highlighter": "^16.1.1",
-    "recharts": "^3.8.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
@@ -150,5 +149,8 @@
     "vite": "^8.1.1",
     "vitest": "^4.1.10",
     "wait-on": "^9.0.10"
+  },
+  "optionalDependencies": {
+    "node-mac-permissions": "^2.5.0"
   }
 }

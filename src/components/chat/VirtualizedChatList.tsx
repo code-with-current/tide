@@ -66,7 +66,7 @@ function WindowedMessage({ message, scrollRoot, cachedHeight }: WindowedMessageP
   if (visible) {
     return (
       <div ref={ref}>
-        <ChatMessage message={message} />
+        <ChatMessage message={message} stopReason={message.stopReason} />
       </div>
     );
   }

@@ -21,6 +21,7 @@ import type { Provider, Usage } from '../../../src/types/index';
 import type { ToolResult, ToolRegistration } from './types';
 import type { ToolContext } from './tool-context';
 import { withPermission } from '../permission-wrapper';
+import { appDataDir } from '../../appPaths.js';
 
 /** Shared body — needs the parent turn's provider/model + signal + usage hook
  *  so the sub-agent runs against the same LLM and folds its cost in.
@@ -37,8 +38,10 @@ export async function runDispatchAgent(
     modelId: string;
     abortSignal: AbortSignal;
     onUsage?: (u: Usage) => void;
-    /** Optional live-stream hook (sub-agent deltas → dispatch card). */
     onDelta?: (text: string) => void;
+    /** Full tool context for multi-step agents (optional — single-shot agents don't need it). */
+    toolCtx?: ToolContext;
+    depth?: number;
   },
 ): Promise<ToolResult> {
   const agent = getAgent(name);
@@ -70,6 +73,8 @@ export async function runDispatchAgent(
     signal: ctx.abortSignal,
     onUsage: ctx.onUsage,
     onDelta: ctx.onDelta,
+    ctx: ctx.toolCtx,
+    depth: ctx.depth,
   });
 }
 
@@ -126,7 +131,7 @@ export function createDispatchAgentTool(ctx: ToolContext) {
   // so the model can't dispatch them.
   let disabledAgents: string[] = [];
   try {
-    const extStore = createExtensionsStore(app.getPath('userData'));
+    const extStore = createExtensionsStore(appDataDir());
     disabledAgents = extStore.getDisabled().agents;
   } catch { /* config unreadable — all agents available */ }
 
@@ -150,6 +155,9 @@ export function createDispatchAgentTool(ctx: ToolContext) {
           modelId: ctx.modelId,
           abortSignal: ctx.abortSignal,
           onUsage: ctx.onUsage,
+          // Pass the full context for multi-step agents + recursion depth.
+          toolCtx: ctx,
+          depth: ctx._depth ?? 0,
         }),
       ),
   });

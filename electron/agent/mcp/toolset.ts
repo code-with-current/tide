@@ -24,7 +24,7 @@
  */
 import { tool, jsonSchema } from 'ai';
 import { createLogger } from '../../logger';
-import { getToolsForWorkspace } from './pool';
+import { getToolsForWorkspace, refreshServerTools } from './pool';
 
 const log = createLogger('mcp/toolset');
 
@@ -50,6 +50,8 @@ function sanitizeInputSchema(schema: Record<string, unknown>): Record<string, un
 export function mcpToolsetForWorkspace(
   workspaceId: string | undefined,
 ): Record<string, ReturnType<typeof tool>> {
+  // Capture workspaceId for the post-execution tool refresh.
+  const wsId = workspaceId;
   const discovered = getToolsForWorkspace(workspaceId);
   const tools: Record<string, ReturnType<typeof tool>> = {};
 
@@ -73,23 +75,56 @@ export function mcpToolsetForWorkspace(
       description: `${serverName}: ${mcpTool.description}`,
       inputSchema: jsonSchema(cleanSchema),
       execute: async (args: Record<string, unknown>) => {
+        const t0 = Date.now();
+        log.info('▶ MCP call', {
+          server: serverName,
+          tool: mcpTool.name,
+          namespaced: namespacedName,
+          args,
+        });
         try {
           const result = await mcpClient.callTool({
             name: mcpTool.name,
             arguments: args,
           });
+
+          // Log the full raw response for debugging.
+          const contentTypes = (result.content ?? []).map((c) => c.type);
           const textParts = (result.content ?? [])
             .filter((c) => c.type === 'text' && c.text)
             .map((c) => c.text!);
           const output = textParts.join('\n');
+          const durationMs = Date.now() - t0;
+
+          log.info('◀ MCP result', {
+            server: serverName,
+            tool: mcpTool.name,
+            durationMs,
+            isError: result.isError ?? false,
+            contentTypes,
+            contentCount: result.content?.length ?? 0,
+            outputLen: output.length,
+            outputPreview: output.slice(0, 500),
+          });
+
           if (result.isError) {
-            log.warn('tool error', { server: serverName, tool: mcpTool.name });
+            log.warn('MCP tool error', { server: serverName, tool: mcpTool.name, output });
             return { status: 'failed' as const, output: output || 'MCP tool returned an error' };
           }
-          log.debug('tool called', { server: serverName, tool: mcpTool.name, outputLen: output.length });
+
+          // After execution, re-fetch the server's tool list. Some MCP servers
+          // (e.g. vue-mcp's set_framework_preferences) dynamically add tools.
+          refreshServerTools(serverName, wsId).catch(() => { /* best-effort */ });
           return { status: 'executed' as const, output };
         } catch (e: any) {
-          log.error('tool call failed', { server: serverName, tool: mcpTool.name, error: e?.message ?? String(e) });
+          const durationMs = Date.now() - t0;
+          log.error('✕ MCP failed', {
+            server: serverName,
+            tool: mcpTool.name,
+            durationMs,
+            error: e?.message ?? String(e),
+            stack: e?.stack,
+          });
           return { status: 'failed' as const, output: `MCP call failed: ${e?.message ?? e}` };
         }
       },

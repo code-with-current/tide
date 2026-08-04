@@ -35,6 +35,7 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
     // permissionRequest was double-managed (harmless via dedupe, but a binding
     // smell). No-op here keeps the block reducer out of permission state.
     case 'permission_required': return state;
+    case 'retry':              return state; // retry state is managed by applyLegacyEvent
     case 'turn_end':           return applyTurnEnd(state, event);
     case 'error':
       return { ...state, error: event.message, isStreaming: false };

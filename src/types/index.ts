@@ -207,6 +207,11 @@ export interface Session {
   };
   messages: Message[];
   usage: Usage;
+  /** Usage from the LAST completed turn only (not cumulative). The context-
+   *  window meter uses this to show "how full is the context right now" —
+   *  the model's last request is what fills the context window, not the sum
+   *  of every turn's tokens. `usage` stays cumulative for cost accounting. */
+  lastTurnUsage?: Usage;
   /** Cumulative cost across all turns in this session. */
   costUsd: number;
   /** File paths the user has explicitly added to context. */
@@ -258,6 +263,9 @@ export interface MessageAttachment {
   bytes?: number;
   /** True if `content` was truncated to fit the attachment budget. */
   truncated?: boolean;
+  /** Absolute on-disk path for external (browsed/pasted) files. Lets the
+   *  viewer re-read the file after a reload once inline content is gone. */
+  absPath?: string;
 }
 
 export interface Message {
@@ -302,6 +310,10 @@ export interface Message {
   toolCalls?: ToolCall[];
   /** Files the user attached to this message (user only). */
   attachments?: MessageAttachment[];
+  /** Turn-level stop reason (assistant only). 'refusal' = failed, 'aborted'
+   *  = user-stopped. Persisted so the TurnHeader renders the correct status
+   *  ("Failed" / "Stopped" / "Done") on reload, not just during the live turn. */
+  stopReason?: string | null;
 }
 
 /**
@@ -483,6 +495,8 @@ export interface SessionStream {
   turn?: Turn;
   /** Last reported per-call usage. */
   usage: Usage | null;
+  /** Cumulative session cost in USD (sum across all turns + steps). */
+  sessionCostUsd: number;
   /** Iteration counter within the turn. */
   iteration: number;
   /** Pending permission prompt for this session, if any. */
@@ -491,6 +505,12 @@ export interface SessionStream {
   isStreaming: boolean;
   /** Error message if the turn failed. */
   error: string | null;
+  /** Retry info when the orchestrator is auto-retrying a failed call.
+   *  Null when no retry is in flight. Drives the "Retrying 1/2…" UI. */
+  retry: { attempt: number; maxAttempts: number; reason: string } | null;
+  /** True while autocompact is summarizing the conversation. Shows a
+   *  "Compacting…" indicator so the user understands the pause. */
+  compacting: boolean;
   /** Stop reason from the last turn_end. */
   stopReason: string | null;
   /** Frozen assistant message shape once the turn ends (for persistence).
@@ -504,6 +524,8 @@ export interface SessionStream {
     reasoningTokens?: number;
     toolCalls?: ToolCall[];
     usage?: Usage;
+    /** The last step's usage only — for the context meter. */
+    lastStepUsage?: Usage;
   } | null;
 }
 
@@ -619,6 +641,14 @@ export interface RagInitProgressEvent {
   chunksTotal: number;
   chunksEmbedded: number;
   currentFile?: string;
+  error?: string;
+}
+
+/** Emitted during model download (tide:rag:downloadProgress). */
+export interface RagDownloadProgressEvent {
+  received: number;
+  total: number;
+  phase: 'downloading' | 'done' | 'failed';
   error?: string;
 }
 

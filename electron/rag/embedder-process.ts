@@ -34,23 +34,34 @@ async function getExtractor(): Promise<Extractor> {
   if (!pipelinePromise) {
     const { pipeline, env } = await import('@xenova/transformers');
 
-    // ── Bundled model ──────────────────────────────────────────────
-    // The model ships inside the app at electron/rag/models/. Point
-    // env.cacheDir there so Transformers.js finds it without hitting
-    // the network. The parent (local-onnx-embedder.ts) sets
-    // TIDE_MODELS_DIR to a userData path for the downloaded fallback;
-    // the BUNDLED_DIR takes priority so we never download what we
-    // already ship.
+    // ── Model location ─────────────────────────────────────────────
+    // The model is no longer bundled in production builds — it's lazy-
+    // downloaded from HuggingFace on first RAG enable (see model-downloader.ts)
+    // into userData/models/, which the parent passes via TIDE_MODELS_DIR.
+    // In dev, the source copy at electron/rag/models/ is used directly
+    // (staged to dist-electron/models/ by copy-tree-sitter-grammars.mjs).
     const BUNDLED_DIR = path.join(__dirname, 'models');
-    if (fs.existsSync(path.join(BUNDLED_DIR, MODEL_ID, 'onnx', 'model_quantized.onnx'))) {
-      env.cacheDir = BUNDLED_DIR;
-      // Disable remote fetch entirely — we have the model bundled.
+    const hasBundled = fs.existsSync(
+      path.join(BUNDLED_DIR, MODEL_ID, 'onnx', 'model_quantized.onnx'),
+    );
+    const downloadDir = process.env.TIDE_MODELS_DIR;
+    const hasDownloaded = downloadDir &&
+      fs.existsSync(path.join(downloadDir, MODEL_ID, 'onnx', 'model_quantized.onnx'));
+
+    if (hasDownloaded && downloadDir) {
+      // Downloaded copy in userData (production) — the primary path.
+      env.cacheDir = downloadDir;
       env.allowRemoteModels = false;
       env.allowLocalModels = true;
-    } else if (process.env.TIDE_MODELS_DIR) {
-      // Fallback: use the downloaded copy in userData (if it exists
-      // from a previous run before the model was bundled).
-      env.cacheDir = process.env.TIDE_MODELS_DIR;
+    } else if (hasBundled) {
+      // Bundled copy (dev builds where the source model is staged).
+      env.cacheDir = BUNDLED_DIR;
+      env.allowRemoteModels = false;
+      env.allowLocalModels = true;
+    } else if (downloadDir) {
+      // Download dir exists but model isn't there yet — point cacheDir
+      // at it so a post-download load finds the files without restart.
+      env.cacheDir = downloadDir;
     }
 
     pipelinePromise = pipeline('feature-extraction', MODEL_ID, {

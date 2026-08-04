@@ -42,4 +42,9 @@ export interface ProtocolContext {
    *  conservative default). When present, protocol builders use this as the
    *  base output cap instead of the hardcoded 8192. */
   maxOutputTokens?: number;
+  /** The provider's base URL. Used to detect non-native Anthropic endpoints
+   *  (e.g. z.ai's Anthropic-compatible proxy) that don't support the native
+   *  `thinking` block or `cacheControl`. When the host is NOT api.anthropic.com,
+   *  these fields are stripped to avoid provider 400/404 errors. */
+  providerBaseUrl?: string;
 }

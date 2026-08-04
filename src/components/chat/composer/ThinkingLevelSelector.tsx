@@ -95,7 +95,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[300px] p-0 overflow-hidden">
+      <DropdownMenuContent align="start" side="top"  className="w-[300px] p-0 overflow-hidden">
         <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
           <Brain className="size-3 text-reasoning" /> Thinking level
           {mandatory && (

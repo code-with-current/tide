@@ -58,9 +58,10 @@ import { registerOpenInAppHandlers } from './ipc/openInApp.js';
 import { registerSettingsHandlers } from './ipc/settings.js';
 import { registerExtensionsHandlers } from './ipc/extensions.js';
 import { registerMcpHandlers } from './ipc/mcp.js';
-import { initUserServers } from './agent/mcp/pool.js';
+import { initUserServers, initBuiltinServers } from './agent/mcp/pool.js';
+import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
-import { setUserDataPath } from './appPaths.js';
+import { setUserDataPath, appDataDir } from './appPaths.js';
 
 /**
  * Cutover flag for the Vercel AI SDK orchestrator (Phase 3).
@@ -218,8 +219,8 @@ if (!gotLock) {
     // Initialize logging AFTER userData is set (so log files land in
     // ~/.tide/logs) but BEFORE handler registration. Sync file writes,
     // global error capture — runs once.
-    initLogger(path.join(app.getPath('userData'), 'logs'));
-    log.info('app ready', { dev: isDev, userData: app.getPath('userData') });
+    initLogger(path.join(appDataDir(), 'logs'));
+    log.info('app ready', { dev: isDev, userData: appDataDir() });
 
     registerIpcHandlers();
     // Settings handlers MUST be ready before the window shows — the renderer
@@ -257,12 +258,17 @@ if (!gotLock) {
       registerScriptHandlers();
       registerOpenInAppHandlers();
       registerExtensionsHandlers();
+      // Migrate old separate OAuth files into unified mcp.json (one-time).
+      migrateOAuthFiles();
       // MCP pool — boot user-scoped servers (~/.tide/mcp.json). Project-scoped
       // servers are connected lazily when the renderer signals the active
       // workspace via `tide:mcp:workspaceActivated`. Init is fire-and-forget;
       // failures (e.g. no config yet) just log and leave an empty pool.
       initUserServers().catch((e) =>
         log.warn('mcp pool init failed', { error: String(e) }),
+      );
+      initBuiltinServers().catch((e) =>
+        log.warn('mcp builtin init failed', { error: String(e) }),
       );
       registerMcpHandlers(() => activeWorkspace);
       // The renderer pushes the active workspace whenever it changes so the

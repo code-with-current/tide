@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import * as api from './api/client';
 import { useUi } from './stores/ui';
 import { toast } from './toast';
-import type { RagInitProgressEvent } from '@/types';
+import type { RagDownloadProgressEvent, RagInitProgressEvent } from '@/types';
 
 /**
  * Module-level QueryClient singleton. Exported so non-React code (e.g. the
@@ -44,7 +44,7 @@ export function useWorkspaces() {
 }
 
 // ============================================================
-// Agent settings (Settings → Permissions & caps)
+// Agent settings (Settings → Permissions & Caps)
 // ============================================================
 
 /** Cached agentSettings (maxSteps, defaultAutonomy, etc.). Used by UI that
@@ -474,5 +474,24 @@ export function useRagInitProgress(workspaceId: string | null): RagInitProgressE
     });
     return unsubscribe;
   }, [workspaceId]);
+  return event;
+}
+
+/** Live model-download progress (global — one model, not per-workspace).
+ *  Returns null when no download is in flight. Resets to null on the
+ *  'done'/'failed' terminal events after the consumer reads them. */
+export function useRagDownloadProgress(): RagDownloadProgressEvent | null {
+  const [event, setEvent] = useState<RagDownloadProgressEvent | null>(null);
+  useEffect(() => {
+    const unsubscribe = api.subscribeRagDownloadProgress((e) => {
+      setEvent(e);
+      // Auto-clear terminal events after a brief delay so the UI doesn't
+      // show a stale "done" forever.
+      if (e.phase === 'done' || e.phase === 'failed') {
+        setTimeout(() => setEvent(null), 2000);
+      }
+    });
+    return unsubscribe;
+  }, []);
   return event;
 }

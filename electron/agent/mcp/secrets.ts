@@ -9,11 +9,12 @@
 import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { appDataDir } from '../../appPaths.js';
 
 const SECRETS_FILE = 'mcp-secrets.json';
 
 function secretsFilePath(): string {
-  return path.join(app.getPath('userData'), SECRETS_FILE);
+  return path.join(appDataDir(), SECRETS_FILE);
 }
 
 interface SecretsFile {

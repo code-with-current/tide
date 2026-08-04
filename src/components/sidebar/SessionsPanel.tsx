@@ -269,6 +269,9 @@ function SessionItem({
   // session itself. For active rows, Session has workspaceId; for archived
   // rows, ArchivedHeader has workspaceId. Both shapes carry it.
   const workspaceId = session.workspaceId;
+  // Shimmer the title while its LLM-generated name is in flight. Subscribed
+  // per-item so only the generating row re-renders.
+  const titleGenerating = useUi((s) => s.titleGeneratingSessionIds.has(session.id));
   const renameSession = useRenameSession(workspaceId);
   const archiveSession = useArchiveSession(workspaceId);
   const unarchiveSession = useUnarchiveSession(workspaceId);
@@ -379,6 +382,7 @@ function SessionItem({
                   "text-[0.9rem] flex-1 truncate",
                   active && "text-foreground",
                   archived && "text-muted-foreground/60",
+                  titleGenerating && "animate-shimmer-title",
                 )}
               >
                 {title}

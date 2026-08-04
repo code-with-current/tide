@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Embedder } from './embedder.js';
 import { LOCAL_META, MODEL_ID, type EmbedResponse } from './embedder-process.js';
+import { appDataDir } from '../appPaths.js';
 
 // ESM has no global __dirname — derive from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,7 +44,7 @@ export class LocalOnnxEmbedder implements Embedder {
     const entry = path.join(__dirname, 'embedder-process.mjs');
     const env = {
       ...process.env,
-      TIDE_MODELS_DIR: path.join(app.getPath('userData'), 'models'),
+      TIDE_MODELS_DIR: path.join(appDataDir(), 'models'),
     };
     this.child = utilityProcess.fork(entry, [], { stdio: 'pipe', env });
 
@@ -81,11 +82,12 @@ export class LocalOnnxEmbedder implements Embedder {
 }
 
 export function localModelExists(): boolean {
-  // Check the bundled copy first (ships with the app).
+  // Check the downloaded copy first (production — lazy-downloaded to userData).
+  const modelsDir = process.env.TIDE_MODELS_DIR ?? path.join(appDataDir(), 'models');
+  const downloadedPath = path.join(modelsDir, MODEL_ID, 'onnx', 'model_quantized.onnx');
+  if (fs.existsSync(downloadedPath)) return true;
+  // Fallback: bundled copy (dev builds where electron/rag/models/ is staged
+  // to dist-electron/models/). Production builds no longer ship the model.
   const bundledPath = path.join(__dirname, 'models', MODEL_ID, 'onnx', 'model_quantized.onnx');
-  if (fs.existsSync(bundledPath)) return true;
-  // Fallback: downloaded copy in userData.
-  const modelsDir = process.env.TIDE_MODELS_DIR ?? path.join(app.getPath('userData'), 'models');
-  const onnxPath = path.join(modelsDir, MODEL_ID, 'onnx', 'model_quantized.onnx');
-  return fs.existsSync(onnxPath);
+  return fs.existsSync(bundledPath);
 }

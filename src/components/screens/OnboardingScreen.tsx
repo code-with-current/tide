@@ -1,19 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import tideLogoPng from '@/assets/logo.png';
-import tideLogoSvg from '@/assets/logo.svg';
+import { TideBrandMark } from '@/components/primitives/TideBrandMark';
 import {
   ArrowLeft, ArrowRight, ShieldCheck, Loader2,
   Folder, CheckCircle2, HardDrive, Globe,
   Check, AlertCircle, Plus, Trash2, Plug, Brain,
-  Terminal, TriangleAlert,
+  Terminal, TriangleAlert, Server, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useUi } from '@/lib/stores/ui';
-import { qk, useAddProvider } from '@/lib/queries';
-import { supportsThinking } from '@/lib/model-capabilities';
+import { qk, useAddProvider, useRagDownloadProgress, useRagInitProgress } from '@/lib/queries';
+import { phaseLabel as phaseLabelLocal } from '@/components/rag/RagIndexProgress';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
@@ -42,6 +42,13 @@ export function OnboardingScreen() {
   useEffect(() => {
     window.tideIpc?.getDiagnostics().then((d) => setVersion(d.appVersion)).catch(() => {});
   }, []);
+
+  // Route to main, unless macOS permissions need consent first (cheap native
+  // check; instant-false on non-mac). Mirrors the SplashScreen gate so the
+  // consent screen appears once after onboarding too.
+  const goToMainOrConsent = () => {
+    api.shouldShowConsent().then((show) => setScreen(show ? 'consent' : 'main'));
+  };
 
   return (
     <div className="flex-1 flex overflow-hidden flex-col"
@@ -138,8 +145,8 @@ export function OnboardingScreen() {
         ) : (
           <WorkspaceStep
             onBack={() => setStep('provider')}
-            onSkip={() => setScreen('main')}
-            onComplete={(wsId) => { setActive(wsId); setScreen('main'); }}
+            onSkip={() => goToMainOrConsent()}
+            onComplete={(wsId) => { setActive(wsId); goToMainOrConsent(); }}
             qc={qc}
           />
         )}
@@ -193,6 +200,19 @@ function ProviderStep({
         modelId: r.modelId.trim(),
         contextWindow: parseInt(r.context, 10) || 200_000,
         providerId: '',
+        // Preserve metadata populated by FetchModelsButton — these drive the
+        // brain icon, context lock, thinking gate, and cost meter. Matches
+        // Settings' rowsToModels so a model added in onboarding has the same
+        // metadata as one added in Settings.
+        catalogId: r.catalogId,
+        reasoning: r.reasoning,
+        reasoningMandatory: r.reasoningMandatory,
+        supportedEfforts: r.supportedEfforts,
+        priceLabel: r.priceLabel,
+        inputCostPerToken: r.inputCostPerToken,
+        outputCostPerToken: r.outputCostPerToken,
+        cacheReadCostPerToken: r.cacheReadCostPerToken,
+        cacheWriteCostPerToken: r.cacheWriteCostPerToken,
       }));
 
   const updateRow = (i: number, patch: Partial<Row>) =>
@@ -253,13 +273,13 @@ function ProviderStep({
     <div className="flex flex-col h-full" style={{ animation: 'fadeIn 0.3s ease-out' }}>
       {/* Mobile brand */}
       <div className="md:hidden flex items-center gap-2 px-6 pt-4">
-        <img src={tideLogoSvg} alt="" className="size-7" />
+        <TideBrandMark size="sm" />
         <span className="text-[14px] font-semibold">Tide</span>
       </div>
 
       <div className="flex-1 flex flex-col justify-center px-6 md:px-8 py-6 mx-auto w-full overflow-y-auto scroll">
         <div className="flex justify-start items-end gap-2.5 mb-5">
-          <img src={tideLogoSvg} alt="" className="size-8" />
+          <TideBrandMark size="md" />
           <span className="text-[15px] font-semibold tracking-tight">Tide</span>
         </div>
         <Card className="relative">
@@ -274,8 +294,10 @@ function ProviderStep({
           {/* Endpoint preview */}
           <EndpointPreview apiStyle={apiStyle} baseUrl={baseUrl} />
 
-          {/* Connection fields */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Connection — stacked FormFields under a SectionLabel, matching
+              the Settings → Provider detail layout (not a 2-col grid). */}
+          <section className="space-y-3.5">
+            <SectionLabel icon={<Server className="size-3" />}>Connection</SectionLabel>
             <FormField id="ob-name" label="Provider name">
               <Input className="h-8 text-[12.5px]" value={name}
                 onChange={(e) => setName(e.target.value)} placeholder="OpenRouter, z.ai, LM Studio…" />
@@ -292,7 +314,7 @@ function ProviderStep({
                 Sent as <span className="font-mono">{PROTOCOL[apiStyle].authHeader}</span>. Stored in OS keychain.
               </p>
             </FormField>
-          </div>
+          </section>
 
           {/* Models table */}
           <div className="space-y-2">
@@ -305,6 +327,7 @@ function ProviderStep({
                       <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">Alias</TableHead>
                       <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">Model ID</TableHead>
                       <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-20">Context</TableHead>
+                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-24">Price</TableHead>
                       <TableHead className="w-8" />
                     </TableRow>
                   </TableHeader>
@@ -313,7 +336,7 @@ function ProviderStep({
                       <TableRow key={i} className="border-border/60">
                         <TableCell className="py-1 pr-1">
                           <div className="flex items-center gap-1">
-                            {supportsThinking(row.modelId) && <Brain className="size-3 text-reasoning shrink-0" />}
+                            {row.reasoning && <Brain className="size-3 text-reasoning shrink-0" />}
                             <input className="w-full bg-transparent border-0 outline-none text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
                               value={row.alias} onChange={(e) => updateRow(i, { alias: e.target.value })} placeholder="Alias" />
                           </div>
@@ -323,8 +346,20 @@ function ProviderStep({
                             value={row.modelId} onChange={(e) => updateRow(i, { modelId: e.target.value })} placeholder="model-id" />
                         </TableCell>
                         <TableCell className="py-1 pr-1">
-                          <input className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                            value={row.context} onChange={(e) => updateRow(i, { context: e.target.value })} placeholder="200000" />
+                          {row.catalogId ? (
+                            <div className="flex items-center gap-1 px-1 py-0.5" title={`Catalog: ${row.catalogId}`}>
+                              <span className="font-mono text-[11.5px] text-muted-foreground">{row.context || '—'}</span>
+                              <span className="text-[8px] px-1 py-0 uppercase tracking-wide text-success/80 bg-success/10 rounded">cat</span>
+                            </div>
+                          ) : (
+                            <input className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
+                              value={row.context} onChange={(e) => updateRow(i, { context: e.target.value })} placeholder="200000" />
+                          )}
+                        </TableCell>
+                        <TableCell className="py-1 pr-1">
+                          <span className="font-mono text-[10.5px] text-muted-foreground/60">
+                            {row.priceLabel || '—'}
+                          </span>
                         </TableCell>
                         <TableCell className="py-1">
                           <Button variant="ghost" size="icon" className="size-6 text-muted-foreground/45 hover:text-destructive"
@@ -429,6 +464,62 @@ function WorkspaceStep({
   const [gitChecking, setGitChecking] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
 
+  // Model download state — when RAG is enabled, the user downloads the
+  // 22 MB model inline before they can open the workspace.
+  type DlState = 'idle' | 'downloading' | 'done' | 'error';
+  const [dlState, setDlState] = useState<DlState>('idle');
+  const [dlError, setDlError] = useState<string | null>(null);
+  const downloadProgress = useRagDownloadProgress();
+
+  // Workspace ID once created — used to subscribe to indexing progress.
+  const [createdWsId, setCreatedWsId] = useState<string | null>(null);
+  const initProgress = useRagInitProgress(createdWsId);
+
+  // Sync download-progress events → local state.
+  useEffect(() => {
+    if (!downloadProgress) return;
+    if (downloadProgress.phase === 'downloading') setDlState('downloading');
+    else if (downloadProgress.phase === 'done') setDlState('done');
+    else if (downloadProgress.phase === 'failed') {
+      setDlState('error');
+      setDlError(downloadProgress.error ?? 'Download failed');
+    }
+  }, [downloadProgress]);
+
+  // Probe whether the model is already on disk (e.g. from a prior workspace).
+  // Uses the lightweight ragModelExists check, NOT downloadRagModel (which
+  // would trigger an actual 22 MB download if the model is missing).
+  useEffect(() => {
+    api.ragModelExists().then((exists) => {
+      if (exists) setDlState('done');
+    }).catch(() => { /* will probe again when user clicks */ });
+  }, []);
+
+  const handleDownloadModel = async () => {
+    setDlState('downloading');
+    setDlError(null);
+    try {
+      const r = await api.downloadRagModel();
+      if (r.ok) {
+        // Verify the model actually landed on disk — don't trust just the
+        // IPC result, match Settings' filesystem-backed check.
+        const exists = await api.ragModelExists();
+        if (exists) {
+          setDlState('done');
+        } else {
+          setDlState('error');
+          setDlError('Download reported success but model not found on disk.');
+        }
+      } else {
+        setDlState('error');
+        setDlError(r.error ?? 'Download failed');
+      }
+    } catch (e) {
+      setDlState('error');
+      setDlError(e instanceof Error ? e.message : 'Download failed');
+    }
+  };
+
   useEffect(() => {
     if (source !== 'local' || !localPath) { setGitInfo(null); setGitError(null); return; }
     setGitChecking(true); setGitError(null);
@@ -489,12 +580,16 @@ function WorkspaceStep({
       return;
     }
     if (!ws?.id) return;
+    setCreatedWsId(ws.id);
 
     if (enableRag) {
-      setPhase('indexing');
+      // The model is already downloaded from the inline Download button on
+      // the form (dlState === 'done'). enableRagWorkspace is a no-op for the
+      // download step — it just adds the workspace to the enabled list.
       try {
         await api.enableRagWorkspace(ws.id);
         qc.invalidateQueries({ queryKey: qk.ragStatus(ws.id) });
+        setPhase('indexing');
         await api.initRagWorkspace(ws.id);
         const deadline = Date.now() + 300_000;
         while (Date.now() < deadline) {
@@ -504,7 +599,12 @@ function WorkspaceStep({
           if ((s as { initState?: string }).initState === 'done' || (s as { initState?: string }).initState === 'failed') break;
         }
         qc.invalidateQueries({ queryKey: qk.ragStatus(ws.id) });
-      } catch { /* non-blocking */ }
+      } catch (e) {
+        // Non-blocking: workspace is created, RAG just didn't finish.
+        toast.error('RAG setup incomplete', {
+          description: e instanceof Error ? e.message : 'You can enable RAG later in Settings.',
+        });
+      }
     }
 
     setPhase('done');
@@ -512,7 +612,8 @@ function WorkspaceStep({
     setTimeout(() => onComplete(ws.id), 600);
   };
 
-  const canOpen = source === 'local' ? !!localPath : !!cloneDir && !!remoteUrl;
+  const canOpen = (source === 'local' ? !!localPath : !!cloneDir && !!remoteUrl)
+    && (!enableRag || dlState === 'done');
 
   // Loading states
   if (phase !== 'form') {
@@ -535,15 +636,83 @@ function WorkspaceStep({
         <div className="text-center mt-5">
           <div className="text-[14px] font-medium">
             {phase === 'creating' && 'Creating workspace…'}
-            {phase === 'indexing' && 'Indexing codebase…'}
+            {phase === 'indexing' && (initProgress ? phaseLabelLocal(initProgress.phase) : 'Indexing codebase…')}
             {phase === 'done' && 'All set! Opening…'}
             {phase === 'error' && 'Something went wrong'}
           </div>
+
+          {/* Detailed indexing progress */}
           {phase === 'indexing' && (
-            <div className="text-[12px] text-muted-foreground/50 mt-1.5 max-w-[300px] leading-relaxed">
-              Walking files, chunking at symbol boundaries, embedding with the local ONNX model.
+            <div className="mt-4 w-[340px] space-y-2.5">
+              {(() => {
+                const ip = initProgress;
+                const failed = ip?.phase === 'failed';
+                const determinate = ip?.phase === 'embedding' && ip.chunksTotal > 0;
+                const pct = determinate && ip
+                  ? Math.min(100, Math.round((ip.chunksEmbedded / ip.chunksTotal) * 100))
+                  : 0;
+
+                return (
+                  <>
+                    {/* Progress bar */}
+                    {ip && !failed ? (
+                      determinate ? (
+                        <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-300 bg-emerald-400"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                          <div className="rag-index-bar-indeterminate h-full rounded-full bg-emerald-400/80" />
+                        </div>
+                      )
+                    ) : !ip ? (
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                        <div className="rag-index-bar-indeterminate h-full rounded-full bg-emerald-400/80" />
+                      </div>
+                    ) : null}
+
+                    {/* Stats line */}
+                    {ip && !failed && (
+                      <div className="text-[11px] text-muted-foreground/60 font-mono flex items-center justify-center gap-3 tabular-nums">
+                        {ip.phase === 'walking' && <span>{ip.filesSeen} files</span>}
+                        {ip.phase === 'chunking' && (<><span>{ip.chunksTotal} chunks</span><span>{ip.filesSeen} files</span></>)}
+                        {ip.phase === 'embedding' && ip.chunksTotal > 0 && (
+                          <>
+                            <span>{ip.chunksEmbedded} / {ip.chunksTotal} chunks</span>
+                            <span className="text-emerald-400/60">{pct}%</span>
+                          </>
+                        )}
+                        {ip.phase === 'embedding' && ip.chunksTotal === 0 && <span>Starting…</span>}
+                      </div>
+                    )}
+                    {!ip && (
+                      <div className="text-[11px] text-muted-foreground/40">
+                        Starting indexer…
+                      </div>
+                    )}
+
+                    {/* Current file */}
+                    {ip && !failed && ip.currentFile && (
+                      <div className="text-[10px] text-muted-foreground/40 font-mono truncate text-center max-w-[320px] mx-auto" title={ip.currentFile}>
+                        {ip.currentFile}
+                      </div>
+                    )}
+
+                    {/* Error */}
+                    {failed && ip?.error && (
+                      <div className="text-[11px] text-destructive/70 font-mono text-left bg-destructive/5 rounded-md p-2 break-words">
+                        {ip.error}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
+
           {phase === 'error' && error && (
             <div className="text-[11px] text-destructive/60 mt-1.5 max-w-[300px] font-mono">{error}</div>
           )}
@@ -561,7 +730,7 @@ function WorkspaceStep({
     <div className="flex flex-col h-full" style={{ animation: 'fadeIn 0.3s ease-out' }}>
       <div className="flex-1 flex flex-col justify-center px-8 md:px-12 py-8 w-full overflow-y-auto scroll">
         <div className="flex justify-start items-end gap-2.5 mb-5">
-          <img src={tideLogoSvg} alt="" className="size-8" />
+          <TideBrandMark size="md" />
           <span className="text-[15px] font-semibold tracking-tight">Tide</span>
         </div>
       <Card>
@@ -673,16 +842,97 @@ function WorkspaceStep({
               </div>
 
               {/* RAG */}
-              <div className="rounded-xl p-4 border flex items-start gap-3"
-                style={{ background: 'rgba(52,211,153,0.03)', borderColor: 'rgba(52,211,153,0.12)' }}>
-                <div className="size-8 rounded-lg flex items-center justify-center shrink-0 text-[15px]"
-                  style={{ background: 'rgba(52,211,153,0.08)', color: '#34d399' }}>◈</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold">Enable RAG</div>
-                  <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">Indexes your codebase locally for semantic search.</div>
-                  <div className="text-[10px] text-muted-foreground/30 mt-1 font-mono">all-MiniLM-L6-v2 · 384-dim · bundled</div>
+              <div className="rounded-xl p-4 border"
+                style={{
+                  background: enableRag ? 'rgba(52,211,153,0.06)' : 'rgba(52,211,153,0.03)',
+                  borderColor: enableRag ? 'rgba(52,211,153,0.25)' : 'rgba(52,211,153,0.12)',
+                }}>
+                <div className="flex items-start gap-3">
+                  <div className="size-8 rounded-lg flex items-center justify-center shrink-0 text-[15px]"
+                    style={{ background: 'rgba(52,211,153,0.08)', color: '#34d399' }}>◈</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold">Enable RAG</div>
+                    <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">
+                      Indexes your codebase locally for semantic search.
+                    </div>
+                  </div>
+                  <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1" />
                 </div>
-                <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1" />
+                {enableRag && (
+                  <div className="mt-3 pt-3 border-t" style={{ borderColor: 'rgba(52,211,153,0.12)' }}>
+                    <div className="flex items-start gap-2">
+                      <Download className="size-3.5 text-emerald-400/70 mt-0.5 shrink-0" />
+                      <div className="text-[11px] text-muted-foreground/60 leading-relaxed">
+                        A <span className="font-medium text-muted-foreground/80">22 MB</span> embedding model
+                        (all-MiniLM-L6-v2) downloads from{' '}
+                        <span className="font-mono text-muted-foreground/70">huggingface.co</span>{' '}
+                        and runs entirely offline after download.
+                      </div>
+                    </div>
+
+                    {/* Download button / progress / done */}
+                    <div className="mt-2.5 ml-[22px]">
+                      {dlState === 'idle' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-[28px] text-[11px] gap-1.5"
+                          onClick={handleDownloadModel}
+                        >
+                          <Download className="size-3" />
+                          Download model (22 MB)
+                        </Button>
+                      )}
+                      {dlState === 'downloading' && (
+                        <div className="space-y-1.5 w-full max-w-[260px]">
+                          <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-300"
+                              style={{
+                                width: downloadProgress && downloadProgress.total > 0
+                                  ? `${Math.min(100, (downloadProgress.received / downloadProgress.total) * 100)}%`
+                                  : '8%',
+                                background: '#34d399',
+                              }}
+                            />
+                          </div>
+                          <div className="text-[10px] text-muted-foreground/50 font-mono flex items-center gap-1.5">
+                            <Loader2 className="size-2.5 animate-spin" />
+                            {downloadProgress && downloadProgress.total > 0
+                              ? `${(downloadProgress.received / 1048576).toFixed(1)} / ${(downloadProgress.total / 1048576).toFixed(1)} MB`
+                              : 'Connecting to huggingface.co…'}
+                          </div>
+                        </div>
+                      )}
+                      {dlState === 'done' && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+                          <CheckCircle2 className="size-3.5" />
+                          Model ready
+                          <span className="text-muted-foreground/30 font-mono ml-1">
+                            all-MiniLM-L6-v2 · 384-dim
+                          </span>
+                        </div>
+                      )}
+                      {dlState === 'error' && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1.5 text-[11px] text-destructive/70">
+                            <AlertCircle className="size-3.5" />
+                            {dlError ?? 'Download failed'}
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-[24px] text-[10px] gap-1.5"
+                            onClick={handleDownloadModel}
+                          >
+                            <Download className="size-2.5" />
+                            Retry
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -692,7 +942,7 @@ function WorkspaceStep({
         </Card>
         <OnboardingFooter
           onBack={onBack} onSkip={onSkip}
-          onNext={handleOpen} nextLabel="Open workspace" saving={false}
+          onNext={handleOpen} nextLabel="Open Workspace" saving={false}
           disabled={!canOpen}
         />
       </div>

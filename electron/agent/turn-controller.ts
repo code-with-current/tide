@@ -35,6 +35,10 @@ export interface ActiveSkill {
 export interface BudgetState {
   inputTokens: number;
   outputTokens: number;
+  /** The LAST step's actual inputTokens — what the model saw in its context
+   *  window on its most recent request. This is the right number for
+   *  autocompact threshold checks (not the cumulative sum). */
+  lastInputTokens: number;
   /** Token count at which to warn (≈80% of context window). */
   warningThreshold: number;
   /** How many nudges injected so far (capped to avoid spam). */
@@ -75,6 +79,7 @@ export function createTurnController(maxSteps: number): TurnController {
     budget: {
       inputTokens: 0,
       outputTokens: 0,
+      lastInputTokens: 0,
       // 100K is a conservative default for the warning threshold; the
       // orchestrator can override after resolving the model's context window.
       warningThreshold: 100_000,

@@ -12,9 +12,9 @@ const DEFAULT_MAX_TOKENS = 8192;
 
 export function anthropicCallOptions(
   thinking: ThinkingConfig | null,
-  ctx?: ProtocolContext,
+  _ctx?: ProtocolContext,
 ): ProtocolCallOptions {
-  const maxBase = ctx?.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
+  const maxBase = _ctx?.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
   if (!thinking) {
     return { providerOptions: undefined, maxOutputTokens: maxBase, label: 'off' };
   }

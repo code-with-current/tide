@@ -13,6 +13,7 @@ import type { WebContents } from 'electron';
 
 const log = createLogger('terminal');
 const require = createRequire(import.meta.url);
+import * as os from 'node:os';
 let pty: any = null;
 try {
   pty = require('node-pty');
@@ -97,12 +98,10 @@ function getShell(): { cmd: string; args: string[] } {
   if (process.platform === 'win32') {
     return { cmd: process.env.COMSPEC || 'powershell.exe', args: [] };
   }
-  const shell = process.env.SHELL || '/bin/zsh';
-  // Interactive (not login) shell — skips /etc/zprofile, ~/.zprofile,
-  // ~/.zlogin which are the slow paths (nvm, conda, rbenv init can add
-  // 1-5s). ~/.zshrc still loads (interactive), so aliases and prompt
-  // themes work. If the user needs a full login shell, they can run
-  // `exec zsh -l` manually.
+  // Use $SHELL if set, otherwise platform-aware fallback:
+  // macOS → zsh, Linux → bash, then sh as last resort.
+  const fallback = process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash';
+  const shell = process.env.SHELL || fallback;
   return { cmd: shell, args: ['-i'] };
 }
 
@@ -136,7 +135,7 @@ function resolveCwd(sessionId: string): string {
     const ws = workspaces.find((w) => w.id === sessionId);
     if (ws?.path && fs.existsSync(ws.path)) return ws.path;
   } catch { /* fall back to HOME */ }
-  return process.env.HOME || '/';
+  return os.homedir();
 }
 
 export function startTerminal(

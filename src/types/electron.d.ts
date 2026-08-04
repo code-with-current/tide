@@ -17,6 +17,7 @@ declare global {
       pickDirectory(): Promise<string | null>;
       pickFiles(): Promise<string[]>;
       readExternalFile(filePath: string): Promise<{ content: string; bytes: number; truncated: boolean } | null>;
+      readImageFile(input: { absPath?: string; workspaceId?: string; relPath?: string }): Promise<{ dataUrl: string; bytes: number } | null>;
       // Open the active session's project folder in an external app. The path
       // is resolved server-side from sessionId (worktree.path → workspace.path
       // → HOME), so the renderer never passes an arbitrary path.
@@ -33,6 +34,15 @@ declare global {
         target: import('./index').ExternalAppTarget,
         sessionId?: string,
       ): Promise<{ ok: boolean; error?: string }>;
+      // macOS permissions (consent screen). No-op on non-mac.
+      permissionStatus(): Promise<{
+        platform: 'mac' | 'other';
+        accessibility: 'authorized' | 'denied' | 'restricted' | 'not determined' | null;
+        fullDiskAccess: 'authorized' | 'denied' | 'restricted' | 'not determined' | null;
+        folders: 'unknown' | null;
+      }>;
+      requestPermission(type: 'accessibility' | 'fullDiskAccess' | 'folders'): Promise<'opened' | 'unavailable'>;
+      shouldShowConsent(): Promise<boolean>;
       // settings.json — shortcut overrides + platform-aware defaults.
       getSettings(): Promise<{
         overrides: Record<string, string[]>;
@@ -73,7 +83,7 @@ declare global {
       // (the active workspace's .mcp.json). The status list merges both.
       mcpList(workspaceId?: string): Promise<{
         name: string;
-        scope: 'user' | 'project';
+        scope: 'user' | 'project' | 'builtin' | 'builtin';
         config: import('../../electron/agent/mcp/types').McpServerConfig;
         status:
           | 'connecting'
@@ -92,24 +102,24 @@ declare global {
       mcpAdd(
         name: string,
         config: import('../../electron/agent/mcp/types').McpServerConfig,
-        scope: 'user' | 'project',
+        scope: 'user' | 'project' | 'builtin',
       ): Promise<{ ok: boolean; error?: string }>;
       mcpUpdate(
         name: string,
         config: import('../../electron/agent/mcp/types').McpServerConfig,
-        scope: 'user' | 'project',
+        scope: 'user' | 'project' | 'builtin',
       ): Promise<{ ok: boolean; error?: string }>;
-      mcpRemove(name: string, scope: 'user' | 'project'): Promise<{ ok: boolean; error?: string }>;
+      mcpRemove(name: string, scope: 'user' | 'project' | 'builtin'): Promise<{ ok: boolean; error?: string }>;
       mcpApprove(name: string): Promise<{ ok: boolean }>;
       mcpRetry(
         name: string,
-        scope: 'user' | 'project',
+        scope: 'user' | 'project' | 'builtin',
         workspaceId?: string,
       ): Promise<{ ok: boolean }>;
       /** OAuth sign-in: opens the browser (user-initiated) + re-runs connect. */
       mcpAuthenticate(
         name: string,
-        scope: 'user' | 'project',
+        scope: 'user' | 'project' | 'builtin',
         workspaceId?: string,
       ): Promise<{ ok: boolean }>;
       /** Re-initialize ALL servers — disconnect + reconnect from config. */
@@ -117,7 +127,7 @@ declare global {
       mcpSetSecret(name: string, value: string): Promise<{ ok: boolean }>;
       mcpHasSecret(name: string): Promise<boolean>;
       mcpClearSecret(name: string): Promise<{ ok: boolean }>;
-      mcpReauthorize(name: string, scope: 'user' | 'project', workspaceId?: string): Promise<{ ok: boolean }>;
+      mcpReauthorize(name: string, scope: 'user' | 'project' | 'builtin', workspaceId?: string): Promise<{ ok: boolean }>;
       mcpScan(): Promise<{
         servers: Array<{
           name: string;
@@ -129,17 +139,17 @@ declare global {
       }>;
       mcpImport(
         servers: Array<{ name: string; config: unknown }>,
-        scope: 'user' | 'project',
+        scope: 'user' | 'project' | 'builtin',
       ): Promise<{ ok: boolean; imported?: number; error?: string }>;
-      mcpSetEnabled(name: string, enabled: boolean, scope: 'user' | 'project'): Promise<{ ok: boolean }>;
-      mcpReadRaw(scope: 'user' | 'project'): Promise<{
+      mcpSetEnabled(name: string, enabled: boolean, scope: 'user' | 'project' | 'builtin'): Promise<{ ok: boolean }>;
+      mcpReadRaw(scope: 'user' | 'project' | 'builtin'): Promise<{
         ok: boolean;
         error?: string;
         config?: Record<string, unknown>;
       }>;
       mcpWriteRaw(
         config: Record<string, unknown>,
-        scope: 'user' | 'project',
+        scope: 'user' | 'project' | 'builtin',
       ): Promise<{ ok: boolean; error?: string }>;
       mcpWorkspaceActivated(workspaceId: string, workspaceRoot: string): Promise<{ ok: boolean }>;
       onMcpStatusChanged(callback: () => void): void;
@@ -185,7 +195,7 @@ declare global {
       getSession(id: string): Promise<any>;
       createSession(workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }): Promise<any>;
       updateSessionSettings(sessionId: string, patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }): Promise<void>;
-      addMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string): Promise<void>;
+      addMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }): Promise<void>;
       addAssistantMessage(
         sessionId: string,
         message: { content: string; reasoning?: string; reasoningTokens?: number; toolCalls?: any[] },
@@ -193,6 +203,7 @@ declare global {
       addSessionUsage(
         sessionId: string,
         delta: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
+        lastStepUsage?: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
       ): Promise<void>;
       deleteSession(id: string): Promise<void>;
       clearAllSessions: () => Promise<{ ok: boolean }>;
@@ -323,6 +334,9 @@ declare global {
       archiveWorkspace: (id: string) => Promise<void>;
       unarchiveWorkspace: (id: string) => Promise<void>;
       deleteWorkspace: (id: string) => Promise<{ ok: boolean; error?: string }>;
+      /** Batch liveness probe: maps each path → whether the folder still exists.
+       *  Drives the sidebar's "missing workspace" indicator. */
+      workspacesExist: (paths: string[]) => Promise<Record<string, boolean>>;
 
       // ── Git source control ──
       gitStatus: (workspaceId: string, sessionId?: string) => Promise<any[]>;
@@ -333,10 +347,12 @@ declare global {
       // ── RAG (Memory & RAG panel) ──
       ragStatus: (workspaceId: string) => Promise<import('./index').RagStatus | { error: string }>;
       downloadRagModel: () => Promise<import('./index').RagWorkspaceOpResult>;
+      ragModelExists: () => Promise<boolean>;
       enableRagWorkspace: (workspaceId: string) => Promise<import('./index').RagWorkspaceOpResult>;
       disableRagWorkspace: (workspaceId: string) => Promise<import('./index').RagWorkspaceOpResult>;
       initRagWorkspace: (workspaceId: string) => Promise<import('./index').RagInitResult>;
       onRagInitProgress: (cb: (e: import('./index').RagInitProgressEvent) => void) => () => void;
+      onRagDownloadProgress: (cb: (e: import('./index').RagDownloadProgressEvent) => void) => () => void;
 
       // ─────────────────────────────────────────────────────────
       // Agent (tool-calling loop). Replaces the old chat:stream trio.
@@ -345,7 +361,7 @@ declare global {
         payload: import('../lib/agent/events').RunTurnPayload,
       ): Promise<void>;
       abortTurn(sessionId: string): Promise<void>;
-      approveToolCalls(sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: 'session' | 'project'): Promise<void>;
+      approveToolCalls(sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean): Promise<void>;
       rejectToolCalls(
         sessionId: string,
         toolCallIds: string[],

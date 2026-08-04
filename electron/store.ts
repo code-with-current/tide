@@ -7,7 +7,7 @@
  *
  * IMPORTANT: the store is lazily initialized on first access, NOT at module
  * import time. This is because app.setPath('userData', '~/.tide') runs inside
- * app.whenReady() in main.ts — if we called app.getPath('userData') at import
+ * app.whenReady() in main.ts — if we called appDataDir() at import
  * time (before whenReady), we'd get the stock Electron path
  * (~/Library/Application Support/tide) instead of the relocated ~/.tide,
  * causing the store to read/write the wrong location. The lazy proxy defers
@@ -18,6 +18,7 @@
 import { app, safeStorage } from 'electron';
 import * as sessionsModule from './ipc/sessions.js';
 import { createConfigStore, type CryptoOps, type WorkspaceCascadeOps } from './configStore.js';
+import { appDataDir } from './appPaths.js';
 
 const crypto: CryptoOps = {
   encrypt: (s: string): string => {
@@ -60,12 +61,12 @@ function cascadeOps(): WorkspaceCascadeOps {
   };
 }
 
-// Lazy store — created on first access. app.getPath('userData') is correct
+// Lazy store — created on first access. appDataDir() is correct
 // at that point because setUserDataPath ran earlier in whenReady.
 let _store: ReturnType<typeof createConfigStore> | null = null;
 function getStore() {
   if (!_store) {
-    _store = createConfigStore(app.getPath('userData'), crypto);
+    _store = createConfigStore(appDataDir(), crypto);
   }
   return _store;
 }

@@ -31,6 +31,7 @@ import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '../../logger';
+import { readFullUserMcpConfig, writeFullUserMcpConfig } from './config';
 
 const log = createLogger('mcp/oauth');
 
@@ -69,9 +70,8 @@ export function hasPendingAuthUrl(serverName: string): boolean {
   return pendingAuthUrls.has(serverName);
 }
 
-function tokensFilePath(): string {
-  return path.join(app.getPath('userData'), OAUTH_TOKENS_FILE);
-}
+/** Tokens are now stored in the unified mcp.json under oauth.tokens.
+ *  These helpers read/write that section without touching mcpServers. */
 
 interface StoredTokens {
   access_token: string;
@@ -87,21 +87,16 @@ interface StoredTokens {
 type OAuthTokensFile = Record<string, string>;
 
 function readTokensFile(): OAuthTokensFile {
-  try {
-    return JSON.parse(fs.readFileSync(tokensFilePath(), 'utf-8'));
-  } catch {
-    return {};
-  }
+  const full = readFullUserMcpConfig();
+  const oauth = full.oauth as Record<string, unknown> | undefined;
+  return (oauth?.tokens as OAuthTokensFile) ?? {};
 }
 
 function writeTokensFile(data: OAuthTokensFile): void {
-  const filePath = tokensFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  // Atomic-ish: write to a temp file then rename over the target. Avoids a
-  // truncated file if the process is killed mid-write.
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tmp, filePath);
+  const full = readFullUserMcpConfig();
+  if (!full.oauth || typeof full.oauth !== 'object') full.oauth = {};
+  (full.oauth as Record<string, unknown>).tokens = data;
+  writeFullUserMcpConfig(full);
 }
 
 /** Decrypt + parse the stored token blob for a server. undefined if absent
@@ -191,22 +186,17 @@ export function handleOAuthCallback(url: string): void {
  * So the verifier must persist between those two calls — we store it next to
  * the tokens. Reused per server-name; each new flow overwrites the previous.
  */
-function verifierFilePath(): string {
-  return path.join(app.getPath('userData'), 'mcp-oauth-verifiers.json');
-}
+/** Verifiers stored in mcp.json under oauth.verifiers. */
 function readVerifiersFile(): Record<string, string> {
-  try {
-    return JSON.parse(fs.readFileSync(verifierFilePath(), 'utf-8'));
-  } catch {
-    return {};
-  }
+  const full = readFullUserMcpConfig();
+  const oauth = full.oauth as Record<string, unknown> | undefined;
+  return (oauth?.verifiers as Record<string, string>) ?? {};
 }
 function writeVerifiersFile(data: Record<string, string>): void {
-  const filePath = verifierFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tmp, filePath);
+  const full = readFullUserMcpConfig();
+  if (!full.oauth || typeof full.oauth !== 'object') full.oauth = {};
+  (full.oauth as Record<string, unknown>).verifiers = data;
+  writeFullUserMcpConfig(full);
 }
 
 /**
@@ -229,22 +219,17 @@ interface StoredClientInfo {
   client_secret_expires_at?: number;
   token_endpoint_auth_method?: string;
 }
-function clientInfoFilePath(): string {
-  return path.join(app.getPath('userData'), 'mcp-oauth-clients.json');
-}
+/** Client info stored in mcp.json under oauth.clients. */
 function readClientInfoFile(): Record<string, string> {
-  try {
-    return JSON.parse(fs.readFileSync(clientInfoFilePath(), 'utf-8'));
-  } catch {
-    return {};
-  }
+  const full = readFullUserMcpConfig();
+  const oauth = full.oauth as Record<string, unknown> | undefined;
+  return (oauth?.clients as Record<string, string>) ?? {};
 }
 function writeClientInfoFile(data: Record<string, string>): void {
-  const filePath = clientInfoFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tmp, filePath);
+  const full = readFullUserMcpConfig();
+  if (!full.oauth || typeof full.oauth !== 'object') full.oauth = {};
+  (full.oauth as Record<string, unknown>).clients = data;
+  writeFullUserMcpConfig(full);
 }
 function getClientInfo(serverName: string): StoredClientInfo | undefined {
   const file = readClientInfoFile();

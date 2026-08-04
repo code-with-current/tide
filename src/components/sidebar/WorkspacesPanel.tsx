@@ -1,5 +1,5 @@
 import {
-  FolderGit2,
+  FolderCode,
   Plus,
   Settings,
   MoreHorizontal,
@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ArchiveIcon,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import {
@@ -79,6 +80,28 @@ export function WorkspacesPanel() {
 
   const active = workspaces?.filter((w) => !w.archivedAt) ?? [];
   const archived = workspaces?.filter((w) => w.archivedAt) ?? [];
+
+  // Liveness probe: which workspace folders still exist on disk? Batched in
+  // one IPC call whenever the workspace list changes. Drives the "missing"
+  // indicator so a deleted/moved project folder is visible at a glance
+  // rather than only surfacing when a tool fails mid-turn.
+  const [missingPaths, setMissingPaths] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!workspaces || workspaces.length === 0) {
+      setMissingPaths(new Set());
+      return;
+    }
+    let cancelled = false;
+    window.tideIpc?.workspacesExist(workspaces.map((w) => w.path)).then((map) => {
+      if (cancelled) return;
+      const missing = new Set<string>();
+      for (const w of workspaces) {
+        if (map[w.path] === false) missing.add(w.path);
+      }
+      setMissingPaths(missing);
+    }).catch(() => { /* probe failure — don't mark anything missing */ });
+    return () => { cancelled = true; };
+  }, [workspaces]);
 
   /**
    * Switch to a workspace and restore its most-recent session in one shot.
@@ -162,12 +185,12 @@ export function WorkspacesPanel() {
           the top-LEFT (over this sidebar) at (12, 12). On Windows/Linux the
           caption buttons sit at the top-RIGHT, so this sidebar needs no
           clearance and the spacer is omitted to avoid a wasted gap. */}
-      {isMac && <div className="h-8 flex-shrink-0" />}
-      <div className="px-3 py-2.5 flex items-center justify-between border-input flex-shrink-0 border-b ">
+      {isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+      <div className={cn("px-3 py-2.5 flex items-center justify-between border-input flex-shrink-0 border-b ", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-foreground/80 font-bold font-stretch-semi-expanded">
           Workspaces
         </div>
-        <Tip label="Add workspace" side="bottom">
+        <Tip label="Add Workspace" side="bottom">
           <Button
             variant="default"
             size="icon-sm"
@@ -192,6 +215,7 @@ export function WorkspacesPanel() {
               workspace={ws}
               active={ws.id === activeId}
               switching={switchingTo === ws.id}
+              missing={missingPaths.has(ws.path)}
               runningSessionIds={runningSessionIds}
               unreadSessionIds={unreadSessionIds}
               onSelect={() => handleSelect(ws.id)}
@@ -212,7 +236,7 @@ export function WorkspacesPanel() {
           onClick={() => openDialog("addWorkspace")}
           className="w-full flex items-center"
           >
-          <FolderGit2 className="size-4" /> Add Workspace
+          <FolderCode className="size-4" /> Add Workspace
         </Button>
         <Button
           variant="outline"
@@ -241,6 +265,7 @@ function WorkspaceItem({
   workspace,
   active,
   switching,
+  missing,
   runningSessionIds,
   unreadSessionIds,
   onSelect,
@@ -248,6 +273,7 @@ function WorkspaceItem({
   workspace: Workspace;
   active: boolean;
   switching?: boolean;
+  missing?: boolean;
   runningSessionIds: string[];
   unreadSessionIds: string[];
   onSelect: () => void;
@@ -309,15 +335,24 @@ function WorkspaceItem({
               ? "bg-secondary text-foreground"
               : "text-muted-foreground hover:bg-secondary",
             archived && "opacity-60",
+            missing && "ring-1 ring-warning/30",
           )}
+          title={missing ? `Folder missing: ${workspace.path}` : undefined}
         >
           <div className="flex items-center gap-2">
-            <FolderGit2
-              className={cn(
-                "size-3.5 flex-shrink-0",
-                active ? "text-primary" : "text-muted-foreground/60",
-              )}
-            />
+            {missing ? (
+              <AlertTriangle
+                className="size-3.5 flex-shrink-0 text-warning"
+                aria-label="Folder missing"
+              />
+            ) : (
+              <FolderCode
+                className={cn(
+                  "size-3.5 flex-shrink-0",
+                  active ? "text-primary" : "text-muted-foreground/60",
+                )}
+              />
+            )}
             {isRenaming ? (
               <Input
                 ref={inputRef}
@@ -506,7 +541,7 @@ function ArchivedWorkspacesSection({
   return (
     <div className="mt-3">
       <Button
-        variant="secondary"
+        variant="ghost"
         onClick={() => setOpen((o) => !o)}
         className="w-full px-2 py-1 flex items-center gap-1.5 text-[0.7143rem] uppercase justify-start"
       >

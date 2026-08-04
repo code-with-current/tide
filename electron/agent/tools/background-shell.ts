@@ -10,6 +10,7 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
+import { toolEnv, wrapWithShell, killProcessTree } from './tool-env';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { resolveAndFollowSymlinks } from '../path-safety';
@@ -40,9 +41,10 @@ export function spawnBackground(id: string, command: string, cwd: string): void 
   if (shells.has(id)) {
     killBackground(id);
   }
-  const proc = spawn(command, {
+  const wrapped = wrapWithShell(command);
+  const proc = spawn(wrapped.command, wrapped.args, {
     cwd,
-    shell: true,
+    env: toolEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const shell: BgShell = {
@@ -79,7 +81,7 @@ function killBackground(id: string): boolean {
   const shell = shells.get(id);
   if (!shell) return false;
   try {
-    if (!shell.exited) shell.proc.kill('SIGTERM');
+    if (!shell.exited) killProcessTree(shell.proc.pid);
   } catch {
     // already dead
   }

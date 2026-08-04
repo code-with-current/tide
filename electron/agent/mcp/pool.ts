@@ -14,7 +14,9 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createLogger } from '../../logger';
 import { readMcpConfig } from './config';
 import { resolveSecrets, resolveArgsSecrets } from './secrets';
-import { getApprovedServers, approveServer } from './approvals';
+// Approval system removed — all servers auto-connect when enabled.
+// The approvals.ts module is kept for back-compat (existing data in
+// extensions.json) but no longer gates connections.
 import { createAuthProvider, consumePendingAuthUrl, hasPendingAuthUrl, registerOAuthCompleter } from './oauth';
 import { createExtensionsStore } from '../../extensionsStore';
 import type {
@@ -23,16 +25,19 @@ import type {
   McpServerConfig,
   McpServerStatus,
 } from './types';
+import { BUILTIN_MCP_SERVERS } from './builtin';
+import { appDataDir } from '../../appPaths.js';
 
 const log = createLogger('mcp');
 
 const userConnections = new Map<string, McpConnection>();
 const workspaceConnections = new Map<string, Map<string, McpConnection>>();
+const builtinConnections = new Map<string, McpConnection>();
 
 /** Check if a server name is disabled in the extensions store. */
 function isServerDisabled(name: string): boolean {
   try {
-    const extStore = createExtensionsStore(app.getPath('userData'));
+    const extStore = createExtensionsStore(appDataDir());
     return extStore.getDisabled().mcp.includes(name);
   } catch {
     return false;
@@ -58,7 +63,7 @@ function notifyStatusChange(): void {
 }
 
 function userConfigPath(): string {
-  return path.join(app.getPath('userData'), 'mcp.json');
+  return path.join(appDataDir(), 'mcp.json');
 }
 
 function projectConfigPath(workspaceRoot: string): string {
@@ -67,21 +72,34 @@ function projectConfigPath(workspaceRoot: string): string {
 
 export async function initUserServers(): Promise<void> {
   const config = readMcpConfig(userConfigPath());
-  const approved = getApprovedServers();
-  log.info('init user servers', { total: Object.keys(config).length, approved: approved.length });
+  log.info('init user servers', { total: Object.keys(config).length });
   for (const [name, serverConfig] of Object.entries(config)) {
-    if (!approved.includes(name)) {
-      userConnections.set(name, {
+    await connectServer(name, serverConfig, 'user');
+  }
+  notifyStatusChange();
+}
+
+/**
+ * Initialize built-in MCP servers. Called once at app boot alongside
+ * initUserServers(). Built-ins skip the approval gate (they're trusted) —
+ * they're either connected (if enabled) or stubbed as disconnected (if
+ * disabled in the extensions store). Default is disabled.
+ */
+export async function initBuiltinServers(): Promise<void> {
+  log.info('init builtin servers', { count: Object.keys(BUILTIN_MCP_SERVERS).length });
+  for (const [name, entry] of Object.entries(BUILTIN_MCP_SERVERS)) {
+    if (isServerDisabled(name)) {
+      builtinConnections.set(name, {
         name,
-        config: serverConfig,
-        scope: 'user',
-        status: 'needs_approval',
+        config: entry.config,
+        scope: 'builtin',
+        status: 'disconnected',
         tools: [],
         restartCount: 0,
       });
       continue;
     }
-    await connectServer(name, serverConfig, 'user');
+    await connectServer(name, entry.config, 'builtin');
   }
   notifyStatusChange();
 }
@@ -101,7 +119,6 @@ export async function activateWorkspace(
 
   const config = readMcpConfig(projectConfigPath(workspaceRoot));
   log.info('activate workspace', { workspaceId, projectServers: Object.keys(config).length });
-  const approved = getApprovedServers();
   let wsPool = workspaceConnections.get(workspaceId);
   if (!wsPool) {
     wsPool = new Map();
@@ -109,18 +126,6 @@ export async function activateWorkspace(
   }
 
   for (const [name, serverConfig] of Object.entries(config)) {
-    if (!approved.includes(name)) {
-      wsPool.set(name, {
-        name,
-        config: serverConfig,
-        scope: 'project',
-        workspaceId,
-        status: 'needs_approval',
-        tools: [],
-        restartCount: 0,
-      });
-      continue;
-    }
     await connectServer(name, serverConfig, 'project', workspaceId);
   }
   notifyStatusChange();
@@ -129,14 +134,16 @@ export async function activateWorkspace(
 async function connectServer(
   name: string,
   config: McpServerConfig,
-  scope: 'user' | 'project',
+  scope: 'user' | 'project' | 'builtin',
   workspaceId?: string,
 ): Promise<void> {
   log.info('connecting', { name, scope, transport: config.type });
   const pool =
     scope === 'user'
       ? userConnections
-      : (workspaceConnections.get(workspaceId!) ?? new Map());
+      : scope === 'builtin'
+        ? builtinConnections
+        : (workspaceConnections.get(workspaceId!) ?? new Map());
   if (scope === 'project' && !workspaceConnections.has(workspaceId!)) {
     workspaceConnections.set(workspaceId!, pool);
   }
@@ -177,22 +184,70 @@ async function connectServer(
     }
 
     let transport;
-    if (config.type === 'stdio') {
-      transport = new StdioClientTransport({
-        command: config.command!,
-        args: resolvedArgs ?? config.args ?? [],
-        env: { ...process.env, ...resolvedEnv } as Record<string, string>,
+    // Infer type if missing: command → stdio, url → http.
+    const transportType = config.type
+      ?? (config.command ? 'stdio'
+      : config.url ? 'http'
+      : 'stdio') as McpTransportType;
+
+    if (transportType === 'stdio') {
+      // ── Platform-aware shell resolution ──────────────────────────────
+      // macOS/Linux GUI apps inherit a minimal PATH. Version managers
+      // (nvm, fnm, asdf, mise) inject their paths via shell init scripts
+      // (~/.zshrc, ~/.bashrc). Spawning through the user's login shell
+      // resolves these — no hardcoded PATH list needed.
+      //
+      // Windows: cmd.exe /c respects system + user PATH (nvm-windows, nvs).
+      const stdioEnv = { ...process.env, ...resolvedEnv } as Record<string, string>;
+      const rawArgs = resolvedArgs ?? config.args ?? [];
+      const fullCommand = `${config.command!} ${rawArgs.join(' ')}`;
+
+      if (process.platform === 'win32') {
+        transport = new StdioClientTransport({
+          command: 'cmd.exe',
+          args: ['/c', fullCommand],
+          env: stdioEnv,
+          stderr: 'pipe',
+        });
+      } else {
+        // Login shell (-l) sources ~/.zprofile + ~/.zshrc (or bash equiv),
+        // resolving nvm/fnm/asdf/mise paths. Falls back to /bin/sh.
+        transport = new StdioClientTransport({
+          command: process.env.SHELL || '/bin/sh',
+          args: ['-l', '-c', fullCommand],
+          env: stdioEnv,
+          stderr: 'pipe',
+        });
+      }
+
+      // ── Lifecycle logging — capture stderr + exit code ───────────────
+      const stdioTransport = transport as StdioClientTransport & {
+        _process?: { stderr?: NodeJS.ReadableStream; on?: (e: string, cb: (...a: any[]) => void) => void; kill?: (sig?: string) => void };
+      };
+      // stderr — surface server-side errors/diagnostics in Tide's log.
+      if (stdioTransport._process?.stderr) {
+        stdioTransport._process.stderr.on('data', (chunk: Buffer) => {
+          const lines = chunk.toString().trim();
+          if (lines) log.warn('MCP stderr', { server: name, output: lines.slice(0, 500) });
+        });
+      }
+      // exit — log exit code/signal for crash diagnostics + trigger recovery.
+      stdioTransport._process?.on?.('exit', (code: number | null, signal: string | null) => {
+        log.info('MCP process exit', { server: name, code, signal });
       });
-    } else if (config.type === 'sse') {
-      // Remote servers may require OAuth — pass an authProvider so the SDK can
-      // run the 401 → metadata → browser → callback → token-exchange flow.
-      // No-op for servers that don't require auth.
+    } else if (transportType === 'sse') {
       transport = new SSEClientTransport(new URL(config.url!), {
         authProvider: createAuthProvider(name) as any,
+        requestInit: config.headers
+          ? { headers: config.headers as Record<string, string> }
+          : undefined,
       });
     } else {
       transport = new StreamableHTTPClientTransport(new URL(config.url!), {
         authProvider: createAuthProvider(name) as any,
+        requestInit: config.headers
+          ? { headers: config.headers as Record<string, string> }
+          : undefined,
       });
     }
 
@@ -210,9 +265,28 @@ async function connectServer(
     const conn0 = pool.get(name);
     if (conn0) conn0.transport = transport;
 
-    await client.connect(transport);
+    // ── Connect timeout — fail fast if the server doesn't respond ──────
+    // stdio servers need more time: login shell startup (.zshrc → nvm/conda)
+    // + npx download/cache + process spawn. Remote servers connect faster.
+    const isStdio = transportType === 'stdio';
+    const CONNECT_TIMEOUT_MS = isStdio ? 30_000 : 10_000;
+    const timeoutId = setTimeout(() => {
+      log.warn('MCP connect timeout', { name, timeout: CONNECT_TIMEOUT_MS });
+      // Kill the subprocess if it's stdio — don't let it linger.
+      const t = transport as any;
+      t?._process?.kill?.('SIGTERM');
+    }, CONNECT_TIMEOUT_MS);
+
+    try {
+      await client.connect(transport);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    log.info('transport connected', { name, scope, transport: config.type });
 
     const { tools } = await client.listTools();
+    const toolNames = (tools ?? []).map((t: any) => t.name);
+    log.info('tools discovered', { name, scope, count: toolNames.length, tools: toolNames });
     const mcpTools: McpTool[] = (tools ?? []).map((t: any) => ({
       name: t.name,
       description: t.description ?? '',
@@ -225,6 +299,33 @@ async function connectServer(
     conn.tools = mcpTools;
     conn.error = undefined;
     conn.restartCount = 0;
+
+    // ── Crash recovery — auto-restart on unexpected subprocess exit ────
+    // Listen for the transport's onclose callback. If the server was
+    // connected (not intentionally disconnected), auto-restart with
+    // exponential backoff (2s → 4s → 8s, max 3 attempts).
+    const MAX_RESTARTS = 3;
+    (transport as any).onclose = () => {
+      const c = pool.get(name);
+      if (!c || c.status !== 'connected') return; // intentional disconnect
+      if (c.restartCount >= MAX_RESTARTS) {
+        c.status = 'error';
+        c.error = `Server crashed ${MAX_RESTARTS}× — check its configuration.`;
+        log.warn('MCP crash recovery exhausted', { name, restarts: MAX_RESTARTS });
+        notifyStatusChange();
+        return;
+      }
+      c.restartCount++;
+      c.status = 'connecting';
+      const delay = Math.min(2000 * 2 ** (c.restartCount - 1), 8000);
+      log.info('MCP crash recovery', { name, attempt: c.restartCount, delayMs: delay });
+      notifyStatusChange();
+      setTimeout(() => {
+        connectServer(name, config, scope, workspaceId).catch((e) =>
+          log.warn('MCP restart failed', { name, err: e?.message ?? String(e) }),
+        );
+      }, delay);
+    };
 
     log.info('connected', { name, scope, tools: mcpTools.length });
   } catch (e: any) {
@@ -253,6 +354,10 @@ async function connectServer(
 }
 
 async function disconnectConnection(conn: McpConnection): Promise<void> {
+  // Set status BEFORE closing so the transport's onclose callback sees
+  // 'disconnected' and doesn't trigger crash recovery.
+  conn.status = 'disconnected';
+  conn.tools = [];
   try {
     if (conn.client) {
       await (conn.client as Client).close();
@@ -260,8 +365,6 @@ async function disconnectConnection(conn: McpConnection): Promise<void> {
   } catch {
     /* best-effort */
   }
-  conn.status = 'disconnected';
-  conn.tools = [];
 }
 
 /**
@@ -312,9 +415,12 @@ function explainConnectError(e: any, name: string): string {
 export async function disconnectAll(): Promise<void> {
   const userCount = userConnections.size;
   const wsCount = [...workspaceConnections.values()].reduce((n, m) => n + m.size, 0);
-  log.info('disconnect all', { userServers: userCount, workspaceServers: wsCount });
+  const builtinCount = builtinConnections.size;
+  log.info('disconnect all', { userServers: userCount, workspaceServers: wsCount, builtinServers: builtinCount });
   for (const conn of userConnections.values()) await disconnectConnection(conn);
   userConnections.clear();
+  for (const conn of builtinConnections.values()) await disconnectConnection(conn);
+  builtinConnections.clear();
   for (const wsPool of workspaceConnections.values()) {
     for (const conn of wsPool.values()) await disconnectConnection(conn);
     wsPool.clear();
@@ -338,7 +444,14 @@ export async function reinitializeAll(
   const userCount = userConnections.size;
   const wsCount = [...workspaceConnections.values()].reduce((n, m) => n + m.size, 0);
   log.info('reinitialize all', { userServers: userCount, workspaceServers: wsCount });
-  await disconnectAll();
+  // Disconnect + reconnect user and project servers only. Built-in servers
+  // are not affected — they have no on-disk config to reload.
+  for (const conn of userConnections.values()) await disconnectConnection(conn);
+  userConnections.clear();
+  for (const wsPool of workspaceConnections.values()) {
+    for (const conn of wsPool.values()) await disconnectConnection(conn);
+    wsPool.clear();
+  }
   await initUserServers();
   if (activeWorkspace) {
     await activateWorkspace(activeWorkspace.id, activeWorkspace.root);
@@ -362,6 +475,19 @@ export function getToolsForWorkspace(
     client: unknown;
   }> = [];
   for (const conn of userConnections.values()) {
+    if (conn.status !== 'connected') continue;
+    if (isServerDisabled(conn.name)) continue;
+    for (const tool of conn.tools) {
+      result.push({
+        namespacedName: `mcp__${conn.name}__${tool.name}`,
+        serverName: conn.name,
+        tool,
+        client: conn.client,
+      });
+    }
+  }
+  // Built-in servers — same iteration as user servers.
+  for (const conn of builtinConnections.values()) {
     if (conn.status !== 'connected') continue;
     if (isServerDisabled(conn.name)) continue;
     for (const tool of conn.tools) {
@@ -411,6 +537,20 @@ export function getStatusList(workspaceId?: string): McpServerStatus[] {
       enabled: !isServerDisabled(conn.name),
     });
   }
+  // Built-in servers.
+  for (const conn of builtinConnections.values()) {
+    statuses.push({
+      name: conn.name,
+      scope: 'builtin',
+      config: conn.config,
+      status: conn.status,
+      toolCount: conn.tools.length,
+      toolNames: conn.tools.map((t) => t.name),
+      error: conn.error,
+      transport: conn.config.type,
+      enabled: !isServerDisabled(conn.name),
+    });
+  }
   if (workspaceId) {
     const wsPool = workspaceConnections.get(workspaceId);
     if (wsPool) {
@@ -434,16 +574,76 @@ export function getStatusList(workspaceId?: string): McpServerStatus[] {
 
 export async function retryServer(
   name: string,
-  scope: 'user' | 'project',
+  scope: 'user' | 'project' | 'builtin',
+  workspaceRoot?: string,
   workspaceId?: string,
 ): Promise<void> {
   const pool =
     scope === 'user'
       ? userConnections
-      : (workspaceConnections.get(workspaceId!) ?? new Map());
+      : scope === 'builtin'
+        ? builtinConnections
+        : (workspaceConnections.get(workspaceId!) ?? new Map());
   const conn = pool.get(name);
   if (!conn) return;
-  await connectServer(name, conn.config, scope, workspaceId);
+
+  // Re-read the config from disk so external edits (changed args, env, etc.)
+  // are picked up on retry — not the stale cached config from the old connection.
+  let config = conn.config;
+  if (scope === 'builtin') {
+    const builtin = BUILTIN_MCP_SERVERS[name];
+    if (builtin) config = builtin.config;
+  } else if (scope === 'user') {
+    const diskConfig = readMcpConfig(userConfigPath());
+    if (diskConfig[name]) config = diskConfig[name];
+  } else if (workspaceRoot) {
+    const diskConfig = readMcpConfig(projectConfigPath(workspaceRoot));
+    if (diskConfig[name]) config = diskConfig[name];
+  }
+
+  await connectServer(name, config, scope, workspaceId);
+}
+
+/**
+ * Re-fetch the tool list from a connected MCP server. Some MCP servers
+ * (e.g. vue-mcp's set_framework_preferences) dynamically add/remove tools
+ * at runtime. Calling this after such a tool execution makes the new tools
+ * available to the orchestrator on the next step.
+ *
+ * Returns the updated tool count, or -1 if the server isn't connected.
+ */
+export async function refreshServerTools(
+  serverName: string,
+  workspaceId?: string,
+): Promise<number> {
+  // Search all pools for this server.
+  const pools: Map<string, McpConnection>[] = [userConnections, builtinConnections];
+  if (workspaceId) {
+    const wsPool = workspaceConnections.get(workspaceId);
+    if (wsPool) pools.push(wsPool);
+  }
+  for (const pool of pools) {
+    const conn = pool.get(serverName);
+    if (conn && conn.status === 'connected' && conn.client) {
+      try {
+        const client = conn.client as Client;
+        const { tools } = await client.listTools();
+        conn.tools = (tools ?? []).map((t: any) => ({
+          name: t.name,
+          description: t.description ?? '',
+          inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
+        }));
+        const newToolNames = conn.tools.map((t) => t.name);
+        log.info('tools refreshed', { name: serverName, tools: conn.tools.length, toolNames: newToolNames });
+        notifyStatusChange();
+        return conn.tools.length;
+      } catch (e: any) {
+        log.warn('tool refresh failed', { name: serverName, err: e?.message ?? String(e) });
+        return -1;
+      }
+    }
+  }
+  return -1;
 }
 
 /**
@@ -551,16 +751,22 @@ export async function completeOAuthCallback(code: string, _state?: string): Prom
   }
 }
 
+/**
+ * Connect a server that was previously in needs_approval state.
+ * With the approval gate removed, this is now just a direct connect —
+ * kept for API back-compat with the IPC layer.
+ */
 export async function approveAndConnect(
   name: string,
-  scope: 'user' | 'project',
+  scope: 'user' | 'project' | 'builtin',
   workspaceId?: string,
 ): Promise<void> {
-  approveServer(name);
   const pool =
     scope === 'user'
       ? userConnections
-      : (workspaceConnections.get(workspaceId!) ?? new Map());
+      : scope === 'builtin'
+        ? builtinConnections
+        : (workspaceConnections.get(workspaceId!) ?? new Map());
   const conn = pool.get(name);
   if (conn) await connectServer(name, conn.config, scope, workspaceId);
 }
@@ -574,14 +780,16 @@ export async function approveAndConnect(
 export async function loadServer(
   name: string,
   config: McpServerConfig,
-  scope: 'user' | 'project',
+  scope: 'user' | 'project' | 'builtin',
   workspaceId?: string,
 ): Promise<void> {
   // Remove existing connection if updating (disconnect first)
   const pool =
     scope === 'user'
       ? userConnections
-      : (workspaceConnections.get(workspaceId!) ?? new Map());
+      : scope === 'builtin'
+        ? builtinConnections
+        : (workspaceConnections.get(workspaceId!) ?? new Map());
   if (scope === 'project' && !workspaceConnections.has(workspaceId!)) {
     workspaceConnections.set(workspaceId!, pool);
   }
@@ -590,17 +798,8 @@ export async function loadServer(
     try { await (existing.client as Client).close(); } catch { /* best-effort */ }
   }
 
-  const approved = getApprovedServers();
-  if (approved.includes(name)) {
-    await connectServer(name, config, scope, workspaceId);
-  } else {
-    pool.set(name, {
-      name, config, scope, workspaceId,
-      status: 'needs_approval', tools: [], restartCount: 0,
-    });
-    log.info('server loaded (needs approval)', { name, scope });
-    notifyStatusChange();
-  }
+  // All servers auto-connect when loaded — no approval gate.
+  await connectServer(name, config, scope, workspaceId);
 }
 
 /**
@@ -609,18 +808,48 @@ export async function loadServer(
  */
 export async function unloadServer(
   name: string,
-  scope: 'user' | 'project',
+  scope: 'user' | 'project' | 'builtin',
   workspaceId?: string,
 ): Promise<void> {
   const pool =
     scope === 'user'
       ? userConnections
-      : (workspaceConnections.get(workspaceId!) ?? new Map());
+      : scope === 'builtin'
+        ? builtinConnections
+        : (workspaceConnections.get(workspaceId!) ?? new Map());
   const conn = pool.get(name);
   if (conn) {
     await disconnectConnection(conn);
     pool.delete(name);
     log.info('server unloaded', { name, scope });
+    notifyStatusChange();
+  }
+}
+
+/**
+ * Disconnect a server but KEEP it in the pool with a 'disconnected' status.
+ * Used when the user toggles a server OFF — the entry stays visible in the
+ * UI (greyed out) so the user can toggle it back on. Contrast with
+ * unloadServer which fully removes the entry.
+ */
+export async function disableServer(
+  name: string,
+  scope: 'user' | 'project' | 'builtin',
+  workspaceId?: string,
+): Promise<void> {
+  const pool =
+    scope === 'user'
+      ? userConnections
+      : scope === 'builtin'
+        ? builtinConnections
+        : (workspaceConnections.get(workspaceId!) ?? new Map());
+  const conn = pool.get(name);
+  if (conn) {
+    await disconnectConnection(conn);
+    conn.status = 'disconnected';
+    conn.tools = [];
+    conn.error = undefined;
+    log.info('server disabled', { name, scope });
     notifyStatusChange();
   }
 }

@@ -37,6 +37,17 @@ export async function runWriteFile(
     };
   }
 
+  // Refuse to write if the workspace root is missing — otherwise
+  // mkdirSync({recursive:true}) would silently resurrect a deleted workspace
+  // (or worktree) and the agent would report success against a phantom dir.
+  // Better to fail loudly so the user knows the project folder is gone.
+  if (!fs.existsSync(workspaceRoot)) {
+    return {
+      status: 'failed',
+      output: `Workspace root does not exist: ${workspaceRoot}. The project folder may have been moved or deleted. Re-add the workspace or restore the folder.`,
+    };
+  }
+
   let abs: string;
   try {
     // Use resolveInside (not followSymlinks) so creating a new file at a

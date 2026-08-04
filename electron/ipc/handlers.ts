@@ -20,11 +20,13 @@ import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, gitStage, gitCommit, gitDiff } from './git.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
+import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
 import { registerRagHandlers } from './rag.js';
 
 import { forwardLog, createLogger } from '../logger.js';
 import type { Workspace, FileNode, ProviderModelMeta } from '../../src/types';
 import type { AgentSettings } from '../configStore.js';
+import { appDataDir } from '../appPaths.js';
 
 const log = createLogger('ipc');
 
@@ -43,7 +45,7 @@ let orCatalog: ProviderModelMeta[] | null = null;
 let orBooted: Promise<void> | null = null;
 
 function orCachePath(): string {
-  return path.join(app.getPath('userData'), OR_CACHE_FILE);
+  return path.join(appDataDir(), OR_CACHE_FILE);
 }
 
 /** Fetch + normalize the OpenRouter catalog. Cached to disk; refreshed when
@@ -264,7 +266,7 @@ export function registerIpcHandlers() {
     chrome: process.versions.chrome ?? 'unknown',
     node: process.versions.node ?? 'unknown',
     platform: `${process.platform} ${os.release()} ${process.arch}`,
-    userDataPath: app.getPath('userData'),
+    userDataPath: appDataDir(),
   }));
 
   // External file picker — for the Attach button. Returns multiple file paths.
@@ -295,6 +297,50 @@ export function registerIpcHandlers() {
     }
   });
 
+  // Read an image file as a base64 data URL so the renderer can show it in
+  // an <img> (it can't load file:// URLs directly — no privileges under
+  // contextIsolation). Accepts an absolute path (external attachment) OR a
+  // {workspaceId, relPath} for workspace @file mentions. Caps at 10 MB so
+  // giant raw photos don't blow up the IPC channel.
+  const IMG_MAX_BYTES = 10 * 1024 * 1024;
+  const IMG_EXT_MIME: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon',
+  };
+  function mimeFromPath(p: string): string | null {
+    const ext = p.split('.').pop()?.toLowerCase() ?? '';
+    return IMG_EXT_MIME[ext] ?? null;
+  }
+  ipcMain.handle(
+    'tide:readImageFile',
+    async (_e, input: { absPath?: string; workspaceId?: string; relPath?: string }): Promise<{ dataUrl: string; bytes: number } | null> => {
+      try {
+        let target: string | null = null;
+        if (input.absPath) {
+          target = input.absPath;
+        } else if (input.workspaceId && input.relPath) {
+          const ws = store.listWorkspaces().find((w) => w.id === input.workspaceId);
+          if (!ws) return null;
+          const root = expandPath(ws.path);
+          const full = path.resolve(root, input.relPath);
+          // Sandbox: keep it inside the workspace.
+          const rel = path.relative(root, full);
+          if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+          target = full;
+        }
+        if (!target) return null;
+        const stat = fs.statSync(target);
+        if (!stat.isFile() || stat.size > IMG_MAX_BYTES) return null;
+        const mime = mimeFromPath(target);
+        if (!mime) return null;
+        const buf = fs.readFileSync(target);
+        return { dataUrl: `data:${mime};base64,${buf.toString('base64')}`, bytes: stat.size };
+      } catch {
+        return null;
+      }
+    },
+  );
+
   // ── Git detection (real) ────────────────────────────────────
 
   ipcMain.handle('tide:detectGitRepo', async (_e, dirPath: string) => {
@@ -302,7 +348,7 @@ export function registerIpcHandlers() {
     return info ? { ...info, isRepo: true } : null;
   });
 
-  // ── Add workspace (real path + git detection) ───────────────
+  // ── Add Workspace (real path + git detection) ───────────────
 
   ipcMain.handle(
     'tide:addWorkspace',
@@ -460,19 +506,38 @@ export function registerIpcHandlers() {
     }
   });
 
+  // Batch liveness probe: which workspace folders still exist on disk?
+  // Drives the sidebar's "missing workspace" indicator. One IPC call for the
+  // whole list rather than N round-trips.
+  handle('tide:workspacesExist', async (_e, paths: string[]) => {
+    const result: Record<string, boolean> = {};
+    for (const p of paths ?? []) {
+      try {
+        result[p] = fs.existsSync(p) && fs.statSync(p).isDirectory();
+      } catch {
+        result[p] = false;
+      }
+    }
+    return result;
+  });
+
   // ── File tree (real filesystem) ─────────────────────────────
 
   ipcMain.handle('tide:getFileTree', async (_e, workspaceId: string) => {
-    // Resolve from the real store first; fall back to mock for dev mode.
-    const stored = store.listWorkspaces();
-    const ws = stored.find((w) => w.id === workspaceId) ?? mockWorkspaces.find((w) => w.id === workspaceId);
-    if (!ws) return structuredClone(fileTree);
+    // Resolve from the real store. Mock fallback was removed: a missing
+    // workspace record or a deleted workspace dir now returns an empty tree
+    // instead of confusing the user with fake mock files.
+    const ws = store.listWorkspaces().find((w) => w.id === workspaceId);
+    if (!ws) return [];
 
     const dirPath = expandPath(ws.path);
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+      return []; // workspace folder moved/deleted — empty, not mock
+    }
     try {
       return readDirTree(dirPath, '', 3); // max depth 3
     } catch {
-      return structuredClone(fileTree); // fallback to mock
+      return []; // unreadable — empty, not mock
     }
   });
 
@@ -684,8 +749,8 @@ export function registerIpcHandlers() {
     return sessions.updateSessionSettings(sessionId, patch);
   });
 
-  handle('tide:addMessage', async (_e, sessionId: string, role: 'user' | 'assistant' | 'system', content: string) => {
-    sessions.addMessage(sessionId, role, content);
+  handle('tide:addMessage', async (_e, sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }) => {
+    sessions.addMessage(sessionId, role, content, extra);
   });
 
   handle('tide:addAssistantMessage', async (
@@ -710,8 +775,9 @@ export function registerIpcHandlers() {
     _e,
     sessionId: string,
     delta: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
+    lastStepUsage?: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
   ) => {
-    sessions.addUsage(sessionId, delta);
+    sessions.addUsage(sessionId, delta, lastStepUsage);
   });
 
   handle('tide:deleteSession', async (_e, id: string) => {
@@ -739,7 +805,22 @@ export function registerIpcHandlers() {
       if (!session) return null;
       const firstUser = session.messages.find((m: any) => m.role === 'user');
       if (!firstUser || !firstUser.content) return null;
-      const title = await generateSessionTitle(String(firstUser.content));
+      // Resolve the session's chat provider so title-gen runs on the SAME
+      // model the session chats with (works whenever a turn would). Mirrors
+      // the orchestrator's resolution: exact providerId match, then any
+      // enabled provider serving this modelId. Falls back to the system
+      // model inside generateSessionTitle when no provider resolves.
+      const providers = store.listProviders();
+      let provider = providers.find((p) => p.id === session.providerId);
+      if (!provider && session.modelId) {
+        provider = providers.find(
+          (p) => p.enabled && p.models.some((m) => m.modelId === session.modelId),
+        );
+      }
+      const title = await generateSessionTitle(String(firstUser.content), {
+        provider,
+        modelId: session.modelId,
+      });
       if (title) sessions.renameSession(sessionId, title);
       return title;
     } catch (e: any) {
@@ -748,7 +829,17 @@ export function registerIpcHandlers() {
     }
   });
 
-  // ── Agent settings (Settings → Permissions & caps) ────────────
+  // ── macOS permissions (consent screen) ───────────────────────────
+  // Synchronous, cheap native calls — safe on the routing path (the splash
+  // screen calls shouldShowConsent before advancing to main). No-op on
+  // non-mac: status.platform === 'other' and shouldShowConsent returns false.
+  ipcMain.handle('tide:permissions:status', () => getPermissionStatus());
+  ipcMain.handle('tide:permissions:request', (_e, type: 'accessibility' | 'fullDiskAccess' | 'folders') =>
+    requestPermission(type),
+  );
+  ipcMain.handle('tide:permissions:shouldShowConsent', () => shouldShowConsent());
+
+  // ── Agent settings (Settings → Permissions & Caps) ────────────
   ipcMain.handle('tide:getAgentSettings', async () => {
     return store.getAgentSettings();
   });
@@ -843,8 +934,19 @@ export function registerIpcHandlers() {
       // fails, enrichment is skipped — models still return as bare.
       await bootstrapCatalog();
       if (!apiKey.trim()) return { ok: false, error: 'API key is empty — type one or save a stored key first.' };
-      // OpenAI-compatible: GET {baseUrl}/models. Anthropic: GET {baseUrl}/v1/models.
-      const url = baseUrl.replace(/\/+$/, '') + (apiStyle === 'openai' ? '/models' : '/v1/models');
+      // Build the models endpoint URL. For OpenAI: {baseUrl}/models. For
+      // Anthropic: {baseUrl}/v1/models — BUT if the user already included
+      // /v1 in the baseUrl, don't double it up. Match the normalization in
+      // provider-factory.ts (normalizeAnthropicBaseURL).
+      const cleanBase = baseUrl.replace(/\/+$/, '');
+      let url: string;
+      if (apiStyle === 'openai') {
+        url = `${cleanBase}/models`;
+      } else {
+        // Anthropic: append /v1/models unless the URL already ends with /v1.
+        const hasVersion = /\/v\d+$/.test(cleanBase);
+        url = hasVersion ? `${cleanBase}/models` : `${cleanBase}/v1/models`;
+      }
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (apiStyle === 'anthropic') {
         headers['x-api-key'] = apiKey;
@@ -911,7 +1013,11 @@ export function registerIpcHandlers() {
       if (!apiKey.trim()) return { ok: false, error: 'API key is empty.' };
       if (!modelId.trim()) return { ok: false, error: 'Model ID is empty.' };
 
-      const url = baseUrl.replace(/\/+$/, '') + (apiStyle === 'openai' ? '/chat/completions' : '/v1/messages');
+      const cleanBase = baseUrl.replace(/\/+$/, '');
+      // Match the normalization in provider-factory.ts — don't double /v1.
+      const url = apiStyle === 'openai'
+        ? `${cleanBase}/chat/completions`
+        : /\/v\d+$/.test(cleanBase) ? `${cleanBase}/messages` : `${cleanBase}/v1/messages`;
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (apiStyle === 'anthropic') {
         headers['x-api-key'] = apiKey;
