@@ -1,13 +1,4 @@
-/**
- * Session persistence — thin wrapper around sessionStore.
- *
- * The actual storage logic lives in ./sessionStore.js, parameterized by
- * directory and fully testable. This file binds it to Electron's userData
- * path and preserves the exact public API every existing caller relies on.
- *
- * On-disk layout: userData/sessions/<sessionId>.json, one file per session.
- * See docs/plans/2026-07-20-session-storage-rewrite-design.md.
- */
+/** Session persistence: thin wrapper around sessionStore, bound to Electron's userData. One JSON file per session; preserves the exact public API callers rely on. */
 
 import { app } from 'electron';
 import * as fs from 'fs';
@@ -103,14 +94,7 @@ export async function listBranches(workspaceId: string): Promise<string[]> {
   return gitListBranches(ws.path);
 }
 
-/** Create a worktree for a session and persist its metadata. The
- *  orchestrator reads `session.worktree.path` on the next turn and uses
- *  it as cwd for tool execution — no extra wiring needed.
- *
- *  Throws if the branch already exists, the base branch is missing, or
- *  the worktree path clashes with an existing entry. The renderer catches
- *  and surfaces to the user; the session still runs against the main
- *  workspace checkout. */
+/** Create a worktree for a session and persist its metadata; the orchestrator uses it as tool cwd. Throws on branch/path conflicts; renderer catches and falls back to the main checkout. */
 export async function createWorktree(
   sessionId: string,
   opts: {
@@ -152,12 +136,7 @@ export async function createWorktree(
   return worktree;
 }
 
-/**
- * Persist (or clear) the sticky skill reference. Set by the orchestrator when
- * a `[[LOAD_SKILL:...]]` marker is processed; read on subsequent turns so the
- * skill body stays in the system prompt for the whole session. Pass undefined
- * to clear.
- */
+/** Persist (or clear) the sticky skill reference. Set by the orchestrator when a `[[LOAD_SKILL:...]]` marker is processed; read on subsequent turns so the skill body stays in the system prompt for the whole session. Pass undefined to clear. */
 export function setActiveSkillRef(
   sessionId: string,
   ref: { name: string; path: string; loadedAt: string } | undefined,
@@ -165,14 +144,7 @@ export function setActiveSkillRef(
   store().setActiveSkillRef(sessionId, ref);
 }
 
-/**
- * Copy a single file from the workspace root into the worktree, mirroring
- * any subdirectory structure. Refuses paths that escape either root
- * (path-traversal guard) and skips silently if the source doesn't exist
- * (the caller already warned at the createWorktree level). Overwrites
- * existing destination files — worktrees start clean from the base
- * branch, so gitignored config files won't pre-exist there.
- */
+/** Copy a file from the workspace root into the worktree, mirroring subdirs; refuses path-traversal escapes and overwrites cleanly. */
 function copyConfigFile(workspaceRoot: string, worktreeRoot: string, relPath: string): void {
   const src = path.resolve(workspaceRoot, relPath);
   const dst = path.resolve(worktreeRoot, relPath);
@@ -193,11 +165,7 @@ function copyConfigFile(workspaceRoot: string, worktreeRoot: string, relPath: st
   fs.copyFileSync(src, dst);
 }
 
-/**
- * Auto-detect common config files at the workspace root — used by the
- * new-session UI to pre-check the files most users want copied (.env,
- * .env.local, etc.). Returns relative paths that exist on disk.
- */
+/** Auto-detect common config files at the workspace root (.env, .env.local, etc.) for the new-session UI to pre-check. Returns relative paths that exist on disk. */
 export function listConfigFiles(workspaceId: string): string[] {
   const ws = listWorkspaces().find((w) => w.id === workspaceId);
   if (!ws?.path) return [];

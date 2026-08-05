@@ -1,17 +1,4 @@
-/**
- * Model capability detection — delegates to the catalog resolver when a match
- * exists, falling back to heuristic prefix tables for models the catalog
- * doesn't know (custom, fine-tuned, private deployments).
- *
- * The catalog resolver is the source of truth; the prefix tables here are the
- * conservative fallback. Existing callers (ProvidersSection, OnboardingScreen,
- * queries → ChatComposer/ModelSelector/ThinkingLevelSelector) keep their
- * signatures.
- *
- * Renderer-side counterpart of electron/agent/model-capabilities.ts. Imports
- * the pure resolver from ./model-catalog (a deliberate duplicate of the
- * electron module — task 4.2 will dedup them).
- */
+/** Model capability detection — delegates to the catalog resolver, falling back to heuristic prefix tables for uncatalogued models. Renderer counterpart of electron/agent/model-capabilities.ts. */
 import { resolveModelMeta } from './model-catalog';
 import type { CatalogMap, ModelRef } from './model-catalog';
 
@@ -25,22 +12,7 @@ export function setCatalog(map: CatalogMap | null) {
 
 // ─── Heuristic fallback tables (kept for uncatalogued models) ──────────
 
-/**
- * Model id prefixes that indicate thinking/reasoning support.
- * Checked via `modelId.startsWith(prefix)` (case-insensitive) as a FALLBACK
- * when the catalog has no match. Maintained against the July 2026 landscape.
- *
- * Sources: provider docs, July 2026.
- *   - Anthropic: claude-sonnet, claude-opus, claude-haiku, claude-fable,
- *     claude-mythos, claude-3-7
- *   - OpenAI: o1, o3, o4, gpt-5 (includes 5.1, 5.2, 5.6 variants), gpt-oss
- *   - Google: gemini-2, gemini-3 (includes Flash Thinking)
- *   - xAI: grok-3, grok-4
- *   - DeepSeek: deepseek-r
- *   - Alibaba: qwq, qwen3
- *   - Moonshot: kimi-k2, kimi-k3
- *   - Z.ai: glm-4, glm-5 (GLM 4.5+ supports extended thinking)
- */
+/** Model id prefixes that indicate thinking/reasoning support (case-insensitive `startsWith` fallback when the catalog has no match; July 2026). */
 export const REASONING_MODEL_PREFIXES = [
   // Anthropic
   'claude-sonnet',
@@ -74,14 +46,7 @@ export const REASONING_MODEL_PREFIXES = [
   'glm-5',
 ];
 
-/**
- * Context window size lookup by model family, used as a FALLBACK when the
- * catalog has no match. Returns the context window in tokens, or undefined if
- * unknown (falls back to the model's configured contextWindow from settings).
- *
- * Values from provider docs, July 2026. Where providers list "up to N" or
- * experimental figures, the max is used.
- */
+/** Context window size lookup by model family (fallback when the catalog has no match; July 2026 max figures). */
 const CONTEXT_WINDOWS: Array<{ prefix: string; tokens: number }> = [
   // Anthropic — specific models first (longer prefixes)
   { prefix: 'claude-opus-4', tokens: 1_000_000 },
@@ -150,11 +115,7 @@ export function supportsThinking(modelId: string): boolean {
   return heuristicReasoning(modelId);
 }
 
-/**
- * Get the context window size for a model by its modelId.
- * Uses the catalog when available; falls back to prefix heuristics otherwise.
- * Returns undefined when unknown.
- */
+/** Get the context window size for a model by modelId (catalog first, prefix heuristics fallback); returns undefined when unknown. */
 export function contextWindowSize(modelId: string): number | undefined {
   if (activeCatalog) {
     const ref: ModelRef = { modelId, contextWindow: 0 };

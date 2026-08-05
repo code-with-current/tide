@@ -1,22 +1,4 @@
-/**
- * remark plugin: detect file paths in markdown text and wrap them in
- * clickable links. Works inside Streamdown/react-markdown's remark
- * pipeline — runs AFTER remark-gfm so it sees the final text nodes.
- *
- * Match criteria (intentionally strict to avoid false positives):
- *   - At least one `/` (directory separator)
- *   - Ends with a known file extension (1–10 chars)
- *   - Preceded by whitespace, start of line, or common delimiters
- *   - NOT inside code blocks/inline code (remark excludes those from
- *     text nodes automatically)
- *
- * The generated <a> tags carry `data-file-path` + a click handler in
- * the container reads it and calls useUi.openFile. The URL uses
- * `tide-file://` scheme so it doesn't trigger browser navigation.
- *
- * Example: "see src/auth.py for details" →
- *   "see " + <a data-file-path="src/auth.py">src/auth.py</a> + " for details"
- */
+/** remark plugin: detect file paths in markdown and wrap them in clickable `<a data-file-path>` links. Runs after remark-gfm. Strict match: needs `/`, ends with a known extension, preceded by whitespace/delimiter; code is excluded by remark. The container reads `data-file-path` and calls `useUi.openFile`; the `tide-file://` URL avoids browser navigation. */
 
 const KNOWN_EXTENSIONS = new Set([
   '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs',

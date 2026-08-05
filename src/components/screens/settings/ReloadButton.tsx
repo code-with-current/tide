@@ -1,17 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { RefreshCw } from 'lucide-react';
 
-/**
- * Compact icon button used by the Extensions settings sections (Agents,
- * Skills, MCP) to re-scan their source folders and refresh the list.
- *
- * Re-scan = re-invoke the section's list IPC, which reads fresh from disk:
- *   - Agents/Skills: <workspace>/.claude | .agent | .zcode + ~/.claude | .agent | .zcode
- *   - MCP: ~/.tide/mcp.json (global) + <workspace>/.mcp.json (project)
- *
- * Shows a spinner while loading and is disabled then. The `title` tooltip
- * tells the user exactly what gets reloaded.
- */
+/** Compact icon button used by Extensions settings (Agents/Skills/MCP) to re-scan source folders and refresh the list. Shows a spinner while loading. */
 export function ReloadButton({
   loading,
   onClick,

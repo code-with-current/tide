@@ -57,16 +57,7 @@ const toolIcon: Record<ToolName, React.ReactNode> = {
   mcp: <Plug className="size-3.5 text-info" />,
 };
 
-/**
- * Resolve the icon node for a tool name. Built-in Tide tools look up their
- * icon in `toolIcon` above; MCP namespaced tools (`mcp__<server>__<tool>`,
- * see electron/agent/mcp/toolset.ts) don't have a per-tool entry, so they
- * fall back to the generic `Plug` icon — the same one the bare `mcp` tool
- * uses, keeping the visual language consistent across all MCP server tools.
- *
- * Typed against `string` (not `ToolName`) because MCP names aren't part of
- * the `ToolName` union — they arrive at runtime from the agent stream.
- */
+/** Resolve the icon for a tool name: built-in Tide tools look up `toolIcon`; MCP namespaced tools (`mcp__<server>__<tool>`) fall back to the generic `Plug` icon, keeping the visual language consistent. Typed against `string` (not `ToolName`) because MCP names aren't part of the `ToolName` union — they arrive at runtime from the agent stream. */
 function getToolIcon(toolName: string): React.ReactNode {
   if (toolName in toolIcon) {
     return toolIcon[toolName as ToolName];
@@ -117,11 +108,7 @@ export function ToolCallCard({
   return <ToolCallCardBase calls={[call]} onViewFile={onViewFile} />;
 }
 
-/**
- * Renders one or more tool calls. When `calls` has more than one entry, the
- * header collapses them into a single card (used for grouped dispatch_agent
- * calls to the same agent — see ChatMessage's groupDispatchAgents).
- */
+/** Renders one or more tool calls; multiple `calls` collapse into one card (used for grouped dispatch_agent calls — see ChatMessage's groupDispatchAgents). */
 export function ToolCallCardGroup({
   calls,
   onViewFile,
@@ -164,12 +151,7 @@ function ToolCallCardBase({
         )}
         {getToolIcon(call.toolName)}
         <span className="font-medium text-xs">{toolLabel(call.toolName, call.status)}</span>
-        {/* Per-tool streaming strategy for the args preview while the model
-            is still typing them out (pending status + _partialInput present):
-              - bash: hide partials (a half-typed shell command is confusing
-                and may contain sensitive fragments before completion)
-              - edit/write/grep/dispatch_agent: show the forming path/command/
-                task with a shimmer so the user sees the tool call taking shape */}
+        {/* Per-tool streaming strategy for the args preview while the model is still typing them out (pending + _partialInput): bash hides partials (a half-typed shell command is confusing and may contain sensitive fragments); edit/write/grep/dispatch_agent show the forming path/command/task with a shimmer so the user sees the tool call taking shape. */}
         {call.status === 'pending' && call._partialInput && call.toolName !== 'bash' && call.toolName !== 'bash_output' && call.toolName !== 'kill_shell' ? (
           <code className="font-mono text-[11px] px-1.5 py-0.5 bg-background rounded text-foreground/70 max-w-[400px] truncate">
             <TextShimmer>{tryExtractPreview(call.toolName, call._partialInput)}</TextShimmer>
@@ -298,15 +280,7 @@ function ToolCallCardBase({
   );
 }
 
-/**
- * Collapsed chip for a run of ≥3 consecutive exploring tools (read_file,
- * grep, glob, list_dir). Shows a one-line summary like "Exploring · 5 files
- * · 2 searches" with a chevron to expand and see the individual tool cards.
- *
- * Auto-expanded while streaming (so the user sees what's happening live),
- * auto-collapses when streaming ends (the work is done, just the summary
- * matters). Mirrors 1code's EXPLORING_TOOLS grouping.
- */
+/** Collapsed chip for a run of ≥3 consecutive exploring tools (read_file, grep, glob, list_dir). Shows a one-line summary like "Exploring · 5 files · 2 searches" with a chevron to expand. Auto-expanded while streaming (so the user sees what's happening live), auto-collapses when streaming ends. Mirrors 1code's EXPLORING_TOOLS grouping. */
 export function ExploringGroup({
   calls,
   onViewFile,
@@ -364,11 +338,7 @@ export function ExploringGroup({
   );
 }
 
-/**
- * Compact one-line row for a tool inside an ExploringGroup. Just the icon,
- * tool name, arg preview, and a status dot — no collapsible body, no diff
- * view, no output. Click to open the file (for read_file/glob/grep).
- */
+/** Compact one-line row for a tool inside an ExploringGroup: just icon, tool name, arg preview, and a status dot — no collapsible body, diff view, or output. Click to open the file (for read_file/glob/grep). */
 function ExploringRow({
   call,
   onViewFile,
@@ -407,17 +377,7 @@ function ExploringRow({
   );
 }
 
-/**
- * Renders a sub-agent's process across one or more dispatches.
- *
- * When the model dispatches the same agent multiple times (e.g. explore, then
- * explore again with sharper instructions), we collapse them into a single
- * card rather than rendering N near-identical cards side by side. The latest
- * dispatch's task + reasoning + report renders open at the top; prior
- * dispatches appear as collapsed history rows below ("Dispatch #1", etc.) so
- * the user can audit the evolution without losing the focus on the newest
- * answer.
- */
+/** Renders a sub-agent's process across one or more dispatches. Multiple dispatches to the same agent collapse into a single card: the latest dispatch's task + reasoning + report renders open at the top, prior dispatches appear as collapsed history rows below ("Dispatch #1", etc.) so the user can audit the evolution without losing focus on the newest answer. */
 function AgentDisplay({
   agentName,
   dispatches,
@@ -697,15 +657,7 @@ function MarkdownLite({ text }: { text: string }) {
   );
 }
 
-/**
- * Collapsible wrapper for tool result bodies (file contents, directory
- * listings). Click the header row to toggle. Default state is open for
- * short results, closed for long ones — see `defaultOpenFor`.
- *
- * When expanded, a "Collapse" button renders at the bottom of the body so
- * the user doesn't have to scroll back up to the header to close it after
- * reading a long result.
- */
+/** Collapsible wrapper for tool result bodies (file contents, directory listings). Click the header row to toggle. Default state is open for short results, closed for long ones — see `defaultOpenFor`. When expanded, a "Collapse" button renders at the bottom of the body so the user doesn't have to scroll back up to close it after reading a long result. */
 function CollapsibleBody({
   label,
   defaultOpen = false,
@@ -750,14 +702,7 @@ function textPreviewLabel(text: string): string {
   return first ? `${lineCount} ${lineCount === 1 ? 'line' : 'lines'} · ${first}${lines[0].length > 60 ? '…' : ''}` : `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}`;
 }
 
-/**
- * Best-effort extract of a human-readable preview from a partial tool-input
- * JSON string. The model streams args as JSON fragments, so we may have
- * something like `{"path":"src/foo.ts","old` — try to pull out the most
- * useful field (path / command / pattern) for the live preview.
- *
- * Falls back to the raw fragment if nothing recognizable parses.
- */
+/** Best-effort extract of a human-readable preview from a partial tool-input JSON string. The model streams args as JSON fragments (e.g. `{"path":"src/foo.ts","old`), so try to pull out the most useful field (path / command / pattern) for the live preview. Falls back to the raw fragment if nothing recognizable parses. */
 function tryExtractPreview(_toolName: string, partialJson: string): string {
   // Try to extract known fields by pattern. Cheaper than a full JSON parse
   // (which would fail on incomplete input anyway).

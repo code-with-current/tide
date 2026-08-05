@@ -1,22 +1,8 @@
-/**
- * Electron main process — window creation, lifecycle, IPC registration.
- *
- * Security posture:
- * - contextIsolation: true, nodeIntegration: false, sandbox: false
- * - Custom frameless titleBar (React TitleBar handles traffic lights + drag)
- * - External links open in OS browser
- * - Navigation blocked away from app
- */
+/** Electron main process: window creation, lifecycle, and IPC registration (contextIsolation on, nodeIntegration off, custom frameless titleBar, external links in OS browser, navigation blocked). */
 
 import { app, BrowserWindow, shell, ipcMain, protocol } from 'electron';
 
-// Load .env before anything else reads process.env. The system app model
-// (agent/system-model.ts, used for title generation) and the TIDE_DEBUG_SDK
-// diagnostic flag are read lazily at call time (via IPC, well after startup),
-// so loading here wins the race. .env is optional — its absence means
-// system-model tasks no-op (title gen returns null, placeholder is kept).
-// In ESM these imports are hoisted above this body, but nothing below reads
-// env at module-eval time, so order is safe.
+// Load .env before anything else reads process.env (system model + TIDE_DEBUG_SDK are read lazily via IPC, so this wins the race). Optional — its absence means system-model tasks no-op (title gen returns null). ESM hoists imports above this body but nothing below reads env at module-eval time.
 try {
   process.loadEnvFile();
 } catch {
@@ -30,12 +16,7 @@ try {
 }
 
 // ── Suppress AI SDK warnings ─────────────────────────────────────────
-// Some OpenAI-compatible providers (z.ai GLM via Anthropic protocol) return
-// reasoning metadata in a format the AI SDK's Anthropic adapter doesn't fully
-// recognize, producing "unsupported reasoning metadata" warnings on every
-// tool-call step. They're noise — the response is correct; the adapter just
-// doesn't know about z.ai's extra fields. Suppress globally before the AI
-// SDK loads.
+// Some OpenAI-compatible providers (z.ai GLM via Anthropic protocol) return reasoning metadata the AI SDK's Anthropic adapter doesn't recognize, producing "unsupported reasoning metadata" warnings on every tool-call step. Noise — the response is correct; the adapter just doesn't know about z.ai's extra fields. Suppress globally before the AI SDK loads.
 (globalThis as Record<string, unknown>).AI_SDK_LOG_WARNINGS = false;
 
 // ── GPU / Hardware Acceleration ──────────────────────────────────────
@@ -63,20 +44,7 @@ import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
 import { setUserDataPath, appDataDir } from './appPaths.js';
 
-/**
- * Cutover flag for the Vercel AI SDK orchestrator (Phase 3).
- *
- *   true  → registerAgentSdkHandlers : streamText + stopWhen step cap, full
- *           20-tool SDK factory path, emits the legacy AgentEvent stream so
- *           the current renderer works unchanged. (Phase 4 swaps the channel's
- *           payload to the PartEvent union — no second channel.)
- *   false → registerAgentHandlers    : the legacy hand-rolled SSE loop. Kept
- *           as the fallback until the SDK path is validated live.
- *
- * Both register on the same AGENT_COMMANDS, so exactly one may be active
- * (ipcMain rejects duplicate handles). Flip back here if a live run surfaces
- * a regression.
- */
+/** Cutover flag for the Vercel AI SDK orchestrator (Phase 3): true → registerAgentSdkHandlers (streamText + stopWhen step cap, full 20-tool SDK factory); false → registerAgentHandlers (legacy hand-rolled SSE). Both register on AGENT_COMMANDS, so exactly one may be active — flip back here if a live run surfaces a regression. */
 const USE_SDK_ORCHESTRATOR = true;
 
 // ESM doesn't provide __dirname — derive it from import.meta.url.
@@ -85,12 +53,7 @@ const __dirname = path.dirname(__filename);
 
 const isDev = !app.isPackaged;
 
-// Register the `tide://` scheme as privileged BEFORE app ready — this is the
-// window for OAuth callback handling. `standard` lets it parse like a normal
-// URL (host + path), `secure` gives it a same-origin context (cookies, etc.),
-// and `supportFetchAPI` lets the MCP SDK fetch against it during the PKCE
-// metadata-exchange step. Must run before app.whenReady(); calling it later
-// throws. See Phase 6 (OAuth) of the MCP integration plan.
+// Register the `tide://` scheme as privileged BEFORE app ready: `standard` parses it like a normal URL, `secure` gives a same-origin context (cookies), and `supportFetchAPI` lets the MCP SDK fetch against it during the PKCE metadata-exchange step. Must run before app.whenReady() or it throws.
 protocol.registerSchemesAsPrivileged([
   { scheme: 'tide', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
@@ -98,11 +61,7 @@ const log = createLogger('main');
 
 let mainWindow: BrowserWindow | null = null;
 
-// The currently active workspace — the MCP pool uses its root to resolve
-// project-scoped servers (.mcp.json), and the MCP IPC handlers use it to
-// pick which config file to mutate on project-scoped add/update/remove.
-// Set by the `tide:mcp:workspaceActivated` IPC handler (renderer fires it
-// when the active workspace changes).
+// The currently active workspace — the MCP pool uses its root for project-scoped servers (.mcp.json), and MCP IPC uses it to pick which config file to mutate. Set by the `tide:mcp:workspaceActivated` IPC handler when the active workspace changes.
 let activeWorkspace: { id: string; root: string } | undefined;
 
 function createWindow() {
@@ -208,12 +167,7 @@ if (!gotLock) {
       app.setAppUserModelId('com.tide.app');
     }
 
-    // Claim the `tide://` protocol so the OS routes OAuth callbacks here.
-    // On macOS, the browser hands the URL to the running instance via the
-    // `open-url` event; on Windows/Linux a second instance is launched with
-    // the URL as the last argv arg (handled in the `second-instance` listener
-    // above). Safe to call unconditionally; returns false if another app
-    // already owns it (rare; the PKCE flow still works via second-instance).
+    // Claim the `tide://` protocol so the OS routes OAuth callbacks here (macOS via `open-url`; Windows/Linux via second-instance with the URL as the last argv arg — handled above). Safe to call unconditionally; returns false if another app already owns it (rare; PKCE still works via second-instance).
     app.setAsDefaultProtocolClient('tide');
     app.on('open-url', (_event, url) => {
       if (url.startsWith('tide://oauth/callback')) {
@@ -237,20 +191,11 @@ if (!gotLock) {
     registerSettingsHandlers();
     log.info('core IPC handlers registered', { ms: Date.now() - t0 });
 
-    // Create the window NOW — don't block first paint on the remaining
-    // handlers. The renderer needs core IPC (workspaces/sessions/settings,
-    // registered above) on mount; chat/agent/MCP/extensions are only used on
-    // user action, so we defer them to the next tick (after the window is
-    // shown) via setImmediate. This cuts time-to-first-paint by the cost of
-    // loading + registering ~6 handler modules.
+    // Create the window NOW — don't block first paint on the remaining handlers. Renderer needs core IPC (workspaces/sessions/settings, registered above) on mount; chat/agent/MCP/extensions are only used on user action, so deferred to next tick via setImmediate. Cuts time-to-first-paint by the cost of loading + registering ~6 handler modules.
     createWindow();
     log.info('window created', { ms: Date.now() - t0 });
 
-    // ── Deferred (non-critical) registration ──
-    // Runs immediately after createWindow returns, before the next event-loop
-    // turn — so the handlers are ready by the time the renderer's bundle has
-    // loaded and the user can interact. Order within this block doesn't
-    // matter (none of these call each other at registration time).
+    // Deferred (non-critical) registration — runs before the next event-loop turn so handlers are ready by the time the renderer bundle loads and the user can interact. Order within this block doesn't matter (none call each other at registration time).
     setImmediate(() => {
       const t1 = Date.now();
       // Bootstrap the OpenRouter catalog — the universal metadata source. When

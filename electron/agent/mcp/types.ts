@@ -1,10 +1,4 @@
-/**
- * MCP server configuration types.
- *
- * The config shape matches what users paste from MCP server docs — a flat
- * map of server name → config object. The file IS the map (no mcpServers
- * wrapper). See the design doc for examples.
- */
+/** MCP server configuration types. The config shape matches what users paste from MCP server docs — a flat map of server name → config object (the file IS the map, no mcpServers wrapper). */
 
 /** Transport type discriminator. Always present in config. */
 export type McpTransportType = 'stdio' | 'sse' | 'http';

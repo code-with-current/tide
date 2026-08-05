@@ -48,12 +48,7 @@ const dotToneClass: Record<DotTone, string> = {
   accent: 'bg-primary',
 };
 
-/**
- * Status dot.
- * - `pulse="heartbeat"` — for in-progress states (running turn, awaiting permission).
- *   Uses the heartbeat keyframe: scale + glow pulse, distinct from `animate-pulse-soft`.
- * - `pulse="soft"` — opacity pulse for older "live" states.
- */
+/** Status dot. `pulse="heartbeat"` = scale+glow for in-progress; `pulse="soft"` = opacity pulse. */
 export function Dot({
   tone = 'muted',
   pulse,

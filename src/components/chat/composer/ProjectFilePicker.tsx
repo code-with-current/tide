@@ -6,11 +6,7 @@ export interface ProjectFileItem {
   kind: 'file' | 'dir';
 }
 
-/**
- * Project file/folder picker — triggered by typing `@` in the editor.
- * Shows a flat list of project files matching the query. Same floating
- * popover approach as the SlashPicker (absolute, above the composer).
- */
+/** Project file/folder picker — triggered by typing `@` in the editor. Shows a flat list of project files matching the query; uses the same floating-popover approach as SlashPicker (absolute, above the composer). */
 export function ProjectFilePicker({
   items,
   highlightedIndex,

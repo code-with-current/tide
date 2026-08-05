@@ -1,18 +1,4 @@
-/**
- * Platform-aware shell + environment helpers for tool execution.
- *
- * macOS GUI apps inherit a minimal PATH. Version managers (nvm, fnm, asdf,
- * mise) inject their paths via shell init scripts (~/.zshrc, ~/.bashrc).
- * Custom env vars (JAVA_HOME, GOPATH, ANDROID_HOME, conda activation) also
- * live in these scripts.
- *
- * Solution: source the login shell ONCE at app startup, capture the full
- * environment, and reuse it for every tool call. This gives us:
- *   - All env vars from the user's shell config (1.7s cost paid once, not per-call)
- *   - Fast tool execution (~0.05s per call via /bin/sh)
- *
- * Used by: bash, background-shell, git, grep, and MCP stdio transports.
- */
+/** Platform-aware shell + environment helpers: source the login shell once at startup to capture full env (PATH, JAVA_HOME, etc.), then reuse it for fast tool subprocess execution. */
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
@@ -25,11 +11,7 @@ const EXTRA_PATHS_UNIX = [
   '/usr/bin', '/bin', '/usr/sbin', '/sbin',
 ];
 
-/**
- * Capture the full environment from the user's login shell.
- * Runs once at module load (app startup). Sources ~/.zshrc, ~/.bashrc,
- * nvm, conda, etc. — capturing ALL env vars, not just PATH.
- */
+/** Capture the full environment from the user's login shell (runs once at module load). */
 let resolvedShellEnv: Record<string, string> | null = null;
 
 function captureShellEnv(): Record<string, string> {
@@ -73,11 +55,7 @@ function captureShellEnv(): Record<string, string> {
 // Capture at module load (app startup). The 1-2s cost is paid once.
 captureShellEnv();
 
-/**
- * Build the environment for tool subprocesses. Uses the captured login shell
- * env (all vars from ~/.zshrc: PATH, JAVA_HOME, GOPATH, conda, etc.) merged
- * with any extra overrides. Adds common PATH entries as a safety net.
- */
+/** Build the tool subprocess environment: captured shell env merged with overrides and PATH safety-net entries. */
 export function toolEnv(extra?: Record<string, string>): Record<string, string> {
   // Start with the captured shell environment (has all user customizations).
   const env = { ...captureShellEnv(), ...extra };
@@ -113,17 +91,7 @@ export function toolShell(): string {
   return '/bin/sh';
 }
 
-/**
- * Wrap a command so it executes through the platform-appropriate shell.
- *
- * Returns `{ command, args }` suitable for `spawn(command, args, ...)`.
- *
- * On Unix: `/bin/sh -c "command args"` — fast (~0.05s startup).
- * Env vars (PATH, JAVA_HOME, GOPATH, conda, etc.) are provided by toolEnv(),
- * which captures them from the login shell at app startup.
- *
- * On Windows: `cmd.exe /c "command args"`.
- */
+/** Wrap a command to execute through the platform shell: `/bin/sh -c` on Unix, `cmd.exe /c` on Windows. */
 export function wrapWithShell(
   command: string,
   args: string[] = [],
@@ -141,11 +109,7 @@ export function wrapWithShell(
   };
 }
 
-/**
- * Kill a process tree platform-aware. On Unix, sends a signal to the
- * process group (negative PID). On Windows, uses `taskkill /T /F` to
- * recursively kill the process tree.
- */
+/** Kill a process tree: signal the process group (Unix) or `taskkill /T /F` (Windows). */
 export function killProcessTree(pid: number | undefined, signal: NodeJS.Signals = 'SIGTERM'): void {
   if (!pid) return;
   if (process.platform === 'win32') {

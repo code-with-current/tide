@@ -1,16 +1,4 @@
-/**
- * Secret blocklist + redaction for tool outputs (design doc §5.6).
- *
- * MVP scope: refuse files whose path looks like a secret. This catches the
- * common cases (`.env`, `id_rsa`, `*.pem`, `*.key`) without the complexity
- * of a regex content scanner. The full content-scanning layer is a
- * follow-up — it requires running on every tool result and deciding where
- * to draw the line on false positives.
- *
- * Refusal happens at the tool layer (the tool returns a `rejected` result)
- * rather than silently scrubbing — the model needs to know it can't have
- * the file so it can ask for a non-secret alternative.
- */
+/** Secret blocklist + redaction for tool outputs (design doc §5.6): MVP refuses files whose path looks like a secret (.env, id_rsa, *.pem, *.key, …) at the tool layer so the model knows it can't have the file. Content scanning is a follow-up. */
 
 import * as path from 'path';
 
@@ -32,12 +20,7 @@ export function isSecretPath(p: string): boolean {
   return false;
 }
 
-/**
- * Minimal inline-content redaction. Pass any tool output through this before
- * returning it to the model. Currently a passthrough — kept as a hook so
- * every read tool calls it now, and a future regex scanner slots in here
- * without touching call sites.
- */
+/** Minimal inline-content redaction (currently passthrough). Hook every read tool through it now so a future regex scanner slots in here without touching call sites. */
 export function redact(content: string): string {
   // TODO: regex-based scanner for AWS keys (AKIA…), GitHub tokens (ghp_…),
   //       JWTs, generic high-entropy strings, private key headers. For now

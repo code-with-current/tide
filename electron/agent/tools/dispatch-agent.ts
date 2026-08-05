@@ -1,15 +1,4 @@
-/**
- * dispatch_agent tool — spawn a specialized sub-agent.
- *
- * The main model calls this to delegate a focused subtask to one of the 8
- * embedded specialists. The agent makes a single LLM call with its own system
- * prompt + the caller's task and returns its answer as the tool result. The
- * main loop keeps doing actual file operations.
- *
- * Auto-deploy: the system prompt advertises the catalog and the model emits
- * this call when it judges a specialist is needed. No manual invocation
- * required (though `@mentions` also work for explicit dispatch).
- */
+/** dispatch_agent tool: spawn a specialized sub-agent for a focused subtask — the agent makes its own LLM call (system prompt + caller's task) and returns the report as the tool result. Auto-deployed when the model judges a specialist is needed (or via @mentions). */
 
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -23,13 +12,7 @@ import type { ToolContext } from './tool-context';
 import { withPermission } from '../permission-wrapper';
 import { appDataDir } from '../../appPaths.js';
 
-/** Shared body — needs the parent turn's provider/model + signal + usage hook
- *  so the sub-agent runs against the same LLM and folds its cost in.
- *
- *  provider/onUsage are optional because the LEGACY ToolContext (./types)
- *  carries them as optional; the body guards `!ctx.provider` before use, so
- *  by the time runAgent sees them they're defined. The SDK ToolContext
- *  (./tool-context) always provides them. */
+/** Shared body — runs the sub-agent against the parent turn's LLM and folds its cost in. provider/onUsage are optional (legacy ./types ToolContext); the body guards `!ctx.provider` before use so runAgent always sees them defined. The SDK ToolContext (./tool-context) always provides them. */
 export async function runDispatchAgent(
   name: string,
   task: string,
@@ -120,10 +103,7 @@ export const dispatchAgentTool: ToolRegistration = {
 };
 
 // ─── SDK factory (Phase 2) ─────────────────────────────────────────────
-// Wires the SDK ToolContext into runAgent. The SDK ctx uses `abortSignal`
-// (not `signal`) and has no `onDelta`; live sub-agent streaming into the
-// dispatch card is deferred until a PartEvent shape exists for it (the
-// sub-agent still completes and returns its full report without it).
+// Wires the SDK ToolContext into runAgent. SDK ctx uses `abortSignal` (not `signal`) and has no `onDelta`; live sub-agent streaming into the dispatch card is deferred until a PartEvent shape exists (the sub-agent still completes and returns its full report).
 
 export function createDispatchAgentTool(ctx: ToolContext) {
   // Read disabled agents from the extensions store (best-effort). Agents

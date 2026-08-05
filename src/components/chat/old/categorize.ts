@@ -45,18 +45,7 @@ export function categorizeTools(calls: ToolCall[]): CategorizedTools {
   return out;
 }
 
-/**
- * Normalize a single option value to a display string. Handles:
- *   - plain string: use as-is
- *   - {label, description}: "label — description" (or just label)
- *   - {value, text}: same pattern, value as label
- *   - other primitives: stringify
- *   - unknown shape: JSON-stringify as last resort
- *
- * Mirrors the normalization in OptionsPicker.parseOptionsBlock so options
- * look identical whether they came from text-parsing (legacy) or from
- * ask_followup_question args (new path).
- */
+/** Normalize a single option value to a display string (string/{label,description}/{value,text}/primitive/object), mirroring OptionsPicker.parseOptionsBlock for parity across legacy and new paths. */
 export function normalizeOption(o: unknown): string {
   if (typeof o === 'string') return o;
   if (typeof o === 'number' || typeof o === 'boolean') return String(o);
@@ -71,13 +60,7 @@ export function normalizeOption(o: unknown): string {
   return JSON.stringify(o);
 }
 
-/** Derive the FollowupMode from the LAST ask_followup_question call.
- *  Returns null if there is no such call, or the args are missing.
- *
- *  Also checks the answer text for a JSON options block as a fallback —
- *  some models emit the question as text instead of calling the tool.
- *  If found, the JSON block is parsed into a followup mode and should be
- *  stripped from the answer by the caller. */
+/** Derive the FollowupMode from the LAST ask_followup_question call, falling back to a JSON options block in the answer text (caller must strip it). */
 export function deriveFollowup(calls: ToolCall[], text?: string): FollowupMode | null {
   // 1) Check for an actual ask_followup_question tool call first.
   for (let i = calls.length - 1; i >= 0; i--) {
@@ -102,11 +85,7 @@ export function deriveFollowup(calls: ToolCall[], text?: string): FollowupMode |
     return null;
   }
 
-  // 2) Fallback: scan the answer text for a JSON block that looks like an
-  //    ask_followup_question payload. Models sometimes emit this as text
-  //    instead of calling the tool. Recognized patterns:
-  //      { "question": "...", "options": ["A", "B"] }
-  //      ```json\n{ "question": "...", "options": [...] }\n```
+  // 2) Fallback: scan the answer text for a JSON block that looks like an ask_followup_question payload (models sometimes emit this as text instead of calling the tool). Recognized: `{ "question":"…","options":["A","B"] }` or fenced ```json blocks.
   if (text) {
     const parsed = parseFollowupFromText(text);
     if (parsed) return parsed;
@@ -115,12 +94,7 @@ export function deriveFollowup(calls: ToolCall[], text?: string): FollowupMode |
   return null;
 }
 
-/**
- * Scan text for a JSON block matching the ask_followup_question schema.
- * Returns a FollowupMode if found, null otherwise. Recognizes both bare
- * JSON and fenced ```json blocks. Requires at least a `question` field;
- * `options` makes it Mode 1 (options), without options it's Mode 2 (question).
- */
+/** Scan text for a bare or fenced JSON block matching the ask_followup_question schema; requires a `question` field, `options` makes it options-mode. */
 function parseFollowupFromText(text: string): FollowupMode | null {
   // Try fenced ```json block first, then bare JSON object.
   const patterns = [
@@ -150,11 +124,7 @@ function parseFollowupFromText(text: string): FollowupMode | null {
   return null;
 }
 
-/**
- * Strip a followup JSON block from answer text so the user doesn't see
- * the raw JSON in the rendered answer. If the text contains a JSON block
- * that parseFollowupFromText recognized, remove it.
- */
+/** Strip a recognized followup JSON block (fenced or bare) from answer text so raw JSON isn't rendered as prose. */
 export function stripFollowupFromText(text: string): string {
   // Remove fenced ```json blocks containing a question field.
   let result = text.replace(/```(?:json)?\s*\n\{[\s\S]*?"question"[\s\S]*?\}\s*\n```/g, '');
@@ -164,19 +134,7 @@ export function stripFollowupFromText(text: string): string {
   return result.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/**
- * Split a timeline into narration (text before/between tools) and answer
- * (text after the last tool). The model often emits process narration like
- * "I'll proceed with a broad analysis..." before launching dispatch_agent
- * calls, then summarizes after — those lead-in segments belong to the
- * process block, not the conclusion.
- *
- * - If there are no tool entries: all text is the answer.
- * - Otherwise: text entries BEFORE the last tool entry are narration;
- *   text entries AT or AFTER the last tool entry are the answer.
- *
- * Empty / whitespace-only segments are dropped.
- */
+/** Split a timeline into narration (text before/between tools) and answer (text at/after the last tool); with no tools, all text is the answer; empty segments dropped. */
 function splitNarration(timeline: Turn['timeline']): {
   narration: string[];
   answer: string;
@@ -213,22 +171,7 @@ function splitNarration(timeline: Turn['timeline']): {
   return { narration, answer: answerParts.join('') };
 }
 
-/**
- * Build a Turn from the raw streaming fields. Used by useChatStream on
- * every state update so the renderer can read a single structured object
- * instead of re-deriving categorization on each render.
- *
- * Pure — takes inputs, returns Turn. Caller stores the result.
- *
- * Narration/answer split applies at all times (streaming or completed):
- * text the model emitted before/between tool calls is narration and lives
- * in the process block; only text AFTER the last tool call is the answer.
- * During streaming, the currently-growing text segment counts as "after
- * the last tool" if no tool has fired since it started — so the user
- * still sees live text growing in the answer position when no tools are
- * mid-flight, but lead-in narration before tools immediately moves to
- * the process block as soon as a tool lands.
- */
+/** Build a Turn from raw streaming fields for useChatStream; applies the narration/answer split at all times so lead-in text before tools lands in the process block while live post-tool text stays in the answer. */
 export function buildTurn(input: {
   toolCalls: ToolCall[];
   timeline: Turn['timeline'];

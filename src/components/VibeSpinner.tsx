@@ -2,14 +2,7 @@ import { useEffect, useState } from 'react';
 import { AsciiSpinner } from '@/components/AsciiSpinner';
 import { cn } from '@/lib/utils';
 
-/**
- * "Vibe words" — the rotating playful verbs that show next to the spinner
- * while the assistant is working. Same convention as Claude Code's status
- * line and Copilot's loading state. The list is intentionally goofy: it
- * humanizes the wait without making promises about what's happening.
- *
- * Words rotate on a ~1.6s cadence, picked at random (no repeats back-to-back).
- */
+/** "Vibe words": rotating playful verbs next to the spinner; random pick on a ~1.6s cadence with no back-to-back repeats. */
 const VIBE_WORDS = [
   'Accomplishing', 'Elucidating', 'Perusing',
   'Actioning', 'Enchanting', 'Philosophising',
@@ -57,11 +50,7 @@ function randomWord(exclude?: string): string {
   return next ?? VIBE_WORDS[0];
 }
 
-/**
- * Braille spinner + rotating vibe word. Mounts its own timer; cleans up on
- * unmount. Use anywhere the assistant is "doing work" and you want a
- * playful, low-key indicator.
- */
+/** Braille spinner + rotating vibe word; self-mounted timer, cleans up on unmount. */
 export function VibeSpinner({
   intervalMs = 1600,
   className,

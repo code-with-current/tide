@@ -1,19 +1,4 @@
-/**
- * Built-in agent catalog — dynamically built from MD files.
- *
- * Agents are defined in src/lib/prompts/agents/*.md. Each .md file has
- * frontmatter (name, description, whenToUse) + the agent's system prompt.
- * At build time, build/promptMarkdownUtils.mjs bundles them into
- * _agent-prompts-bundle.ts. This module just maps the bundle onto AgentDef.
- *
- * To add a new agent: drop a .md file in src/lib/prompts/agents/ and rebuild.
- * No code changes needed.
- *
- * Consumed by:
- * - `dispatch_agent` tool (executor looks up the agent by name)
- * - main system prompt (15-builtin-agents.md advertises whenToUse hints)
- * - renderer `@mention` catalog (via the `tide:listAgents` IPC)
- */
+/** Built-in agent catalog built from src/lib/prompts/agents/*.md (bundled at build time into _agent-prompts-bundle.ts by build/promptMarkdownUtils.mjs). Add a .md file + rebuild to add an agent. Consumed by dispatch_agent, the main system prompt, and the renderer @mention catalog. */
 
 import type { AgentDef } from './types';
 import { BUNDLED_AGENTS } from './prompts';

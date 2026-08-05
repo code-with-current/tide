@@ -1,15 +1,4 @@
-/**
- * ask_followup_question tool — model emits a structured question for the user.
- *
- * Formalizes the "options popup" pattern as a tool. The model calls this when
- * it needs the user to pick between concrete options (approach, file, API
- * style). The renderer surfaces it as an interactive picker; the model's turn
- * pauses until the user answers.
- *
- * Until the renderer wires interactive pickup, the tool result just echoes
- * the question + options back to the model so it can wait for the next user
- * message. This keeps the tool useful immediately even without UI work.
- */
+/** ask_followup_question tool: model emits a structured question; the renderer surfaces an interactive picker and the model's turn pauses until the user answers. */
 
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -23,12 +12,7 @@ interface FollowupOption {
   description?: string;
 }
 
-/** Shared body — normalizes the two accepted option shapes and renders the
- *  question for the model + UI. No ctx dependency.
- *
- *  `multiple` is accepted but not yet used by the echo path; Phase 3 Task 3.3
- *  (the awaiting execute) consumes it to drive single- vs multi-select in the
- *  picker. Underscored here to signal intent and satisfy noUnusedParameters. */
+/** Shared body — normalizes the two accepted option shapes and renders the question for the model + UI. No ctx dependency. `_multiple` is accepted but unused by the echo path; Phase 3 Task 3.3 (the awaiting execute) consumes it for single- vs multi-select. Underscored to satisfy noUnusedParameters. */
 export async function runAskFollowup(
   question: string,
   options: unknown[],
@@ -133,12 +117,7 @@ export const askFollowupTool: ToolRegistration = {
 };
 
 // ─── SDK factory (Phase 3 Task 3.3) ───────────────────────────────────
-// HITL execute: emits a `followup` event (→ followup_required in the
-// renderer), then awaits the user's pick on followup-resolver. The SDK's
-// streamText naturally pauses the step while this execute awaits; once the
-// pick arrives (via the submitFollowup IPC handler), the execute returns and
-// the model continues with the answer visible in the tool_result. Aborting
-// the turn resolves the pick as null → the execute returns a fallback.
+// HITL execute: emits a `followup` event, then awaits the user's pick on followup-resolver. streamText pauses the step while this awaits; once the pick arrives (submitFollowup IPC handler), execute returns and the model continues with the answer in the tool_result. Aborting the turn resolves the pick as null → fallback.
 
 export function createAskFollowupTool(ctx: ToolContext) {
   return tool({

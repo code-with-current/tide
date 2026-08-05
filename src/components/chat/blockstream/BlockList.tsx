@@ -31,22 +31,7 @@ interface BlockListProps {
   onViewFile?: (path: string) => void;
 }
 
-/**
- * Walks the canonical block list and routes each block to its visual
- * section via deriveLayout. The single source of truth for turn rendering.
- *
- * Each section leaf is memoized individually — when one tool block changes
- * reference (reducer guarantee), only that tool's row re-renders. The
- * layout itself is memoized on the blocks array reference.
- *
- * Scroll preservation: when `streaming` flips false, the Thinking +
- * Process sections auto-collapse above the answer. Without compensation,
- * content the user was reading would jump up. We measure the height delta
- * on the next animation frame and adjust the scroll container so the
- * answer stays at the same screen position — but only if the answer is
- * already in view. If the user is scrolled up reading thinking/process,
- * we leave them alone.
- */
+/** Walks the canonical block list and routes each block via deriveLayout. Memoized sections; preserves scroll on streaming→completed transition when answer is in view. */
 export const BlockList = memo(function BlockList({
   blocks, streaming, stopped, stopReason, sessionId, messageId, onViewFile,
 }: BlockListProps) {

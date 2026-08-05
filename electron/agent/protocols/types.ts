@@ -1,12 +1,4 @@
-/**
- * Shared types for per-protocol call-option resolution.
- *
- * Each protocol expresses "thinking" differently and may grow its own
- * provider-specific knobs (cache headers, telemetry, model quirts). The
- * ProtocolCallOptions shape is what every protocol builder returns, so the
- * orchestrator can consume it uniformly without knowing which protocol
- * produced it.
- */
+/** Shared types for per-protocol call-option resolution: each protocol expresses "thinking" differently and may grow its own knobs, but every builder returns the same ProtocolCallOptions shape so the orchestrator can consume it uniformly. */
 
 /** Resolved thinking config (from Tide's thinkingLevel). */
 export interface ThinkingConfig {
@@ -25,11 +17,7 @@ export interface ProtocolCallOptions {
   label: string;
 }
 
-/**
- * Context passed to protocol builders so they can make decisions based on
- * what else is in the request (e.g. some providers reject `reasoning_effort`
- * when tools are present).
- */
+/** Context passed to protocol builders for request-aware decisions (e.g. some providers reject `reasoning_effort` when tools are present). */
 export interface ProtocolContext {
   /** Whether the current step has tool definitions. Some Gemini endpoints
    *  reject `reasoning_effort` + tools with a 400 INVALID_ARGUMENT. */

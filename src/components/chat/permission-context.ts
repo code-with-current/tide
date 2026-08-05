@@ -1,12 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { ToolCall } from '@/types';
 
-/**
- * Inline-permission surface. Provided by TurnBlock (which has the session's
- * `permissionRequest` + approve/reject callbacks); consumed by OneCodeToolRow
- * so each pending tool row can render its own `<PermissionCard>` without
- * prop-drilling through BlockList → ProcessSection.
- */
+/** Inline-permission surface: provided by TurnBlock (carries the session's permissionRequest + approve/reject callbacks) and consumed by OneCodeToolRow so each pending row renders its own PermissionCard without prop-drilling. */
 export interface PermissionSurface {
   /** Pending permission entries keyed by toolCallId (real ids). */
   byId: Map<string, ToolCall>;

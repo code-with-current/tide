@@ -1,13 +1,4 @@
-/**
- * Domain types for Tide.
- *
- * Faithful to the design doc revision v2 (`../agentic-desktop-app-design-doc.revision-v2.md`):
- * - `format_version` / `turn_start` / `turn_end` / `usage` envelope events are reflected
- *   in the Session shape.
- * - Per-token-class Usage (input, output, cache_read, cache_write, reasoning) drives
- *   the cost ticker.
- * - Tool results split model-facing `output` from UI-facing `display`.
- */
+/** Domain types for Tide. */
 
 // Block types are defined in './block' (which itself imports back from this
 // file for FollowupMode/RiskTier/etc.). We pull `Block` in as a local type
@@ -72,13 +63,7 @@ export interface Model {
   cacheWriteCostPerToken?: number;
 }
 
-/**
- * Rich metadata for a model as returned by a provider's /models endpoint.
- * OpenRouter populates all fields; OpenAI/Anthropic direct + LM Studio return
- * only `id` (bare). The probe handler returns an array of these; the
- * FetchModelsButton uses the rich fields directly when present and falls back
- * to the LiteLLM catalog for bare-id entries.
- */
+/** Rich metadata for a model from a provider's /models endpoint. OpenRouter populates all fields; OpenAI/Anthropic direct + LM Studio return only `id` (bare). The probe handler returns an array; FetchModelsButton uses the rich fields directly when present and falls back to the LiteLLM catalog for bare-id entries. */
 export interface ProviderModelMeta {
   id: string;
   /** Display name (OpenRouter "name"). */
@@ -148,21 +133,7 @@ export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
 
 export type SessionStatus = 'active' | 'idle' | 'awaiting_permission' | 'error' | 'spend_capped';
 
-/**
- * The Inspector hero's derived status — a single label that collapses the
- * three runtime signals (Session.status, the stream's isStreaming flag, and
- * a pending permissionRequest) into the four states the UI actually shows.
- * Computed by `deriveHeroStatus` in SessionHero.tsx.
- *
- *   running     → a turn is in flight (stream.isStreaming)
- *   blocked     → a permission card is pending (permissionRequest != null)
- *   error       → session.status === 'error', or stream.error set
- *   spend_capped→ session.status === 'spend_capped'
- *   idle        → none of the above
- *
- * Note this is broader than SessionStatus: 'running' and 'blocked' are
- * runtime-only (driven by the live stream, not persisted).
- */
+/** Inspector hero status: collapses Session.status + stream.isStreaming + permissionRequest into the states the UI shows. Computed by `deriveHeroStatus`. Broader than SessionStatus — 'running'/'blocked' are runtime-only. */
 export type HeroStatus = 'running' | 'idle' | 'blocked' | 'error' | 'spend_capped';
 
 /** A port exposed by a running script (dev server, etc.). */
@@ -247,13 +218,7 @@ export interface ActivityEvent {
 
 export type MessageRole = 'user' | 'assistant';
 
-/**
- * A file the user explicitly attached to a message. Code/text files carry
- * their contents inline so the model can reason about them without a tool
- * call. Paste attachments carry user-pasted content under a generated name.
- * Image attachments carry only the path for now — real multimodal blocks
- * (Anthropic image content) are a follow-up.
- */
+/** A user-attached message file: code/text/paste carry inline contents; images carry only the path. */
 export interface MessageAttachment {
   path: string;
   kind: 'code' | 'image' | 'text' | 'paste';
@@ -316,22 +281,13 @@ export interface Message {
   stopReason?: string | null;
 }
 
-/**
- * The three behaviors of the `ask_followup_question` tool, derived from its
- * parsed args. See `docs/plans/2026-07-20-turn-block-streaming-design.md`
- * Section 10 for the routing rules.
- */
+/** The three behaviors of the `ask_followup_question` tool, derived from its parsed args (see `docs/plans/2026-07-20-turn-block-streaming-design.md` Section 10 for routing rules). */
 export type FollowupMode =
   | { kind: 'options'; question: string; options: string[]; multiple: boolean }
   | { kind: 'question'; question: string }
   | { kind: 'blank' };
 
-/**
- * Structured turn-block — the new shape assistant messages render as.
- * Built incrementally during streaming (alongside the existing timeline)
- * and frozen on turn_end. Same data drives both streaming-expanded and
- * completed-collapsed views.
- */
+/** Structured turn-block assistant messages render as: built during streaming, frozen on turn_end; drives both expanded and collapsed views. */
 export interface Turn {
   thinking?: { text: string; tokens?: number; ms?: number };
   /** bash, bash_output, kill_shell, git */
@@ -403,11 +359,7 @@ export type ToolCallStatus =
 
 export type RiskTier = 'read_only' | 'write' | 'destructive';
 
-/**
- * A tool definition sent to the model plus internal metadata that drives
- * the permission gate (design doc §8). The `definition` is what the model
- * sees; the rest never leaves the app.
- */
+/** Tool definition sent to the model plus internal permission-gate metadata; the `definition` is model-facing, the rest never leaves the app. */
 export interface ToolDefinition {
   definition: {
     name: ToolName;
@@ -459,11 +411,7 @@ export type ToolDisplay =
   | { kind: 'agent'; agentName: string; task: string; report: string; usage?: Usage; reasoning?: string }
   | { kind: 'file_loaded'; path: string; lines: number; bytes: number; description?: string; body: string };
 
-/**
- * Per-session streaming state. Keyed by sessionId in the UI store so each
- * session's stream is fully independent — two sessions can stream in parallel
- * without overwriting each other's text/toolCalls/usage.
- */
+/** Per-session streaming state, keyed by sessionId so sessions stream independently without overwriting each other. */
 export interface SessionStream {
   /** Accumulated assistant text this turn. */
   text: string;
@@ -471,13 +419,7 @@ export interface SessionStream {
   reasoning: string;
   /** Tool calls emitted this turn (start → executing → result). */
   toolCalls: ToolCall[];
-  /**
-   * Live timeline built incrementally during streaming so the renderer can
-   * show text and tool rows interleaved in true emission order — not the
-   * "text first, all tools after" legacy layout. Each delta appends to the
-   * current text entry (creating one if the last entry was a tool); each
-   * tool_call_start pushes a new tool entry pointing at the new call.
-   */
+  /** Live timeline built during streaming so text and tool rows interleave in true emission order rather than the legacy "text first, all tools after" layout. */
   timeline: Array<
     | { type: 'text'; text: string }
     | { type: 'tool'; toolIndex: number }
@@ -599,10 +541,7 @@ export interface McpServer {
 // RAG embedder (Memory & RAG panel)
 // ============================================================
 
-/** Which embedder variant built a given index. The two are NOT
- *  cross-compatible despite matching dimensions — fine-tuning moves
- *  the embedding space — so query dispatch must always read this field
- *  and never mix. */
+/** Which embedder variant built an index; the two are NOT cross-compatible despite matching dimensions, so query dispatch must never mix them. */
 export type EmbedderId = 'local-code-512' | 'cloud-base';
 
 /** Per-workspace RAG config. Persisted on the Workspace, hydrated at
@@ -653,13 +592,7 @@ export interface RagDownloadProgressEvent {
 }
 
 // ─── Open-in-app (top-bar "Open Project In…" menu) ─────────────────────
-/** Apps the top-bar menu can open the active session's project folder in.
- *  `finder` (the OS file manager — Finder/File Explorer/Files depending on
- *  platform) and `terminal` are always available; `vscode` and `zed` are
- *  surfaced only when detected as installed (auto-detect on first menu open).
- *  The id values are stable cross-platform identifiers; the human-readable
- *  label (e.g. "File Explorer" on Windows) is supplied by the backend per
- *  process.platform and may differ from the id. */
+/** Apps the top-bar menu can open the project in: `finder`/`terminal` always available, `vscode`/`zed` only when detected as installed. */
 export type ExternalAppTarget = 'finder' | 'terminal' | 'vscode' | 'zed';
 
 /** One entry in the open-in-app menu. `available` is false for editors that

@@ -1,15 +1,4 @@
-/**
- * Detect file paths referenced in a user's chat message and fetch their
- * contents to inject into the system prompt as on-demand context.
- *
- * This is a stop-gap until real tool calling lands: the model can't read
- * files itself, but the user expects it to know about files they mention
- * by name. So the harness reads them ahead of time and stuffs them into
- * the system prompt — same slot as the workspace summary.
- *
- * Detection is intentionally conservative — we'd rather miss a reference
- * than read the wrong file (which would burn tokens and confuse the model).
- */
+/** Stop-gap context injector: detect file paths mentioned in a user message and fetch their contents into the system prompt (conservatively — missing a reference is preferred to reading the wrong file). Used until the model can read files itself via tools. */
 
 import * as api from '@/lib/api/client';
 
@@ -57,11 +46,7 @@ export function extractFilePaths(message: string): string[] {
 /** Hard cap on total injected bytes across all referenced files. */
 const MAX_TOTAL_BYTES = 200_000;
 
-/**
- * Fetch each referenced file's contents and assemble them into a
- * `# Referenced files` block suitable for the system prompt.
- * Returns '' if no files were found or fetchable.
- */
+/** Fetch each referenced file's contents and assemble them into a `# Referenced files` block for the system prompt. Returns '' if none found/fetchable. */
 export async function buildReferencedFilesBlock(
   workspaceId: string,
   userMessage: string,

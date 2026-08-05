@@ -1,11 +1,4 @@
-/**
- * notebook_edit tool — edit a Jupyter notebook cell.
- *
- * Notebooks are JSON (.ipynb). Replacing a cell's source by hand is fiddly
- * (the source field is an array of lines). This tool handles the shape so
- * the model can address cells by index. Supports: replace, insert, delete,
- * append.
- */
+/** notebook_edit tool: edit a Jupyter (.ipynb) cell by index, handling the JSON shape (source is an array of lines) so the model passes source as a plain string. Modes: replace / insert / delete / append. */
 
 import * as fs from 'fs';
 import { tool } from 'ai';

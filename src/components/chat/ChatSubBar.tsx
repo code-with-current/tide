@@ -27,11 +27,7 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('script');
 
-/**
- * Chat column sub-bar (32px). Shows breadcrumb (left) and git branch +
- * run/scripts/port controls (right). Scripts execute real child processes
- * via IPC; port detection is parsed from stdout/stderr.
- */
+/** Chat column sub-bar (32px): breadcrumb (left) and git branch + run/scripts/port controls (right). Scripts execute real child processes via IPC; port detection is parsed from stdout/stderr. */
 
 /** Strip the dedupe suffix added by addTerminal so two terminals spawned
  *  by the same Run command ("npm run dev" and "npm run dev (1)") compare
@@ -66,15 +62,7 @@ export function ChatSubBar() {
   const runScripts = scripts.filter((s) => s.kind === 'run' && s.command);
   const deleteScripts = scripts.filter((s) => s.kind === 'delete' && s.command);
 
-  // Identify any terminal that's currently RUNNING the primary Run script.
-  // Gating on `scriptRunning` (not just "tab exists") is what makes the
-  // button flip back to Run after Stop — Stop kills the foreground
-  // process but leaves the shell + tab alive, so name-only matching
-  // would keep the button stuck on Stop forever.
-  //
-  // Match by BASE name (strip the " (N)" suffix) so that two clicks on
-  // Run — producing "npm run dev" and "npm run dev (1)" — both count as
-  // running the primary script. Stop then drains them one at a time.
+  // Identify any terminal currently RUNNING the primary Run script. Gating on `scriptRunning` (not just "tab exists") is what flips the button back to Run after Stop — Stop kills the foreground process but leaves the shell + tab alive, so name-only matching would keep the button stuck on Stop forever. Match by BASE name (strip the " (N)" suffix) so two clicks on Run — producing "npm run dev" and "npm run dev (1)" — both count; Stop drains them one at a time.
   const primaryRunName = primaryRun?.command.slice(0, 40);
   const runTerminal = useMemo(() => {
     if (!primaryRunName) return undefined;
@@ -88,12 +76,7 @@ export function ChatSubBar() {
   }, [allTerminals, primaryRunName]);
   const isPrimaryRunActive = !!runTerminal;
 
-  // PID-based liveness — the source of truth for whether the Run script is
-  // ACTUALLY still running. The `scriptRunning` flag flips correctly on a
-  // user Stop, but can't detect a crashed/killed dev server. So when a run
-  // terminal exists, poll its pid: if the process died (crash, external
-  // kill, OS shutdown), clear scriptRunning so the button reverts to Run
-  // and port badges clear — without waiting for the user to notice.
+  // PID-based liveness — the source of truth for whether the Run script is ACTUALLY still running. `scriptRunning` flips correctly on a user Stop, but can't detect a crashed/killed dev server. So when a run terminal exists, poll its pid: if the process died (crash, external kill, OS shutdown), clear scriptRunning so the button reverts to Run and port badges clear — without waiting for the user to notice.
   useEffect(() => {
     const tid = runTerminal?.id;
     if (!tid) return;
@@ -114,13 +97,7 @@ export function ChatSubBar() {
     const interval = setInterval(poll, 2000); // then every 2s
     return () => { cancelled = true; clearInterval(interval); };
   }, [runTerminal?.id]);
-  // Aggregate ports from ALL terminals across ALL sessions — multiple
-  // scripts can run side by side, each exposing its own dev-server port.
-  // Detection is backend-driven (per-PTY output scanning) so it fires
-  // regardless of which tab is visible or whether the panel is open.
-  //
-  // Each badge is stamped with the source terminal's name so the user
-  // can tell which script is exposing which port when several are live.
+  // Aggregate ports from ALL terminals across ALL sessions — multiple scripts can run side by side, each exposing its own dev-server port. Detection is backend-driven (per-PTY output scanning) so it fires regardless of which tab is visible or whether the panel is open. Each badge is stamped with the source terminal's name so the user can tell which script exposes which port when several are live.
   const aggregatedPorts = useMemo(() => {
     // Scope to the ACTIVE session's terminals only — otherwise a port
     // detected in session A's terminal leaks into session B's sub-bar.
@@ -149,11 +126,7 @@ export function ChatSubBar() {
     if (!runTerminal) return;
     const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
     ipc?.terminalStop(runTerminal.id);
-    // Flip the button back to Run immediately. The SIGINT will kill the
-    // foreground process; the shell + tab stay alive so the user can
-    // read tail output. Without this client-side mark, the button would
-    // stay Stop forever (we have no PTY-side signal that "foreground
-    // process exited" — the shell doesn't tell us).
+    // Flip the button back to Run immediately. SIGINT kills the foreground process; the shell + tab stay alive so the user can read tail output. Without this client-side mark the button would stay Stop forever (we have no PTY-side signal that "foreground process exited" — the shell doesn't tell us).
     useUi.getState().markTerminalStopped(runTerminal.id);
   }, [runTerminal]);
 
@@ -191,14 +164,7 @@ export function ChatSubBar() {
     [runningCommands],
   );
 
-  // Run a script INSIDE a terminal tab — the command is queued on the
-  // terminal instance as `pendingCommand` and flushed by TerminalPanel
-  // once ipc.terminalStart resolves. Doing the input send here directly
-  // would race the PTY spawn (the main process has no PTY for the new
-  // id until terminalStart fires) and the bytes would be dropped.
-  //
-  // Setup/Delete scripts keep the old api.runScript path — they're
-  // lifecycle events, not interactive dev workflows.
+  // Run a script INSIDE a terminal tab — the command is queued on the terminal instance as `pendingCommand` and flushed by TerminalPanel once ipc.terminalStart resolves. Doing the input send here directly would race the PTY spawn (the main process has no PTY for the new id until terminalStart fires) and the bytes would be dropped. Setup/Delete scripts keep the old api.runScript path — they're lifecycle events, not interactive dev workflows.
   const runScriptInTerminal = useCallback(
     (cmd: string) => {
       const sid = activeSessionId ?? activeWorkspaceId;

@@ -1,16 +1,4 @@
-/**
- * LoadingRows — a compact stack of shimmer placeholder bars for query loads.
- *
- * Use for *queries* (data loading), never for actions (those get a spinner).
- * The user didn't initiate a query load, so a quiet placeholder is right.
- *
- * Three consumers: Inspector skeleton, chat-restore skeleton, and replaces
- * the hand-rolled shimmer in SourceControlPanel. `count` controls how many
- * bars; `className` lets a caller size the row container. Each bar uses
- * `animate-pulse` (the same primitive motion already in SourceControlPanel)
- * and degrades to a static fill under prefers-reduced-motion automatically
- * (Tailwind's animate-pulse respects that media query).
- */
+/** LoadingRows: compact shimmer placeholder bars for query loads (not actions). count controls bar count; degrades to static fill under prefers-reduced-motion. */
 
 import { cn } from '@/lib/utils';
 

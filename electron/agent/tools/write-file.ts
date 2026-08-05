@@ -1,12 +1,4 @@
-/**
- * write_file tool — create or overwrite a file.
- *
- * Distinct from edit_file: edit_file requires an existing file and a unique
- * match; write_file creates new files or fully replaces content. Refuses
- * to overwrite secret paths. Refuses paths that escape the workspace.
- *
- * Migration state (Phase 2): dual export per the bash.ts pattern.
- */
+/** write_file tool: create or overwrite a file (distinct from edit_file, which targets a unique match in an existing file). Refuses secret-blocklist paths and paths escaping the workspace; dual export per the bash.ts pattern. */
 
 import * as fs from 'fs';
 import * as path from 'path';

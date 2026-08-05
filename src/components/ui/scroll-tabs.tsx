@@ -1,27 +1,4 @@
-/**
- * ScrollTabs — horizontal scrolling tab strip with chevron buttons + the
- * classic file-folder curved-bottom aesthetic on the active tab.
- *
- * Wraps Radix Tabs (so value/onValueChange, keyboard nav, focus mgmt all
- * come for free) and adds:
- *
- *   1. Left/right chevron buttons that scroll the strip when the tab
- *      count overflows the container. Chevrons stay mounted but fade out
- *      when there's nowhere to scroll to — avoids layout shift.
- *   2. A curved bottom edge on the active tab via ::before/::after
- *      pseudo-elements in index.css. The inverse curves at the bottom
- *      corners are filled with the active tab's bg color, so the tab
- *      appears to flow seamlessly into the content body below.
- *   3. Drag-to-scroll: click anywhere on the strip + drag horizontally
- *      to scroll. A small movement threshold distinguishes drag from
- *      click so tab selection still works normally.
- *   4. Optional `leading` + `trailing` slots for actions ("+ add tab",
- *      close-panel, pickers) that live outside the scroll area.
- *
- * Intended as a drop-in replacement for shadcn's `Tabs` / `TabsList` /
- * `TabsTrigger` in surfaces like the RightPanel and TerminalPanel where
- * tab counts can grow large (open files, multiple terminals).
- */
+/** ScrollTabs — horizontal scrolling tab strip with chevron buttons, the file-folder curved-bottom aesthetic on the active tab, drag-to-scroll, and leading/trailing slots. Wraps Radix Tabs. */
 
 import * as React from 'react';
 import { Tabs as TabsPrimitive } from 'radix-ui';
@@ -41,13 +18,7 @@ type ScrollTabsListProps = React.ComponentProps<typeof TabsPrimitive.List> & {
 };
 
 /**
- * The scroll container. Tracks overflow state via a scroll listener +
- * ResizeObserver and fades chevrons in/out accordingly.
- *
- * Layout: `[leading]? [«] [scroll-area] [»] [trailing]?`
- *
- * The scroll area itself is the Radix TabsPrimitive.List — keeps a11y
- * semantics (role="tablist") where they belong.
+ * The scroll container — tracks overflow via a scroll listener + ResizeObserver and fades chevrons in/out accordingly. Layout: `[leading]? [«] [scroll-area] [»] [trailing]?`. The scroll area is the Radix TabsPrimitive.List so a11y semantics (role="tablist") stay where they belong.
  */
 export function ScrollTabsList({
   className,
@@ -61,17 +32,11 @@ export function ScrollTabsList({
   const [canRight, setCanRight] = React.useState(false);
 
   // ── Drag-to-scroll state ──
-  // Tracked in a ref (not state) so pointermove doesn't trigger React
-  // re-renders on every pixel — that would make the drag janky.
+  // Tracked in a ref (not state) so pointermove doesn't trigger React re-renders per pixel (would make the drag janky). `moved` is set once the cursor passes the click-vs-drag threshold; onClickCapture uses it to swallow the synthetic click the browser fires after a drag (otherwise dragging the strip would select whatever tab was under the pointer at pointerdown).
   const dragState = React.useRef({
     isDown: false,
     startX: 0,
     startScrollLeft: 0,
-    // True once the cursor moved beyond the click-vs-drag threshold.
-    // Used by onClickCapture to swallow the synthetic click that the
-    // browser fires after a drag — without this, dragging the strip
-    // would accidentally select whatever tab was under the pointer at
-    // pointerdown.
     moved: false,
   });
   const [dragging, setDragging] = React.useState(false);
@@ -88,15 +53,7 @@ export function ScrollTabsList({
     const el = listRef.current;
     if (!el) return;
 
-    // Map vertical wheel scroll to horizontal scroll on the strip, and
-    // block the vertical delta from bubbling up to parent containers
-    // (which could otherwise scroll the panel content behind the tabs).
-    // Pure-horizontal wheel (trackpad horizontal swipe, shift+wheel) is
-    // left alone so native behavior handles it.
-    //
-    // Registered as a non-passive listener so preventDefault works —
-    // React's synthetic onWheel can be passive in some setups, which
-    // silently breaks the intercept.
+    // Map vertical wheel to horizontal scroll on the strip and block the vertical delta from bubbling to parent containers (which could scroll the panel behind the tabs). Pure-horizontal wheel (trackpad swipe, shift+wheel) is left to native behavior. Registered non-passive so preventDefault works — React's synthetic onWheel can be passive in some setups, silently breaking the intercept.
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY === 0) return;
       e.preventDefault();
@@ -122,25 +79,12 @@ export function ScrollTabsList({
   };
 
   // ── Drag-to-scroll handlers ──
-  // Pointer events (not mouse events) so the same code handles mouse,
-  // touch, and pen. Capture the pointer so we keep receiving move events
-  // even after the cursor leaves the strip — without capture, a fast drag
-  // that overshoots the strip would stop tracking mid-motion.
-  //
-  // Drag-vs-click threshold is 8px — high enough that normal click jitter
-  // on the small close-X span doesn't trip it, low enough that any real
-  // drag registers within the first few pixels of motion.
+  // Pointer events (not mouse events) handle mouse/touch/pen uniformly; capture the pointer so move events keep arriving after the cursor leaves the strip. Drag-vs-click threshold is 8px — high enough that click jitter on the close-X span doesn't trip it, low enough that any real drag registers within the first few pixels.
   const DRAG_THRESHOLD_PX = 8;
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return; // left button only
-    // Don't initiate drag from the close button or any other element
-    // marked role="button". Those have their own click semantics —
-    // capturing the pointer here would let the drag's click-suppression
-    // swallow a perfectly normal close-click, especially when the user's
-    // hand jitters slightly during the click. Tabs themselves (role="tab")
-    // are NOT excluded: grabbing a tab and dragging horizontally to
-    // scroll the strip is a legitimate interaction.
+    // Don't initiate drag from the close button or any element marked role="button" — capturing the pointer here would let the drag's click-suppression swallow a normal close-click. Tabs themselves (role="tab") are NOT excluded: grabbing a tab and dragging horizontally to scroll the strip is legitimate.
     const target = e.target as HTMLElement | null;
     if (target?.closest('[role="button"]')) return;
     const el = listRef.current;
@@ -173,11 +117,7 @@ export function ScrollTabsList({
     try { listRef.current?.releasePointerCapture(e.pointerId); } catch { /* fine */ }
   };
 
-  // After a drag, the browser fires a click event on whatever element
-  // was under the pointer at pointerdown (the tab the user grabbed to
-  // start dragging). Swallow it during capture so the tab isn't
-  // accidentally selected. `moved` resets here so the next genuine
-  // click goes through.
+  // After a drag, the browser fires a click on whatever element was under the pointer at pointerdown; swallow it during capture so the tab isn't accidentally selected. `moved` resets here so the next genuine click goes through.
   const handleClickCapture = (e: React.MouseEvent) => {
     if (dragState.current.moved) {
       e.preventDefault();
@@ -261,16 +201,7 @@ function ScrollButton({
   );
 }
 
-/**
- * A single tab trigger. The curved-bottom folder-tab look comes from
- * `.scroll-tabs-trigger::before` / `::after` in index.css — those
- * pseudo-elements render inverse curves at the bottom corners and are
- * filled via box-shadow with the active tab's bg color.
- *
- * Active state: `bg-card text-foreground` so the trigger matches the
- * content body below; the curves then blend them into one shape.
- * Inactive: transparent bg over the list's secondary surface.
- */
+/** A single tab trigger. The curved-bottom folder-tab look comes from `.scroll-tabs-trigger::before`/`::after` in index.css (inverse curves at the bottom corners, filled via box-shadow with the active tab's bg color). Active state uses `bg-card text-foreground` so the trigger matches the content body and the curves blend them into one shape; inactive is transparent over the list's secondary surface. */
 export function ScrollTabsTrigger({
   className,
   children,

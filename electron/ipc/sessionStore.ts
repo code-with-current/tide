@@ -1,10 +1,4 @@
-/**
- * Pure session storage — no Electron imports, fully testable.
- *
- * All public functions on the returned object mirror the existing
- * `sessions.ts` API exactly. `sessions.ts` becomes a thin wrapper
- * that instantiates this with `app.getPath('userData')`.
- */
+/** Pure (Electron-free) session storage; `sessions.ts` wraps this with `app.getPath('userData')` and mirrors its API. */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -32,12 +26,7 @@ export interface StoredSession {
   workspaceId: string;
   title: string;
   modelId: string;
-  /**
-   * Provider half of the model selection. The same model id can exist under
-   * multiple providers, so this disambiguates routing. Absent on sessions
-   * created before this field existed — callers fall back to first-match by
-   * modelId.
-   */
+  /** Provider half of model selection (disambiguates routing when the same modelId exists under multiple providers); absent on legacy sessions, which fall back to first-match by modelId. */
   providerId?: string;
   messages: StoredMessage[];
   createdAt: string;
@@ -79,15 +68,7 @@ export interface StoredSession {
   /** Audit trail of notable per-turn events (file loads, permission asks,
    *  tool reads/executions). Appended by addActivity; shown in the Inspector. */
   activity?: ActivityRecord[];
-  /**
-   * Sticky skill reference — set when a `[[LOAD_SKILL:...]]` marker is
-   * processed on turn 1, re-injected into the system prompt on every
-   * subsequent turn until cleared. Without this, continuation turns lose
-   * the skill body because the marker was stripped from the persisted user
-   * message and the orchestrator rebuilds the system prompt from scratch.
-   * Cleared when the user issues a different slash command or a different
-   * skill marker is processed (replacing the active skill).
-   */
+  /** Sticky skill reference set when a `[[LOAD_SKILL:...]]` marker is processed, re-injected into the system prompt on subsequent turns until cleared (different slash command or skill marker). */
   activeSkillRef?: {
     name: string;
     path: string;
@@ -199,10 +180,7 @@ export interface SessionStore {
       behind: number;
     },
   ): void;
-  /** Persist (or clear) the sticky skill reference. Set by the orchestrator
-   *  when a `[[LOAD_SKILL:...]]` marker is processed; re-read on subsequent
-   *  turns so the skill body stays in the system prompt for the whole session.
-   *  Pass `undefined` to clear (different slash command, skill complete, etc.). */
+  /** Persist (or clear with undefined) the sticky skill reference so the skill body stays in the system prompt across turns. */
   setActiveSkillRef(
     sessionId: string,
     ref: { name: string; path: string; loadedAt: string } | undefined,
@@ -498,11 +476,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     // Also update the top-level session.costUsd — the SessionHero displays
     // THIS field (not s.usage.costUsd). Both stay in sync.
     s.costUsd = s.usage.costUsd;
-    // Store the last step's usage as lastTurnUsage — the context-window meter
-    // reads THIS (not the cumulative s.usage) to show "how full is the context
-    // right now". For multi-step turns, lastStepUsage is the final LLM call's
-    // input tokens (the actual context fill). Falls back to delta for
-    // single-step turns or older callers that don't pass lastStepUsage.
+    // Store the last step's usage as lastTurnUsage — the context-window meter reads THIS (not cumulative s.usage) to show "how full is the context right now". For multi-step turns, lastStepUsage is the final LLM call's input tokens; falls back to delta for single-step turns or older callers.
     const src = lastStepUsage ?? delta;
     s.lastTurnUsage = {
       inputTokens: src.inputTokens ?? 0,
@@ -547,11 +521,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       throw new Error('Session must be archived before deletion');
     }
 
-    // Cascade: if the session has a worktree, fire the delete hook so
-    // the runtime can `git worktree remove` + `git branch -D` before we
-    // unlink the JSON (which would orphan the worktree metadata).
-    // The archived manifest only carries headers — read the full session
-    // from disk to get the worktree field.
+    // Cascade: if the session has a worktree, fire the delete hook so the runtime can `git worktree remove` + `git branch -D` before we unlink the JSON (which would orphan worktree metadata). The archived manifest only carries headers — read the full session from disk to get the worktree field.
     const file = path.join(sessionsDir, `${id}.json`);
     try {
       const raw = fs.readFileSync(file, 'utf-8');

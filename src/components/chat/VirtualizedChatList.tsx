@@ -2,25 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { Message } from '@/types';
 import { ChatMessage } from './ChatMessage';
 
-/**
- * Windowed chat message list — unmounts messages far outside the viewport and
- * replaces them with a spacer of their last-measured height.
- *
- * Unlike full virtualization (absolute positioning + translateY), this keeps
- * the existing flex layout + scroll container intact: messages still flow
- * normally, just off-screen ones become cheap spacers. This avoids the
- * regression risk to streaming/auto-scroll that a rewrite would carry, while
- * still removing the DOM cost of hundreds of heavy ChatMessage trees (each
- * with markdown + code blocks) in long sessions.
- *
- * Uses IntersectionObserver per message to detect visibility. When a message
- * leaves the viewport (with a buffer), its rendered content is swapped for a
- * spacer div of the recorded height; scrolling back re-renders it. Heights
- * are cached so the scrollbar stays stable across windowing cycles.
- *
- * NOT virtualized: the streaming message (always at the bottom, always
- * visible) and the error banner. The parent passes them as children.
- */
+/** Windowed chat list: unmounts off-screen messages (replaced with height spacers) via IntersectionObserver, preserving the existing flex/scroll layout. */
 const VISIBLE_BUFFER = 600; // px above/below viewport kept rendered
 
 interface WindowedMessageProps {

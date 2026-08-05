@@ -1,18 +1,4 @@
-/**
- * Settings IPC — read/write `settings.json` (shortcut bindings today, future
- * UI preferences as the file grows). Mirrors the agentSettings pattern: a
- * get-all + a patch.
- *
- * Three handlers:
- *   tide:settings:get      → { overrides, defaults } — defaults are the
- *                            platform-aware set so the renderer renders Ctrl
- *                            on Windows/Linux without detecting the OS itself.
- *   tide:settings:setShortcut(id, keys | null)  → set / clear one binding
- *   tide:settings:resetShortcuts               → clear all overrides
- *
- * The store is created at module init via the userData path resolved in
- * main.ts (post-relocation: ~/.tide / ~/.tide-dev).
- */
+/** Settings IPC for settings.json (shortcuts today): tide:settings:get returns {overrides, platform-aware defaults}, tide:settings:setShortcut sets/clears one binding, tide:settings:resetShortcuts clears all overrides. Store created at init from appDataDir(). */
 import { ipcMain, app } from 'electron';
 import { createSettingsStore, type ShortcutOverrides } from '../settingsStore.js';
 import { createLogger } from '../logger.js';

@@ -3,13 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Tip } from '@/components/ui/quick-tooltip';
 import { cn } from '@/lib/utils';
 
-/**
- * Icon-only Send / Stop button. The caller decides which mode to show:
- *
- *   mode='stop'             — pulsing red square, click aborts the turn
- *   mode='send'             — coral arrow, click submits (or queues, see willQueue)
- *   mode='send' willQueue   — coral list-plus icon, click enqueues for later
- */
+/** Icon-only Send / Stop button. Modes: 'stop' = pulsing red square (aborts turn); 'send' = coral arrow (submits); 'send' + willQueue = coral list-plus (enqueues for later). */
 export function SendStopButton({
   mode,
   willQueue = false,

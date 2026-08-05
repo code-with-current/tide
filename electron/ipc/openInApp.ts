@@ -1,25 +1,4 @@
-/**
- * Open-in-app — opens the active session's project folder in an external app
- * (Finder/File Explorer, Terminal, VSCode, Zed). Powers the top-bar icon menu.
- *
- * Two handlers:
- *   tide:openInApp:detect  — probe which optional editors (VSCode, Zed) are
- *                            installed. Result cached for the process lifetime;
- *                            the renderer calls this once on first menu open.
- *   tide:openInApp:open    — resolve the session's path server-side and open
- *                            it in the requested app.
- *
- * Security: the renderer passes only `sessionId` (never an arbitrary path).
- * The path is resolved through the same chain terminal.ts uses (worktree →
- * workspace → HOME), so the surface is no wider than the existing terminal
- * handler. `spawn` is used with argv arrays (no shell), so there's no
- * injection vector through the path.
- *
- * Path resolution is intentionally a focused duplicate of terminal.ts:79-103
- * rather than a shared helper — the rule is short, terminal.ts owns its copy,
- * and a premature shared module would couple two unrelated features. The
- * canonical version lives there; this one mirrors it with a cross-reference.
- */
+/** Open-in-app: opens a session's project folder in an external app (Finder/Explorer, Terminal, VSCode, Zed). Renderer passes only sessionId; path is resolved via the same worktree→workspace→HOME chain as terminal.ts (spawned with argv arrays, no shell). */
 import { app, ipcMain, shell } from 'electron';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -65,18 +44,7 @@ function resolveIconPathMac(id: ExternalAppTarget): string | null {
   return null;
 }
 
-/** Windows: resolve the executable that actually carries an embedded icon.
- *
- *  `where <cli>` on Windows returns multiple matches, and the FIRST is often a
- *  Unix-style shim with no extension (e.g. `...\bin\code`) that isn't a real
- *  file — `where` lists it via the PATHEXT-less entry but it doesn't exist on
- *  disk. The icon-bearing target is the `.exe`:
- *    - Built-ins: %SystemRoot%\explorer.exe, %SystemRoot%\system32\cmd.exe.
- *    - Editors:   the `.exe` from `where` (e.g. Zed.exe), or for VS Code the
- *                 install-root Code.exe when only the bin/ shim is on PATH.
- *
- *  We filter `where` output to the first existing `.exe` and fall back to the
- *  known install location, so getFileIcon always gets a real binary. */
+/** Windows: resolve the icon-bearing `.exe` — `where`'s first result is often an extensionless shim, so filter to the first existing .exe and fall back to the install root (e.g. Code.exe). */
 function resolveIconPathWindows(id: ExternalAppTarget): string | null {
   const sysRoot = process.env.SystemRoot || 'C:\\Windows';
   if (id === 'finder') return `${sysRoot}\\explorer.exe`;
@@ -168,19 +136,7 @@ function isEditorAvailable(cli: string, macBundle?: string): boolean {
   return false;
 }
 
-/** Fetch an app's OS icon as a base64 data URL.
- *
- * On macOS, Electron's app.getFileIcon() returns a generic placeholder for
- * .app bundles and their executables (the bundle's actual CFBundleIconFile is
- * not honored), so we extract the real icon ourselves: read CFBundleIconFile
- * from Info.plist, convert the .icns to PNG via the system `sips` tool, and
- * base64-encode. This yields the true, colorful per-app icon (verified:
- * VSCode/Zed/Finder/Terminal all produce distinct PNGs).
- *
- * On Windows/Linux, getFileIcon works as documented (reads .exe embedded
- * icons / mime-associated icons), so we use it directly.
- *
- * Returns null if extraction fails — the renderer falls back to a lucide icon. */
+/** Fetch an app's OS icon as a base64 data URL. On macOS getFileIcon returns a placeholder for .app bundles, so extract the real icon via Info.plist + `sips`; on Windows/Linux getFileIcon works directly. Returns null on failure (renderer falls back to a lucide icon). */
 async function fetchIcon(id: ExternalAppTarget): Promise<string | null> {
   const iconPath = resolveIconPath(id);
   if (!iconPath) return null;
@@ -201,20 +157,7 @@ async function fetchIcon(id: ExternalAppTarget): Promise<string | null> {
   }
 }
 
-/** macOS-only: read CFBundleIconFile from the bundle's Info.plist, convert
- *  the .icns resource to PNG via the system `sips` tool, return as a data URL.
- *
- *  Uses the plain converter form `sips -s format png <icns> --out <png>` —
- *  no resample, because .icns already contains multiple sizes and sips picks
- *  the largest rep. The renderer downscales via CSS to fit the ~14px menu
- *  slot, so we keep the full-resolution PNG and let the browser handle it.
- *
- *  `sips` is always present on macOS (system tool). Synchronous spawn is fine
- *  here — runs once per app at detect time (~30ms each), then cached.
- *
- *  NOTE: this used to reference an undefined `id` in the temp filename (the
- *  function only took bundlePath), which threw ReferenceError and silently
- *  fell through to the getFileIcon placeholder. `id` is now a real param. */
+/** macOS-only: read CFBundleIconFile from Info.plist and convert the .icns to a PNG data URL via the system `sips` tool (always present; sync spawn runs once at detect time then cached). */
 function extractMacIcon(id: ExternalAppTarget, bundlePath: string): string | null {
   try {
     const plist = fs.readFileSync(path.join(bundlePath, 'Contents/Info.plist'), 'utf8');
@@ -226,12 +169,7 @@ function extractMacIcon(id: ExternalAppTarget, bundlePath: string): string | nul
     const icns = path.join(bundlePath, 'Contents/Resources', iconFile);
     if (!fs.existsSync(icns)) return null;
 
-    // Plain format conversion + downscale: icns → 64px PNG. The bare form
-    // `sips -s format png <icns> --out <png>` works but extracts the largest
-    // rep in the .icns (often 1024×1024 → ~200-450KB → ~600KB base64 each,
-    // ~2.4MB across four icons for a 14px menu slot). --resampleWidth 64
-    // caps it at ~5KB each — crisp on retina (14px × 2 dpr = 28px target),
-    // a ~50× payload reduction, visually identical at menu size.
+    // icns → 64px PNG: --resampleWidth 64 caps payload at ~5KB each vs ~600KB for the largest rep, crisp on retina (28px target), ~50× reduction.
     const tmp = path.join(os.tmpdir(), `tide-icon-${id}.png`);
     const r = spawnSync('sips', ['-s', 'format', 'png', '--resampleWidth', '64', icns, '--out', tmp], {
       stdio: 'ignore',
@@ -283,12 +221,7 @@ async function detectApps(): Promise<ExternalApp[]> {
 
 // ─── Path resolution (mirrors terminal.ts:79-103) ───────────────────────
 
-/** Resolve the folder to open for a session. Preference order:
- *   1. session.worktree.path — isolated worktree sessions open there
- *   2. workspace.path via session.workspaceId
- *   3. workspace.path when sessionId IS a workspace id (no session yet)
- *   4. $HOME fallback
- * Each step gated by fs.existsSync so a stale worktree doesn't win. */
+/** Resolve the folder to open for a session: worktree.path → workspace via workspaceId → workspace when sessionId IS a workspace id → $HOME. Each step gated by fs.existsSync. */
 function resolveSessionPath(sessionId?: string): string {
   try {
     if (sessionId) {
@@ -314,15 +247,7 @@ function resolveSessionPath(sessionId?: string): string {
 
 // ─── Open in target app ─────────────────────────────────────────────────
 
-/** Spawn a detached process so the launched app outlives Tide. stdio:'ignore'
- *  + unref() detaches it fully — we don't care about its output or exit.
- *  `cwd` (optional) launches the process already in that directory, which on
- *  Windows is the robust way to open a terminal in a folder without fighting
- *  `start`'s quote/title parsing (passing the path as a `cmd /K` arg instead
- *  treats it as a command to run → "not recognized as an internal command").
- *  `shell` (optional) — on Windows, the editor CLIs (`code`/`zed`) resolve to
- *  `.cmd`/extensionless shims that Node's spawn can't launch detached without
- *  a shell; passing shell:true lets cmd.exe resolve them. */
+/** Spawn a detached process (stdio:'ignore' + unref) so the app outlives Tide. `cwd` opens a terminal in-folder on Windows; `shell:true` resolves `.cmd`/extensionless editor shims that spawn can't launch detached. */
 function detach(cmd: string, args: string[], opts?: { cwd?: string; shell?: boolean }): boolean {
   try {
     const child = spawn(cmd, args, {
@@ -350,19 +275,7 @@ function cliAvailable(cli: string): boolean {
   }
 }
 
-/** Launch an editor for `dir`. Prefers the CLI (`code`/`zed`) when on PATH
- *  — faster, no `open` indirection. Falls back to `open -a <App> <dir>` on
- *  macOS so an installed `.app` whose "Shell Command: Install 'code' in PATH"
- *  step was skipped still launches. (Common case: VSCode's .app present but
- *  `code` CLI absent — without this fallback, detection says available but
- *  launch silently fails.)
- *
- *  Windows note: the editor CLIs resolve to `.cmd`/extensionless shims (e.g.
- *  `code.cmd`), which Node's `spawn` cannot launch detached without a shell.
- *  We pass `shell: true` there so cmd.exe resolves the shim. Without it the
- *  spawn fails asynchronously (after detach already returned true) and VS Code
- *  never opens — the detection still says "available" because `where code` finds
- *  the shim, so this is the only thing that actually launches it. */
+/** Launch an editor for `dir`: prefer the CLI (`code`/`zed`) on PATH; fall back to `open -a <App>` on macOS for installed .apps missing the CLI. Windows passes shell:true so cmd.exe resolves the `.cmd` shims. */
 function launchEditor(cli: string, macAppName: string, dir: string): boolean {
   if (cliAvailable(cli)) {
     return detach(cli, [dir], { shell: process.platform === 'win32' });
@@ -394,13 +307,7 @@ function openInTarget(target: ExternalAppTarget, dir: string): { ok: boolean; er
           : { ok: false, error: 'Failed to launch Terminal' };
       }
       if (process.platform === 'win32') {
-        // Open a new cmd window already in `dir`. We spawn `cmd` with cwd=dir
-        // so the directory is inherited — no need to pass the path as an arg
-        // (passing it to `cmd /K <path>` makes cmd try to RUN the path as a
-        // command → "not recognized as an internal or external command").
-        // `start ""` opens a new console window; the empty title arg is the
-        // documented workaround so `start` doesn't grab the next quoted arg
-        // as the window title.
+        // Spawn `cmd` with cwd=dir (passing the path to `cmd /K` would make cmd try to RUN it); `start ""` opens a new console, empty title arg prevents start grabbing the next quoted arg.
         return detach('cmd', ['/c', 'start', '', 'cmd'], { cwd: dir })
           ? { ok: true }
           : { ok: false, error: 'Failed to launch cmd' };

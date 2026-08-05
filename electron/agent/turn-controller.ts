@@ -1,21 +1,4 @@
-/**
- * Turn controller — between-step state for the orchestration loop.
- *
- * The Vercel AI SDK's `streamText` runs the multi-step tool-call loop
- * internally. Two hooks let us intervene between steps without taking over
- * the loop:
- *
- *   - `prepareStep({ steps, messages })` → mutate tools/messages/system before
- *     each step. We use it to inject correction messages and restrict tools.
- *   - `onStepEnd(step: StepResult)` → inspect what happened after each step.
- *     We use it to track skill progress, detect deviations, and nudge on
- *     budget.
- *
- * The TurnController is the shared mutable state both hooks close over.
- * `onStepEnd` writes to it (sets flags, updates counters); `prepareStep` reads
- * from it (injects corrections, restricts tools). This keeps the hook logic
- * stateless and testable — all state lives on the controller.
- */
+/** Turn controller: shared mutable state between the streamText `prepareStep` and `onStepEnd` hooks (onStepEnd writes flags/counters; prepareStep reads them to inject corrections and restrict tools), keeping the hook logic stateless and testable. */
 
 /** A skill that's active for this turn. */
 export interface ActiveSkill {
@@ -55,12 +38,7 @@ export interface TurnController {
   stepCount: number;
   /** Hard step cap (matches MAX_STEPS in orchestrator-sdk). */
   maxSteps: number;
-  /**
-   * Correction message set by `onStepEnd`, consumed by `prepareStep`.
-   * When non-null, `prepareStep` injects it as a user message before the
-   * next step and clears it. This is how deviations and budget nudges are
-   * communicated to the model mid-loop.
-   */
+  /** Correction message set by `onStepEnd`, consumed by `prepareStep` — when non-null, prepareStep injects it as a user message before the next step and clears it. How deviations and budget nudges reach the model mid-loop. */
   needsCorrection: string | null;
   /** If true, the custom `stopWhen` predicate stops the loop. */
   shouldStop: boolean;
@@ -96,20 +74,7 @@ export function createTurnController(maxSteps: number): TurnController {
 
 // ─── Skill checklist parsing ────────────────────────────────────────────
 
-/**
- * Parse a SKILL.md body for checklist items and allowed-tools metadata.
- *
- * Checklist extraction is heuristic — looks for:
- *   - A `## Checklist` section with `- [ ]` or numbered items
- *   - `## Step N:` / `### N.` style step headings
- *   - A `## Process` section with numbered items
- *
- * Allowed-tools extraction reads the YAML frontmatter `allowed-tools:` or
- * `tools:` field (a comma-separated list).
- *
- * Returns `{ checklist, allowedTools }`. Both default to empty/undefined when
- * nothing is found — the controller treats that as "no gating, no restriction".
- */
+/** Parse a SKILL.md body for checklist items (heuristic: `## Checklist`/`## Steps`/`## Process` sections or `## Step N:` headings) and frontmatter `allowed-tools`/`tools`; both default to empty/undefined when absent (treated as no gating). */
 export function parseSkillMetadata(
   body: string,
 ): { checklist: string[]; allowedTools?: string[] } {
@@ -167,17 +132,7 @@ function parseAllowedTools(body: string): string[] | undefined {
 
 // ─── Checklist progress tracking ────────────────────────────────────────
 
-/**
- * Mark checklist items as completed based on what the model did in a step.
- * Heuristic: maps tool calls to checklist items by keyword matching.
- *
- *   write_file / edit_file / multi_edit → items mentioning "write", "save",
- *     "doc", "spec", "commit"
- *   ask_followup_question → items mentioning "ask", "question", "clarif"
- *   read_file / list_dir / glob / grep → items mentioning "explore", "check",
- *     "read", "understand", "project"
- *   git → items mentioning "commit"
- */
+/** Mark checklist items completed by mapping the step's tool call to checklist items via keyword matching (write/edit→"write/save/doc/spec", ask→"ask/question", read/grep→"explore/check/read", git→"commit"). */
 export function markChecklistProgress(
   ctrl: TurnController,
   toolCall: { toolName: string },
@@ -233,11 +188,7 @@ export function remainingSteps(skill: ActiveSkill): string {
 
 // ─── Deviation detection ────────────────────────────────────────────────
 
-/**
- * Did the model produce a text answer but stop without calling tools — and is
- * this NOT the final step of the skill? A `stop` finish reason with text but
- * no tool calls often means the model decided it's "done" when it shouldn't be.
- */
+/** Did the model produce a text answer but stop without calling tools — and this isn't the final step of the skill? A `stop` finish reason with text but no tool calls often means the model decided it's "done" prematurely. */
 export function looksLikePrematureStop(step: {
   finishReason: string;
   text?: string;
@@ -252,12 +203,7 @@ export function looksLikePrematureStop(step: {
   return true;
 }
 
-/**
- * Build a correction message for when the model stopped before completing the
- * skill. Wording follows the same philosophy as the length-cap resume message:
- * lead with the imperative, suppress the apology/recap reflex, name the
- * remaining work concretely, and instruct execution rather than summary.
- */
+/** Build a resume correction for when the model stopped before completing the skill: lead with the imperative, name the remaining steps, and instruct execution over summary. */
 export function buildCorrectionMessage(skill: ActiveSkill): string {
   const remaining = remainingSteps(skill);
   return (
@@ -269,13 +215,7 @@ export function buildCorrectionMessage(skill: ActiveSkill): string {
 
 // ─── Budget nudges ──────────────────────────────────────────────────────
 
-/**
- * Check whether a budget nudge should be injected. Sets `ctrl.needsCorrection`
- * if so. Two nudge types, capped at 2 total to avoid spamming:
- *
- *   1. Step nudge: within 3 steps of the cap.
- *   2. Token nudge: over 85% of the warning threshold.
- */
+/** Inject a budget nudge (capped at 2 total): a step nudge within 3 steps of the cap, or a token nudge over 85% of the warning threshold. */
 export function checkBudgetNudge(ctrl: TurnController): void {
   if (ctrl.budget.nudgeCount >= 2) return;
 

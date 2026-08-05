@@ -1,42 +1,12 @@
-/**
- * Anthropic Messages API streaming, tool-aware.
- *
- * Replaces the older `streamAnthropic` in `electron/ipc/chat.ts`. Handles
- * every SSE event type the orchestrator needs:
- *
- *   - `content_block_start` with `tool_use`   → onToolCallStart
- *   - `content_block_delta` with `text_delta` → onDelta (assistant text)
- *   - `content_block_delta` with `thinking_delta` → onReasoning
- *   - `content_block_delta` with `input_json_delta` → onToolCallDelta
- *   - `content_block_stop`                     → close any open tool call
- *   - `message_delta` with `delta.stop_reason` + `usage` → onUsage + stopReason
- *   - `message_stop`                           → end stream
- *
- * Also falls back to OpenAI-shaped events for Anthropic-compatible proxies
- * that respond in OpenAI format (some z.ai routes do this).
- */
+/** Anthropic Messages API streaming (tool-aware); maps every SSE event type the orchestrator needs and falls back to OpenAI-shaped events for compat proxies. */
 
 import type { Usage } from '../../src/types/index';
 import { createLogger } from '../logger.js';
-// undici ships with Node 18+ — used here for HTTP keep-alive across calls.
-// Without a shared dispatcher, every streamAnthropicOnce call opens a fresh
-// TCP+TLS handshake (~100-400ms each on cold connections to api.anthropic.com).
-// With keep-alive, the connection is reused across iterations within a turn
-// AND across sub-agent dispatches — eliminating that per-call latency floor.
+// undici ships with Node 18+ — HTTP keep-alive across calls. Without a shared
+// dispatcher every call opens a fresh TCP+TLS handshake (~100-400ms each).
 import { Agent, fetch as undiciFetch } from 'undici';
 
-/**
- * Shared connection pool for Anthropic (and Anthropic-compatible) endpoints.
- *
- *   keepAliveTimeout — idle connection kept open for 5 min (Anthropic's
- *     server-side idle limit is generous; this matches typical proxy behavior).
- *   connections — allows up to 16 concurrent in-flight requests per origin,
- *     which covers the parent turn + several parallel sub-agent dispatches.
- *
- * This is module-scoped: the same pool is reused for the lifetime of the
- * process. The first call eats the handshake; every subsequent call to the
- * same baseUrl reuses the warm socket.
- */
+/** Module-scoped connection pool reused for the process lifetime: 5-min keep-alive + up to 16 concurrent requests per origin so the first call eats the handshake and later calls reuse the warm socket. */
 const agent = new Agent({
   keepAliveTimeout: 5 * 60 * 1000,
   keepAliveMaxTimeout: 10 * 60 * 1000,
@@ -85,13 +55,7 @@ interface AnthropicRequestBody {
   system?: string | Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
   messages: AnthropicMessage[];
   tools?: Array<{ name: string; description: string; input_schema: unknown; cache_control?: { type: 'ephemeral' } }>;
-  /**
-   * Anthropic-native extended thinking payload.
-   * Per https://platform.claude.com/docs/en/build-with-claude/extended-thinking:
-   *   - `{ type: 'enabled', budget_tokens: N }` — cap reasoning at N tokens
-   *     (minimum 1024). When set, max_tokens MUST exceed budget_tokens.
-   *   - `{ type: 'disabled' }` — thinking off entirely.
-   */
+  /** Anthropic-native extended thinking: `{ type:'enabled', budget_tokens:N }` (min 1024; max_tokens MUST exceed it) or `{ type:'disabled' }`. See https://platform.claude.com/docs/en/build-with-claude/extended-thinking. */
   thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'disabled' };
 }
 
@@ -146,27 +110,7 @@ export async function streamAnthropicOnce(
   }
 
   // ─── Prompt caching ────────────────────────────────────────────
-  // Anthropic prompt caching (and z.ai's Anthropic-compatible endpoint)
-  // lets the provider cache a prefix of the prompt for ~5 min. Marking
-  // `cache_control: { type: 'ephemeral' }` on the last block of a cacheable
-  // section tells the provider "everything up to here can be reused if the
-  // next call sends the same prefix." For Tide this matters in three places:
-  //
-  //   1. System prompt — identical across every dispatch to the same agent.
-  //      First call eats the processing; subsequent dispatches (within 5 min)
-  //      skip ~1-2s of re-processing.
-  //
-  //   2. Tool definitions — the 20 built-in tools are identical across every
-  //      parent iteration. Caching the LAST tool's definition marks the whole
-  //      tool list as cacheable. Saves ~0.5-1s per iteration after the first.
-  //
-  //   3. Conversation history — grows each iteration. Marking the last
-  //      message's last content block makes iteration N+1's prefix a cache
-  //      hit up to the new assistant turn + tool result.
-  //
-  // If the provider doesn't support caching, `cache_control` is silently
-  // ignored — no breakage, just no benefit. The usage response includes
-  // `cache_read_input_tokens` / `cache_creation_input_tokens` to confirm.
+  // Mark `cache_control: { type: 'ephemeral' }` on the last block of a cacheable section (system prompt, last tool def, last message block) so the provider reuses the prefix ~5 min; ignored by non-caching providers.
   const CACHE = { type: 'ephemeral' } as const;
 
   // System prompt — array form with cache_control on the (single) block.

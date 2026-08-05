@@ -1,25 +1,4 @@
-/**
- * LLM session-title generation.
- *
- * Prefers the SAME provider + model the session chats with (so title-gen
- * works whenever a turn would — no separate credential surface to set up).
- * Falls back to the app's system model (agent/system-model.ts) when the
- * session's provider isn't resolvable — e.g. a deleted provider or a missing
- * API key. If neither is available, returns null and the caller keeps the
- * placeholder.
- *
- * One-shot, no tools, ~80 token cap, 30s abort. Strips `/skill` and `@agent`
- * prefixes first (stripCommandPrefix) so the title reflects the task, not the
- * invocation. Also strips leading `[/label/](path)` attachment/file-link
- * blocks the composer now embeds into content.
- *
- * Lifecycle: fire-and-forget from the renderer right after a NEW session is
- * created. The session already has a locally-stripped placeholder title, so
- * the sidebar is sane instantly; this call refines it and renames via
- * `sessions.renameSession` when it returns. On any failure (provider error,
- * timeout, empty result) it returns null and the caller keeps the placeholder
- * — title generation never blocks the user.
- */
+/** LLM session-title generation: prefers the session's own provider+model, falls back to the system model, and returns null (caller keeps placeholder) on any failure. Fire-and-forget, best-effort, ~80 tokens / 30s. */
 import { generateText, type LanguageModel } from 'ai';
 import { runSystemTask, isSystemModelConfigured } from './system-model.js';
 import { resolveModel } from './provider-factory.js';
@@ -37,15 +16,7 @@ export interface TitleModelSource {
   modelId?: string;
 }
 
-/**
- * @param firstMessage  The session's first user message (raw — stripped here).
- * @param source        The session's chat provider+model. When resolvable,
- *                      title-gen runs on that model. Falls back to the system
- *                      model; if neither is usable, returns null.
- * @returns A cleaned short title, or null if no model was available,
- *          generation failed, or there was no subject to summarize. Callers
- *          keep the placeholder on null.
- */
+/** @param firstMessage raw first user message (stripped here); @param source chat provider+model (falls back to system model); @returns cleaned title or null (caller keeps placeholder). */
 export async function generateSessionTitle(
   firstMessage: string,
   source?: TitleModelSource,

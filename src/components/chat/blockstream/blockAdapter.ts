@@ -1,8 +1,4 @@
-/**
- * Adapter between the new ToolBlock shape and the existing OneCodeToolRow /
- * ToolCallCard components. Those components expect a `ToolCall` — this
- * synthesizes one from the block so we don't have to rewrite them.
- */
+/** Adapter synthesizing a `ToolCall` from the new ToolBlock shape so existing OneCodeToolRow / ToolCallCard components don't need rewriting. */
 
 import type { ToolBlock, ToolCall } from '@/types';
 

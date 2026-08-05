@@ -1,13 +1,7 @@
 import type { DiffHunk } from '@/types';
 import { cn } from '@/lib/utils';
 
-/**
- * Renders unified diff hunks with old + new line numbers and
- * colored backgrounds for added/removed lines.
- *
- * Used by both ToolCallCard (edit_file diffs) and the Source
- * Control DiffDialog (git diffs).
- */
+/** Renders unified diff hunks with old + new line numbers and colored add/remove backgrounds. Used by ToolCallCard + Source Control DiffDialog. */
 export function DiffView({ hunks }: { hunks: DiffHunk[] }) {
   return (
     <div className="font-mono text-[12px] leading-[1.7]">

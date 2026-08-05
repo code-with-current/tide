@@ -1,23 +1,7 @@
 // TODO(task 4.2): dedup with electron/agent/model-catalog.ts into a shared module.
-/**
- * Model catalog resolver — renderer-side copy of electron/agent/model-catalog.ts.
- *
- * This is a deliberate, documented duplicate. The renderer build cannot import
- * the electron main-process module, so the pure resolver is copied here with
- * the CatalogEntry type inlined (no import from electron/agent/model-prices.ts).
- * Task 4.2 will collapse both copies into a single shared module.
- *
- * resolveModelMeta() performs deterministic lookup:
- *   1. exact catalog[catalogId] if catalogId is set
- *   2. auto-match modelId against catalog keys (suffix + normalized)
- *   3. conservative fallback (user fields + defaults)
- *
- * Pure module — no I/O. Takes the catalog map as a parameter so it's testable
- * and shared between main process (real loader) and renderer (IPC-fetched).
- */
+/** Renderer-side copy of the model catalog resolver (renderer can't import the electron main module). resolveModelMeta() does deterministic lookup: exact catalogId → suffix/normalized auto-match → conservative fallback. Pure: takes the catalog map as a parameter. */
 
-/** Normalized catalog entry (Tier-1 fields only). Inlined from
- *  electron/agent/model-prices.ts so this module is renderer-self-contained. */
+/** Normalized catalog entry (Tier-1 fields only). Inlined from electron/agent/model-prices.ts. */
 export interface CatalogEntry {
   catalogId: string; // the canonical key, e.g. 'anthropic/claude-sonnet-4-5'
   mode: string;
@@ -46,31 +30,14 @@ export interface MatchResult {
   matches: CatalogEntry[];
 }
 
-/**
- * Normalize a model id for comparison: lowercase, trim, collapse the
- * provider prefix segment (everything up to and including the last '/').
- * This lets 'claude-sonnet-4-5' and 'anthropic/claude-sonnet-4-5' compare equal.
- */
+/** Normalize a model id for comparison: lowercase, trim, drop the provider prefix segment so 'claude-sonnet-4-5' equals 'anthropic/claude-sonnet-4-5'. */
 function normalize(id: string): string {
   const trimmed = id.trim().toLowerCase();
   const slash = trimmed.lastIndexOf('/');
   return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
 }
 
-/**
- * Match a provider modelId against the catalog. Returns:
- *  - 'matched' (1 confident hit) — auto-enrich
- *  - 'ambiguous' (2+ hits)       — user must pick
- *  - 'none' (0 hits)             — no catalog data
- *
- * Ambiguity disambiguation: a model name like 'gpt-5' typically appears under
- * several provider routes (openai/, azure/, bedrock/, vertex_ai/, …) that all
- * sell the SAME model at the same price. To avoid forcing the user to pick
- * among identical entries, an ambiguous set is collapsed to 'matched' when
- * either (a) a bare canonical key (no '/') exists among the hits, or (b) all
- * hits agree on input/output pricing and context window. Only genuinely
- * conflicting matches (different prices or capabilities) surface as ambiguous.
- */
+/** Match a provider modelId against the catalog, returning 'matched' / 'ambiguous' / 'none'; ambiguous sets collapse to 'matched' when entries are effectively the same model (bare canonical key, or agreeing price+context). */
 export function matchModelToCatalog(modelId: string, catalog: CatalogMap): MatchResult {
   if (!modelId?.trim()) return { state: 'none', matches: [] };
   const lower = modelId.trim().toLowerCase();
@@ -112,15 +79,7 @@ export function matchModelToCatalog(modelId: string, catalog: CatalogMap): Match
   return { state: 'none', matches: [] };
 }
 
-/**
- * Collapse an ambiguous match set to a single confident entry when the hits
- * are effectively the same model. Two strategies:
- *  (a) Prefer a bare canonical key (no provider '/'), e.g. 'gpt-5' over
- *      'openai/gpt-5'. This is the model's home entry.
- *  (b) If all hits agree on input/output price + context window, they're the
- *      same model sold via different routes — return the first.
- * Returns null when the hits genuinely conflict (keep as ambiguous).
- */
+/** Collapse an ambiguous set to one entry when hits are the same model: prefer a bare canonical key, else accept when all hits agree on price+context. Returns null on genuine conflict. */
 function disambiguate(
   hits: CatalogEntry[],
   catalog: CatalogMap,

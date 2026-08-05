@@ -1,12 +1,4 @@
-/**
- * read_media_file tool — read binary files as base64 data URLs.
- *
- * Handles images, audio, and other binary files that read_file (text-only)
- * cannot process. Returns a data URL suitable for inline display or model
- * vision input. Detects MIME type from the file extension.
- *
- * Replaces the MCP filesystem server's `read_media_file`.
- */
+/** read_media_file tool: read binary files (images/audio/video/PDF) as base64 data URLs for inline display or model vision input; MIME detected from extension. Replaces the MCP filesystem server's read_media_file. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { tool } from 'ai';

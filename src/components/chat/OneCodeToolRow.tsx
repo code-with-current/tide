@@ -30,19 +30,7 @@ import { PermissionCard } from './PermissionCard';
 import { usePermissionSurface } from './permission-context';
 import { Button } from '@/components/ui/button';
 
-// ============================================================
-// 1code-style tool row
-//
-// Distinct from Tide's ToolCallCard: no card chrome, no border,
-// no surface bg. Just a dense single-line status row with a thin
-// left accent bar that colors by outcome. Click to expand inline
-// content (diff, command output, agent report) below the row.
-//
-// Mirrors 1code's "borderless timeline" aesthetic:
-//   ✓ read_file  src/index.ts          1.2s
-//   • grep       "useState"            230ms
-//   ✗ bash       npm run build         failed
-// ============================================================
+// 1code-style tool row: borderless single-line status with a colored left accent; click to expand inline content (diff, output, agent report).
 
 const ICON: Record<ToolName, React.ReactNode> = {
   read_file: <FileSearch className="size-3 text-muted-foreground/60" />,
@@ -315,11 +303,7 @@ function AgentBody({ d }: { d: Extract<ToolDisplay, { kind: 'agent' }> }) {
   );
 }
 
-/** Body for the file_loaded display — a "loaded <path>" header with size +
- *  line count, the description as a one-liner, and the full body. Shown
- *  directly (no second collapsible) — the parent OneCodeToolRow already
- *  collapses/expands, so nesting another toggle here meant two clicks to
- *  read the skill. Used by slash_command / load_skill. */
+/** file_loaded body: header (size + line count), one-line description, and full content; used by slash_command / load_skill. */
 function FileLoadedBody({ d }: { d: Extract<ToolDisplay, { kind: 'file_loaded' }> }) {
   const bytes = d.bytes < 1024 ? `${d.bytes} B` : `${(d.bytes / 1024).toFixed(1)} KB`;
   return (
@@ -582,18 +566,7 @@ export const OneCodeToolRow = memo(function OneCodeToolRow({
   );
 });
 
-/** Build a human-friendly status label for the row's right-side meta.
- *  Returns empty string when nothing meaningful applies.
- *
- *  Examples:
- *    bash exit 0       → "exit 0"
- *    bash exit 1       → "exit 1" (red)
- *    grep 12 hits      → "12 hits"
- *    grep 0 hits       → "no matches"
- *    dispatch_agent    → "end_turn" (from display)
- *    failed tool       → "failed"
- *    rejected/timeout  → "rejected" / "timeout"
- */
+/** Build a human-friendly status label for the row meta (e.g. "exit 0", "12 hits", "failed"); empty when nothing applies. */
 function statusLabelOf(call: ToolCall): string {
   // Sub-agent: surface the stop reason from the display.
   if (call.toolName === 'dispatch_agent' && call.display?.kind === 'agent') {
@@ -626,11 +599,7 @@ function statusLabelOf(call: ToolCall): string {
   return '';
 }
 
-/**
- * Exploring group — 1code collapses consecutive read-only investigation
- * (read_file/grep/glob/list_dir) into a single line. The user sees
- * "exploring (5)" with the count; expanding shows the rows.
- */
+/** Exploring group: collapses consecutive read-only investigation (read_file/grep/glob/list_dir) into one expandable line. */
 export const OneCodeExploringGroup = memo(function OneCodeExploringGroup({
   calls,
   onViewFile,

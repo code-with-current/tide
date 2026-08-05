@@ -7,13 +7,7 @@ export interface TodoItem {
   priority?: 'high' | 'medium' | 'low';
 }
 
-/**
- * Subscribe to a session's todo list. Fetches the current list on mount and
- * on sessionId change, then live-updates via the todos:updated event.
- *
- * Subscription is set up once per mount; subsequent sessionId changes just
- * refetch (the event stream isn't per-session — the listener filters by id).
- */
+/** Subscribe to a session's todo list: fetch on mount/sessionId change, then live-update via the todos:updated event (the listener filters by session id since the stream isn't per-session). */
 export function useTodos(sessionId: string | null | undefined): TodoItem[] {
   const [todos, setTodos] = useState<TodoItem[]>([]);
 

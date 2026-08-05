@@ -1,17 +1,4 @@
-/**
- * MCP import scanner — detects existing MCP servers from other tools'
- * config files and normalizes them into Tide's config shape.
- *
- * Sources scanned:
- *   - Claude Code: ~/.claude.json (mcpServers key) + ~/.claude/settings.json
- *   - Codex CLI:   ~/.codex/config.toml ([mcp_servers.*] sections)
- *   - OpenCode:    ~/.config/opencode/opencode.json (mcp key)
- *   - Generic:     ~/.agents/mcp.json
- *
- * Each source has a slightly different format — this module normalizes them
- * all to Tide's McpServerConfig shape:
- *   { type: 'stdio' | 'sse' | 'http', command?, args?, env?, url?, auth? }
- */
+/** MCP import scanner: detects servers from other tools' config files (Claude Code, Codex, OpenCode, generic) and normalizes them to Tide's McpServerConfig shape. */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -156,17 +143,7 @@ function scanCodexToml(
   }
 }
 
-/**
- * Parse [mcp_servers.NAME] sections from a Codex config.toml.
- * Extracts: command, args, env, url, type, http_headers.
- *
- * This is a minimal parser — NOT a full TOML implementation. It handles:
- *   - [mcp_servers.NAME] section headers
- *   - key = "value" lines
- *   - key = ["a", "b"] arrays
- *   - [mcp_servers.NAME.env] sub-tables (env = { K = "V" } or [mcp_servers.NAME.env])
- *   - http_headers = { Authorization = "Bearer xxx" }
- */
+/** Minimal TOML parser for [mcp_servers.NAME] sections (plus env/http_headers sub-tables); not a full TOML implementation. */
 function parseTomlMcpServers(toml: string): Record<string, Record<string, unknown>> {
   const result: Record<string, Record<string, unknown>> = {};
   let currentServer: string | null = null;
@@ -265,17 +242,7 @@ function parseTomlArray(raw: string): string[] {
 
 // ─── Normalizer ───────────────────────────────────────────────────────
 
-/**
- * Normalize an external server config (from any source) to Tide's format.
- *
- * External tools don't always specify `type` — we infer it:
- *   - `command` present → stdio
- *   - `url` present → http
- *
- * Other normalizations:
- *   - Codex uses `http_headers` instead of `headers` → map to env or drop
- *   - Some tools omit `type` entirely on stdio servers
- */
+/** Normalize an external server config to Tide's format, inferring type from `command` (stdio) or `url` (http). */
 function normalizeExternalConfig(raw: Record<string, unknown>): McpServerConfig | null {
   const config: Partial<McpServerConfig> = {};
 

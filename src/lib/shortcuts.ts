@@ -1,21 +1,4 @@
-/**
- * Keyboard shortcut registry — the single source of truth for every binding
- * Tide knows about.
- *
- * Each shortcut has a stable `id` (used as the persistence key), a display
- * `label`, a default combo (`keys`), and an `implemented` flag indicating
- * whether the action is actually wired up in the renderer. The Settings →
- * Shortcuts screen edits overrides on top of these defaults; key listeners
- * (App.tsx, ChatComposer) read the effective binding via `getShortcut(id)`.
- *
- * Keys are stored as display tokens (e.g. ['⌘', 'K']) and normalized for
- * matching via `comboMatches(binding, event)`. Tokens used:
- *   ⌘ = Meta (macOS Cmd), Ctrl = Ctrl, ⇧ = Shift, ⌥ = Alt/Option
- *
- * Unimplemented actions are still listed (and rebindable) so the screen is a
- * complete catalog; the "implemented" flag lets the UI mark them as "not yet
- * wired" honestly rather than silently no-op'ing.
- */
+/** Keyboard shortcut registry — single source of truth for all bindings. */
 export interface ShortcutDef {
   /** Stable id, used as the persistence key. Never rename (breaks stored overrides). */
   id: string;
@@ -34,10 +17,7 @@ export const SHORTCUT_GROUPS = ['Global', 'Navigation', 'Chat', 'Sessions', 'Too
 
 export const SHORTCUTS: ShortcutDef[] = [
   // ── Global ────────────────────────────────────────────────────────────
-  // commandPalette (⌘K / Ctrl+K) focuses the SessionsPanel search box. It was
-  // originally reserved for a global command palette that was never built; the
-  // sessions search advertises this binding, so it now drives that. A real
-  // palette, if added later, would get its own binding.
+  // commandPalette (⌘K/Ctrl+K) focuses the SessionsPanel search box — originally reserved for a global command palette that was never built; the sessions search advertises this binding so it now drives that. A real palette, if added later, gets its own binding.
   { id: 'commandPalette', label: 'Search sessions', group: 'Global', keys: ['⌘', 'K'], implemented: true },
   { id: 'newSession', label: 'New session', group: 'Global', keys: ['⌘', 'N'], implemented: true },
   { id: 'openSettings', label: 'Open settings', group: 'Global', keys: ['⌘', ','], implemented: true },
@@ -174,27 +154,14 @@ export function eventToTokens(e: KeyboardEvent): string[] | null {
   return tokens;
 }
 
-/**
- * Platform-default bindings, populated by the backend at app startup (see
- * useUi.loadShortcuts). The hardcoded `keys` in SHORTCUTS above are a
- * macOS-flavored fallback used only before the IPC round-trip completes
- * (the first paint); once the platform defaults arrive they take precedence
- * so Windows/Linux users see Ctrl instead of ⌘ from the very first render
- * of the Settings screen.
- *
- * Set via setPlatformDefaults() — idempotent, no-op if undefined.
- */
+/** Platform-default bindings (populated by backend at startup via useUi.loadShortcuts); take precedence over the hardcoded macOS fallback once they arrive, so non-macOS users see Ctrl from first paint. */
 let platformDefaults: Record<string, string[]> | null = null;
 
 export function setPlatformDefaults(defaults: Record<string, string[]> | null): void {
   platformDefaults = defaults;
 }
 
-/** Resolve the effective binding for an action:
- *    1. user override (from settings.json via IPC)
- *    2. platform default (from backend, macOS ⌘ / Windows+Linux Ctrl)
- *    3. hardcoded fallback in SHORTCUTS (macOS-flavored)
- * This is what key listeners should call. */
+/** Resolve the effective binding for an action: 1) user override (settings.json via IPC), 2) platform default (backend; macOS ⌘ / Windows+Linux Ctrl), 3) hardcoded fallback in SHORTCUTS (macOS-flavored). Key listeners call this. */
 export function getEffectiveKeys(id: string, overrides: Record<string, string[]> | undefined): string[] {
   if (overrides?.[id]) return overrides[id];
   if (platformDefaults?.[id]) return platformDefaults[id];

@@ -1,19 +1,4 @@
-/**
- * Sub-agent runtime — supports both single-shot and multi-step agents.
- *
- *   - **Single-shot** (no `allowedTools`): one `generateText` call, no tools.
- *     Used for analysis, planning, research, design.
- *
- *   - **Multi-step** (has `allowedTools`): `streamText` with a tool loop
- *     (`stopWhen`), `repairToolCall`, and a subset of tools. Can read files,
- *     search code, and dispatch its own sub-agents (recursive, depth-guarded).
- *
- * Both paths inherit the parent turn's provider/model/protocol, fold usage
- * into the parent, and return a `ToolResult` for the dispatch_agent tool.
- *
- * Routed through the SDK's `generateText`/`streamText` + `resolveModel`, so
- * the sub-agent hits the correct endpoint per the parent provider's protocol.
- */
+/** Sub-agent runtime: single-shot (no allowedTools → one generateText call) or multi-step (has allowedTools → streamText tool loop with repairToolCall, recursive + depth-guarded). Both inherit parent provider/model/protocol, fold usage into the parent, and return a ToolResult. */
 import { generateText, streamText, isStepCount } from 'ai';
 import type { LanguageModelUsage } from 'ai';
 import { resolveModel } from '../provider-factory.js';
@@ -70,13 +55,7 @@ function mapUsage(u: LanguageModelUsage, calls = 1): Usage {
   };
 }
 
-/**
- * Run a sub-agent. Returns a ToolResult suitable for direct return from
- * the dispatch_agent tool executor.
- *
- * If the agent has `allowedTools`, runs a multi-step streamText loop with
- * the subset of tools. Otherwise, runs a single-shot generateText call.
- */
+/** Run a sub-agent and return a ToolResult for dispatch_agent; multi-step (streamText loop) when allowedTools+ctx are present, otherwise single-shot generateText. */
 export async function runAgent(opts: RunAgentOptions): Promise<ToolResult> {
   const { agent, task, provider, modelId, signal, onUsage, ctx, depth = 0 } = opts;
   const start = Date.now();

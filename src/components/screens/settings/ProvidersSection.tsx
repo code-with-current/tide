@@ -58,17 +58,10 @@ import { SettingsHeader } from "./shared";
 
 // =============================================================
 // ProvidersSection — LLM provider management, master/detail.
-// Sidebar lists added providers (+ "New"); selecting one drives
-// the main pane's inline edit form. Add and edit share the same
-// ProviderDetail component (no modal) — the sidebar IS the
-// navigation between them.
+// Sidebar lists added providers (+ "New"); selecting one drives the main pane's inline edit form. Add and edit share the same ProviderDetail component — the sidebar IS the navigation between them.
 // =============================================================
 
-// Per-protocol form config — drives placeholders, auth-header hints, and
-// the resolved endpoint path. Centralizing here keeps the add + edit forms
-// in sync and makes the protocol↔behavior relationship explicit (the auth
-// header in particular is the z.ai coding-vs-anthropic gotcha — each
-// protocol speaks only one, and mixing them 404s).
+// Per-protocol form config — drives placeholders, auth-header hints, and the resolved endpoint path. Centralizing here keeps add + edit forms in sync and makes the protocol↔behavior relationship explicit (the auth header is the z.ai coding-vs-anthropic gotcha — each protocol speaks only one, mixing them 404s).
 export const PROTOCOL = {
   anthropic: {
     baseUrlPlaceholder: "https://api.anthropic.com",
@@ -196,9 +189,7 @@ export function ProvidersSection() {
 }
 
 // =============================================================
-// ProviderListItem — one row in the sidebar.
-// Active row: primary tint + left accent bar (the "you are here"
-// cue the UX active-state rule calls for). Keyboard-selectable.
+// ProviderListItem — one row in the sidebar. Active row uses primary tint + left accent bar (the "you are here" cue). Keyboard-selectable.
 // =============================================================
 
 function ProviderListItem({
@@ -301,11 +292,7 @@ function EmptyDetail() {
 }
 
 // =============================================================
-// ProviderFormDialog — add a NEW provider (modal). Editing existing
-// providers stays inline (ProviderDetail, auto-save); add goes through
-// this dialog with an explicit Save because the provider doesn't exist
-// to auto-save yet. Composes the same sub-components (EndpointPreview,
-// ApiStylePicker, SectionLabel, FormField) as the inline form.
+// ProviderFormDialog — add a NEW provider (modal). Editing existing providers stays inline (ProviderDetail, auto-save); add goes through this dialog with an explicit Save because the provider doesn't exist yet to auto-save. Composes the same sub-components as the inline form.
 // =============================================================
 
 function ProviderFormDialog({
@@ -371,11 +358,7 @@ function ProviderFormDialog({
   const save = async () => {
     setSaving(true);
     try {
-      // Save exactly what the user typed — no trailing-slash strip, no /v1
-      // auto-append. Provider endpoints vary (z.ai coding relay lives at
-      // /api/coding/paas/v4; some gateways want /v1, others don't), so the
-      // form must not mutate the input. The EndpointPreview below shows
-      // what the SDK will resolve to; the user decides what to type.
+      // Save exactly what the user typed — no trailing-slash strip, no /v1 auto-append. Provider endpoints vary (z.ai coding relay lives at /api/coding/paas/v4; some gateways want /v1, others don't), so the form must not mutate the input. EndpointPreview shows what the SDK resolves to; the user decides.
       const baseUrlToSave = baseUrl.trim();
       const created = await addProvider.mutateAsync({
         name: name.trim() || "Untitled",
@@ -629,9 +612,7 @@ function ProviderFormDialog({
 }
 
 // =============================================================
-// ProviderDetail — the inline edit form (auto-save).
-// Selecting a provider in the sidebar renders this; edits persist
-// ~600ms after the last change. Add is handled by ProviderFormDialog.
+// ProviderDetail — the inline edit form (auto-save). Selecting a provider in the sidebar renders this; edits persist ~600ms after the last change. Add is handled by ProviderFormDialog.
 // =============================================================
 
 export interface Row {
@@ -674,11 +655,7 @@ function ProviderDetail({
   const [name, setName] = useState(provider.name);
   const [apiStyle, setApiStyle] = useState<ApiStyle>(provider.apiStyle);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
-  // Key field starts EMPTY on edit — the decrypted key is never pre-filled
-  // into the DOM. The save below omits apiKey from the patch when the field
-  // is blank, so an untouched form preserves whatever's in the keychain.
-  // Type a new value to replace; there's no explicit "clear key" affordance
-  // (delete the provider if you want the key gone).
+  // Key field starts EMPTY on edit — the decrypted key is never pre-filled into the DOM. Save omits apiKey from the patch when the field is blank, so an untouched form preserves whatever's in the keychain. Type a new value to replace; there's no explicit "clear key" affordance (delete the provider to clear the key).
   const [apiKey, setApiKey] = useState("");
   const hasStoredKey = !!provider.apiKey;
   const [rows, setRows] = useState<Row[]>(
@@ -751,14 +728,9 @@ function ProviderDetail({
       return;
     }
     const t = setTimeout(() => {
-      // Save exactly what the user typed — no trailing-slash strip, no /v1
-      // auto-append (see the add form for rationale).
+      // Save exactly what the user typed — no trailing-slash strip, no /v1 auto-append (see the add form for rationale).
       const baseUrlToSave = baseUrl.trim();
-      // Build the patch WITHOUT apiKey, then add it only if the user typed
-      // one. Omitting the field entirely (vs sending undefined) is the
-      // robust way to say "don't touch the keychain entry" — structured
-      // clone over IPC preserves undefined, but being explicit avoids any
-      // ambiguity at the store layer.
+      // Build the patch WITHOUT apiKey, then add it only if the user typed one. Omitting the field entirely (vs sending undefined) is the robust way to say "don't touch the keychain entry" — structured clone over IPC preserves undefined, but being explicit avoids any ambiguity at the store layer.
       const patch: Parameters<typeof api.updateProvider>[1] = {
         name: name.trim() || "Untitled",
         apiStyle,
@@ -1062,12 +1034,7 @@ function ProviderDetail({
 // =============================================================
 
 // =============================================================
-// EndpointPreview — echoes the typed baseUrl verbatim. No
-// trailing-slash strip, no /v1 auto-append, no path suffix:
-// provider endpoints vary (z.ai's coding relay lives at
-// /api/coding/paas/v4; some gateways want /v1, others don't),
-// so transforming the input here would misrepresent non-standard
-// gateways. The SDK appends its own path at runtime.
+// EndpointPreview — echoes the typed baseUrl verbatim. No trailing-slash strip, no /v1 auto-append, no path suffix: provider endpoints vary (z.ai's coding relay lives at /api/coding/paas/v4; some gateways want /v1, others don't), so transforming the input here would misrepresent non-standard gateways. The SDK appends its own path at runtime.
 // =============================================================
 export function EndpointPreview({
   apiStyle,
@@ -1162,11 +1129,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** A fetched model's match state.
- *  - 'live'     : rich provider response (OpenRouter) — used directly, no catalog
- *  - 'matched'  : confident single catalog hit (auto-enrich)
- *  - 'ambiguous': multiple catalog hits (pick one)
- *  - 'none'     : no catalog data (bare id) */
+/** A fetched model's match state: 'live' (rich OpenRouter response, used directly), 'matched' (single catalog hit, auto-enrich), 'ambiguous' (multiple hits, pick one), 'none' (no catalog data, bare id). */
 export type MatchState = "live" | "matched" | "ambiguous" | "none";
 
 /** A single candidate shown for an ambiguous model (the catalog-resolve path
@@ -1262,11 +1225,7 @@ function liveToFetchedModel(m: ProviderModelMeta): FetchedModel {
     !Number.isNaN(outTok)
       ? formatPriceRate({ inputPerToken: inTok, outputPerToken: outTok })
       : undefined;
-  // The reasoning flag comes ONLY from the OpenRouter `reasoning` object.
-  // We deliberately do NOT fall back to `supported_parameters.includes('reasoning')`
-  // because nearly every modern model accepts the reasoning *parameter*, but that
-  // doesn't mean it's a reasoning model. The brain icon means "this model actually
-  // reasons by default" (default_enabled) or "always reasons" (mandatory).
+  // NOTE: reasoning flag comes ONLY from the OpenRouter `reasoning` object — NOT from `supported_parameters.includes('reasoning')` (nearly every model accepts the param without actually being a reasoning model). Brain icon = "reasons by default" (default_enabled) or "always reasons" (mandatory).
   const reasoningOn =
     m.reasoning?.default_enabled ?? m.reasoning?.mandatory ?? undefined;
   return {
@@ -1293,17 +1252,7 @@ function liveToFetchedModel(m: ProviderModelMeta): FetchedModel {
   };
 }
 
-/** Fetch-models button — probes the provider's /models endpoint, then resolves
- *  each result against the LiteLLM catalog and opens a grouped dialog where the
- *  user selects models to add. Models are grouped by match state:
- *    ✅ MATCHED   — auto-resolved, one-click add
- *    ⚠ AMBIGUOUS  — multiple catalog candidates, user picks one
- *    — NONE       — no catalog data, add as-is
- *  Multi-select via checkboxes; [Add N selected] commits the selection.
- *
- *  The baseUrl/apiKey come from the form's current state, so this works in
- *  the add form before the provider is saved. Errors show inline next to
- *  the button (wrong key, 404, network) without a modal. */
+/** Fetch-models button — probes the provider's /models endpoint, resolves each result against the LiteLLM catalog, and opens a grouped dialog (✅ MATCHED / ⚠ AMBIGUOUS / — NONE) where the user multi-selects models to add. baseUrl/apiKey come from the form's current state so it works in the add form before the provider is saved. Errors show inline next to the button (no modal). */
 export function FetchModelsButton({
   apiStyle,
   baseUrl,

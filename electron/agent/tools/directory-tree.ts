@@ -1,12 +1,4 @@
-/**
- * directory_tree tool — recursive JSON tree of files and directories.
- *
- * Returns a nested { name, type, children? } structure for the given path,
- * respecting .gitignore patterns. Caps depth and entry count to bound output.
- *
- * Replaces the MCP filesystem server's `directory_tree` — native, no IPC
- * overhead, no npx spawn, respects Tide's path-safety + permission gates.
- */
+/** directory_tree tool: recursive JSON tree ({name, type, children?}) respecting .gitignore with depth/entry caps. Native replacement for the MCP filesystem server's directory_tree (no IPC overhead, no npx spawn, goes through Tide's path-safety + permission gates). */
 import * as fs from 'fs';
 import * as path from 'path';
 import { tool } from 'ai';

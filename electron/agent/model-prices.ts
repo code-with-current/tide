@@ -1,12 +1,4 @@
-/**
- * LiteLLM model_prices_and_context_window.json catalog loader.
- *
- * Ships a vendored snapshot in electron/data/, refreshed in the background
- * from GitHub every 7 days with graceful fallback. Loaded once at app start;
- * the in-memory map is queried by model-catalog.ts's resolveModelMeta().
- *
- * Never imports anything renderer-side — pure main-process module.
- */
+/** LiteLLM catalog loader: vendored snapshot in electron/data/, refreshed from GitHub every 7 days with graceful fallback. Loaded once at app start; the in-memory map is queried by model-catalog.ts's resolveModelMeta(). Pure main-process module. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';

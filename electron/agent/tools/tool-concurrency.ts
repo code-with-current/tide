@@ -1,17 +1,4 @@
-/**
- * Tool concurrency — partition tool calls into parallel/sequential batches.
- *
- * Read-only tools (read_file, glob, grep, etc.) have no side effects and can
- * safely run in parallel. Write/bash tools mutate state and must run
- * sequentially. This module provides the partitioning logic that a future
- * manual loop (or streaming tool executor) would use to dispatch tools.
- *
- * NOTE: The Vercel AI SDK currently executes tools sequentially within each
- * step. This partition logic is forward-looking — it's ready for when a
- * manual loop or SDK-level parallelism is available. Today it's used for:
- *   - Permission batching (ask once for N safe tools, not N times)
- *   - Documentation of which tools are concurrency-safe
- */
+/** Partition tool calls into parallel/sequential batches: read-only tools run in parallel, write/bash tools run sequentially. Forward-looking (SDK runs sequentially today); currently used for permission batching and concurrency-safety documentation. */
 
 /** Tools safe to run in parallel (read-only, no shared mutable state). */
 const CONCURRENCY_SAFE_TOOLS = new Set<string>([
@@ -23,26 +10,12 @@ const CONCURRENCY_SAFE_TOOLS = new Set<string>([
   'web_search',
 ]);
 
-/**
- * Is this tool safe to run concurrently with other safe tools?
- * Write tools (edit_file, write_file, bash, git) are NOT safe — they
- * mutate the filesystem or shell state.
- */
+/** Is this tool safe to run concurrently? Write tools (edit_file, write_file, bash, git) are NOT — they mutate the filesystem or shell state. */
 export function isConcurrencySafe(toolName: string): boolean {
   return CONCURRENCY_SAFE_TOOLS.has(toolName);
 }
 
-/**
- * Partition a list of tool calls into batches. Consecutive concurrency-safe
- * tools form one batch (eligible for parallel execution); non-safe tools
- * each get their own single-element batch (must run alone, in order).
- *
- * Example:
- *   [read_file, glob, grep, bash, read_file]
- *   → [[read_file, glob, grep], [bash], [read_file]]
- *
- * Mirrors Claude Code's partitionToolCalls in toolOrchestration.ts.
- */
+/** Partition tool calls into batches: consecutive concurrency-safe tools batch together (parallel-eligible); non-safe tools get their own single-element batch (must run alone, in order). Mirrors Claude Code's partitionToolCalls. */
 export function partitionToolCalls<T extends { toolName: string }>(
   calls: T[],
 ): T[][] {

@@ -32,13 +32,7 @@ export function shortName(p: string): string {
   return parts.slice(-2).join('/');
 }
 
-/**
- * Read a file from disk and build an AttachedFile. Shared by the AttachButton
- * file picker and the composer's paste handler so both produce identical
- * attachments. Images attach by path only (no inline content); code/text
- * files are read via IPC and inline'd. Returns null if the read fails AND
- * the caller wants to skip rather than emit an error stub (used by paste).
- */
+/** Read a file from disk and build an AttachedFile. Shared by AttachButton + composer paste handler. Images attach by path; code/text files are inline'd. */
 export async function attachFromPath(
   filePath: string,
 ): Promise<AttachedFile | null> {
@@ -60,11 +54,7 @@ export async function attachFromPath(
   return { path: shortName(filePath), kind: 'text', content: '[read failed]', absPath: filePath };
 }
 
-/**
- * Attach button — opens the native OS file picker for external files (anywhere
- * on disk, not limited to the workspace). Selected files are read via IPC
- * and added as attachments. For project files, use the `@` inline trigger.
- */
+/** Attach button: opens the native OS file picker for external files (anywhere on disk); selected files are read via IPC and added as attachments. */
 export function AttachButton({
   onAdd,
 }: {

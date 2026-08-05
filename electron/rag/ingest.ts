@@ -1,23 +1,4 @@
-/**
- * Workspace ingestion pipeline — walks the workspace, chunks every
- * source file via the tree-sitter chunker (Phase B), embeds the chunks
- * in batches via the resolved embedder (local ONNX or cloud fallback),
- * and writes them into the per-workspace RagStore (Phase A).
- *
- * Content-hash dedupe: a chunk whose `path|symbol|startLine` produces
- * the same id AND whose `contentHash` matches the stored value is
- * skipped — no re-embed. This makes re-ingest fast: editing one file
- * re-embeds only that file's changed chunks.
- *
- * Batching: chunks are embedded 32 at a time. The local ONNX runtime
- * handles a 32-chunk batch in roughly 0.5–1.5s; cloud is one round
- * trip per batch. Progress callbacks fire per batch so the panel can
- * show steady movement instead of a long stall.
- *
- * Background vs foreground: ingestWorkspace itself is just an async
- * function — the IPC layer (rag.ts) wraps it so it runs in the
- * background and emits webContents events for progress.
- */
+/** Workspace ingestion pipeline: walk → chunk (tree-sitter) → embed in batches → write to RagStore. Content-hash dedup skips unchanged chunks; runs in the background via the IPC layer. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { minimatch } from 'minimatch';
@@ -177,12 +158,8 @@ export async function ingestWorkspace(
       emit({ phase: 'walking', filesSeen: n, chunksTotal: 0, chunksEmbedded: 0 }),
     );
 
-    // If the workspace root is gone, the walk yields 0 files silently. Fail
-    // loudly here instead of writing a misleading "success" lastIngestedAt —
-    // the caller (rag.ts) turns the throw into a 'failed' progress event so
-    // the UI's RagIndexProgress card shows the real reason. We check the root
-    // existence directly rather than relying on files.length === 0, since a
-    // genuinely-empty workspace (new project, no source yet) also yields 0.
+    // If the workspace root is gone, the walk yields 0 files silently — fail loudly here instead of writing a misleading "success" lastIngestedAt (caller rag.ts turns the throw into a 'failed' progress event so the RagIndexProgress card shows the real reason).
+    // NOTE: check root existence directly rather than files.length===0, since a genuinely-empty workspace (new project, no source yet) also yields 0.
     if (!fs.existsSync(ws.path)) {
       throw new Error(
         `Workspace folder no longer exists: ${ws.path}. Restore the folder or re-add the workspace before indexing.`,
@@ -279,11 +256,7 @@ export async function ingestWorkspace(
   }
 }
 
-/**
- * Parse a .gitignore file into a list of glob patterns. Handles negation
- * (!prefix), comments (#), and blank lines. Patterns are relative to the
- * directory containing the .gitignore file.
- */
+/** Parse a .gitignore file into glob patterns (handles negation, comments, blank lines). */
 function parseGitignore(filePath: string): string[] {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
@@ -296,12 +269,7 @@ function parseGitignore(filePath: string): string[] {
   }
 }
 
-/**
- * Check if a relative path is ignored by any accumulated .gitignore pattern.
- * Uses minimatch with the standard .gitignore semantics: patterns without
- * a slash match at any depth, patterns with a slash are relative to the
- * .gitignore's directory. Negation (!) un-ignores.
- */
+/** Check if a relative path is ignored by accumulated .gitignore patterns via minimatch (standard gitignore semantics, with negation). */
 function isGitignored(relPath: string, patterns: string[]): boolean {
   let ignored = false;
   for (const pattern of patterns) {

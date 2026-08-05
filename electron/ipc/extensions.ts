@@ -1,21 +1,4 @@
-/**
- * Extensions IPC — power the Extensions management UI.
- *
- * Mirrors the settingsStore pattern: a singleton store created at module init
- * from `appDataDir()` (post-relocation: ~/.tide / ~/.tide-dev),
- * plus a single `registerExtensionsHandlers()` registration entry point.
- *
- * Five handlers:
- *   tide:extensions:list        → { agents, skills } disabled-name allowlist
- *   tide:extensions:setEnabled  → flip one item on/off (domain, name, enabled)
- *   tide:extensions:listAgents  → unified catalog (builtins + project + user)
- *   tide:extensions:listSkills  → unified catalog (project + user)
- *   tide:extensions:listMcp     → MCP server list (stub until MCP runtime lands)
- *
- * The list handlers merge the persisted disabled-set into each entry so the
- * renderer gets a single ready-to-render list per domain. Scan failures are
- * swallowed — builtins are always returned for agents, skills return empty.
- */
+/** Extensions IPC for the Extensions UI: singleton store (appDataDir) + registerExtensionsHandlers exposing list/setEnabled/listAgents/listSkills/listMcp. List handlers merge the persisted disabled-set; scan failures fall back to builtins (or empty for skills). */
 import { ipcMain, app } from 'electron';
 import { createExtensionsStore } from '../extensionsStore.js';
 import { scanProjectEntries } from '../agent/project-context.js';

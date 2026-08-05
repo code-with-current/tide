@@ -1,12 +1,4 @@
-/**
- * Mermaid diagram renderer. Lazy-loads the mermaid library on first
- * render, then renders the diagram as SVG. Falls back to a code block
- * if mermaid fails to load or the diagram syntax is invalid.
- *
- * Click the diagram to open a full-screen zoomable overlay with pan/zoom
- * controls (scroll to zoom, drag to pan). Minimal chrome — just the
- * diagram + floating zoom buttons on a dim background.
- */
+/** Mermaid renderer: lazy-loads the library, renders SVG, falls back to a code block on error; click opens a full-screen pan/zoom overlay. */
 import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import { AlertTriangle, ZoomIn, X, ZoomOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -180,14 +172,7 @@ function DiagramZoomOverlay({
   );
 }
 
-/**
- * Sanitize mermaid source for common LLM-emitted patterns that break the
- * parser. Each transform is conservative — it only fires when the input
- * actually contains the problem pattern.
- *
- * Returns an array of candidate sources to try in order (original first,
- * progressively cleaned). The renderer tries each until one succeeds.
- */
+/** Sanitize mermaid source for common LLM-emitted parser-breaking patterns; returns candidate sources (original first, progressively cleaned). */
 function sanitizeMermaid(raw: string): string[] {
   const candidates: string[] = [raw];
 
@@ -244,11 +229,7 @@ function sanitizeMermaid(raw: string): string[] {
     if (!candidates.includes(noInit)) candidates.push(noInit);
   }
 
-  // 5. Sequence diagrams: braces in message text break the parser.
-  //    Mermaid treats `{` as a block opener. Lines like
-  //      API-->>A: { data: currentUser }
-  //    cause "Parse error". Fix by stripping the braces (keep the inner text).
-  //    Only applies to lines that look like sequence arrows (contain ->> or -->).
+  // 5. Sequence diagrams: braces in message text break the parser (Mermaid treats `{` as a block opener). Fix by stripping braces from arrow/message lines (contain ->> or -->), keeping inner text.
   if (/^(sequenceDiagram|sd)\b/m.test(raw) && /^[ \t]*\S.*--?>>.*:.*\{/m.test(raw)) {
     const noBraces = raw
       .split('\n')

@@ -1,10 +1,4 @@
-/**
- * SessionHero — the compact status header at the top of the Inspector tab.
- *
- * Shows only the session title, ID, start time, and status chip. All usage
- * stats (iteration, tools, cost) and the context-window meter live in the
- * Context Window section below.
- */
+/** SessionHero: compact Inspector header — title, ID, start time, status chip. Usage stats live in the Context Window section below. */
 import { Loader2, ShieldAlert, AlertTriangle, Pause, CircleStop } from 'lucide-react';
 import type { Session, SessionStream, HeroStatus } from '@/types';
 import { Badge } from '@/components/ui/badge';

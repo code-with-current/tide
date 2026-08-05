@@ -1,16 +1,4 @@
-/**
- * The block-stream reducer. Pure: (state, event) → state. One transition
- * per AgentEvent. This is the only place block mutations happen during
- * streaming.
- *
- * Invariants:
- *  - The reducer NEVER generates UUIDs. The orchestrator assigns ids at
- *    event emission time (spec §2). The reducer just uses them.
- *  - Each case returns a new `BlockStreamState`. The blocks array is
- *    always a new reference when anything changed; unchanged blocks keep
- *    their original reference so memoized leaves can skip re-rendering.
- *  - Tool block ids ALWAYS equal their toolCallId (asserted on creation).
- */
+/** The block-stream reducer — pure `(state, event) → state`. Orchestrator assigns block ids; tool-block ids always equal their toolCallId. Unchanged blocks keep their reference for memoized leaves. */
 
 import type { SessionStream, ToolCallStatus } from '@/types';
 import type { Block, FollowupBlock, ReasoningBlock, TextBlock, ToolBlock } from '@/types';
@@ -203,14 +191,7 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
     return b;
   });
 
-  // The answer phase begins after the last tool call. Text before it is
-  // narration (the model talking while working — "let me check…"); text
-  // after is the deliverable. Treating every kind === 'tool' as the bound
-  // — with no skip-set taxonomy — handles bookkeeping (todo_write), yields
-  // (ask_followup_question), and real actions (bash/edit_file) uniformly,
-  // and lets synthesized trailing followup blocks pass through without
-  // breaking the scan. Mirrors orchestrator.finalizeBlocks and
-  // blockMigration.redetermineAnswerFlag.
+  // The answer phase begins after the last tool call: text before = narration, after = deliverable. Treating every kind==='tool' as the bound (no skip-set) handles todo_write/ask_followup_question/bash/edit_file uniformly, and lets trailing followup blocks pass through. Mirrors orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag.
   let lastToolIdx = -1;
   for (let i = blocks.length - 1; i >= 0; i--) {
     if (blocks[i].kind === 'tool') { lastToolIdx = i; break; }

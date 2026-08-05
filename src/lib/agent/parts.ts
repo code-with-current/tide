@@ -1,23 +1,4 @@
-/**
- * Parts-based event and state types — the new canonical shape for the
- * agent event stream and renderer state. Replaces the Block[] model.
- *
- * Phase 1 (this file): type declarations only, no behavior. Phase 3
- * emits PartEvents from the SDK-driven orchestrator; Phase 4 consumes
- * them in the useParts hook + deriveView.
- *
- * Two layers, deliberately separated:
- *
- * 1. PartEvent — the IPC wire format. One event per emission. The raw
- *    parts list (accumulated from these events) is the canonical state.
- *
- * 2. DerivedView — the memoized projection the existing components
- *    consume. Pure function of Part[] (see deriveView in Phase 4).
- *
- * The raw parts list is exposed alongside the derived view so the
- * Inspector and future affordances can read the original SDK emission
- * without going through the projection. Full fidelity.
- */
+/** Parts-based event/state types — the new canonical shape for the agent event stream and renderer state (replaces `Block[]`). Two layers: `PartEvent` (IPC wire format) and `DerivedView` (memoized projection in Phase 4). */
 
 import type { ToolName, Usage } from '@/types';
 

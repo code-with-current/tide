@@ -1,15 +1,4 @@
-/**
- * One-shot adapter for messages persisted before the block-stream era.
- * Pure function: same input → same output, every time. Called from the
- * session loader on every message. Idempotent — messages already in
- * block form pass through unchanged.
- *
- * Block id scheme for migrated data (deterministic, no UUIDs):
- *   text block:     `msg_${message.id}_text_${index}`
- *   reasoning:      `msg_${message.id}_reasoning`
- *   tool block:     the toolCallId itself (matches the live wire format)
- *   followup:       `${toolCallId}#followup` (matches the live wire format)
- */
+/** One-shot idempotent adapter for messages persisted before the block-stream era. Pure; deterministic block-id scheme: `msg_${id}_text_${index}`, `msg_${id}_reasoning`, the toolCallId for tool blocks, `${toolCallId}#followup` for followups. */
 
 import type {
   Block,
@@ -45,22 +34,7 @@ export function toolCallToBlock(call: ToolCall): ToolBlock {
   };
 }
 
-/** Redetermine the `isAnswer` flag on every text block using the same
- *  rule as streamReducer.applyTurnEnd and orchestrator.finalizeBlocks:
- *  the answer phase begins after the last tool call, so every text block
- *  after the final `kind === 'tool'` is the answer; everything before is
- *  narration. Bookkeeping (todo_write), yields (ask_followup_question),
- *  and real actions (bash/edit_file) all bound the answer phase
- *  identically — no skip-set taxonomy needed. Synthesized trailing
- *  followup blocks don't count as tools, so prose after a clarifying-
- *  question turn is captured (the prior walk-back rule broke on those
- *  trailing followups and left the answer unmarked, surfacing as
- *  "No summary — this turn was tool-only.").
- *
- *  Idempotent. Cheap. Used by the migration to repair messages saved
- *  by earlier builds.
- *
- *  Returns a new message with a new blocks array; original is untouched. */
+/** Redetermine each text block's `isAnswer` flag (matches streamReducer.applyTurnEnd / orchestrator.finalizeBlocks): the answer phase begins after the last tool call. Idempotent; returns a new message, original untouched. */
 function redetermineAnswerFlag(message: Message): Message {
   if (!message.blocks || message.blocks.length === 0) return message;
   const blocks = message.blocks.map(b =>
@@ -76,18 +50,7 @@ function redetermineAnswerFlag(message: Message): Message {
   return { ...message, blocks };
 }
 
-/** Heal a block list using the legacy `toolCalls` array as the source of
- *  truth for tool status/display/output/duration. Preserves the block
- *  ordering and identity (so React keys don't shift) and leaves non-tool
- *  blocks (text/reasoning/followup) untouched.
- *
- *  Also ensures a followup block exists for every ask_followup_question
- *  call — without this, persisted messages saved by the earlier broken
- *  orchestrator (which didn't spawn followup blocks in finalizeBlocks)
- *  would never fire the options popup on reload.
- *
- *  Idempotent: if blocks are already in sync with toolCalls, the patch
- *  is a no-op (same field values reapplied). Safe to run on every load. */
+/** Heal a block list using the legacy `toolCalls` array as source of truth for tool fields, and ensure a followup block exists for every ask_followup_question call. Preserves block identity/order; idempotent; safe to run on every load. */
 function reconcileBlocksWithToolCalls(message: Message): Message {
   const callsById = new Map<string, ToolCall>();
   for (const c of message.toolCalls ?? []) callsById.set(c.id, c);
@@ -134,12 +97,7 @@ function reconcileBlocksWithToolCalls(message: Message): Message {
 }
 
 export function migrateMessageToBlocks(message: Message): Message {
-  // Reconciliation pass — happens whenever blocks exist alongside legacy
-  // toolCalls. We use toolCalls as the source of truth for tool block
-  // status/display/output/durationMs because they were maintained by a
-  // separate, earlier code path that survived multiple orchestrator bugs.
-  // Healing is idempotent: if blocks are already in sync with toolCalls,
-  // the patch is a no-op (same field values). This runs on every load.
+  // Reconciliation pass: heal tool blocks from the legacy `toolCalls` array (source of truth for status/display/output/duration). Idempotent; runs on every load.
   if (message.blocks && message.blocks.length > 0 && message.toolCalls && message.toolCalls.length > 0) {
     return redetermineAnswerFlag(reconcileBlocksWithToolCalls(message));
   }

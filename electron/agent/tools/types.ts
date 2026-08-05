@@ -1,11 +1,4 @@
-/**
- * Tool executor contract.
- *
- * Every built-in tool implements this signature. The orchestrator looks up
- * the executor by tool name in the registry, calls it with the model's
- * parsed args and a context carrying the workspace root + abort signal,
- * and forwards the result back to the model + renderer.
- */
+/** Tool executor contract: every built-in tool implements this signature; the orchestrator looks up the executor by name and calls it with parsed args + a context carrying the workspace root and abort signal. */
 
 import type { Provider, ToolDisplay, ToolName, Usage } from '../../../src/types/index';
 
@@ -16,32 +9,16 @@ export interface ToolContext {
   signal: AbortSignal;
   /** Per-tool timeout in ms (from ToolDefinition). */
   timeoutMs: number;
-  /**
-   * Parent turn's provider — consumed by `dispatch_agent` to spawn a
-   * sub-agent against the same LLM endpoint. Other tools ignore this.
-   * Set by the orchestrator before each dispatch.
-   */
+  /** Parent turn's provider — consumed by `dispatch_agent` to spawn a sub-agent against the same LLM endpoint (ignored by other tools; set by the orchestrator before each dispatch). */
   provider?: Provider;
   /**
    * Parent turn's model id — sub-agents inherit it. Consumed by
    * `dispatch_agent`; ignored by other tools.
    */
   modelId?: string;
-  /**
-   * Usage accumulator — folds a sub-agent's token usage into the parent
-   * turn's aggregate so the context-window meter reflects sub-agent cost.
-   * Consumed by `dispatch_agent`; ignored by other tools.
-   */
+  /** Usage accumulator — folds a sub-agent's token usage into the parent turn's aggregate so the context-window meter reflects sub-agent cost (dispatch_agent only). */
   onUsage?: (u: Usage) => void;
-  /**
-   * Sub-agent streaming delta hook. When `dispatch_agent` spawns a sub-agent,
-   * each token the sub-agent emits fires this callback so the orchestrator
-   * can emit a `tool_call_delta` event to the renderer — giving the user
-   * live progress inside the dispatch card instead of a frozen spinner
-   * for the entire sub-agent turn.
-   *
-   * Consumed by `dispatch_agent`; ignored by other tools.
-   */
+  /** Sub-agent streaming delta hook (dispatch_agent only): each emitted token fires this so the orchestrator can stream live progress to the renderer's dispatch card. */
   onDelta?: (delta: string) => void;
   /** Active session id — used by todo_write to key its per-session store
    *  and broadcast updates to the renderer. Other tools ignore it. */

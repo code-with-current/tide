@@ -1,13 +1,4 @@
-/**
- * Per-execute toolCallId context.
- *
- * `buildToolset` wraps each tool's execute in `runWithToolCallId(id, ...)`, so
- * `withPermission` can read the current id via `currentToolCallId()` WITHOUT
- * every tool threading it as an explicit parameter (avoids ~20 mechanical
- * edits). AsyncLocalStorage propagates across `await` (the permission wait),
- * and each parallel execute gets its own context — no race between concurrent
- * tool calls in the same SDK step.
- */
+/** Per-execute toolCallId context via AsyncLocalStorage: buildToolset wraps each execute so withPermission can read the current id without explicit threading; propagates across awaits and gives each parallel execute its own context (no races between concurrent tool calls in the same step). */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const storage = new AsyncLocalStorage<string>();

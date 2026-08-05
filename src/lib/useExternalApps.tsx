@@ -1,16 +1,4 @@
-/**
- * useExternalApps — shared hook for detecting which external apps (Finder/File
- * Explorer, Terminal, VSCode, Zed) are installed and opening a session's
- * project folder in one.
- *
- * Extracted from OpenInAppMenu so the SessionItem "Open with…" context-menu
- * submenu can reuse the same detection + icon rendering + open handler without
- * duplicating the lazy-detect effect and fallback logic.
- *
- * The backend (`detectExternalApps`) caches its result for the process
- * lifetime, so calling this hook from multiple components is cheap — each
- * mount fires one IPC that returns the cached list.
- */
+/** useExternalApps: shared hook detecting installed external apps and opening a session's folder in one. Default target is persisted in localStorage and shared across callers. */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   FolderOpen,
@@ -72,12 +60,7 @@ export interface UseExternalAppsResult {
   renderAppIcon: (app?: ExternalApp, size?: string) => ReactNode;
 }
 
-/**
- * Detect installed external apps once (cached by the backend for the process
- * lifetime) and expose helpers to open a session's folder in one. The default
- * target is persisted in localStorage and shared across all callers, so picking
- * an app anywhere updates the default everywhere.
- */
+/** Detect installed external apps once (backend-cached for process lifetime) and open a session's folder in one; the default target is persisted in localStorage and shared across all callers. */
 export function useExternalApps(): UseExternalAppsResult {
   const [apps, setApps] = useState<ExternalApp[] | null>(null);
   const [loading, setLoading] = useState(false);

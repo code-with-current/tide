@@ -1,23 +1,4 @@
-/**
- * Permission gate — design doc §5.
- *
- * Given a tool's risk tier and the session's autonomy mode, decide whether
- * the tool runs automatically, needs approval, or is blocked outright.
- *
- * Scope note: Tide has NO worktree isolation today (design doc §6 not built).
- * That means write/destructive tools hit the user's real working tree. The
- * autonomy mode IS the consent — the user explicitly picks the mode knowing
- * this. So:
- *
- *   plan  → read tools only (writes blocked outright; the tool set sent to
- *           the model is already filtered, this is defense in depth)
- *   ask   → reads auto, writes/destructive prompt
- *   edit  → reads + writes auto, destructive prompts
- *   full  → everything auto (user opted into full trust)
- *
- * If you want a "asks even in full mode" escape hatch later, add a separate
- * per-session flag — don't overload the autonomy mode.
- */
+/** Permission gate (design doc §5): decide auto/ask/blocked from a tool's risk tier and the session's autonomy mode. With no worktree isolation, the autonomy mode IS the consent: plan=read-only, ask=reads auto + writes/destructive prompt, edit=reads+writes auto + destructive prompt, full=trust all. */
 
 import type { AutonomyMode, RiskTier } from '../../src/types/index';
 

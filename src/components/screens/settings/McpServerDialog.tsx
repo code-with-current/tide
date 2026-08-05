@@ -7,22 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { SectionLabel, FormField } from './ProvidersSection';
 
-/**
- * Add / edit dialog for an MCP server. Two modes:
- *
- *  - Form: structured fields (name, scope, transport, command/args/env or url,
- *    auth). Friendly for first-time setup.
- *  - JSON: raw textarea editing the server config object (the value that would
- *    sit under the server's name in mcp.json). Live-validated, debounced.
- *
- * The two modes are bidirectionally synced through a single source of truth
- * (the form fields). Switching to JSON serializes the form; switching back
- * parses the JSON (and refuses to leave JSON mode while invalid).
- *
- * In edit mode the dialog opens straight to JSON with the existing config
- * pre-filled — that's the safest view for editing an existing entry without
- * losing fields the form doesn't surface.
- */
+/** Add/edit dialog for an MCP server. Two bidirectionally-synced modes: Form (structured fields) and JSON (raw config textarea, live-validated). Edit mode opens to JSON. */
 
 /** A server config (matches the value side of the mcp.json map). */
 export interface McpConfig {
@@ -134,11 +119,7 @@ export function McpServerDialog({
     setMode('json');
   }, [form]);
 
-  /**
-   * Switch json → form: parse JSON into form fields. If the JSON is invalid
-   * (or doesn't look like a server config), we refuse to leave JSON mode so
-   * the user doesn't silently lose data.
-   */
+  /** Switch json → form: parse JSON into form fields. If invalid (or not a server config), refuse to leave JSON mode so the user doesn't silently lose data. */
   const toForm = useCallback(() => {
     const parsed = tryParseConfig(jsonText);
     if (!parsed.ok) {
@@ -732,16 +713,7 @@ function configToJson(form: FormState): string {
   return JSON.stringify(cfg, null, 2);
 }
 
-/** Try to parse a JSON string as a server config.
- *  Handles these shapes:
- *    1. Bare config:    { "type": "http", "url": "..." }
- *    2. Wrapped:        { "server-name": { "type": "http", "url": "..." } }
- *    3. No type field:  { "command": "npx", ... } → inferred as stdio
- *    4. No type field:  { "url": "https://..." } → inferred as http
- *
- *  When wrapped, extracts the inner config AND returns the server name so
- *  the caller can auto-fill the Name field.
- */
+/** Parse JSON as a server config: bare config, wrapped {name: {...}}, or type-inferred from command/url. Returns extractedName when wrapped. */
 function tryParseConfig(text: string):
   | { ok: true; config: McpConfig; extractedName?: string }
   | { ok: false; error: string } {

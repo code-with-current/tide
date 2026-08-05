@@ -28,11 +28,7 @@ export const AnswerBlock = memo(function AnswerBlock({
     ? <div className="border-t border-input my-1" />
     : null;
 
-  // Empty answer — tool-only turn, pre-text phase, or failed turn.
-  // On failure, render nothing (the error block in MainScreen handles it).
-  // Also suppress when there's no text AND no process content (no tools,
-  // no thinking) — that's a failed/empty turn, not a "tool-only" turn.
-  // A real tool-only turn has tool blocks above (hasProcessContent = true).
+  // Empty answer (tool-only turn, pre-text phase, or failed). Suppress failed turns and turns with no text AND no process content (a real tool-only turn has hasProcessContent = true).
   if (!text && !streaming) {
     if (failed || !hasProcessContent) return null;
     return (

@@ -3,17 +3,7 @@ import { HelpCircle, Loader2, MessageCircleReply } from 'lucide-react';
 import type { FollowupMode } from '@/types';
 import { useUi } from '@/lib/stores/ui';
 
-/**
- * Routes ask_followup_question behavior:
- *
- *   Mode 'options'   — popup fires automatically with suggestion chips + input
- *   Mode 'question'  — popup fires with just an input (open-ended)
- *   Mode 'blank'     — shimmer while args stream in
- *
- * When the popup is dismissed (Esc / X button) but the question is NOT
- * resolved (user hasn't submitted an answer), the card stays visible with
- * an "Answer" button that re-opens the popup.
- */
+/** Routes ask_followup_question: 'options' fires popup with chips+input, 'question' fires input-only, 'blank' shimmers while args stream. Dismissed-but-unresolved shows an Answer button. */
 export const FollowupPrompt = memo(function FollowupPrompt({
   mode,
   sessionId,

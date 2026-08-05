@@ -1,19 +1,4 @@
-/**
- * MCP IPC — bridges the MCP management UI to the connection pool + config
- * + secrets modules.
- *
- * Mirrors the extensions.ts pattern: a single `registerMcpHandlers()`
- * entry point that wires ipcMain.handle handlers, plus a status-change
- * broadcast that pushes `tide:mcp:statusChanged` to every BrowserWindow
- * whenever the pool's connection state mutates (so the UI refreshes live
- * as servers connect, fail, or get approved).
- *
- * Config paths resolve per call from `getActiveWorkspace()` — the user
- * config lives in `appDataDir()` (always available) and the
- * project config lives in the active workspace's root (`<root>/.mcp.json`).
- * Handlers that operate on project scope no-op (return without writing)
- * when no workspace is active.
- */
+/** MCP IPC: bridges the management UI to the connection pool, config, and secrets. Broadcasts `tide:mcp:statusChanged` on pool state mutations; project-scoped handlers no-op when no workspace is active. */
 import { ipcMain, app, BrowserWindow } from 'electron';
 import * as path from 'path';
 import {
@@ -47,12 +32,7 @@ const log = createLogger('mcp');
 
 type ActiveWorkspace = { id: string; root: string } | undefined;
 
-/**
- * Resolve the active workspace — tries the live tracker first, then falls
- * back to the config store's lastWorkspaceId. Returns the workspace path
- * so project-scoped MCP configs (.mcp.json) can be written even when the
- * renderer hasn't fired workspaceActivated yet (e.g. user is on Settings).
- */
+/** Resolve the active workspace via the live tracker, falling back to the config store so project-scoped configs resolve even before workspaceActivated fires. */
 function resolveWorkspace(getActiveWorkspace: () => ActiveWorkspace): ActiveWorkspace {
   const live = getActiveWorkspace();
   if (live?.root) return live;
@@ -77,11 +57,7 @@ function projectConfigPath(root: string): string {
   return path.join(root, '.mcp.json');
 }
 
-/**
- * Register MCP IPC handlers. `getActiveWorkspace` is a thunk so the handler
- * always reads the freshest value (main.ts updates an `activeWorkspace`
- * variable on `tide:mcp:workspaceActivated`).
- */
+/** Register MCP IPC handlers. `getActiveWorkspace` is a thunk so each handler reads the freshest value. */
 export function registerMcpHandlers(
   getActiveWorkspace: () => ActiveWorkspace,
 ): void {
@@ -210,10 +186,7 @@ export function registerMcpHandlers(
   );
 
   // ── Re-initialize ALL servers (disconnect + reconnect from config) ──
-  // The MCP "reload" action: tears down every connection and re-runs the
-  // full init (user servers + active workspace's project servers), so newly
-  // added/removed/edited servers and previously-failing ones all get a fresh
-  // connect attempt. Fire-and-forget; the UI updates off statusChanged.
+  // MCP "reload": tears down every connection and re-runs full init (user + active workspace's project servers) so newly added/removed/edited and previously-failing servers all get a fresh connect attempt. Fire-and-forget; UI updates off statusChanged.
   ipcMain.handle('tide:mcp:reinitialize', () => {
     const ws = resolveWorkspace(getActiveWorkspace);
     reinitializeAll(ws ?? undefined).catch((e) =>
@@ -267,12 +240,7 @@ export function registerMcpHandlers(
             : null;
       if (!filePath) return { ok: false, error: 'No active workspace for project scope' };
 
-      // Write config + approve synchronously for all servers, then fire
-      // connections in the BACKGROUND. The IPC returns immediately so the
-      // dialog can close — connections resolve asynchronously and the UI
-      // updates via the statusChanged broadcast. Previously, `await loadServer`
-      // blocked the IPC on each server's connection attempt, which could hang
-      // forever if a server was unreachable (no timeout on client.connect).
+      // Write config + approve synchronously for all servers, then fire connections in the BACKGROUND. IPC returns immediately so the dialog can close; connections resolve async and the UI updates via statusChanged. (Previously `await loadServer` blocked the IPC per server and could hang forever — no timeout on client.connect.)
       for (const { name, config } of servers) {
         addServer(filePath, name, config);
         // Auto-approve removed — servers connect immediately.

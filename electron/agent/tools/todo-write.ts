@@ -1,14 +1,4 @@
-/**
- * todo_write tool — let the model maintain its own todo list.
- *
- * The model calls this to plan multi-step work: it writes a structured list
- * of todos with status, and the UI renders them as a floating progress card.
- * Each subsequent call replaces the list wholesale (same as Claude Code's
- * TodoWrite).
- *
- * Persists per session in memory. Broadcasts an event on every change so the
- * renderer's floating panel updates live.
- */
+/** todo_write tool: let the model maintain a per-session todo list (replaces wholesale on each call, like Claude Code's TodoWrite); broadcasts a live-update event so the renderer's floating panel re-renders. */
 
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -30,11 +20,7 @@ type TodoListener = (payload: { sessionId: string; todos: TodoItem[] }) => void;
 /** In-memory store keyed by session id — the current todo list per session. */
 const sessionTodos = new Map<string, TodoItem[]>();
 
-/**
- * Minimal event bus — replaces Node's EventEmitter to avoid Vite's
- * browser-external mangling of the 'events' module in the electron bundle.
- * Only what we need: subscribe, unsubscribe, emit.
- */
+/** Minimal event bus — replaces Node's EventEmitter to avoid Vite's browser-external mangling of the 'events' module in the electron bundle. subscribe/unsubscribe/emit only. */
 class TodoBus {
   private listeners = new Set<TodoListener>();
   on(fn: TodoListener): void {

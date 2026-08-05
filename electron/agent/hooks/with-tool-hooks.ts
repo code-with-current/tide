@@ -1,34 +1,10 @@
-/**
- * withToolHooks — higher-order wrapper that adds PreToolUse/PostToolUse hooks
- * to any SDK tool.
- *
- * Applied in `buildToolset` (registry.ts) AFTER each factory creates its tool.
- * The wrapper intercepts the tool's `execute` function, runs hooks before/after,
- * and handles deny/block/modify results.
- *
- * Hook execution order around a tool call:
- *
- *   1. PreToolUse hooks (can deny, modify input, inject context)
- *   2. Permission check (the tool's own withPermission)
- *   3. Tool execution
- *   4. PostToolUse hooks (can modify output, inject context, block)
- *
- * If no hooks are configured, the wrapper is a pass-through (zero overhead).
- */
+/** withToolHooks: higher-order wrapper (applied in buildToolset) that intercepts a tool's `execute` to run PreToolUse hooks, then the tool+permission, then PostToolUse hooks. Pass-through (zero overhead) when no hooks are configured. */
 import type { CoreTool } from 'ai';
 import { runPreToolUseHooks, runPostToolUseHooks } from './tool-hooks.js';
 import type { HookConfig } from './hook-config.js';
 import type { ToolResult } from '../tools/types.js';
 
-/**
- * Wrap an SDK tool's execute function with hook support.
- *
- * @param toolName   The tool's name (for hook matching).
- * @param sdkTool    The tool object from the factory ({ description, inputSchema, execute }).
- * @param config     Hook config (null = no hooks, pass-through).
- * @param workspaceRoot  The workspace root for hook cwd.
- * @returns          A new tool object with execute wrapped.
- */
+/** Wrap an SDK tool's execute with hook support; pass through unchanged when config is null or empty. */
 export function withToolHooks<T extends CoreTool>(
   toolName: string,
   sdkTool: T,

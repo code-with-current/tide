@@ -50,14 +50,7 @@ const TEMPLATE_LOGOS: Partial<Record<TemplateId, string>> = {
   nuxt: nuxtLogo,
 };
 
-/**
- * Phases:
- *   choice     — initial picker: Existing Project / New Project / From Template
- *   form       — Existing Project flow (the original local/remote form)
- *   newProject — New Project flow (name + parent folder → mkdir + git init)
- *   template   — From Template flow (name + parent + template grid → scaffold)
- *   creating / indexing / done / error — shared progress states
- */
+/** Dialog phases: choice → form/newProject/template → creating → indexing → done/error. */
 type Phase = 'choice' | 'form' | 'newProject' | 'template' | 'creating' | 'indexing' | 'done' | 'error';
 
 /** The four creation steps shown as a checklist during creating→done. Order
@@ -98,11 +91,7 @@ export function AddWorkspaceDialog() {
   const [phase, setPhase] = useState<Phase>('choice');
   const [phaseError, setPhaseError] = useState<string | null>(null);
 
-  // Per-step progress during creating→indexing→done. Each entry is one of
-  // the four creation phases the user sees as a checklist. Tracked here
-  // (rather than derived from `phase`) so the checklist can show ✓ on
-  // completed steps while a later step is in flight — e.g. folder + template
-  // + git all ✓ while RAG spins.
+  // Per-step progress (creating→indexing→done). Tracked separately from `phase` so the checklist can show ✓ on completed steps while a later step is in flight (e.g. folder + template + git all ✓ while RAG spins).
   const [steps, setSteps] = useState<Record<StepId, StepStatus>>({
     folder: 'pending', template: 'pending', git: 'pending', rag: 'pending',
   });
@@ -155,11 +144,7 @@ export function AddWorkspaceDialog() {
     return () => clearTimeout(timer);
   }, [localPath, source]);
 
-  /** Open the OS folder picker and write the chosen path into the targeted
-   *  field. `target` names the destination state explicitly so a Browse button
-   *  never silently updates the wrong input — the prior bug had New Project
-   *  and Template phases browsing into `cloneDir` (the Existing-flow field)
-   *  while their inputs read `newParent`, so the pick looked like a no-op. */
+  /** Open the OS folder picker and write the chosen path into the named target field. `target` is explicit so a Browse button never silently updates the wrong input (prior bug: New Project/Template phases browsed into `cloneDir` while their inputs read `newParent`, making the pick look like a no-op). */
   const handleBrowse = (target: 'localPath' | 'cloneDir' | 'newParent') => {
     api.pickDirectory().then((picked) => {
       if (!picked) return;
@@ -232,16 +217,7 @@ export function AddWorkspaceDialog() {
     await createWorkspace(synthesized, undefined, templateId);
   };
 
-  /** Shared workspace-creation path used by all three flows. Handles the
-   *  optional template scaffold (passed straight through to addWorkspace) +
-   *  RAG indexing + entering the workspace.
-   *
-   *  Step tracking: folder/template/git all run server-side inside the single
-   *  addWorkspace IPC, so from the renderer they complete together when the
-   *  call resolves. We mark folder active when the call starts, then flip
-   *  folder/template/git to done in sequence on resolve (they're already done
-   *  server-side; the staggered flip is just visual continuity). RAG is its
-   *  own multi-second step with real polling. */
+  /** Shared workspace-creation path for all three flows: handles template scaffold, RAG indexing, and step-checklist tracking. */
   const createWorkspace = async (
     path: string,
     repository: string | undefined,
@@ -343,11 +319,7 @@ export function AddWorkspaceDialog() {
     // — no auto-dismiss, so the user controls when to leave and can verify
     // every step turned green (or skipped) first.
     setActive(ws.id);
-    // A brand-new workspace has no sessions yet, so hide the sessions panel
-    // (nothing to list) and the right panel (no active session to inspect).
-    // The user lands on a clean new-session screen; both panels reopen
-    // automatically once they send the first message (MainScreen's
-    // has-sessions effect restores them).
+    // A brand-new workspace has no sessions yet: hide the sessions panel (nothing to list) and the right panel (no active session). Both reopen automatically once the first message is sent (MainScreen's has-sessions effect).
     useUi.getState().setSessionsPanel(false);
     useUi.getState().setRightPanel(false);
     setPhase('done');

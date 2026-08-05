@@ -1,16 +1,4 @@
-/**
- * exit_plan_mode tool — signal that planning is done and ready for review.
- *
- * When autonomyMode === 'plan', the model is restricted to read-only tools
- * and should produce a plan, not execute. It calls this tool to mark the
- * plan complete and present it for user approval. The renderer can render
- * an approval prompt; if approved, the user can switch to 'ask'/'edit' mode
- * and re-run with the plan as context.
- *
- * For now, this tool just returns the plan as text — the approval gate is
- * manual (user reads the plan, switches mode, sends "go"). Wire the IPC
- * approval flow later.
- */
+/** exit_plan_mode tool: in plan mode (read-only), the model calls this to mark the plan complete and present it for user approval. Currently returns the plan as text (the user manually switches mode + sends "go"); IPC approval flow to be wired later. */
 
 import { tool } from 'ai';
 import { z } from 'zod';

@@ -1,10 +1,4 @@
-/**
- * MCP connection pool — module-scoped singleton owning all server connections.
- *
- * Hybrid lifecycle:
- *   - User servers (~/.tide/mcp.json): app-lifetime
- *   - Project servers (.mcp.json): workspace-lifetime
- */
+/** MCP connection pool — module-scoped singleton owning all server connections. User servers are app-lifetime; project servers are workspace-lifetime. */
 import { app } from 'electron';
 import * as path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -79,12 +73,7 @@ export async function initUserServers(): Promise<void> {
   notifyStatusChange();
 }
 
-/**
- * Initialize built-in MCP servers. Called once at app boot alongside
- * initUserServers(). Built-ins skip the approval gate (they're trusted) —
- * they're either connected (if enabled) or stubbed as disconnected (if
- * disabled in the extensions store). Default is disabled.
- */
+/** Initialize built-in MCP servers at app boot. Built-ins skip the approval gate: connected if enabled, stubbed disconnected if disabled (default). */
 export async function initBuiltinServers(): Promise<void> {
   log.info('init builtin servers', { count: Object.keys(BUILTIN_MCP_SERVERS).length });
   for (const [name, entry] of Object.entries(BUILTIN_MCP_SERVERS)) {
@@ -192,12 +181,7 @@ async function connectServer(
 
     if (transportType === 'stdio') {
       // ── Platform-aware shell resolution ──────────────────────────────
-      // macOS/Linux GUI apps inherit a minimal PATH. Version managers
-      // (nvm, fnm, asdf, mise) inject their paths via shell init scripts
-      // (~/.zshrc, ~/.bashrc). Spawning through the user's login shell
-      // resolves these — no hardcoded PATH list needed.
-      //
-      // Windows: cmd.exe /c respects system + user PATH (nvm-windows, nvs).
+      // macOS/Linux GUI apps inherit a minimal PATH; spawning through the user's login shell resolves version-manager (nvm/fnm/asdf/mise) paths. Windows cmd.exe /c respects system+user PATH.
       const stdioEnv = { ...process.env, ...resolvedEnv } as Record<string, string>;
       const rawArgs = resolvedArgs ?? config.args ?? [];
       const fullCommand = `${config.command!} ${rawArgs.join(' ')}`;
@@ -367,14 +351,7 @@ async function disconnectConnection(conn: McpConnection): Promise<void> {
   }
 }
 
-/**
- * Turn a connect/auth failure into a clear, actionable error message.
- *
- * The MCP SDK's auth() surfaces low-level HTTP failures as opaque strings
- * (e.g. "HTTP 403: Invalid OAuth error response: ... Raw body: Forbidden").
- * Detect the common, meaningful cases and reword them so the user
- * understands the cause instead of seeing SDK internals.
- */
+/** Turn a connect/auth failure into an actionable message — rewording the SDK's opaque error strings (e.g. 403/no-DCR/PKCE cases) so the user understands the cause. */
 function explainConnectError(e: any, name: string): string {
   const raw: string = e?.message ?? String(e);
 
@@ -427,17 +404,7 @@ export async function disconnectAll(): Promise<void> {
   }
 }
 
-/**
- * Re-initialize ALL MCP servers — disconnect everything and reconnect from
- * the config files (user ~/.tide/mcp.json + the active workspace's
- * .mcp.json). This is the "reload" action for the MCP settings panel: it
- * picks up newly-added/removed/edited servers and re-runs every connection,
- * so a server that was failing (stale, misconfigured, or just added outside
- * the app) gets a fresh connect attempt.
- *
- * Reuses initUserServers() / activateWorkspace() so the reconnect path is
- * identical to app startup / workspace switch — no divergent logic.
- */
+/** Re-initialize ALL MCP servers from config files (the MCP panel "reload" action): picks up added/removed/edited servers and re-runs every connection, reusing initUserServers()/activateWorkspace() so the path matches startup. */
 export async function reinitializeAll(
   activeWorkspace?: { id: string; root: string },
 ): Promise<void> {
@@ -604,14 +571,7 @@ export async function retryServer(
   await connectServer(name, config, scope, workspaceId);
 }
 
-/**
- * Re-fetch the tool list from a connected MCP server. Some MCP servers
- * (e.g. vue-mcp's set_framework_preferences) dynamically add/remove tools
- * at runtime. Calling this after such a tool execution makes the new tools
- * available to the orchestrator on the next step.
- *
- * Returns the updated tool count, or -1 if the server isn't connected.
- */
+/** Re-fetch the tool list from a connected MCP server (some servers add/remove tools at runtime). Returns the updated tool count, or -1 if not connected. */
 export async function refreshServerTools(
   serverName: string,
   workspaceId?: string,
@@ -646,16 +606,7 @@ export async function refreshServerTools(
   return -1;
 }
 
-/**
- * User-initiated OAuth sign-in: opens the browser at the authorization URL the
- * deferred flow stashed, then the `tide://oauth/callback` round-trip completes
- * the token exchange inside the SDK. After the browser opens, we re-run
- * connectServer — which now has stored tokens (once the user authorizes) and
- * will connect, or will return to needs_oauth if the user cancels.
- *
- * MUST be triggered by an explicit user action (the "Authenticate" button) —
- * never during init/reload, per the product requirement.
- */
+/** User-initiated OAuth sign-in: opens the browser at the stashed authorization URL, then the `tide://oauth/callback` round-trip completes the exchange. MUST be triggered by the "Authenticate" button — never during init/reload. */
 export async function authenticateServer(
   name: string,
   scope: 'user' | 'project',
@@ -675,11 +626,7 @@ export async function authenticateServer(
     const { shell } = await import('electron');
     log.info('opening browser for oauth (user-initiated)', { server: name, url: url.origin });
     await shell.openExternal(url.toString());
-    // Mark connecting while the user completes sign-in in the browser.
-    // Do NOT re-run connectServer here — the ORIGINAL transport from init is
-    // still alive and waiting; the OAuth callback will call finishAuth(code)
-    // on it via completeOAuthCallback(). Creating a fresh transport would
-    // orphan the in-flight PKCE verifier.
+    // Mark connecting while the user completes sign-in. Do NOT re-run connectServer — the original transport is still alive waiting for the OAuth callback (finishAuth via completeOAuthCallback); a fresh transport would orphan the in-flight PKCE verifier.
     conn.status = 'connecting';
     conn.error = undefined;
     notifyStatusChange();
@@ -691,18 +638,7 @@ export async function authenticateServer(
   }
 }
 
-/**
- * Complete the OAuth flow from the `tide://oauth/callback` redirect.
- *
- * The SDK transport that started the flow is still alive (kept on the
- * connection); call its `finishAuth(code)` to exchange the authorization
- * code for tokens, then reconnect. This MUST run on the ORIGINAL transport —
- * a fresh one can't complete the exchange (no PKCE verifier / discovery state).
- *
- * `state` is currently unused for routing (the SDK doesn't always set it),
- * but accepted for forward-compat. We match the flow to the single server
- * that's `needs_oauth` / connecting with a pending auth.
- */
+/** Complete the OAuth flow from the `tide://oauth/callback` redirect: call finishAuth(code) on the ORIGINAL transport (kept on the connection — a fresh one lacks the PKCE verifier), then reconnect. */
 export async function completeOAuthCallback(code: string, _state?: string): Promise<void> {
   if (!code) {
     log.warn('oauth callback: no code');
@@ -751,11 +687,7 @@ export async function completeOAuthCallback(code: string, _state?: string): Prom
   }
 }
 
-/**
- * Connect a server that was previously in needs_approval state.
- * With the approval gate removed, this is now just a direct connect —
- * kept for API back-compat with the IPC layer.
- */
+/** Connect a server previously in needs_approval state. Approval gate is removed — now a direct connect, kept for IPC back-compat. */
 export async function approveAndConnect(
   name: string,
   scope: 'user' | 'project' | 'builtin',
@@ -771,12 +703,7 @@ export async function approveAndConnect(
   if (conn) await connectServer(name, conn.config, scope, workspaceId);
 }
 
-/**
- * Load a newly-added (or updated) server into the pool.
- * Called by the IPC add/update handlers after writing the config file.
- * If the server is approved, connects immediately; otherwise marks
- * needs_approval so it shows up in the UI.
- */
+/** Load a newly-added (or updated) server into the pool. Called by IPC add/update handlers after the config write; all servers auto-connect (no approval gate). */
 export async function loadServer(
   name: string,
   config: McpServerConfig,
@@ -826,12 +753,7 @@ export async function unloadServer(
   }
 }
 
-/**
- * Disconnect a server but KEEP it in the pool with a 'disconnected' status.
- * Used when the user toggles a server OFF — the entry stays visible in the
- * UI (greyed out) so the user can toggle it back on. Contrast with
- * unloadServer which fully removes the entry.
- */
+/** Disconnect a server but KEEP it in the pool (greyed out) so the user can toggle it back on — contrast with unloadServer which fully removes the entry. */
 export async function disableServer(
   name: string,
   scope: 'user' | 'project' | 'builtin',

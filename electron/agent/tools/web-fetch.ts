@@ -1,10 +1,4 @@
-/**
- * web_fetch tool — fetch a URL and return its text content.
- *
- * Strips HTML to readable text (basic tag removal — not a full readability
- * extractor). Caps response size to keep token cost bounded. Lets the model
- * pull in docs, API references, or any web resource.
- */
+/** web_fetch tool: fetch a URL and return its text content (basic HTML tag-stripping, not a full readability extractor); caps response size to bound token cost. */
 
 import { tool } from 'ai';
 import { z } from 'zod';

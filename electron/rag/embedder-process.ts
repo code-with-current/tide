@@ -1,13 +1,4 @@
-/**
- * Local ONNX embedder — child side. Runs inside a utilityProcess spawned
- * by local-onnx-embedder.ts (the parent). The pure handleMessage function
- * is unit-testable without a real process; the port wiring at the bottom
- * of the file is the thin shell that the process actually runs.
- *
- * Model: isuruwijesiri/all-MiniLM-L6-v2-code-search-512 (code-tuned fine-
- * tune of all-MiniLM-L6-v2, 512-token context, 22MB quantized ONNX).
- * Bundled inside the app at electron/rag/models/.
- */
+/** Local ONNX embedder — child side, runs in a utilityProcess spawned by local-onnx-embedder.ts. Pure handleMessage is unit-testable; the bottom of the file is the thin process shell. Model: all-MiniLM-L6-v2-code-search-512 (22MB quantized ONNX). */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,12 +25,7 @@ async function getExtractor(): Promise<Extractor> {
   if (!pipelinePromise) {
     const { pipeline, env } = await import('@xenova/transformers');
 
-    // ── Model location ─────────────────────────────────────────────
-    // The model is no longer bundled in production builds — it's lazy-
-    // downloaded from HuggingFace on first RAG enable (see model-downloader.ts)
-    // into userData/models/, which the parent passes via TIDE_MODELS_DIR.
-    // In dev, the source copy at electron/rag/models/ is used directly
-    // (staged to dist-electron/models/ by copy-tree-sitter-grammars.mjs).
+    // ── Model location: lazy-downloaded to userData/models/ (TIDE_MODELS_DIR) in prod; dev uses the bundled copy at electron/rag/models/.
     const BUNDLED_DIR = path.join(__dirname, 'models');
     const hasBundled = fs.existsSync(
       path.join(BUNDLED_DIR, MODEL_ID, 'onnx', 'model_quantized.onnx'),
@@ -76,11 +62,7 @@ export type EmbedResult = { type: 'result'; id: string; vectors: number[][] };
 export type EmbedError = { type: 'error'; id: string; message: string };
 export type EmbedResponse = EmbedResult | EmbedError;
 
-/**
- * Pure handler — the test surface. Loads the pipeline lazily, embeds each
- * text with mean pooling + L2 normalize (matching the model card's JS
- * quick-start), converts Float32Array → number[].
- */
+/** Pure handler (test surface). Loads the pipeline lazily, embeds each text with mean pooling + L2 normalize (matching the model card's JS quick-start), converts Float32Array → number[]. */
 export async function handleMessage(req: EmbedRequest): Promise<EmbedResponse> {
   try {
     const extractor = await getExtractor();

@@ -1,16 +1,4 @@
-/**
- * load_skill tool — read and "execute" a skill by loading its SKILL.md.
- *
- * Purpose-built for skill invocation (vs. generic read_file). When the user
- * types `/skill-name`, the composer injects a directive telling the model to
- * call this tool with the skill's absolute path. The tool reads the file
- * (through read_file's logic + the skill-root allowlist), returns the full
- * body as instructions the model must follow, and surfaces a skill-specific
- * display card.
- *
- * "Execute" here = load the instructions so the model follows them. Skills in
- * Tide are prompt-based (SKILL.md), not executable code.
- */
+/** load_skill tool: reads a skill's SKILL.md (via read_file + skill-root allowlist) and returns the body as instructions to follow; "execute" = load the prompt-based skill, not run code. Triggered by `/skill-name`. */
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ToolResult, ToolRegistration } from './types';
@@ -20,11 +8,7 @@ import { runReadFile } from './read-file';
 
 const DEFAULT_MAX_LINES = 2000;
 
-/**
- * Shared body — reads the SKILL.md at the given path (absolute; may live
- * outside the workspace under ~/.claude/skills, which read_file's skill-root
- * exception allows). Extracts the skill name from the YAML frontmatter.
- */
+/** Shared body — reads the SKILL.md at the given absolute path (may live outside the workspace under ~/.claude/skills, which read_file's skill-root exception allows) and extracts the skill name from YAML frontmatter. */
 export async function runLoadSkill(
   skillPath: string,
   workspaceRoot: string,

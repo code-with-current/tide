@@ -1,12 +1,4 @@
-/**
- * Per-turn context bound into every tool factory via closure. The SDK's
- * execute only receives { messages, toolCallId, abortSignal } — anything
- * Tide-specific rides through here.
- *
- * Mutable fields (autonomyMode, compactionSettings) may change mid-turn
- * after permission escalation or settings edits. Tools that read these
- * should do so at execution time, not at factory-build time.
- */
+/** Per-turn context bound into every tool factory via closure (the SDK's execute only gets {messages, toolCallId, abortSignal}; everything Tide-specific rides through here). Mutable fields (autonomyMode, compactionSettings) may change mid-turn — read at execution time, not factory-build time. */
 
 import type { Provider, Usage, AutonomyMode } from '../../../src/types';
 import type { CompactionSettings } from '../../../src/types/compaction';

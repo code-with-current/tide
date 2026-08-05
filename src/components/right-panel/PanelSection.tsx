@@ -2,22 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/**
- * VSCode-style collapsible section — shared across Inspector, File Explorer,
- * and Source Control panels. Consistent header: chevron + uppercase label +
- * optional badge/count. Border-bottom divider. Click to toggle.
- *
- * The optional `action` slot renders a control (e.g. the Memory section's
- * Re-Index button, the Git section's Changes button) inline at the right of
- * the header, as a sibling of the collapse toggle. This keeps the section
- * collapsible while exposing a per-section action without a second row.
- *
- * When `action` is provided, the header becomes a flex container holding two
- * siblings: the toggle button (chevron + title + badge) and the action. The
- * toggle is a real <button> so keyboard users can still collapse the section;
- * the action is its own interactive element. (HTML forbids nesting buttons,
- * which is why the header is a div + two buttons rather than one button.)
- */
+/** VSCode-style collapsible section (chevron + label + optional badge + optional header action). HTML-safe div+button structure when action is set. */
 export function PanelSection({
   title,
   badge,

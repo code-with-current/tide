@@ -11,21 +11,7 @@ import * as api from '@/lib/api/client';
 import type { PermissionStatus, PermissionType } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
-/**
- * macOS Permissions consent screen.
- *
- * Shown after splash/onboarding when `shouldShowConsent()` is true — i.e. on
- * macOS with at least one of Accessibility / Full Disk Access not yet
- * authorized. Skips entirely on non-mac or when everything is already granted
- * (the splash/onboarding routing checks `shouldShowConsent` and routes
- * straight to main otherwise).
- *
- * Not a hard gate: "Continue" is always enabled. The OS can't grant these
- * programmatically — each row's button opens System Settings to the relevant
- * pane; the user toggles manually. The screen re-checks status on window
- * focus (when the user returns from System Settings) and auto-advances once
- * everything is authorized.
- */
+/** macOS Permissions consent screen. Shown when Accessibility / Full Disk Access isn't granted; not a hard gate — opens System Settings and re-checks on focus. */
 export function ConsentScreen() {
   const setScreen = useUi((s) => s.setScreen);
   const [status, setStatus] = useState<PermissionStatus | null>(null);

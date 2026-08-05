@@ -2,13 +2,7 @@ import { FileText } from 'lucide-react';
 import type { OpenFile } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
 
-/**
- * Right-panel "file viewer" — shows a mocked current-state file with line
- * numbers and changed lines highlighted. In production this would read the
- * actual file from the worktree and run it through a syntax highlighter
- * (Shiki). For now the content is keyed by path so each opened file has
- * believable content.
- */
+/** Right-panel "file viewer": mocked current-state file with line numbers + changed-line highlights. (Production would read the actual worktree file through Shiki; content is path-keyed for now so each opened file has believable content.) */
 export function FileViewerTab({ file }: { file: OpenFile }) {
   const content = FILE_CONTENT[file.path] ?? FALLBACK(file.path);
   const changedSet = new Set(file.changedLines ?? []);
@@ -76,11 +70,7 @@ const FILE_CONTENT: Record<string, string> = {
   error?: string;
 }
 
-/**
- * Parse user input from the form.
- * Empty strings are now a valid case (returns ok + empty value)
- * instead of throwing — see parser.test.ts.
- */
+/** Parse user input from the form. Empty strings are valid (returns ok + empty value) instead of throwing — see parser.test.ts. */
 export function parseInput(input: string): ParseResult {
   if (typeof input !== "string") {
     return { ok: false, value: "", error: "Input must be a string" };

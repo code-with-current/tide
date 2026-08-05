@@ -1,12 +1,4 @@
-/**
- * RAG IPC — handlers + event channel backing the Memory & RAG panel.
- *   tide:rag:status            read-only snapshot
- *   tide:rag:downloadModel     download embedding model from HuggingFace (lazy)
- *   tide:rag:enableWorkspace   download-if-needed + add to enabled list
- *   tide:rag:disableWorkspace  remove from enabled list
- *   tide:rag:initWorkspace     ingestion pipeline (background)
- * Events: tide:rag:initProgress, tide:rag:downloadProgress
- */
+/** RAG IPC for the Memory & RAG panel: status / downloadModel / enableWorkspace / disableWorkspace / initWorkspace handlers, plus the tide:rag:initProgress and tide:rag:downloadProgress event channels. */
 import { ipcMain, BrowserWindow, app } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

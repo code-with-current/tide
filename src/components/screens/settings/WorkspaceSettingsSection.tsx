@@ -286,12 +286,7 @@ export function WorkspaceSettingsSection() {
 }
 
 // =============================================================
-// SIDEBAR ROW — one workspace in the list, with a right-click
-// context menu mirroring the sidebar's actions (Archive / Unarchive
-// / Delete). Rename selects the workspace so its Name field in the
-// detail column (WorkspaceColumn) gets focus — avoids a second
-// inline-rename flow here. Hooks live in this child component so they
-// can be called once per row without violating rules-of-hooks.
+// SIDEBAR ROW — one workspace in the list with right-click context menu (Archive / Unarchive / Delete). Rename selects the workspace; hooks live here per row.
 // =============================================================
 
 function WorkspaceListRow({

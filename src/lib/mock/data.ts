@@ -1,13 +1,4 @@
-/**
- * In-memory mock data store.
- *
- * This is the seed dataset for the mock API in `../api/client.ts`.
- * Visually matches the HTML mockup (`../../mockup.html`) so the React
- * app and the static mockup are interchangeable references.
- *
- * In Electron: this entire file is replaced by IPC calls — nothing in
- * components changes.
- */
+/** In-memory mock data store — seed dataset for the mock API in ../api/client.ts, visually matching mockup.html. Replaced entirely by IPC calls in Electron; components don't change. */
 
 import type {
   FileNode,

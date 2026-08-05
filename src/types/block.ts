@@ -1,14 +1,4 @@
-/**
- * Block — the atomic unit of a turn's rendered output. A turn is an
- * ordered list of blocks; array order is emission order.
- *
- * Every block has a stable `id` (assigned by the orchestrator at event
- * emission time) used as the React key. The id never changes after
- * creation. This is what lets the reducer update one block without
- * busting the memoization of its siblings.
- *
- * See `docs/superpowers/specs/2026-07-20-block-stream-ui-design.md`.
- */
+/** Block — atomic unit of a turn's rendered output (a turn is an ordered list of blocks). Each block has a stable id (assigned at emission, used as the React key, never mutates) so the reducer can update one block without busting siblings' memoization. See block-stream-ui-design.md. */
 
 import type {
   FollowupMode,

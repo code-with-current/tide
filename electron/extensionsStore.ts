@@ -1,12 +1,4 @@
-/**
- * Extensions config store — persistence for the Extensions management UI.
- *
- * Holds a `disabled` allowlist: items NOT in the list are enabled by default.
- * New skills/agents appearing on disk → ON by default. Mirrors the
- * settingsStore pattern (factory, lazy cache, best-effort write).
- *
- * File: `<userData>/extensions.json` (i.e. ~/.tide/extensions.json)
- */
+/** Extensions config store (~/.tide/extensions.json) for the Extensions UI: holds a `disabled` allowlist so items NOT listed are enabled by default (new skills/agents → ON). Mirrors the settingsStore pattern (factory, lazy cache, best-effort write). */
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from './logger.js';
@@ -27,12 +19,7 @@ export interface ExtensionsFile {
 
 const EMPTY: ExtensionsConfig = { agents: [], skills: [], mcp: [] };
 
-/**
- * Built-in MCP servers that are disabled by default. Seeded into the disabled
- * list ONLY on first run (when extensions.json doesn't exist yet). After that,
- * the user's choices are respected — if they toggle a server on (removing it
- * from the disabled list), it stays on across restarts.
- */
+/** Built-in MCP servers disabled by default; seeded into the disabled list ONLY on first run, after which the user's choices are respected across restarts. */
 const DEFAULT_DISABLED_MCP = ['tide-filesystem'];
 
 /** Build the initial config for first run — seeds default-disabled builtins. */

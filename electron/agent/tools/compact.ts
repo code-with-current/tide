@@ -1,11 +1,4 @@
-/**
- * compact tool — DEPRECATED stub (Phase 2 Task 2.21).
- *
- * Compaction becomes a system-level concern in Phase 6 (orchestrator-driven,
- * not model-invoked). This factory is a placeholder so the SDK toolset stays
- * complete during the migration; Phase 3 Task 3.6 deletes it (and its
- * registry/ToolName entries) entirely.
- */
+/** compact tool — DEPRECATED stub (Phase 2 Task 2.21): placeholder keeping the SDK toolset complete during migration; compaction becomes orchestrator-driven (not model-invoked) and Phase 3 Task 3.6 deletes this + its registry entries entirely. */
 
 import { tool } from 'ai';
 import { z } from 'zod';

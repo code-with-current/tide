@@ -46,28 +46,7 @@ const kindColor: Record<MentionKind, string> = {
   mcp: 'text-reasoning bg-reasoning/10 p-2 rounded-md',
 };
 
-/**
- * The `@` mention button for the left vertical toolbar. Opens a popover
- * with four tabs (Agents / Skills / Context / MCP), filterable.
- *
- * Sources:
- *   - Agents: built-in registry (tide:listAgents) + project .claude/agents/*
- *   - Skills: project .claude/skills/*
- *   - Context: root CLAUDE.md / AGENT.md
- *   - MCP: mocked (until dynamic server loader ships)
- *
- * Project-defined entries carry their file content; on pick, the composer
- * prepends that content as guidance to the user's message so the model
- * applies the skill / agent / context instructions to the task.
- */
-/**
- * Build the mention catalog (built-in agents + project + user entries) for
- * the active workspace. Shared between the `/` toolbar button picker and
- * the typing-triggered slash picker so they stay in sync.
- *
- * Fetches lazily on first open or workspace change. Returns a flat
- * `Mention[]` ready to filter/render.
- */
+/** Build the mention catalog (built-in agents + project + user entries) for the active workspace; shared between the `/` toolbar picker and the inline slash picker. Fetches lazily; returns a flat Mention[]. */
 export function useMentionCatalog(activeWorkspaceId: string | null): Mention[] {
   const [agents, setAgents] = useState<Mention[]>([]);
   const [projectEntries, setProjectEntries] = useState<{

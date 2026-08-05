@@ -6,17 +6,8 @@ import { useUi, type OpenFile } from '@/lib/stores/ui';
 import { TurnBlock, langFromPath } from './TurnBlock';
 
 // ============================================================
-// Chat message — entry point.
-//
-// User messages render the right-aligned bubble. Assistant messages
-// delegate to <TurnBlock>, the block-stream structured turn renderer.
-//
-// DISPLAY FORMAT (matches the composer):
-//   - Attachments & @file mentions → markdown links `[/label/](path)`
-//     stored in content. Rendered as chips ABOVE the text row.
-//   - Skill/agent mentions `/name` → plain inline text chips.
-// Because links live in content (which is always persisted), chips
-// survive reload — closing the long-standing attachment-persistence gap.
+// Chat message — entry point. User messages render the right-aligned bubble; assistant messages delegate to <TurnBlock>.
+// Display format matches the composer: attachments & @file mentions → `[/label/](path)` links in content (rendered as chips above text); skill/agent `/name` → inline text chips. Links live in persisted content, so chips survive reload.
 // ============================================================
 
 /** Markdown link shape: `[/label/](target)`. Both attachment and @file
@@ -32,11 +23,7 @@ interface RefLink {
  *  Kept in sync with the viewer's IMG_EXT_MIME in handlers.ts. */
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico']);
 
-/** Split content into (chips, body). Chips are the leading run of
- *  `[/label/](target)` links (attachments are prepended by the composer,
- *  so they cluster at the start); the body is the remaining text with
- *  the link syntax stripped. Links that appear inline mid-message are
- *  also stripped from the body and surfaced as chips — order preserved. */
+/** Split content into (chips, body): chips = leading `[/label/](target)` links (attachments cluster at start); body = remaining text with link syntax stripped. Inline mid-message links are also stripped and surfaced as chips (order preserved). */
 function parseRefLinks(content: string): { chips: RefLink[]; body: string } {
   const chips: RefLink[] = [];
   // Match [/label/](target). Label permits any non-']' chars; target any
@@ -66,18 +53,7 @@ function refIcon(target: string, label: string) {
   return <FileText className="size-3 shrink-0" />;
 }
 
-/**
- * Render the user message body with `/name` skill/agent chips inline.
- * File-reference links have already been lifted to chips by
- * parseRefLinks; this only handles the bare `/name` tokens (kept inline
- * so the skill's position in the sentence is preserved).
- *
- * Splits on `/{word}` patterns, skipping URL-embedded slashes (preceded
- * by `:` like `https://`). Each chip gets a subtle background + rounded
- * border so it stands out from plain text. Only known mentions (from
- * message.mentions metadata) render as chips; unknown `/words` (like
- * path segments in `server/api/index.ts`) render as plain text.
- */
+/** Render the user message body with `/name` skill/agent chips inline. File-reference links have already been lifted to chips by parseRefLinks; this only handles the bare `/name` tokens (kept inline so the skill's position in the sentence is preserved). Splits on `/{word}` patterns, skipping URL-embedded slashes (preceded by `:` like `https://`). Only known mentions (from message.mentions metadata) render as chips; unknown `/words` (like path segments in `server/api/index.ts`) render as plain text. */
 function renderUserBody(content: string, mentions?: Message['mentions']): ReactNode[] {
   // Build lookup map for skill/agent chips. Context (file) mentions are
   // now handled as links above the text, so they're excluded here.
@@ -149,15 +125,7 @@ function ChatMessageImpl({
     // text. The remaining body keeps /skill mentions inline.
     const { chips, body } = useMemo(() => parseRefLinks(message.content), [message.content]);
 
-    /** Open a chip's file in the side viewer. Discriminator:
-     *  - Absolute path target (starts with /, ~, or a drive letter) → an
-     *    external attachment. The viewer reads it via readExternalFile/
-     *    readImageFile (no workspace sandbox).
-     *  - Relative path target → a workspace @file mention → readFileInWorkspace
-     *    (or readImageFile for images).
-     *  Image-ness is inferred from the EXTENSION when no attachment matches,
-     *    so images open correctly even for old sessions whose attachments[]
-     *    wasn't persisted. */
+    /** Open a chip's file in the side viewer. Discriminator: absolute path target (starts with /, ~, or a drive letter) → external attachment (viewer reads via readExternalFile/readImageFile, no workspace sandbox); relative path target → workspace @file mention (readFileInWorkspace, or readImageFile for images). Image-ness is inferred from the EXTENSION when no attachment matches, so images open correctly even for old sessions whose attachments[] wasn't persisted. */
     const handleChipOpen = useCallback(
       (chip: RefLink) => {
         if (!activeSessionId) return;

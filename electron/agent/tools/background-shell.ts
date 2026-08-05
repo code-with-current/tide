@@ -1,13 +1,4 @@
-/**
- * bash_output + kill_shell tools — manage background shell processes.
- *
- * The main bash tool is synchronous (spawns, waits, returns). For long-
- * running work (dev servers, watchers, build loops), the model can ask to
- * background a command and poll its output later.
- *
- * A shared in-process registry holds the spawned shells. Keys are shell ids
- * the model uses to reference them.
- */
+/** bash_output + kill_shell tools: manage background shell processes for long-running work (dev servers, watchers, build loops) — the synchronous bash tool can background a command and the model polls/kills it later via a shared in-process registry keyed by shell id. */
 
 import { spawn, type ChildProcess } from 'child_process';
 import { toolEnv, wrapWithShell, killProcessTree } from './tool-env';

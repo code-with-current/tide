@@ -52,23 +52,7 @@ export interface ChatComposerProps {
   onChange?: (text: string) => void;
 }
 
-/**
- * Build the guidance block a mention contributes to the outgoing prompt.
- *
- * Three shapes depending on what the mention carries:
- *
- * 1. Content-bearing (project/user skills, agents, context files):
- *    Full body injected as a fenced block.
- *
- * 2. Built-in agents (no content, but have description/whenToUse):
- *    Natural-language reference with the agent's specialty + a dispatch
- *    hint. Avoids the bare `/name` format — the model misinterprets that
- *    as a slash_command invocation and tries to call the slash_command
- *    tool, which fails.
- *
- * 3. Other no-content (mocked MCP, etc.):
- *    Minimal name-only reference.
- */
+/** Build the guidance block a mention contributes to the outgoing prompt: fenced content for content-bearing mentions, a dispatch hint for built-in agents, or a name-only reference otherwise. */
 function mentionBlock(m: Mention): string {
   if (m.content) {
     const kindLabel = m.kind === 'context' ? 'project context' : m.kind;
@@ -114,11 +98,7 @@ export function ChatComposer({
 
   const mentionsRef = useRef<Map<string, Mention>>(new Map());
   const chipIdCounter = useRef(0);
-  // Last known selection inside the editor. Tracked via `selectionchange`
-  // so that when the user clicks the @ button (which moves focus OUT of
-  // the editor to the picker), we still know where to drop the chip.
-  // Without this, the picker click clears the editor's live selection and
-  // chips always land at the start (or wherever focus happens to restore).
+  // Last known editor selection (tracked via `selectionchange` so clicking the @ button — which moves focus out of the editor — still knows where to drop the chip).
   const savedRangeRef = useRef<Range | null>(null);
   const [, bumpVersion] = useReducer((x: number) => x + 1, 0);
 
@@ -137,11 +117,7 @@ export function ChatComposer({
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const catalog = useMentionCatalog(activeWorkspaceId);
 
-  // Slash-picker state. `slashRangeRef` holds the live Range covering the
-  // `/query` text in the editor; `slashQuery` is the string after the slash.
-  // `null` query = picker closed. We keep the Range in a ref rather than
-  // state because it mutates as the user types and we don't want a render
-  // storm — the query string is the reactive signal.
+  // Slash-picker state. `slashRangeRef` = live Range over `/query` (ref, not state, to avoid render storms as it mutates); `slashQuery` = string after the slash (null = closed, the reactive signal).
   const slashRangeRef = useRef<Range | null>(null);
   const slashRectRef = useRef<DOMRect | null>(null);
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
@@ -233,11 +209,7 @@ export function ChatComposer({
     [catalog, slashQuery],
   );
 
-  // Track the editor's selection whenever it changes anywhere in the doc.
-  // Filtered to only save when the selection is inside our editor — that
-  // way, when the picker steals focus, we keep the last in-editor position.
-  // Also re-runs slash detection so the picker tracks caret moves, mouse
-  // clicks, and arrow-key navigation in real time.
+  // Track the editor's selection via `selectionchange`: save only in-editor positions so the picker stealing focus keeps the last position, and re-run slash detection so the picker tracks caret/mouse/arrow moves in real time.
   useEffect(() => {
     const handler = () => {
       const editor = editorRef.current;
@@ -311,11 +283,7 @@ export function ChatComposer({
     return chip;
   }, [removeChip]);
 
-  /** Insert a mention as an inline chip at the last known cursor position.
-   *  Uses `savedRangeRef` (tracked via `selectionchange`) so that chips
-   *  land where the user's cursor was — even after focus moved out to the
-   *  @ picker. Falls back to appending at the end if we have no saved
-   *  position (e.g. editor was never focused). */
+  /** Insert a mention as an inline chip at the last known cursor position (uses `savedRangeRef`), falling back to appending at the end if no position was saved. */
   const insertMention = useCallback((m: Mention) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -376,20 +344,10 @@ export function ChatComposer({
     insertMention(m);
   }, [insertMention]);
 
-  /**
-   * Intercept paste. Force text-only — contentEditable accepts rich HTML
-   * by default, which would let arbitrary formatting leak into the prompt.
-   * Long pastes (>10 lines) become a virtual attachment, matching the
-   * previous textarea behavior.
-   */
+  /** Intercept paste: force text-only (no rich HTML) and turn long pastes (>10 lines) into virtual attachments. */
   const PASTE_LINE_THRESHOLD = 10;
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
-    // Pasted FILES (e.g. from Finder/File Explorer) take precedence over
-    // text — they arrive as a FileList on clipboardData. Attach each like a
-    // browsed file so the chip + sent-message preview are identical. We read
-    // the File's content directly in the renderer (File API) so this works
-    // regardless of contextIsolation; webUtils.getPathForFile is used only
-    // opportunistically for a real on-disk path when available.
+    // Pasted FILES (e.g. from Finder) take precedence over text — they arrive as a FileList on clipboardData and are attached like browsed files. The File's content is read directly via the File API; webUtils.getPathForFile is used opportunistically for a real on-disk path.
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
@@ -408,10 +366,7 @@ export function ChatComposer({
           addAttachment({ path: shortName(realPath), kind, absPath: realPath });
           continue;
         }
-        // Read the File's content directly. This is async; we bump
-        // pendingReads so the send button stays disabled until the content
-        // lands in `attachments` — otherwise send() could snapshot state
-        // before the read resolves and drop the attachment.
+        // Read the File's content directly (async); bump pendingReads so send() stays disabled until content lands in `attachments`, otherwise send() could snapshot state and drop the attachment.
         bumpPendingReads(1);
         f.text().then((content) => {
           const MAX = 200_000; // matches the IPC read cap in readExternalFile
@@ -448,14 +403,7 @@ export function ChatComposer({
     addAttachment({ path: name, kind: 'paste', content: text });
   };
 
-  /** Pick an item from the slash picker. Restores the saved slash range as
-   *  the live selection so insertMention replaces the `/query` text with
-   *  the chip in one atomic edit. */
-  /**
-   * Open the slash picker via button click. Inserts `/` at the cursor so the
-   * existing slash detection picks it up — same inline picker as typing `/`.
-   * This unifies the button and typing trigger into one picker.
-   */
+  /** Open the slash picker via button click by inserting `/` at the cursor so existing slash detection picks it up — unifies the button and typing trigger into one picker. */
   const openSlashFromButton = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -471,11 +419,7 @@ export function ChatComposer({
     }
     sel?.removeAllRanges();
     sel?.addRange(range);
-    // Insert just `/` — no trailing nbsp. The cursor must land immediately
-    // after the slash so detectSlashQueryAt's regex `\/(\w*)$` matches with
-    // an empty query (opens the picker with the full catalog). A nbsp here
-    // would break the pattern: the cursor lands after the space, and the
-    // regex sees `/ ` which doesn't match `\/(\w*)$`.
+    // Insert just `/` (no trailing nbsp) so cursor lands right after it — required for `\/(\w*)$` to match with empty query and open the picker; a nbsp would yield `/ ` which breaks the regex.
     const textNode = document.createTextNode('/');
     range.deleteContents();
     range.insertNode(textNode);
@@ -613,11 +557,7 @@ export function ChatComposer({
     }
   };
 
-  /** Walk the editor DOM and produce BOTH a display string (for the chat
-   *  bubble) and a prompt string (for the model). Chips contribute a
-   *  short `/{name}` token to the display and a full content block to the
-   *  prompt. This separation keeps the chat UI clean while giving the
-   *  model the full skill body it needs. */
+  /** Walk the editor DOM and produce both a display string (for the chat bubble) and a prompt string (for the model); chips contribute a `/{name}` token to display and a full content block to the prompt. */
   const buildOutgoingContent = useCallback((): {
     displayText: string;
     promptText: string;
@@ -652,13 +592,7 @@ export function ChatComposer({
               } else {
                 displayText += `/${m.name}`;
               }
-              // Prompt: for skills/agents WITH a file path, emit the
-              // LOAD_SKILL marker so the orchestrator runs the skill as a
-              // sub-agent (runSkillAgent) BEFORE the model thinks. This is
-              // the reliable path — inlining the body (mentionBlock) produces
-              // a CRITICAL directive that GLM-5.2 ignores. For entries
-              // without absPath (built-in agents, context files), fall back
-              // to the inline content block.
+              // Prompt: for skills/agents WITH a file path, emit the LOAD_SKILL marker so the orchestrator runs the skill as a sub-agent BEFORE the model thinks (inlining the body produces a CRITICAL directive GLM-5.2 ignores). For entries without absPath (built-in agents, context files), fall back to the inline content block.
               if (m.absPath && (m.kind === 'skill' || m.kind === 'agent')) {
                 promptText += `\n[[LOAD_SKILL:${m.absPath}|${m.name}]]\n`;
               } else {
@@ -673,10 +607,7 @@ export function ChatComposer({
             displayText += '\n';
             promptText += '\n';
           } else {
-            // Block-level elements (DIV, P, etc.) start a new visual line.
-            // The browser inserts these on Enter; without prefixing a newline
-            // here, multi-line input collapses to a single line on send
-            // (textContent reads "line1line2" instead of "line1\nline2").
+            // Block-level elements (DIV, P, etc.) start a new visual line — without prefixing a newline here, multi-line input collapses to a single line on send (textContent reads "line1line2" instead of "line1\nline2").
             const isBlock =
               el.tagName === 'DIV' ||
               el.tagName === 'P' ||
@@ -708,14 +639,7 @@ export function ChatComposer({
           if (found.source === 'builtin' && found.kind === 'skill' && !found.absPath) {
             promptText = `/${found.name}${rest ? ` ${rest}` : ''}`;
           } else if (found.absPath) {
-            // Orchestrator-driven load (reliable): drop a transient marker.
-            // runSdkTurn reads the file via read_file's logic BEFORE the model
-            // thinks, and replaces the marker with the body wrapped in a strong
-            // "follow this first" directive. This doesn't depend on the model
-            // calling any tool — GLM-5.2 ignores "call load_skill first"
-            // directives and dives into exploration. The pre-read guarantees
-            // the skill is in context from the first token. The load_skill tool
-            // stays available for future model-initiated skill discovery.
+            // Orchestrator-driven load (reliable): runSdkTurn reads the file BEFORE the model thinks and replaces the marker with the body wrapped in a strong "follow this first" directive. This doesn't depend on the model calling any tool — GLM-5.2 ignores "call load_skill first" directives. The load_skill tool stays available for future model-initiated skill discovery.
             promptText = `[[LOAD_SKILL:${found.absPath}|${found.name}]]${rest ? `\n${rest}` : ''}`;
           } else {
             // No file (built-in agent, mocked MCP) — inline the guidance block.
@@ -745,12 +669,7 @@ export function ChatComposer({
     // Allow send if there's editor content (text or chips) OR attachments.
     if (!displayText && attachments.length === 0 && mentions.length === 0) return;
 
-    // Encode attachments as markdown links prepended to the display text.
-    // The link TARGET carries the absolute path when known so the viewer
-    // can re-read the file via readExternalFile even after a reload (when
-    // inline content is gone and attachments[] isn't persisted). The LABEL
-    // stays as the short display name. This makes chips part of
-    // message.content (always persisted) AND re-openable across reloads.
+    // Encode attachments as markdown links prepended to display text. The link TARGET carries the absolute path so the viewer can re-read via readExternalFile even after a reload (inline content is gone and attachments[] isn't persisted). The LABEL stays as the short display name, making chips part of message.content AND re-openable across reloads.
     const attachmentLinks = attachments.length > 0
       ? attachments.map((a) => `[/${a.path}/](${a.absPath ?? a.path})`).join(' ') + '\n'
       : '';

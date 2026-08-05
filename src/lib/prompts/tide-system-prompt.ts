@@ -1,17 +1,4 @@
-/**
- * Tide's system prompt — assembled from markdown files.
- *
- * The base prompt content lives in src/lib/prompts/system/*.md (sorted
- * alphabetically by numeric prefix). At build time, build/promptMarkdownUtils.mjs
- * concatenates them into _system-prompt-bundle.ts. This module wraps the bundle
- * with dynamic context (environment, workspace, skills, diagrams, RAG).
- *
- * To edit prompt content: modify the .md files, then run:
- *   node build/promptMarkdownUtils.mjs
- *
- * System prompt fragments adapted from Claude Code's published system-prompt
- * fragments (https://github.com/Piebald-AI/claude-code-system-prompts).
- */
+/** Tide's system prompt: base content lives in src/lib/prompts/system/*.md (concatenated at build time into _system-prompt-bundle.ts by build/promptMarkdownUtils.mjs); this module wraps it with dynamic context (environment, workspace, skills, RAG). Edit the .md files then re-run the bundler. */
 
 import { BASE_SYSTEM_PROMPT } from './_system-prompt-bundle';
 import { TOOL_LIST_MD } from './_tool-descriptions-bundle';
@@ -32,11 +19,7 @@ export interface SystemPromptContext {
   worktree?: { branch: string; baseBranch: string };
 }
 
-/**
- * Build the system prompt for a turn. Context fields are optional; when
- * absent the relevant clause is dropped rather than rendered with empty
- * values.
- */
+/** Build the system prompt for a turn. Context fields are optional; when absent the relevant clause is dropped rather than rendered with empty values. */
 export function buildSystemPrompt(ctx: SystemPromptContext = {}): string {
   const env: string[] = [];
   if (ctx.workspacePath) env.push(`- Working directory: ${ctx.workspacePath}`);

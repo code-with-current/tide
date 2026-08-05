@@ -1,11 +1,4 @@
-/**
- * glob tool — find files by pattern.
- *
- * Dedicated tool (not a shell `find` wrapper) so the model gets structured
- * results instead of freeform command output. Supports the common glob
- * syntax: *, **, ?, character classes. Respects a basic .gitignore
- * (node_modules, .git, dist) by default.
- */
+/** glob tool: find files by pattern (dedicated, not a shell `find` wrapper) so the model gets structured results. Supports *, **, ?, [abc]; respects a basic .gitignore (node_modules, .git, dist, …). */
 
 import * as fs from 'fs';
 import * as path from 'path';

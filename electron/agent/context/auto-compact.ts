@@ -1,20 +1,4 @@
-/**
- * Context management — autocompact.
- *
- * When a conversation approaches the model's context window, summarize old
- * messages and keep recent ones verbatim. This prevents 413 (prompt-too-long)
- * errors on long sessions without losing essential context.
- *
- * Compaction runs between steps via the SDK's `prepareStep` hook (which
- * supports async returns). The forked summarizer call uses the same
- * provider/model as the main turn, matching Claude Code's approach of
- * summarizing on the main-loop model (not a small/cheap model).
- *
- * Three layers (matching Claude Code's architecture, simplified):
- *   1. Token estimation (character-based heuristic — no tokenizer dependency)
- *   2. Threshold check (configurable, default 75% of context window)
- *   3. Forked summarization (generateText with a compact-prompt system message)
- */
+/** Context autocompact: when a conversation nears the model's context window, summarize old messages and keep recent ones verbatim to avoid 413 errors. Runs between steps via the SDK's `prepareStep` hook; the forked summarizer uses the main-loop model. Three layers: char-based token estimate, threshold check (default 75%), forked generateText summarization. */
 import { generateText } from 'ai';
 import { resolveModel } from '../provider-factory.js';
 import { resolveProtocolOptions } from '../protocols/index.js';
@@ -62,11 +46,7 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 
 // ─── Token estimation ───────────────────────────────────────────────────
 
-/**
- * Estimate token count from message array. Uses a character-based heuristic
- * (~3.5 chars/token for mixed English/code) — no tokenizer dependency. Good
- * enough for threshold checks; the actual API enforces the hard limit.
- */
+/** Estimate token count via a char-based heuristic (~3.5 chars/token) — no tokenizer dependency; good enough for threshold checks since the API enforces the hard limit. */
 export function estimateTokens(messages: ModelMessage[]): number {
   let chars = 0;
   for (const msg of messages) {
@@ -87,15 +67,7 @@ export function estimateTokens(messages: ModelMessage[]): number {
 
 // ─── Threshold check ────────────────────────────────────────────────────
 
-/**
- * Should we compact? True when estimated tokens exceed threshold fraction of
- * the context window, minus a safety buffer for the model's output.
- *
- * Uses the character-based heuristic as a first check. If the caller provides
- * `actualInputTokens` (from the SDK's usage), uses that as a more accurate
- * second check — the heuristic underestimates code-heavy conversations by
- * 2-5x because tokens like `{`, `}`, `=>` are short but count as full tokens.
- */
+/** Should we compact? True when tokens exceed threshold fraction of (contextWindow − output reserve). Prefers `actualInputTokens` from the SDK when available — the heuristic underestimates code-heavy chats 2-5x. */
 export function shouldCompact(
   messages: ModelMessage[],
   config: AutoCompactConfig,
@@ -118,16 +90,7 @@ export function shouldCompact(
 
 // ─── Compaction ─────────────────────────────────────────────────────────
 
-/**
- * Compact the conversation: summarize old messages, keep recent ones.
- *
- * Splits messages into:
- *   - Old messages (summarized via a forked generateText call)
- *   - Recent turns (kept verbatim — `keepRecentTurns` user+assistant pairs)
- *
- * The summary becomes a system-tagged user message at the start of the
- * compacted array, followed by the kept messages.
- */
+/** Compact the conversation: fork a generateText call to summarize old messages, keep the last `keepRecentTurns` user+assistant pairs verbatim, and prepend the summary as a system-tagged user message. */
 export async function compactConversation(
   messages: ModelMessage[],
   config: AutoCompactConfig,
@@ -256,11 +219,7 @@ async function summarizeMessages(
   return (result.text ?? '').trim() || '(Summary generation returned empty content)';
 }
 
-/**
- * Serialize messages into a text block suitable for summarization.
- * Strips tool result bodies (replaces with a placeholder) to keep the
- * summarizer input manageable.
- */
+/** Serialize messages into a text block for summarization, stripping tool-result bodies (replaced with a placeholder) to keep input manageable. */
 function serializeForSummary(messages: ModelMessage[]): string {
   const parts: string[] = [];
   for (const msg of messages) {

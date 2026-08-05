@@ -1,18 +1,4 @@
-/**
- * TideBrandMark — the Tide wave logo on the brand-orange (#d97757) tile.
- *
- * The shared brand-mark treatment used across the app: the Add Workspace /
- * MCP dialog headers, the onboarding screens, and now the About screen.
- * One visual language instead of raw floating logo images.
- *
- * `size`:
- *   sm = mobile/compact headers (size-7 tile)
- *   md = section headers (size-8 tile)
- *   lg = hero/About (size-12 tile)
- *
- * The wave logo is rendered on a faint orange-tinted rounded tile with a
- * subtle border, matching StyleAvatar / the dialog header tiles.
- */
+/** TideBrandMark: the Tide wave logo on a brand-orange rounded tile. Sizes: sm/md/lg/xl. Shared across dialog headers, onboarding, and About. */
 import tideLogoSvg from '@/assets/logo.svg';
 
 export function TideBrandMark({

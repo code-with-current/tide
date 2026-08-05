@@ -1,10 +1,4 @@
-/**
- * grep tool — uses ripgrep if available, falls back to a Node implementation.
- *
- * Searches file contents (not file names — that's list_dir's job). Caps at
- * `maxResults` (default 100) lines so a pattern matching every line of a
- * big file doesn't blow up the context.
- */
+/** grep tool: search file contents (not names — that's list_dir) using ripgrep when available, falling back to a Node implementation. Caps at maxResults (default 100) lines so a pattern matching every line doesn't blow up context. */
 
 import { spawnSync } from 'child_process';
 import { toolEnv } from './tool-env';

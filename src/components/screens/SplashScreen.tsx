@@ -21,11 +21,7 @@ export function SplashScreen() {
     window.tideIpc?.getDiagnostics().then((d) => setVersion(d.appVersion)).catch(() => {});
   }, []);
 
-  // Whether the last-session restore IPC has resolved (success OR failure).
-  // Routing to MainScreen is gated on this so MainScreen never mounts with
-  // stale null state — without the gate, a slow IPC roundtrip could land
-  // AFTER the 800ms routing timeout, leaving the restored session invisible
-  // and getting immediately overwritten by MainScreen's first effect run.
+  // Whether the last-session restore IPC has resolved (success OR failure). Routing to MainScreen is gated on this so it never mounts with stale null state (a slow IPC could otherwise land after the 800ms timeout, leaving the restored session invisible/overwritten).
   const [restored, setRestored] = useState(false);
 
   const hasProviders = (providers?.length ?? 0) > 0;
