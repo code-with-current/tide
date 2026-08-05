@@ -54,23 +54,7 @@ const TONES: Record<'ask' | 'blocked', Tone> = {
   },
 };
 
-/**
- * One branched card for every permission surface. Renders two ways:
- *
- *   - `gateDecision === 'blocked'` (plan mode forbids the op): no Approve —
- *     plan mode is read-only by design, so the only way forward is to
- *     escalate to edit mode for the rest of the turn (or cancel).
- *   - `gateDecision === 'ask'` (or absent, for legacy calls): explicit
- *     Approve, plus an "Approve in edit mode" escalation that makes the
- *     remaining same-tier calls auto-approve this turn.
- *
- * Used in two places (kept consistent by sharing this component): inline on
- * the pending tool block (`TurnBlock`), and in the Inspector's Review section
- * so an off-screen prompt is still reachable.
- *
- * The countdown auto-rejects at zero — defense in depth; the orchestrator's
- * server-side timeout (PERMISSION_TIMEOUT_MS) is the actual source of truth.
- */
+/** Permission card for tool approval. 'blocked' (plan mode) → escalate/cancel only; 'ask' → Approve + mode escalation. Used inline in TurnBlock and in the Inspector. */
 export function PermissionCard({
   call,
   timeoutAt,

@@ -1,18 +1,4 @@
-/**
- * Workspace script execution — spawns real child processes for setup, run,
- * and cleanup scripts. Streams stdout/stderr to the renderer and detects
- * ports from output for the dev-server badge feature.
- *
- * Process lifecycle:
- *   tide:script:run   → spawn, track in Map, stream output, detect ports
- *   tide:script:stop  → kill by workspace+command key
- *
- * Events (main → renderer):
- *   script:output  → { workspaceId, command, stream: 'stdout'|'stderr', line }
- *   script:exit    → { workspaceId, command, code }
- *   script:ports   → { workspaceId, ports: [{ port, label, url }] }
- *   script:lines   → { workspaceId, lines: TerminalLine[] } (bulk buffer read)
- */
+/** Workspace script execution: spawn real child processes for setup/run/cleanup, stream stdout/stderr to the renderer, and detect ports from output for the dev-server badge. Handlers: tide:script:run / tide:script:stop; events: script:output / script:exit / script:ports / script:lines. */
 
 import { ipcMain, WebContents } from 'electron';
 import { spawn, ChildProcess } from 'child_process';

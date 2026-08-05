@@ -6,17 +6,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
 
-/**
- * ButtonGroup — groups related buttons with consistent styling. A container
- * whose direct children get their inner corners trimmed so adjacent buttons
- * share borders. Combine with ButtonGroupSeparator to build split buttons.
- *
- * Vendored from shadcn/ui (new-york style) and adapted to this project's
- * alias conventions (Separator imported from @/components/ui, not a registry
- * path). Functionally identical to the upstream component.
- *
- * @see https://ui.shadcn.com/docs/components/base/button-group
- */
+/** ButtonGroup: container that trims inner corners of adjacent children. Vendored from shadcn/ui (new-york). @see https://ui.shadcn.com/docs/components/base/button-group */
 const buttonGroupVariants = cva(
   "flex w-fit items-stretch has-[>[data-slot=button-group]]:gap-2 [&>*]:focus-visible:relative [&>*]:focus-visible:z-10 has-[select[aria-hidden=true]:last-child]:[&>[data-slot=select-trigger]:last-of-type]:rounded-r-md [&>[data-slot=select-trigger]:not([class*='w-'])]:w-fit [&>input]:flex-1",
   {

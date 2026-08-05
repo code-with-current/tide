@@ -1,15 +1,4 @@
-/**
- * Model catalog resolver — the single source of truth for model metadata.
- *
- * Replaces the heuristic REASONING_MODEL_PREFIXES / CONTEXT_WINDOWS tables in
- * model-capabilities.ts. resolveModelMeta() performs deterministic lookup:
- *   1. exact catalog[catalogId] if catalogId is set
- *   2. auto-match modelId against catalog keys (suffix + normalized)
- *   3. conservative fallback (user fields + defaults)
- *
- * Pure module — no I/O. Takes the catalog map as a parameter so it's testable
- * and shared between main process (real loader) and renderer (IPC-fetched).
- */
+/** Model catalog resolver: single source of truth for model metadata via deterministic lookup (catalogId → auto-match → conservative fallback). Pure, no I/O. */
 import type { CatalogEntry } from './model-prices.js';
 
 export type CatalogMap = Map<string, CatalogEntry>;
@@ -25,31 +14,14 @@ export interface MatchResult {
   matches: CatalogEntry[];
 }
 
-/**
- * Normalize a model id for comparison: lowercase, trim, collapse the
- * provider prefix segment (everything up to and including the last '/').
- * This lets 'claude-sonnet-4-5' and 'anthropic/claude-sonnet-4-5' compare equal.
- */
+/** Normalize a model id: lowercase, trim, drop the provider prefix segment so 'claude-sonnet-4-5' and 'anthropic/claude-sonnet-4-5' compare equal. */
 function normalize(id: string): string {
   const trimmed = id.trim().toLowerCase();
   const slash = trimmed.lastIndexOf('/');
   return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
 }
 
-/**
- * Match a provider modelId against the catalog. Returns:
- *  - 'matched' (1 confident hit) — auto-enrich
- *  - 'ambiguous' (2+ hits)       — user must pick
- *  - 'none' (0 hits)             — no catalog data
- *
- * Ambiguity disambiguation: a model name like 'gpt-5' typically appears under
- * several provider routes (openai/, azure/, bedrock/, vertex_ai/, …) that all
- * sell the SAME model at the same price. To avoid forcing the user to pick
- * among identical entries, an ambiguous set is collapsed to 'matched' when
- * either (a) a bare canonical key (no '/') exists among the hits, or (b) all
- * hits agree on input/output pricing and context window. Only genuinely
- * conflicting matches (different prices or capabilities) surface as ambiguous.
- */
+/** Match a modelId against the catalog; returns 'matched', 'ambiguous', or 'none'. Identical cross-provider entries collapse to 'matched'; only genuinely conflicting matches stay 'ambiguous'. */
 export function matchModelToCatalog(modelId: string, catalog: CatalogMap): MatchResult {
   if (!modelId?.trim()) return { state: 'none', matches: [] };
   const lower = modelId.trim().toLowerCase();
@@ -91,15 +63,7 @@ export function matchModelToCatalog(modelId: string, catalog: CatalogMap): Match
   return { state: 'none', matches: [] };
 }
 
-/**
- * Collapse an ambiguous match set to a single confident entry when the hits
- * are effectively the same model. Two strategies:
- *  (a) Prefer a bare canonical key (no provider '/'), e.g. 'gpt-5' over
- *      'openai/gpt-5'. This is the model's home entry.
- *  (b) If all hits agree on input/output price + context window, they're the
- *      same model sold via different routes — return the first.
- * Returns null when the hits genuinely conflict (keep as ambiguous).
- */
+/** Collapse an ambiguous match set to one entry when hits are the same model (bare canonical key, or all agree on price + context); returns null on genuine conflict. */
 function disambiguate(
   hits: CatalogEntry[],
   catalog: CatalogMap,

@@ -1,17 +1,4 @@
-/**
- * The agent loop — orchestrates multi-step model calls with tool execution.
- *
- * Per design doc §4: a user turn is N model calls, not one. The loop:
- *
- *   1. assemble context (system prompt + history)
- *   2. call the model via streamAnthropicOnce
- *   3. if stop_reason == 'tool_use': dispatch each tool, append results, loop
- *   4. if stop_reason == 'end_turn' / 'max_tokens': emit turn_end, return
- *   5. on iteration cap: inject "wrap up" note, force no-tools, final call
- *
- * Events flow to the renderer via the `emit` callback. The renderer sees
- * a single discriminated-union stream — it doesn't know about iterations.
- */
+/** The agent loop: orchestrates multi-step model calls with tool execution until end_turn or the iteration cap. */
 
 import type { WebContents } from 'electron';
 import * as store from '../store.js';
@@ -36,25 +23,7 @@ import { categorizeTool, deriveFollowupMode } from '../../src/lib/stream/blockSt
 const MAX_ITERATIONS = 100;
 const PERMISSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 
-/**
- * Tide thinking level → Anthropic `thinking.budget_tokens`.
- *
- * Per https://platform.claude.com/docs/en/build-with-claude/extended-thinking:
- *   - `thinking: { type: 'enabled', budget_tokens: N }` caps the model's
- *     internal reasoning at N tokens (minimum 1024).
- *   - `thinking: { type: 'disabled' }` turns it off entirely.
- *   - When enabled, `max_tokens` MUST exceed `budget_tokens` (enforced in
- *     stream-anthropic.ts).
- *
- * We expose 6 levels in the UI; map each to a token budget that reflects
- * how much room the model gets to reason before answering. Tuned so:
- *   off    → thinking disabled (no reasoning budget)
- *   low    → 1_024    (bare minimum — quick tasks)
- *   medium → 8_000    (default — most work)
- *   high   → 24_000   (deep analysis, multi-file investigations)
- *   extra  → 48_000   (hard problems, design tradeoffs)
- *   max    → 64_000   (max reasoning — leave room for the answer)
- */
+/** Tide thinking level → Anthropic `thinking.budget_tokens`; `off` disables thinking. max_tokens must exceed budget_tokens (enforced in stream-anthropic.ts). */
 const THINKING_BUDGET: Record<string, number> = {
   low: 1_024,
   medium: 8_000,
@@ -63,11 +32,7 @@ const THINKING_BUDGET: Record<string, number> = {
   max: 64_000,
 };
 
-/**
- * Resolve a Tide thinking level into an Anthropic-native `thinking` payload.
- * Returns `null` when thinking is disabled, which the streamer sends as
- * `{ type: 'disabled' }`. A non-null value is `{ type: 'enabled', budget_tokens }`.
- */
+/** Resolve a Tide thinking level into the Anthropic-native `thinking` payload; null → disabled. */
 function thinkingPayload(level: string): { type: 'enabled'; budget_tokens: number } | null {
   if (level === 'off') return null;
   const budget = THINKING_BUDGET[level] ?? THINKING_BUDGET.medium;
@@ -114,11 +79,7 @@ type TimelineEntry =
   | { type: 'text'; text: string }
   | { type: 'tool'; toolIndex: number };
 
-/** Finalize the block list at turn_end. Marks trailing text blocks as the
- *  answer; aborts running/pending tools if aborted; spawns followup blocks
- *  for ask_followup_question calls (mirroring streamReducer.applyToolArgs).
- *
- *  Mirrors streamReducer.applyTurnEnd + applyToolArgs exactly. */
+/** Finalize the block list at turn_end: mark trailing text as the answer, abort running tools if aborted, spawn followup blocks. Mirrors streamReducer.applyTurnEnd + applyToolArgs. */
 function finalizeBlocks(active: ActiveTurn, stopReason: string): Block[] {
   const stopped = stopReason === 'aborted';
   const blocks: Block[] = active.blocks.map(b => {
@@ -129,9 +90,7 @@ function finalizeBlocks(active: ActiveTurn, stopReason: string): Block[] {
     return b;
   });
 
-  // Spawn followup blocks for ask_followup_question calls — mirrors the
-  // reducer's applyToolArgs logic. Without this, persisted messages would
-  // have no followup block and the popup wouldn't fire on session reload.
+  // Spawn followup blocks for ask_followup_question calls — mirrors applyToolArgs so the popup fires on session reload.
   for (const b of blocks) {
     if (b.kind !== 'tool') continue;
     if (b.toolName !== 'ask_followup_question') continue;
@@ -150,16 +109,7 @@ function finalizeBlocks(active: ActiveTurn, stopReason: string): Block[] {
     } as FollowupBlock);
   }
 
-  // The answer phase begins after the last tool call. Text before it is
-  // narration (the model talking while working — "let me check…"); text
-  // after is the deliverable. Treating every kind === 'tool' as the bound
-  // — with no skip-set taxonomy — handles bookkeeping (todo_write), yields
-  // (ask_followup_question), and real actions (bash/edit_file) uniformly,
-  // and lets synthesized trailing followup blocks pass through without
-  // breaking the scan. Without this, prose after a trailing followup (e.g.
-  // the spec the model writes after asking clarifying questions) was left
-  // unmarked and AnswerBlock showed "No summary — this turn was tool-only."
-  // Mirrors streamReducer.applyTurnEnd and blockMigration.redetermineAnswerFlag.
+  // Answer phase = text after the last tool call (treat every kind==='tool' as the bound so trailing followups pass through). Mirrors streamReducer.applyTurnEnd.
   let lastToolIdx = -1;
   for (let i = blocks.length - 1; i >= 0; i--) {
     if (blocks[i].kind === 'tool') { lastToolIdx = i; break; }
@@ -170,14 +120,7 @@ function finalizeBlocks(active: ActiveTurn, stopReason: string): Block[] {
   return blocks;
 }
 
-/** Patch a tool block in `active.blocks` in place. Used by executeToolCall
- *  to mirror tool_executing and tool_result events into the block list —
- *  without this, persisted blocks would keep stale pending/running status
- *  and the renderer would show stuck spinners after turn_end.
- *
- *  Mirrors the streamReducer's applyToolStatus / applyToolResult pattern
- *  (mutation here is fine — the orchestrator owns the canonical list and
- *  is single-threaded within a turn). */
+/** Patch a tool block in `active.blocks` in place to mirror tool_executing/result events (mirrors streamReducer.applyToolStatus/applyToolResult). */
 function updateToolBlock(
   active: ActiveTurn,
   toolCallId: string,
@@ -290,13 +233,7 @@ async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   if (!provider.apiKey) throw new Error(`No API key for ${provider.name}`);
 
   const workspaces = store.listWorkspaces();
-  // Resolve the workspace root from the session's workspaceId — NOT
-  // workspaces[0]. Falling back to the first workspace silently ran tools
-  // against the wrong project when the user had multiple workspaces or had
-  // selected a non-default one. Look up the session, then its workspace.
-  // If the session has a worktree (per-session isolation), prefer its
-  // path — tools will then read/write against the worktree instead of
-  // the user's main checkout.
+  // Resolve workspace root from the session (worktree path if isolated, else workspaceId lookup) — NOT workspaces[0], which silently ran tools against the wrong project.
   let workspaceRoot: string | undefined;
   let worktreeMeta: { branch: string; baseBranch: string } | undefined;
   try {
@@ -358,11 +295,7 @@ async function runTurn(wc: WebContents, payload: RunTurnPayload) {
     }
   }
 
-  // Send ALL tools regardless of mode. In plan mode, write tools are
-  // blocked at the permission gate — but instead of hard-rejecting, the
-  // gate pauses the turn and asks the user to switch modes. This gives
-  // the model awareness of what it COULD do if the user approves, and
-  // produces a smoother UX than filtering tools entirely.
+  // Send ALL tools regardless of mode; plan-mode writes are blocked at the permission gate, which pauses and asks for a mode switch rather than hard-rejecting.
   const tools = getAnthropicTools();
   // Resolve the Anthropic-native thinking payload. `null` = disabled
   // (streamer sends thinking.type:'disabled'); an object = enabled with a
@@ -385,15 +318,7 @@ async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   let anyPriorIterationText = false;
   const allToolCalls: ToolCall[] = [];
 
-  /**
-   * Ordered timeline — the single source of truth for rendering order.
-   * Each entry is either a text segment or a tool-call reference, in the
-   * exact order the model emitted them: text₁ → tool₁ → text₂ → tool₂.
-   *
-   * This replaces the old approach of splitting content + toolCalls into
-   * separate flat fields (which destroyed the interleaving on freeze).
-   * The renderer iterates this array directly — no splitting, no guessing.
-   */
+  /** Ordered timeline — the single source of truth for rendering order; entries interleave text and tool refs in emission order. */
   const timeline: TimelineEntry[] = [];
   /** Points at the current text entry being accumulated, or null if no
    *  text entry has been started in the current "segment." */
@@ -590,14 +515,7 @@ async function runTurn(wc: WebContents, payload: RunTurnPayload) {
       currentTextEntry = null;
       const toolResults: AnthropicContent = [];
       // ─── Parallel dispatch for read-only, always-auto-approved tools ────
-      // Multiple dispatch_agent calls in one iteration (or any mix of
-      // read-only tools) can run concurrently — they don't need permission
-      // prompts and they don't mutate shared state. Running them in parallel
-      // collapses N serial LLM round-trips into one wall-clock wait.
-      //
-      // Tools that need permission (write/destructive risk, or autoApprove
-      // doesn't cover the current mode) still run sequentially so the
-      // permission resolver doesn't get concurrent asks.
+      // Read-only auto-approved tools run concurrently (collapse N round-trips); permission-gated tools stay sequential to avoid concurrent asks.
       const ALL_MODES: AutonomyMode[] = ['plan', 'ask', 'edit', 'full'];
       const isParallelSafe = (t: StreamedToolSummary): boolean => {
         const reg = getRegistration(t.toolName);
@@ -763,17 +681,7 @@ async function runTurn(wc: WebContents, payload: RunTurnPayload) {
       },
     });
   } catch (err: any) {
-    // Abort (user clicked Stop, or session switched and the parent gave up)
-    // throws an AbortError out of streamAnthropicOnce. Without this catch,
-    // the throw skips the turn_end emission entirely — the renderer never
-    // learns what the model had already done, so the partial work (text +
-    // tool calls already executed) is silently discarded and the streaming
-    // bubble just vanishes.
-    //
-    // Emit a partial turn_end with whatever was accumulated so the renderer
-    // can freeze + persist it. We treat AbortError specifically as 'aborted';
-    // any other error is surfaced as a normal error event and re-thrown so
-    // the renderer's catch path handles it.
+    // Abort throws AbortError out of streamAnthropicOnce; without this catch, the partial work would be discarded. Emit a partial turn_end so the renderer can freeze/persist; other errors surface as error events.
     const isAbort = err?.name === 'AbortError' || controller.signal.aborted;
     if (isAbort) {
       const abortMessageId = `m_${Date.now().toString(36)}_abort`;
@@ -1004,16 +912,7 @@ async function dispatchTool(
   emit(wc, sessionId, { type: 'tool_executing', sessionId, seq: nextSeq(sessionId), toolCallId: id });
   updateToolBlock(active, id, { status: 'running' });
   const start = Date.now();
-  // Inject the parent turn's provider + modelId + usage accumulator so the
-  // `dispatch_agent` tool can spawn a sub-agent against the same LLM and
-  // fold its token usage into this turn's aggregate (for the context meter).
-  // Other tools ignore these fields.
-  //
-  // `onDelta` is the sub-agent streaming hook: each token the sub-agent
-  // emits fires a `tool_call_delta` event so the renderer shows live
-  // progress in the dispatch card instead of waiting for the full report.
-  // The renderer already handles `tool_call_delta` (same event used for
-  // progressive tool-input streaming during the parent's turn).
+  // Inject provider/modelId/usage so dispatch_agent can spawn a sub-agent and fold its usage into the turn aggregate; onDelta streams live sub-agent tokens via tool_call_delta events.
   const result = await executeTool(toolName, args, {
     workspaceRoot,
     signal,
@@ -1067,11 +966,7 @@ function userContent(m: TurnMessage): AnthropicContent {
 
 /** Look up a tool's risk tier without going through the registry (avoids circular). */
 function riskOf(toolName: string): 'read_only' | 'write' | 'destructive' {
-  // Source of truth: the tool registry. Each ToolRegistration declares its
-  // own riskTier (e.g. dispatch_agent is 'read_only' even though it spawns
-  // an LLM call). Only fall back to the conservative switch if a tool isn't
-  // registered — which shouldn't happen for built-ins but guards against
-  // future dynamic tools (MCP) landing before they're fully wired.
+  // Source of truth is the tool registry; the switch is a conservative fallback for not-yet-registered (e.g. future MCP) tools.
   const reg = getRegistration(toolName);
   if (reg) return reg.riskTier;
   switch (toolName) {

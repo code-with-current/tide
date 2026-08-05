@@ -1,31 +1,4 @@
-/**
- * Rule-based permission rules — `.agents/settings.json`.
- *
- * Rule format: `"ToolName(argPattern)"` — e.g. `"bash(pnpm i)"`,
- * `"bash(npx:*)"`, `"edit_file(src/)"`. Tool name matches case-insensitively
- * via `'*'` / exact / `'prefix:*'`.
- *
- * argPattern matching:
- *   - Bare `"ToolName"` (no parens) = match any args
- *   - `"ToolName(prefix)"` = prefix match on the tool's primary arg
- *   - `"ToolName(prefix:*)"` = glob match — prefix up to `:*` matches anything after
- *   - `"ToolName(*suffix)"` = suffix glob match
- *   - `"ToolName(*middle*)"` = contains glob match
- *
- * Precedence: deny always rejects; allow upgrades an 'ask' decision to auto;
- * allow does NOT bypass plan-mode blocking.
- *
- * Rules persist in `{workspaceRoot}/.agents/settings.json`:
- * {
- *   "permissions": {
- *     "allow": ["bash(npm:*)", "edit_file(src/*)"],
- *     "deny": []
- *   }
- * }
- *
- * There is no separate "session" vs "project" scope — all rules are project-level
- * and persist across sessions. This matches Claude Code's behavior.
- */
+/** Rule-based permission rules in `.agents/settings.json`. Spec format: `"ToolName(argPattern)"` — bare tool name matches any args; `prefix`, `prefix:*` (glob suffix), `*suffix`, and `*middle*` patterns match the tool's primary arg. Precedence: deny wins, allow upgrades ask→auto (doesn't bypass plan mode). All rules are project-level and persist across sessions. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { minimatch } from 'minimatch';
@@ -117,13 +90,7 @@ function toolNameMatches(pattern: string, toolName: string): boolean {
   return false;
 }
 
-/**
- * Does an arg pattern match a value? Supports:
- *   - Plain prefix: "npm install" matches "npm install --force"
- *   - Glob suffix: "npx:*" matches "npx create-react-app" (anything after npx )
- *   - Glob path: "src/*" matches "src/components/Foo.ts"
- *   - Glob wildcard: "*" matches anything
- */
+/** Does an arg pattern match a value? Glob chars (* ? [) use minimatch; otherwise plain prefix match. */
 function argPatternMatches(pattern: string, value: string): boolean {
   // If the pattern contains glob chars (* or ? or [), use minimatch.
   if (/[*?\[]/.test(pattern)) {
@@ -153,13 +120,7 @@ export function evaluateRules(
   return null;
 }
 
-/**
- * Derive a rule spec for "Always Allow" from the approved call.
- * Generates smart glob patterns:
- *   - bash: "bash(npx:*)" for npx commands, "bash(npm install)" for npm
- *   - file tools: "edit_file(src/*)" for path-based tools
- *   - bare tool name if no recognizable arg
- */
+/** Derive an "Always Allow" rule spec from an approved call: smart globs for bash (npx:*, npm <cmd>) and file tools (dir/*); bare tool name if no recognizable arg. */
 export function deriveRuleSpec(toolName: string, args: Record<string, unknown>): string {
   const arg = primaryArg(toolName, args);
   if (arg === null) return toolName;
@@ -211,13 +172,7 @@ export function clearSessionRules(sessionId: string): void {
 
 // ─── Unified rule writer (replaces addSessionRule + addProjectRule) ────
 
-/**
- * Add an "always allow" rule to `.agents/settings.json`. Also adds it to the
- * in-memory session rules so it takes effect immediately without a file re-read.
- *
- * The rule is derived from the approved tool call via deriveRuleSpec, producing
- * smart glob patterns (e.g. bash(npx:*) for npx commands).
- */
+/** Add an "always allow" rule to `.agents/settings.json` and the in-memory session rules (immediate effect) via deriveRuleSpec's smart globs. */
 export function addPermissionRule(
   sessionId: string,
   workspaceRoot: string,

@@ -5,12 +5,7 @@ import { useUi } from './stores/ui';
 import { toast } from './toast';
 import type { RagDownloadProgressEvent, RagInitProgressEvent } from '@/types';
 
-/**
- * Module-level QueryClient singleton. Exported so non-React code (e.g. the
- * keyboard-shortcut dispatcher in shortcutActions.ts) can read cached query
- * data — `getQueryData(['sessions', wsId])` for session cycling — without a
- * hook context. App.tsx consumes this same instance via QueryClientProvider.
- */
+/** Module-level QueryClient singleton. Exported so non-React code (e.g. shortcutActions.ts) can read cached query data without a hook context. */
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -159,13 +154,7 @@ export function useModels(): { models: ModelOption[]; isLoading: boolean } {
   return { models, isLoading };
 }
 
-/**
- * Find a single model + its provider. Pass both ids when the same model id
- * may exist under multiple providers (e.g. an Anthropic-style and an
- * OpenAI-style gateway exposing the same name); pass providerId=null to
- * fall back to first-match, used when restoring from old sessions that
- * didn't persist the provider half of the selection.
- */
+/** Find a model+provider by ids; pass providerId=null to first-match (used when restoring legacy sessions that didn't persist the provider half). */
 export function useModelOption(providerId: string | null, modelId: string | null): ModelOption | undefined {
   const { models } = useModels();
   if (!modelId) return undefined;
@@ -189,12 +178,7 @@ export function useAddProvider() {
   });
 }
 
-// ============================================================
-// Session lifecycle — rename / archive / unarchive / delete
-// Each invalidates both the active sessions list and the archived
-// manifest for the same workspace, so the UI can move a row from
-// one section to the other without a manual refetch.
-// ============================================================
+// ===== Session lifecycle: rename/archive/unarchive/delete (invalidates both active + archived lists so rows can move between sections).
 
 export function useRenameSession(workspaceId: string) {
   const qc = useQueryClient();
@@ -244,15 +228,7 @@ export function useDeleteSession(workspaceId: string) {
   });
 }
 
-// ============================================================
-// Workspace lifecycle — archive / unarchive / delete + rename.
-// Workspace mutations also invalidate the workspace's session
-// queries because the cascade (archive/delete) moves or removes
-// sessions belonging to this workspace.
-//
-// Rename uses api.updateWorkspace (the existing patch-shape IPC),
-// so no new IPC channel is required for workspace rename.
-// ============================================================
+// ===== Workspace lifecycle: archive/unarchive/delete + rename (uses api.updateWorkspace; invalidates session queries too because cascades move/remove sessions).
 
 export function useRenameWorkspace() {
   const qc = useQueryClient();
@@ -400,16 +376,7 @@ export function useUpdateRagConfig(workspaceId: string | null) {
   });
 }
 
-/**
- * Trigger a full re-index of a workspace (the "Re-Index" button in the
- * Inspector's Memory section). Wraps `initRagWorkspace` — the same IPC the
- * initial ingest uses — and invalidates the rag-status query on completion so
- * the chunk count + last-indexed time refresh automatically. Exposes
- * `isReindexing` for the button's spinner state.
- *
- * Progress events stream over `tide:rag:initProgress` (handled separately by
- * the RAG panel); this hook only tracks request lifecycle.
- */
+/** Trigger a full workspace re-index (Inspector's "Re-Index" button) via initRagWorkspace and invalidate rag-status; progress streams separately via `tide:rag:initProgress`. */
 export function useReindexWorkspace(workspaceId: string | null) {
   const qc = useQueryClient();
   const mutation = useMutation({

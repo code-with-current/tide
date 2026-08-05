@@ -1,20 +1,4 @@
-/**
- * App-standard toast helpers — thin wrappers over Sonner.
- *
- * Convention (see docs/plans/2026-08-01-loading-state-coverage-design.md):
- *   • Toast = a user-initiated ACTION completed or failed (saved, deleted,
- *     toggled, created). Fire-and-forget outcome confirmation.
- *   • Inline spinner/skeleton = ongoing loading or query state. Never toast
- *     "loading" for a query.
- *   • Success toasts are terse (2–4 words), auto-dismiss (~2.5s default).
- *     Errors persist until dismissed and carry a description.
- *   • No redundant success toast for outcomes already confirmed by visible
- *     UI change (e.g. a toggle flipping on).
- *
- * Call sites `import { toast } from '@/lib/toast'`. The helpers below
- * reference the original sonner functions directly (NOT via the exported
- * object) to avoid the self-referential recursion that `Object.assign` caused.
- */
+/** App-standard toast helpers — thin wrappers over Sonner. */
 
 import { toast as sonnerToast } from 'sonner';
 
@@ -44,11 +28,7 @@ export function toastPromise<T>(
   return sonnerToast.promise(promise, msgs);
 }
 
-/**
- * The default export mirrors sonner's `toast` callable (so existing
- * `toast('msg')` calls still work) while exposing the typed helpers above
- * as static props. Built by binding — no self-reference.
- */
+/** Default export mirrors sonner's `toast` callable with typed helpers as static props. */
 const toast = Object.assign(
   (msg: string, opts?: Parameters<typeof sonnerToast>[1]) => sonnerToast(msg, opts),
   {

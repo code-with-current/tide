@@ -6,30 +6,14 @@ import * as api from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
 
-/**
- * New-session screen — what the user sees when mainView === 'new'.
- *
- * Composer at the top + a configurable worktree panel below. The worktree
- * panel auto-suggests a branch name from the composer's text (slugified),
- * lets the user pick a base branch from the workspace's local branches,
- * and toggles isolation on/off per session.
- *
- * Removed: the four hardcoded suggestion cards ("Fix a bug", "Add a
- * feature", etc.) — they weren't tailored to anything and just cluttered
- * the composer's primary affordance.
- */
+/** New-session screen: composer + worktree panel that auto-suggests a branch name, picks a base branch, and toggles per-session isolation. */
 export function EmptyChatState({
   onSend,
   isStreaming = false,
 }: {
   onSend?: (payload: {
     text: string;
-    /** Enriched text — display text + full skill/agent content blocks
-     *  injected inline. This is what MainScreen.handleSend ships to the
-     *  orchestrator as the user message. Dropping it (the prior bug) left
-     *  the model seeing a bare `/name` token from a slash-picked skill,
-     *  which it misread as a slash_command tool call and tried to invoke —
-     *  the failed slash_command block at the start of such turns. */
+    /** Enriched text — display text + full skill/agent content blocks injected inline. Shipped to the orchestrator as the user message; dropping it (prior bug) left the model seeing a bare `/name` token and misinvoking slash_command. */
     promptText?: string;
     mentions?: Array<{ name: string; kind: 'skill' | 'agent' | 'context' | 'mcp'; source?: 'project' | 'user' | 'builtin' }>;
     attachments: import('@/types').MessageAttachment[];
@@ -170,11 +154,7 @@ export function EmptyChatState({
   );
 }
 
-/**
- * The worktree panel — collapsed by default, expands to show branch name
- * + base branch + location. Toggle controls whether worktree isolation
- * is enabled for the session about to start.
- */
+/** Worktree panel: collapsed by default; expand to show branch/base/location and toggle isolation for the upcoming session. */
 function WorktreePanel({
   enabled,
   onToggle,

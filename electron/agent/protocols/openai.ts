@@ -1,28 +1,11 @@
-/**
- * OpenAI-protocol call options (z.ai, OpenRouter, OpenAI itself, etc.).
- *
- * The Anthropic `thinking` block is dropped by the openai-compatible provider,
- * so thinking is expressed as `reasoning_effort` instead — z.ai's GLM-5.2
- * accepts `'high' | 'max'` (plus an `xhigh` alias on some platforms). The
- * @ai-sdk/openai-compatible provider writes `providerOptions.openaiCompatible
- * .reasoningEffort` to the request body as `reasoning_effort`.
- */
+/** OpenAI-protocol call options (z.ai, OpenRouter, OpenAI, …): thinking is expressed as `reasoning_effort` (high/max) via providerOptions.openaiCompatible, since the Anthropic thinking block is dropped by the openai-compatible provider. */
 import type { ProtocolCallOptions, ProtocolContext, ThinkingConfig } from './types';
 
 const DEFAULT_MAX_TOKENS = 8192;
-/**
- * Gemini-backed endpoints cap `max_tokens` (maxOutputTokens) at 65535
- * (2^16−1). Requests above this return 400 INVALID_ARGUMENT. Cap here so
- * the thinking budget + base doesn't exceed the provider limit.
- */
+/** Gemini-backed endpoints cap `max_tokens` (maxOutputTokens) at 65535 (2^16−1); requests above return 400 INVALID_ARGUMENT. Cap here so the thinking budget + base doesn't exceed the provider limit. */
 const MAX_OUTPUT_TOKENS_CAP = 65_535;
 
-/**
- * Map Tide's thinking budget (THINKING_BUDGET: low=1024, medium=8000,
- * high=24000, extra=48000, max=64000) onto GLM-5.2's discrete effort tiers.
- * Threshold at the extra tier: extra/max → `max` (z.ai's recommendation for
- * coding), lower levels → `high`.
- */
+/** Map Tide's thinking budget onto GLM-5.2's discrete effort tiers: extra/max (≥48000) → `max` (z.ai's recommendation for coding), lower levels → `high`. */
 function effortFromBudget(budgetTokens: number): 'high' | 'max' {
   return budgetTokens >= 48_000 ? 'max' : 'high';
 }

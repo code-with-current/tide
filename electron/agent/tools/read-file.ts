@@ -1,14 +1,4 @@
-/**
- * read_file tool — read a file from the workspace, sandboxed.
- *
- * Caps at `maxLines` (default 2000) to keep the response bounded. Files on
- * the secret blocklist are refused outright. Output passes through the
- * redaction hook (currently a passthrough).
- *
- * Migration state (Phase 2): dual export — legacy `readFileTool` keeps the
- * existing orchestrator working; `createReadFileTool(ctx)` is the SDK
- * factory for the Phase 3 orchestrator rewrite. Both call `runReadFile`.
- */
+/** read_file tool: read a file from the workspace, sandboxed; caps at maxLines (default 2000), refuses secret-blocklist paths, and pipes output through the redaction hook. Dual export: legacy readFileTool + SDK factory createReadFileTool, both calling runReadFile. */
 
 import * as fs from 'fs';
 import { tool } from 'ai';
@@ -45,11 +35,7 @@ export async function runReadFile(
   try {
     abs = resolveAndFollowSymlinks(workspaceRoot, relPath);
   } catch (e: any) {
-    // Not inside the workspace. Allow reads of skill/agent/context files under
-    // the user's ~/.claude or ~/.agent dirs — these are trusted entries the
-    // user explicitly invoked via `/name`, and the model needs to `read_file`
-    // them for progressive skill disclosure (they live outside the workspace).
-    // Anything else stays rejected (no arbitrary filesystem access).
+    // Not inside the workspace. Allow reads of skill/agent/context files under ~/.claude or ~/.agent — trusted entries the user invoked via `/name`, needed for progressive skill disclosure (they live outside the workspace). Anything else stays rejected (no arbitrary filesystem access).
     try {
       abs = resolveUnderSkillRoot(relPath);
     } catch {

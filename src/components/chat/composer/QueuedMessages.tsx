@@ -19,12 +19,7 @@ import { cn } from '@/lib/utils';
 import { useUi, type QueuedMessage } from '@/lib/stores/ui';
 import { Button } from '@/components/ui/button';
 
-/**
- * Outgoing message queue, rendered above the composer. Shows when the user
- * has queued one or more messages for a session that's currently running a
- * turn. Items are reorderable via drag (grip handle) and per-item actions
- * (edit / send-now / remove).
- */
+/** Outgoing message queue above the composer. Drag-reorderable; per-item edit/send-now/remove actions. */
 
 /** Module-level stable empty array — never re-create the fallback, or
  *  Zustand's useSyncExternalStore sees a "new" snapshot every render and

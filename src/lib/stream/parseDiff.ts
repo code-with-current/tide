@@ -1,12 +1,6 @@
 import type { DiffHunk, DiffLine } from '@/types';
 
-/**
- * Parse unified diff output (from `git diff`) into DiffHunk[].
- *
- * Skips the preamble (diff --git, index, ---/+++ lines) and processes
- * only @@ hunk headers + their body lines. Handles the `\ No newline
- * at end of file` marker by skipping it.
- */
+/** Parse unified diff output (from `git diff`) into DiffHunk[]: skip the preamble (diff --git, index, ---/+++) and process @@ hunk headers + bodies, ignoring the `\ No newline at end of file` marker. */
 export function parseUnifiedDiff(raw: string): DiffHunk[] {
   if (!raw || !raw.trim()) return [];
   const lines = raw.split('\n');

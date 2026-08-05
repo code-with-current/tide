@@ -21,14 +21,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { ConfirmPopover } from '@/components/ui/confirm-popover';
 
-/**
- * Status row for a single MCP server. Mirrors the ExtensionRow pattern:
- * a hover-revealed action cluster on the right, a status-led + name + status
- * text in the body, and a transport badge.
- *
- * Owned by McpSection; onApprove / onRetry are optional because they only
- * make sense for `needs_approval` / `error` (or `needs_credentials`) states.
- */
+/** Status row for a single MCP server (mirrors ExtensionRow: hover-revealed actions + status led + name + transport/scope badges). Owned by McpSection. */
 
 export type McpStatusValue =
   | 'connecting'

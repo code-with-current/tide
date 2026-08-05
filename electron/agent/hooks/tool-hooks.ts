@@ -1,19 +1,4 @@
-/**
- * Tool hooks — PreToolUse and PostToolUse execution.
- *
- * Hooks are user-configured shell commands (from .agent/hooks.json or
- * ~/.agent/hooks.json) that run around each tool call:
- *
- *   PreToolUse:  runs BEFORE the tool executes. Can deny the call, modify
- *                the tool input, or inject additional context.
- *   PostToolUse: runs AFTER the tool completes. Can modify the output,
- *                inject context, or block continuation.
- *
- * Hooks receive a JSON payload on stdin describing the tool call, and can
- * return a JSON response on stdout to control behavior. Non-JSON or non-zero
- * exit = hook passes through (no effect). This mirrors Claude Code's hook
- * contract.
- */
+/** PreToolUse / PostToolUse hooks: user-configured shell commands run around each tool call, receiving JSON on stdin and returning JSON on stdout to control behavior (non-JSON or non-zero exit = pass-through). Mirrors Claude Code's hook contract. */
 import { exec } from 'child_process';
 import { toolPatternMatches, type HookEntry, type HookConfig } from './hook-config.js';
 import type { ToolResult } from '../tools/types.js';
@@ -52,11 +37,7 @@ export interface ToolHookResult {
 
 // ─── Execution ──────────────────────────────────────────────────────────
 
-/**
- * Run all PreToolUse hooks matching the tool name. Returns an array of
- * results (one per matching hook). Hooks run sequentially — a later hook
- * sees the earlier hook's input modifications.
- */
+/** Run all PreToolUse hooks matching the tool name. Hooks run sequentially — a later hook sees the earlier hook's input modifications. */
 export async function runPreToolUseHooks(
   toolName: string,
   input: Record<string, unknown>,
@@ -132,11 +113,7 @@ export async function runPostToolUseHooks(
 
 // ─── Shell execution ────────────────────────────────────────────────────
 
-/**
- * Execute a single hook: run its shell command, feed JSON on stdin, parse
- * JSON response from stdout. Returns a ToolHookResult (empty if the hook
- * produced no JSON or exited non-zero — pass-through).
- */
+/** Execute a single hook: run its shell command, feed JSON on stdin, parse JSON from stdout (empty result on non-JSON or non-zero exit = pass-through). */
 async function executeHook(
   hook: HookEntry,
   input: HookInput,

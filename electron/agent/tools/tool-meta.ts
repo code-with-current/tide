@@ -1,19 +1,4 @@
-/**
- * Risk metadata sidecar — keyed by tool name. The SDK has no concept of
- * risk tiers, autonomy modes, or categories; this map is read by:
- *
- *   - withPermission (auto/ask/blocked decision per autonomy mode)
- *   - ProcessSection / EditsSection (categorization for the UI)
- *   - ToolCallCard (timeout enforcement via Promise.race)
- *
- * Values transcribed from the per-tool ToolRegistration objects that
- * existed pre-migration. Keep in sync with the tool factories in this
- * directory — the test enumerates the expected keys.
- *
- * Categories mirror the sets in `src/lib/stream/blockState.ts`
- * (COMMAND_TOOLS / EDIT_TOOLS / EXPLORATION_TOOLS) so the UI's existing
- * grouping logic continues to work without refactoring.
- */
+/** Risk-metadata sidecar keyed by tool name (the SDK has no risk tiers/categories). Read by withPermission, the UI sections, and ToolCallCard's timeout race; categories mirror src/lib/stream/blockState.ts. Keep in sync with the tool factories and the test's expected keys. */
 
 import type { AutonomyMode, RiskTier, ToolName } from '../../../src/types';
 

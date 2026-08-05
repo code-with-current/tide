@@ -15,10 +15,7 @@ import { cn, isMac } from '@/lib/utils';
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
 // ── Module-level terminal registry ──────────────────────────────
-// xterm instances live OUTSIDE React's reconciliation. React provides
-// a mount div; we imperatively create/destroy terminal canvases inside
-// it. This guarantees terminals survive session switches — the DOM
-// elements are never touched by React's diffing.
+// xterm instances live OUTSIDE React's reconciliation. React provides a mount div; we imperatively create/destroy terminal canvases inside it. This guarantees terminals survive session switches — the DOM elements are never touched by React's diffing.
 
 interface LiveTerminal {
   term: Terminal;
@@ -30,12 +27,7 @@ interface LiveTerminal {
 const registry = new Map<string, LiveTerminal>();
 
 // ── Output batching ──────────────────────────────────────────────
-// PTY output arrives as many small IPC events (one per node-pty onData
-// chunk). Writing each synchronously to xterm saturates the main thread on
-// high-throughput output (cargo build, npm install, log floods) → UI
-// freeze. Instead, buffer per-terminal and flush once per animation frame.
-// Worst-case added latency: ~16ms (imperceptible); throughput is unchanged
-// because the chunks concatenate into a single write.
+// PTY output arrives as many small IPC events (one per node-pty onData chunk). Writing each synchronously to xterm saturates the main thread on high-throughput output (cargo build, npm install, log floods) → UI freeze. Instead, buffer per-terminal and flush once per animation frame. Worst-case added latency: ~16ms (imperceptible); throughput is unchanged because the chunks concatenate into a single write.
 const outputBuffers = new Map<string, string>();
 const pendingFlushes = new Set<string>();
 
@@ -60,14 +52,7 @@ function queueOutput(terminalId: string, data: string) {
 }
 
 // ── File-path link provider ──────────────────────────────────────
-// Detects absolute paths (and path:line / path:line:col) in terminal output
-// and reveals them in the OS file manager on click. xterm calls provideLinks
-// per visible line as the user hovers; we scan that line for path matches and
-// return ILink objects with the buffer range + activate handler.
-//
-// Path pattern: an absolute POSIX path (starts with /) OR a Windows path
-// (drive letter:\), optionally suffixed with :line and :col. We deliberately
-// require a leading slash / drive to avoid matching arbitrary "foo:bar" text.
+// Detects absolute paths (and path:line / path:line:col) in terminal output and reveals them in the OS file manager on click. xterm calls provideLinks per visible line as the user hovers; we scan that line for path matches and return ILink objects with the buffer range + activate handler. Path pattern: an absolute POSIX path (starts with /) OR a Windows path (drive letter:\), optionally suffixed with :line and :col. We deliberately require a leading slash / drive to avoid matching arbitrary "foo:bar" text.
 const PATH_PATTERN = /(?:\/[\w./@-]+|[A-Za-z]:\\[\w\\./-]+)(?::(\d+))?(?::(\d+))?/g;
 
 class FilePathLinkProvider {
@@ -130,11 +115,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
 
   const active = activeId && terminals.some((t) => t.id === activeId) ? activeId : terminals[0]?.id;
 
-  // Drag-to-resize from the top edge. We attach mousemove + mouseup to the
-  // window so the drag keeps working after the cursor leaves the handle
-  // (otherwise a fast upward drag detaches from the listener and stalls).
-  // Height is clamped to [120, 720] — keeps the terminal useful without
-  // swallowing the chat area on giant displays.
+  // Drag-to-resize from the top edge. We attach mousemove + mouseup to the window so the drag keeps working after the cursor leaves the handle (otherwise a fast upward drag detaches from the listener and stalls). Height is clamped to [120, 720] — keeps the terminal useful without swallowing the chat area on giant displays.
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startY = e.clientY;
@@ -192,10 +173,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   const prevActiveRef = useRef<string | null | undefined>(undefined);
 
   // ── IPC listeners (registered ONCE, not per-terminal) ──────────────
-  // Each terminal's output/exit/ports events are routed by terminalId — the
-  // handlers look up the xterm instance in the module-level `registry` at
-  // event time. This avoids adding a new listener per terminal creation,
-  // which caused MaxListenersExceededWarning after ~11 terminals.
+  // Each terminal's output/exit/ports events are routed by terminalId — the handlers look up the xterm instance in the module-level `registry` at event time. This avoids adding a new listener per terminal creation, which caused MaxListenersExceededWarning after ~11 terminals.
   useEffect(() => {
     if (!ipc) return;
 
@@ -265,12 +243,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       term.open(wrapper);
       fit.fit();
 
-      // Hardware-accelerated WebGL renderer — a major perf win for dense
-      // output (build logs, cat-ing large files) over the default DOM/canvas
-      // renderer. Must load AFTER term.open(). Throws if WebGL isn't
-      // available (headless, old GPU, context limit) → fall back to canvas.
-      // Loaded dynamically so the CJS addon isn't in the initial bundle (its
-      // UMD wrapper trips rolldown's require-resolution in dev otherwise).
+      // Hardware-accelerated WebGL renderer — a major perf win for dense output (build logs, cat-ing large files) over the default DOM/canvas renderer. Must load AFTER term.open(). Throws if WebGL isn't available (headless, old GPU, context limit) → falls back to canvas. Loaded dynamically so the CJS addon isn't in the initial bundle (its UMD wrapper trips rolldown's require-resolution in dev otherwise).
       import('@xterm/addon-webgl')
         .then(({ WebglAddon }) => {
           try {
@@ -349,11 +322,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
     }
 
     // ── Visibility toggle ──
-    // Terminals in the ACTIVE session are candidates to show; everything else
-    // (other sessions' terminals still alive in the registry) is hidden.
-    // Only refocus / refit when the active id actually changed, or when the
-    // active terminal was just created — calling focus() on every effect run
-    // is what caused the "can't type" + flicker symptoms.
+    // Terminals in the ACTIVE session are candidates to show; everything else (other sessions' terminals still alive in the registry) is hidden. Only refocus / refit when the active id actually changed, or when the active terminal was just created — calling focus() on every effect run is what caused the "can't type" + flicker symptoms.
     const activeChanged = active !== prevActiveRef.current;
     for (const [tid, live] of registry) {
       const wrapper = live.term.element?.parentElement;
@@ -382,12 +351,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
     }
   }, [terminalTheme, terminalFontSize]);
 
-  // Refit on expand OR on screen return. The panel is always mounted (so
-  // xterm state survives collapse + Settings visits), but its outer div has
-  // display:none while collapsed/hidden — the ResizeObserver can't measure a
-  // zero-size box, so the active terminal's last fit() ran against the
-  // pre-hide dimensions. When the user re-opens the panel or returns from
-  // Settings, refit + refocus so the canvas matches the new visible size.
+  // Refit on expand OR on screen return. The panel is always mounted (so xterm state survives collapse + Settings visits), but its outer div has display:none while collapsed/hidden — the ResizeObserver can't measure a zero-size box, so the active terminal's last fit() ran against the pre-hide dimensions. When the user re-opens the panel or returns from Settings, refit + refocus so the canvas matches the new visible size.
   useEffect(() => {
     if (!terminalOpen) return;
     if (!screenActive) return;

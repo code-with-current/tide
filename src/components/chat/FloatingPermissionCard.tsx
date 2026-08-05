@@ -1,14 +1,4 @@
-/**
- * FloatingPermissionCard — a fixed-position overlay that surfaces pending
- * permission prompts above the composer, replacing the Inspector's Review
- * section. Renders one card per pending tool call, stacked vertically.
- *
- * Reads directly from the UI store (like the old ReviewSection did), so it
- * works independently of TurnBlock/OneCodeToolRow's inline card. The inline
- * card in the chat stream can be kept or removed — this floating variant
- * ensures the prompt is always visible even when the tool row is scrolled
- * out of view.
- */
+/** FloatingPermissionCard: fixed overlay above the composer surfacing pending permission prompts (one card per pending tool call). Reads from UI store; complements the inline card. */
 import { ShieldAlert } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { PermissionCard } from './PermissionCard';

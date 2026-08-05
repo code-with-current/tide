@@ -1,15 +1,4 @@
-/**
- * edit_file tool — replace an exact string match in a file.
- *
- * Per design doc §8: if `old_string` is not unique in the file, refuse
- * with the line numbers of all matches — do NOT silently pick the first.
- *
- * Returns a unified-diff `display` so the UI can render hunks. Without
- * worktree isolation, the edit hits the user's real working tree; the
- * permission gate (forced `ask`) is the only safety net.
- *
- * Migration state (Phase 2): dual export per the bash.ts pattern.
- */
+/** edit_file tool: replace a unique exact string match in a file; refuses (with all match line numbers) if old_string isn't unique. Returns a unified-diff display; the permission gate is the safety net without worktree isolation. */
 
 import * as fs from 'fs';
 import { tool } from 'ai';
@@ -144,11 +133,7 @@ export function createEditFileTool(ctx: ToolContext) {
   });
 }
 
-/**
- * Build a minimal unified-diff view: one hunk covering the changed region
- * with 3 lines of context above and below. Sufficient for the UI card;
- * not a full `diff -u` reimplementation.
- */
+/** Build a minimal unified-diff view: one hunk with 3 lines of context above/below the changed region. Sufficient for the UI card; not a full `diff -u` reimplementation. */
 function buildUnifiedDiff(before: string, after: string, path: string): DiffHunk[] {
   const beforeLines = before.split('\n');
   const afterLines = after.split('\n');

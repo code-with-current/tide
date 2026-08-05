@@ -1,13 +1,4 @@
-/**
- * multi_edit tool — batch multiple string-replacement edits in one file.
- *
- * Atomic: if any edit fails (not found, not unique), the file is left
- * untouched and the whole call fails with the index of the bad edit.
- * This is the latency win over calling edit_file N times — one model
- * turn, one write, one diff.
- *
- * Reuses edit_file's diff builder so the UI gets a unified diff view.
- */
+/** multi_edit tool: batch string-replacement edits in one file, atomically (any failed edit leaves the file untouched and fails the call with the bad edit's index). Latency win over N edit_file calls; reuses edit_file's diff builder. */
 
 import * as fs from 'fs';
 import { tool } from 'ai';
@@ -164,11 +155,7 @@ export function createMultiEditTool(ctx: ToolContext) {
   });
 }
 
-/**
- * Build a diff with one hunk per changed region. Coarser than a real diff
- * algorithm but enough for the UI — shows each contiguous change block
- * with 3 lines of context.
- */
+/** Build a diff with one hunk per changed region — coarser than a real diff algorithm but enough for the UI (3 lines of context per contiguous change). */
 function buildMultiDiff(before: string, after: string, path: string): DiffHunk[] {
   const beforeLines = before.split('\n');
   const afterLines = after.split('\n');

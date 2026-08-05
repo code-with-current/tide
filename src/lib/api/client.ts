@@ -1,15 +1,4 @@
-/**
- * API client — the single swap point between mock data and real IPC.
- *
- * - In a plain browser (Vite dev server alone): every method returns from
- *   the in-memory store in `../mock/data`. No Electron required.
- * - Inside Electron: `window.tideIpc` is present (injected by the preload
- *   script via contextBridge), and every method calls through IPC to the
- *   main process. The mock data is still returned by the main process today;
- *   swap the main-process handlers for real implementations later.
- *
- * Components that import these helpers do not change either way.
- */
+/** API client — the single swap point between mock data and real IPC. Uses `window.tideIpc` (Electron preload) when present, otherwise falls back to the in-memory mock store. */
 
 import {
   allSessions,
@@ -35,8 +24,6 @@ import type {
 } from '@/types';
 
 // ── Electron detection ──────────────────────────────────────────
-// In Electron, `window.tideIpc` is injected by preload.ts via contextBridge.
-// In a browser it's undefined — we fall back to mock data.
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
 // ── Mock helpers (browser fallback) ─────────────────────────────
@@ -250,11 +237,7 @@ export async function addMessage(
   if (ipc) return ipc.addMessage(sessionId, role, content, extra);
 }
 
-/**
- * Persist a full assistant message (with reasoning + tool calls). Used by
- * the agent-loop path. Falls back to addMessage(content) when the IPC
- * surface isn't available.
- */
+/** Persist a full assistant message (with reasoning + tool calls). Used by the agent-loop path. Falls back to addMessage(content) when the IPC surface isn't available. */
 export async function addAssistantMessage(
   sessionId: string,
   message: {
@@ -273,11 +256,7 @@ export async function addAssistantMessage(
   await addMessage(sessionId, 'assistant', message.content);
 }
 
-/**
- * Accumulate a turn's usage into the session's cumulative totals. Drives the
- * context-window meter in the right panel. No-op when the IPC surface is
- * unavailable (mock mode) — usage is purely informational.
- */
+/** Accumulate a turn's usage into the session's cumulative totals (drives the context-window meter in the right panel). No-op when the IPC surface is unavailable (mock mode) — usage is purely informational. */
 export async function addSessionUsage(
   sessionId: string,
   delta: {
@@ -317,11 +296,7 @@ export async function renameSession(sessionId: string, title: string): Promise<v
   if (ipc) await ipc.renameSession(sessionId, title);
 }
 
-/**
- * Best-effort LLM title generation. Returns the new title or null (placeholder
- * kept). Fire-and-forget — caller should not await on the critical path; just
- * invalidate the sessions query on resolve so the sidebar picks up the rename.
- */
+/** Best-effort LLM title generation. Returns the new title or null (placeholder kept). Fire-and-forget — don't await on the critical path; just invalidate the sessions query on resolve so the sidebar picks up the rename. */
 export async function generateSessionTitle(sessionId: string): Promise<string | null> {
   if (ipc) return ipc.generateSessionTitle(sessionId);
   return null;

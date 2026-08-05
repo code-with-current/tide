@@ -1,23 +1,4 @@
-/**
- * Thin façade over the per-session streaming state in the UI store.
- *
- * Previously this hook held one blob of streaming state (streamingText,
- * streamingToolCalls, etc.) and its IPC listener dropped events for any
- * session that wasn't the most recently started one — so two sessions
- * couldn't stream in parallel.
- *
- * Now all streaming state lives in `useUi.streams[sessionId]` (keyed by
- * session). This hook:
- *   - Wires a single mount-once IPC listener that routes events by
- *     event.sessionId into the right session's store entry.
- *   - Exposes start/abort/approve/reject actions that take an explicit
- *     sessionId argument.
- *   - Exposes nothing else — MainScreen reads streaming fields directly
- *     from the store via selectors.
- *
- * The per-session microtask coalescer ensures bursts of tokens for one
- * session don't stomp another session's buffer.
- */
+/** Thin façade over per-session streaming state in useUi.streams[sessionId]; a mount-once IPC listener routes events by sessionId so sessions stream in parallel. */
 
 import { useCallback, useEffect } from 'react';
 import type { AgentEvent, RunTurnPayload } from '@/lib/agent/events';
@@ -34,12 +15,7 @@ export interface ChatStreamStartArgs {
   thinkingLevel: RunTurnPayload['thinkingLevel'];
 }
 
-/**
- * Optimistically remove resolved cards from the pending permission set. The
- * server resolves the tool independently; this keeps the UI snappy and lets
- * parallel cards remain visible while one is acted on (Phase 2 batched queue —
- * tool_result no longer wipes permissionRequest, so approve/reject must filter).
- */
+/** Optimistically remove resolved cards from the pending permission set so the UI stays snappy and parallel cards stay visible. */
 function removePendingPermissionCards(sessionId: string, ids: string[]): void {
   useUi.getState().removePermissionCards(sessionId, ids);
 }
@@ -77,13 +53,7 @@ export function useChatStream(): {
           isStreaming: false,
         });
       } finally {
-        // Always clear the running indicator when the turn's IPC call
-        // returns — covers the case where the turn ends with no result and
-        // no throw (no finalMessage, so the MainScreen freeze effect never
-        // fires). Without this, the session chat indicator stays stuck on
-        // "processing" after a no-result turn. setSessionRunning is a no-op
-        // when the state already matches, so this is safe alongside the
-        // finalMessage effect's own clear.
+        // Always clear the running indicator when the IPC call returns — covers no-result turns that the freeze effect never fires on.
         useUi.getState().setSessionRunning(args.sessionId, false);
         // Also ensure isStreaming clears if no turn_end event arrived.
         if (useUi.getState().streams[args.sessionId]?.isStreaming) {
@@ -97,11 +67,7 @@ export function useChatStream(): {
   const abort = useCallback(
     (sessionId: string) => {
       if (!ipc) return;
-      // Tell the main process to abort. Do NOT clear local streaming state
-      // here — the orchestrator's catch block emits a turn_end with the
-      // partial work accumulated so far, and that event drives the cleanup
-      // (isStreaming false, finalMessage set) so the freeze effect can
-      // persist the partial message before the bubble disappears.
+      // Don't clear local state here — the orchestrator emits a turn_end with partial work that drives cleanup so the freeze effect can persist it.
       ipc.abortTurn(sessionId);
       // Just dismiss any pending permission prompt for this session.
       useUi.getState().patchStream(sessionId, { permissionRequest: null });
@@ -150,29 +116,11 @@ export function useChatStream(): {
   );
 
   // ─── Single mount-once IPC listener ──────────────────────────────────────
-  // Registered exactly once for the hook's lifetime. Routes every event to
-  // the per-session entry in the store by event.sessionId. No event is
-  // dropped — concurrent streams for different sessions update independently.
-  //
-  // The listener maintains TWO parallel views of the streaming state:
-  //   1. `blocks` — the new canonical block-stream model (driven by
-  //      streamReducer, one commit per flush, ordering is structural).
-  //   2. The legacy `text`/`toolCalls`/`timeline`/`turn`/`reasoning` fields
-  //      — kept in sync until Tasks 12-14 rewrite the components to read
-  //      from `blocks`. Once that lands, the legacy maintenance dies.
+  // Registered once for the hook's lifetime; routes every event by event.sessionId so concurrent sessions update independently. Maintains the new `blocks` view plus legacy fields (in sync until Tasks 12-14 land).
   useEffect(() => {
     if (!ipc) return;
 
-    // Per-session event queue. Events accumulate here in arrival order;
-    // a 50ms timer coalesces them into one reducer pass + one store
-    // commit. Urgent events (turn_end, error, permission_required) flush
-    // immediately — they're user-visible state transitions.
-    //
-    // This fixes the prior out-of-order bug: the old code flushed text
-    // deltas via setTimeout but applied tool events synchronously, so a
-    // tool that arrived between two text deltas would render before the
-    // text that should have preceded it. With the queue, ordering is
-    // structural: events are applied in arrival order, period.
+    // Per-session event queue coalescing events into one reducer pass + commit per 50ms. Urgent events (turn_end/error/permission_required/followup_required) flush immediately. Fixes an out-of-order bug where tool events applied synchronously rendered before preceding text deltas.
     const FLUSH_MS = 50;
     const queues = new Map<string, AgentEvent[]>();
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -227,19 +175,7 @@ export function useChatStream(): {
 }
 
 // ─── Legacy-field back-compat bridge ─────────────────────────────────────
-//
-// The block-stream reducer (above) maintains `blocks` — the new canonical
-// shape. But until Tasks 12-14 land, the renderer's ThinkingSection,
-// ProcessSection, AnswerBlock, etc. still read the legacy `text`/
-// `toolCalls`/`timeline`/`turn`/`reasoning`/`finalMessage` fields. This
-// helper keeps those fields in sync with the events.
-//
-// DEATH MARCH: every task that rewires a component to read from blocks
-// removes one field from this helper. Once all components are migrated,
-// this whole function goes away and only the reducer drives state.
-//
-// Runs INSIDE the same setState as the reducer, so it's still one commit
-// per batch. Returns a new SessionStream; never mutates its argument.
+// Keeps the legacy text/toolCalls/timeline/turn/reasoning/finalMessage fields in sync with events until Tasks 12-14 rewire components to read from `blocks`. Runs in the same setState as the reducer; returns a new SessionStream.
 function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStream {
   switch (event.type) {
     case 'delta': {
@@ -396,13 +332,7 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
   }
 }
 
-/** Append a text chunk to the live timeline. If the last timeline entry is
- *  a tool (or empty), start a new text entry. Returns a new array; never
- *  mutates the input.
- *
- *  Performance: only the LAST entry is copied — the rest are reused by
- *  reference. This avoids O(N) object allocations per delta on long
- *  conversations with many timeline entries. */
+/** Append a text chunk to the live timeline, starting a new entry if the last was a tool; copies only the last entry to avoid O(N) allocations per delta. */
 function appendTextToTimeline(
   timeline: SessionStream['timeline'],
   chunk: string,

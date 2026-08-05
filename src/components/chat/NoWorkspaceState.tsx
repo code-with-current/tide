@@ -4,12 +4,7 @@ import { useWorkspaces } from '@/lib/queries';
 import { Tag } from '@/components/primitives';
 import { Button } from '@/components/ui/button';
 
-/**
- * Shown in the main panel when no workspace is selected — either at startup
- * (no workspaces added yet) or after the user deselects. Distinct from
- * EmptyChatState, which assumes a workspace is active and is ready to take
- * a prompt.
- */
+/** Shown when no workspace is selected (startup or deselected). Distinct from EmptyChatState (which assumes a workspace is active). */
 export function NoWorkspaceState() {
   const openDialog = useUi((s) => s.openDialog);
   const setActive = useUi((s) => s.setActiveWorkspace);

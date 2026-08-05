@@ -1,22 +1,4 @@
-/**
- * Shortcut action dispatcher — central registry of what each shortcut id DOES.
- *
- * Called from App.tsx's keydown handler once a combo matches; the handler
- * itself only does combo-matching and dispatch. Keeping the actions here (not
- * inline in App.tsx) makes them greppable, testable, and decoupled from the
- * React tree.
- *
- * Each action is a no-arg function that returns true if it actually handled
- * the action (so the caller can preventDefault), false if it was a no-op
- * (e.g. no active session). Actions read fresh state via useUi.getState() /
- * queryClient.getQueryData() — never close over stale captures.
- *
- * Caveats: actions that need component-internal UI state with no store hook
- * (rename inline input, worktree form) fall back to window.prompt() — the IPC
- * fires; the bespoke UI doesn't open. That's the honest best-effort given the
- * current architecture; lifting that state into the store is a separate
- * refactor.
- */
+/** Shortcut action dispatcher — central registry mapping shortcut ids to handler functions. */
 import type { Session } from '@/types';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
@@ -37,12 +19,7 @@ function pendingToolCallIds(sid: string | null): string[] {
 // ─── Global ──────────────────────────────────────────────────────────────
 
 const commandPalette: Action = () => {
-  // ⌘K / Ctrl+K focuses the SessionsPanel search box. (Originally reserved
-  // for a global command palette, but that was never built; the SessionsPanel
-  // search advertises this binding, so it now drives that. A real palette,
-  // if added later, would get its own binding.) Only on the main screen —
-  // the sessions panel isn't mounted elsewhere. Ensures the panel is open,
-  // then bumps a nonce the panel reacts to by focusing its input.
+  // ⌘K / Ctrl+K focuses the SessionsPanel search box on the main screen.
   if (useUi.getState().screen !== 'main') return false;
   if (!useUi.getState().sessionsPanelOpen) {
     useUi.getState().toggleSessionsPanel();
@@ -52,8 +29,7 @@ const commandPalette: Action = () => {
 };
 
 const newSession: Action = () => {
-  // Mirror the SessionsPanel "+ New" button: clear active session + show the
-  // new-session view. The session is created lazily on first send.
+  // Clear active session and show the new-session view.
   const ui = useUi.getState();
   ui.setActiveSession(null);
   ui.setMainView('new');
@@ -66,9 +42,7 @@ const openSettings: Action = () => {
 };
 
 const closeWindow: Action = () => {
-  // No quit IPC exists; window.close() is the renderer-standard way to close
-  // the focused window. On macOS this hides rather than quits (matches native
-  // app behavior); on Win/Linux it closes.
+  // window.close() hides on macOS, closes on Win/Linux.
   window.close();
   return true;
 };
@@ -76,8 +50,7 @@ const closeWindow: Action = () => {
 // ─── Navigation ──────────────────────────────────────────────────────────
 
 const requireMain: Action = () => {
-  // Most navigation shortcuts only make sense on the main screen (not splash,
-  // onboarding, or settings). Returns true when allowed; callers gate on this.
+  // Gate: only allow shortcuts on the main screen.
   return useUi.getState().screen === 'main';
 };
 
@@ -104,17 +77,14 @@ const toggleRightPanel: Action = () => {
 const abortTurn: Action = () => {
   const sid = useUi.getState().activeSessionId;
   if (!sid) return false;
-  // Direct IPC — same path useChatStream().abort takes, without needing the
-  // hook mounted. The orchestrator stops the turn; the stream's permission
-  // prompt (if any) is also cleared so the UI dismisses immediately.
+  // Direct IPC abort; clears permission prompt too.
   window.tideIpc?.abortTurn(sid);
   useUi.getState().patchStream(sid, { permissionRequest: null });
   return true;
 };
 
 const dismissPrompt: Action = () => {
-  // Esc dismisses: the model-emitted options popup, then any pending
-  // permission card. Both live in different store slices; clear in order.
+  // Esc dismisses: options popup first, then permission card.
   const sid = useUi.getState().activeSessionId;
   if (sid) {
     const ui = useUi.getState();
@@ -131,9 +101,7 @@ const dismissPrompt: Action = () => {
 };
 
 const editLastMessage: Action = () => {
-  // No edit-last-message flow exists in the codebase (the composer only sends
-  // new messages). Wiring requires building the edit UI first; declared
-  // implemented:false in the registry. No-op here.
+  // Not yet implemented — no edit-last-message flow exists.
   return false;
 };
 
@@ -153,8 +121,7 @@ function cycleSession(delta: 1 | -1): boolean {
   if (sessions.length === 0) return false;
   const ui = useUi.getState();
   const currentIdx = sessions.findIndex((s) => s.id === ui.activeSessionId);
-  // If no active session (or not found), delta-from-end gives a sensible
-  // starting point: +1 → first, -1 → last.
+  // No active session: +1 → first, -1 → last.
   const startIdx = currentIdx === -1 ? (delta === 1 ? -1 : sessions.length) : currentIdx;
   const nextIdx = (startIdx + delta + sessions.length) % sessions.length;
   ui.setActiveSession(sessions[nextIdx].id);
@@ -167,11 +134,7 @@ const prevSession: Action = () => cycleSession(-1);
 const renameSession: Action = () => {
   const sid = useUi.getState().activeSessionId;
   if (!sid) return false;
-  // The inline rename UI is component-local state in SessionsPanel with no
-  // store hook, so we can't open it from here. Fall back to window.prompt for
-  // the title — the rename IPC commits the change; the sidebar re-renders
-  // from the react-query invalidation. Less polished than the inline input,
-  // but functional.
+  // Falls back to window.prompt (inline rename is component-local state).
   const sessions = readSessions();
   const current = sessions.find((s) => s.id === sid);
   const next = window.prompt('Rename session', current?.title ?? '');
@@ -185,16 +148,12 @@ const renameSession: Action = () => {
 const deleteSession: Action = () => {
   const sid = useUi.getState().activeSessionId;
   if (!sid) return false;
-  // deleteSession IPC throws if the session isn't archived first (see
-  // SessionsPanel — Delete only shows for archived rows). Mirror the full
-  // cleanup path from useDeleteSession: archive → delete → clear store state
-  // → invalidate queries.
+  // Mirror useDeleteSession: confirm → archive → delete → clear state.
   const confirmed = window.confirm('Delete this session? This cannot be undone.');
   if (!confirmed) return false;
   const ui = useUi.getState();
   const wsId = ui.activeWorkspaceId;
-  // Best-effort: archive then delete. If archive fails (already archived or
-  // other), skip straight to delete — the IPC will throw there if not allowed.
+  // Best-effort: skip archive on failure, go straight to delete.
   window.tideIpc?.archiveSession(sid).catch(() => {}).finally(() => {
     window.tideIpc?.deleteSession(sid).then(() => {
       useUi.getState().clearSessionData(sid);
@@ -236,8 +195,7 @@ const copyDiff: Action = () => {
   const activePath = ui.activeOpenFile[sid];
   const file = files?.find((f) => f.path === activePath);
   if (!file?.diffHunks?.length) return false;
-  // Format the diff as unified-diff-ish text. No formatter exists in the
-  // codebase (DiffView only renders), so build it here.
+  // Format diff hunks as unified-diff text (no formatter exists in codebase).
   const text = file.diffHunks
     .map((h) => `${h.header}\n${h.lines.map((l) => `${l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}${l.text}`).join('\n')}`)
     .join('\n');
@@ -251,10 +209,7 @@ const copyDiff: Action = () => {
 const branchFromWorktree: Action = () => {
   const sid = useUi.getState().activeSessionId;
   if (!sid) return false;
-  // The worktree form (branchName/baseBranch) lives in EmptyChatState and is
-  // only shown at new-session creation — there's no store hook to open it for
-  // an existing session. Fall back to prompts for the two required inputs,
-  // then call the same createWorktree IPC MainScreen uses.
+  // Falls back to prompts (worktree form is component-local in EmptyChatState).
   const branch = window.prompt('New branch name');
   if (!branch?.trim()) return false;
   const base = window.prompt('Base branch', 'main') ?? 'main';
@@ -297,8 +252,7 @@ const ACTIONS: Record<string, Action> = {
   branchFromWorktree,
 };
 
-/** Dispatch a matched shortcut. Returns true if the action handled it (caller
- *  should preventDefault to swallow the keystroke), false if no-op. */
+/** Dispatch a matched shortcut. Returns true if handled (caller should preventDefault). */
 export function dispatchShortcut(actionId: string): boolean {
   const fn = ACTIONS[actionId];
   if (!fn) return false;

@@ -1,14 +1,4 @@
-/**
- * Agent event protocol — single source of truth for the wire format between
- * the main-process orchestrator and the renderer.
- *
- * Every event carries `sessionId` and a monotonic per-session `seq` so the
- * renderer can reorder out-of-order events (parallel tool execution) and
- * detect gaps after a renderer reload.
- *
- * Mirrors the design doc §9 IPC event table, condensed to a single
- * discriminated union rather than a flat channel-per-event scheme.
- */
+/** Agent event protocol — single source of truth for the orchestrator↔renderer wire format. Every event carries `sessionId` and a monotonic per-session `seq`. A single discriminated union (design doc §9, condensed). */
 
 import type {
   Block,
@@ -254,11 +244,7 @@ export interface RunTurnPayload {
   thinkingLevel: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
 }
 
-/**
- * Message shape the orchestrator accepts. Richer than the bare
- * `{role, content: string}` the old chat path used — content can be a
- * string (plain text) or an array of content blocks (Anthropic shape).
- */
+/** Message shape the orchestrator accepts — richer than the old chat path's `{role, content: string}`: content can be plain text or an array of Anthropic-shape content blocks. */
 export interface TurnMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;

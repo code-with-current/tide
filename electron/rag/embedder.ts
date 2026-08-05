@@ -1,14 +1,4 @@
-/**
- * Embedder strategy. Two implementations (local ONNX, cloud OpenRouter)
- * share this surface so the resolver can swap them without callers
- * caring which is active.
- *
- * INVARIANT: two different EmbedderIds are NOT cross-compatible, even
- * with matching `dim`. Fine-tuning moves the embedding space, so a chunk
- * embedded with one id MUST be queried with the same id. The resolver
- * (resolve.ts) enforces this by reading ws.ragConfig.embedderId at both
- * build and query time and never mixing.
- */
+/** Embedder strategy shared by local ONNX and cloud implementations so the resolver can swap them transparently. INVARIANT: different EmbedderIds are NOT cross-compatible even with matching `dim` (fine-tuning moves the embedding space) — the resolver enforces same-id build/query. */
 import type { EmbedderId } from '../../src/types';
 
 export interface Embedder {

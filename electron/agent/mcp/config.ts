@@ -1,40 +1,11 @@
-/**
- * MCP config file read/write/merge.
- *
- * Two config sources, merged at connection time:
- *   - User:   ~/.tide/mcp.json (global servers, app-lifetime, + OAuth data)
- *   - Project: <workspace>/.mcp.json (workspace servers, workspace-lifetime)
- *
- * User config shape (unified):
- *   {
- *     "mcpServers": { "server-name": { ...config } },
- *     "oauth": {
- *       "tokens": { "server-name": "encrypted-blob" },
- *       "clients": { "server-name": "encrypted-blob" },
- *       "verifiers": { "server-name": "verifier-string" }
- *     }
- *   }
- *
- * Project config shape (flat, same as before):
- *   { "server-name": { ...config } }
- *
- * readMcpConfig handles all shapes and returns just the server map.
- */
+/** MCP config read/write/merge. Two sources merged at connection time: user (~/.tide/mcp.json — global servers + OAuth data) and project (<workspace>/.mcp.json — workspace servers). User config wraps servers under `mcpServers` plus an `oauth` section; project config is flat. readMcpConfig handles both shapes and returns just the server map. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import type { McpConfigFile, McpServerConfig } from './types';
 import { appDataDir } from '../../appPaths.js';
 
-/** Read and parse an MCP config file. Returns {} on missing/corrupt.
- *
- *  Handles BOTH config shapes:
- *    1. Tide flat format:   { "server-name": { "type": "http", ... } }
- *    2. Wrapped format:     { "mcpServers": { "server-name": { ... } } }
- *
- *  The wrapper is detected when the top-level object has a
- *  "mcpServers" key whose value is an object — we unwrap it.
- */
+/** Read and parse an MCP config file (returns {} on missing/corrupt). Handles both the Tide flat format and the wrapped `{ "mcpServers": {...} }` format — unwrapping when the top-level `mcpServers` key is present. */
 export function readMcpConfig(filePath: string): McpConfigFile {
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -58,11 +29,7 @@ export function readMcpConfig(filePath: string): McpConfigFile {
   }
 }
 
-/**
- * Read the full user MCP config file (mcp.json) as a raw object, including
- * both mcpServers and oauth sections. Used by oauth.ts to access the oauth
- * section without clobbering the servers section.
- */
+/** Read the full user MCP config (mcp.json) including mcpServers and oauth sections (used by oauth.ts to avoid clobbering servers). */
 export function readFullUserMcpConfig(): Record<string, unknown> {
   const filePath = path.join(appDataDir(), 'mcp.json');
   try {
@@ -132,11 +99,7 @@ export function migrateOAuthFiles(): void {
   writeFullUserMcpConfig(full);
 }
 
-/**
- * Write an MCP config file atomically (temp + rename).
- * For the user config (mcp.json), preserves the oauth section by reading
- * the existing file first and merging. For project configs, writes flat.
- */
+/** Write an MCP config file atomically (temp + rename). For the user mcp.json, preserves the oauth section by reading-merging first; project configs write flat. */
 export function writeMcpConfig(filePath: string, config: McpConfigFile): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
@@ -170,11 +133,7 @@ export function mergeConfigs(
   return { ...user, ...project };
 }
 
-/**
- * Validate a single server config. Returns an array of error strings
- * (empty = valid). Accepts configs without an explicit "type" — infers
- * stdio from "command" or http from "url".
- */
+/** Validate a single server config; returns error strings (empty = valid). Accepts configs without explicit "type" — infers stdio from "command" or http from "url". */
 export function validateServerConfig(config: McpServerConfig): string[] {
   const errors: string[] = [];
   const type = config.type

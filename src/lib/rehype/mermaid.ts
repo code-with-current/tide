@@ -1,16 +1,4 @@
-/**
- * rehype plugin: intercept mermaid code blocks BEFORE Streamdown's
- * Shiki code renderer sees them. Finds `<pre><code class="language-mermaid">`
- * in the HTML AST and replaces the entire `<pre>` with a plain `<div>`
- * carrying the raw mermaid source as a data attribute.
- *
- * Without this, Streamdown's built-in code renderer intercepts fenced
- * code blocks at the component level, and react-markdown's
- * `components.code` override never fires for them.
- *
- * The `<div data-mermaid="...">` is then rendered by the `components.div`
- * override in MemoizedMarkdown, which mounts the MermaidDiagram component.
- */
+/** rehype plugin: intercept mermaid code blocks before Streamdown's Shiki renderer. Replaces `<pre><code class="language-mermaid">` with `<div data-mermaid="...">`, which MemoizedMarkdown's `components.div` mounts as `MermaidDiagram`. */
 export function rehypeMermaid() {
   return (tree: any) => {
     if (!tree?.children) return;

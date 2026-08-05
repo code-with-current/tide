@@ -5,30 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-/**
- * OptionsPopup — the "model is asking you a question" surface.
- *
- * Renders above the chat composer when the agent emits a `followup_required`
- * event (or a persisted followup block is unresolved). The popup blocks the
- * composer until the user answers.
- *
- * Layout:
- *   ┌─────────────────────────────────────┐
- *   │ ◆ Tide is asking              [X]   │  ← accent header bar
- *   │ Which framework do you prefer?      │
- *   ├─────────────────────────────────────┤
- *   │ ┌────────┐ ┌────────┐ ┌────────┐   │  ← option chips (clickable)
- *   │ │ Next.js │ │ Vite   │ │ Astro  │   │     single: submit immediately
- *   │ └────────┘ └────────┘ └────────┘   │     multiple: toggle + Submit
- *   ├─────────────────────────────────────┤
- *   │ ┌──────────────────────────┐ ↵     │  ← free-text input (fallback)
- *   │ │ Or type your own answer… │        │
- *   │ └──────────────────────────┘        │
- *   └─────────────────────────────────────┘
- *
- * State lives in the ui store (`pendingOptions`); this component just renders
- * whatever is there. Props: `onSubmit: (selection: string[]) => void`.
- */
+/** OptionsPopup: "model is asking you a question" surface rendered above the composer (blocks until answered). Shows option chips + free-text fallback; state lives in the ui store. */
 export function OptionsPopup({
   onSubmit,
 }: {

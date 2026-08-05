@@ -1,10 +1,4 @@
-/**
- * react-syntax-highlighter integration point.
- *
- * The actual highlighting is done inline in the component (HighlightedCode in
- * FileViewerPanel.tsx) using <SyntaxHighlighter>. This module just provides
- * the language-alias map so the component knows which language name to pass.
- */
+/** Language-alias map for react-syntax-highlighter (used by HighlightedCode in FileViewerPanel.tsx). */
 
 const LANG_ALIAS: Record<string, string> = {
   typescript: 'typescript',

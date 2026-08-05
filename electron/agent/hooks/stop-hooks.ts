@@ -1,23 +1,4 @@
-/**
- * Stop hooks — run when the model naturally terminates.
- *
- * When the model produces a final response with no tool calls (finishReason
- * 'stop'), stop hooks validate the result. They can:
- *
- *   - Block continuation (soft block): inject a blocking message and force
- *     another model call. Used for lint checks, test gates, "did you actually
- *     do what was asked?" validation.
- *   - Prevent continuation (hard stop): end the turn immediately.
- *   - Inject additional context.
- *
- * Integration is via TurnController: onStepEnd detects natural termination
- * and runs stop hooks; prepareStep injects any blocking errors as messages.
- * The stopHookActive flag prevents infinite loops (a blocking hook that
- * triggers another stop sees the flag and can choose not to re-block).
- *
- * Mirrors Claude Code's Stop hook contract: shell commands receiving JSON on
- * stdin, returning {continue: false, reason: "..."} to block.
- */
+/** Stop hooks run on natural termination (finishReason 'stop', no tool calls): they can soft-block (inject a message + re-invoke the model), hard-stop, or inject context. Mirrors Claude Code's Stop hook contract. */
 import { exec } from 'child_process';
 import { type HookEntry, type HookConfig } from './hook-config.js';
 
@@ -46,13 +27,7 @@ export interface StopHookResult {
 
 // ─── Execution ──────────────────────────────────────────────────────────
 
-/**
- * Run all Stop hooks. Called from onStepEnd when the model naturally
- * terminates (finishReason='stop', no tool calls).
- *
- * Hooks run sequentially; the first hard-stop wins. Blocking errors
- * accumulate (all matching hooks run, their reasons merge).
- */
+/** Run all Stop hooks on natural termination; first hard-stop wins, blocking errors accumulate. */
 export async function handleStopHooks(
   config: HookConfig | null,
   input: StopHookInput,

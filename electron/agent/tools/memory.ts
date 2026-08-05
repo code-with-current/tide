@@ -1,35 +1,4 @@
-/**
- * memory tool — semantic + full-text search over the active workspace's
- * RAG index. This is the consumer side of the ingestion pipeline (Phase
- * C) — the agent calls it to find code by meaning rather than by exact
- * string match.
- *
- * Flow per call:
- *   1. Verify the workspace is in ragEnabledWorkspaces. Refuse with a
- *      hint otherwise — the model gets actionable text, not a cryptic
- *      error.
- *   2. Open the per-workspace RagStore. Refuse if the index is empty
- *      (initState was 'never' or the index got cleared).
- *   3. resolveForQuery picks the embedder that BUILT the index — never
- *      crosses, even if the other strategy is now available. Throws
- *      "rebuild required" if the recorded embedder can't serve.
- *   4. Embed the query (one vector), run queryByVector + queryByFts
- *      for top-K each.
- *   5. Reciprocal rank fusion (RRF, k=60) merges the two rankings.
- *      RRF is the standard zero-parameter fusion: it doesn't need
- *      scores, only ranks, so it works across FTS's bm25 (lower is
- *      better) and cosine similarity (higher is better) without
- *      normalization headaches.
- *   6. Format top-K chunks as `[n] path:line (symbol) · 87%\n<body>`.
- *
- * Cost: one embed call per tool use (~50–200ms locally). The store
- * opens cheaply (better-sqlite3 with sqlite-vec extension load) — about
- * 10–20ms — and closes in <1ms. Total tool latency well under the 5s
- * timeout in tool-meta.ts.
- *
- * Permission: read-only, auto-approved in every mode. The tool only
- * reads from the per-workspace index; it never writes.
- */
+/** memory tool — semantic + full-text search over the workspace RAG index. Verifies RAG is enabled, opens the store, resolves the embedder that built the index, embeds the query, and merges vector + FTS top-K via reciprocal rank fusion (RRF, k=60). Read-only and auto-approved. */
 
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -102,11 +71,9 @@ export async function runMemory(
       };
     }
 
-    // 3. Resolve the query-time embedder. resolveForQuery reads the
-    //    index's recorded embedderId and refuses to cross — a
-    //    local-built index whose local runtime has died throws rather
-    //    than silently re-embedding via cloud (the vectors would land
-    //    in a different space and produce garbage scores).
+    // 3. Resolve the query-time embedder. resolveForQuery refuses to cross
+    //    embedders — a local-built index whose runtime died throws rather
+    //    than silently re-embedding via cloud (vectors would mismatch).
     const ws = workspaceStore.listWorkspaces().find((w) => w.id === workspaceId);
     const ragConfig = hydrateRagConfig(ws?.ragConfig);
     let embedder;
@@ -148,10 +115,8 @@ export async function runMemory(
       };
     }
 
-    // 6. Format. Show path:line + symbol + similarity (when available).
-    //    Truncate chunk body to keep tool result readable; long bodies
-    //    bloat the model's context. 1500 chars ≈ 75 lines of source —
-    //    enough for a complete function/class without mid-body cutoff.
+    // 6. Format. Truncate body to BODY_CAP chars to keep the tool result
+    //    readable and avoid bloating the model's context.
     const BODY_CAP = 1500;
     const lines = fused.map((hit, i) => {
       const loc = `${shortPath(hit.path)}:${hit.startLine}` +
@@ -172,11 +137,7 @@ export async function runMemory(
     return {
       status: 'executed',
       output: text,
-      // `display.kind: 'text'` makes ToolCallCard render the body in a
-      // collapsible section (same as web_search/web_fetch results).
-      // Without this, the card shows only the header (tool name + arg
-      // preview) with an empty body — the user sees the tool was called
-      // but can't read what it found.
+      // `display.kind:'text'` makes ToolCallCard render the body in a collapsible section (like web_search/web_fetch). Without it the card shows only the header — the user sees the tool was called but can't read what it found.
       display: { kind: 'text', text },
     };
   } finally {
@@ -184,14 +145,7 @@ export async function runMemory(
   }
 }
 
-/** Reciprocal Rank Fusion — zero-parameter merge of two rankings.
- *  Works with rank-only signals (no need to normalize bm25 vs cosine).
- *  Returns top-K by fused score.
- *
- *  Generic over two distinct item types so VectorHit + FtsHit (which
- *  carry different score-shape fields — `similarity` vs `rank`) can be
- *  fused without forcing one shape. The output is the union type; the
- *  formatter checks for `similarity`/`rank` defensively. */
+/** Reciprocal Rank Fusion — zero-parameter merge of two rankings using rank-only signals; generic over distinct hit types so VectorHit + FtsHit fuse without forcing one score shape. */
 function fuse<T1 extends { id: string }, T2 extends { id: string }>(
   vec: T1[],
   fts: T2[],
@@ -260,11 +214,7 @@ export function createMemoryTool(ctx: ToolContext) {
 }
 
 // ─── Legacy ToolRegistration shape (kept for the registry's non-SDK map) ──
-//
-// The legacy orchestrator (USE_SDK_ORCHESTRATOR=false) consumes this.
-// Today USE_SDK_ORCHESTRATOR=true so this path is dormant, but the
-// registry imports it for shape parity + so a flip back doesn't break.
-// The execute signature mirrors the SDK shape.
+// Consumed by the legacy orchestrator (USE_SDK_ORCHESTRATOR=false). Today that path is dormant, but the registry imports it for shape parity + so a flip back doesn't break; the execute signature mirrors the SDK shape.
 
 export const memoryTool: ToolRegistration = {
   name: 'memory' as const,

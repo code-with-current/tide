@@ -1,16 +1,4 @@
-/**
- * SplitButton — a primary action button with a chevron toggle that opens a
- * dropdown of related secondary actions. Built from shadcn ButtonGroup +
- * Button + DropdownMenu so it inherits their styling and a11y (keyboard nav,
- * focus management, outside-click/Escape close — all from Radix).
- *
- * Used by the Inspector Review card to collapse the four secondary permission
- * actions (Reject & explain; Remember · Session/Project; Switch to Edit Mode)
- * behind the two primary buttons, reducing visual clutter in a narrow panel.
- *
- * The primary click and each item's onSelect stay independent callbacks —
- * this is a presentation composite, not a behavior change.
- */
+/** SplitButton: primary action + chevron dropdown of secondary actions, built on shadcn ButtonGroup/Button/DropdownMenu. Used to collapse secondary permission actions in the narrow Inspector panel. */
 import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { type VariantProps } from 'class-variance-authority';

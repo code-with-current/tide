@@ -1,15 +1,4 @@
-/**
- * Renderer-side logger — forwards to the main process's central log file
- * via the tide:log IPC. Mirrors the main-process createLogger API so the
- * two sides are symmetric.
- *
- * Usage:
- *   import { createLogger } from '@/lib/logger';
- *   const log = createLogger('streamReducer');
- *   log.warn('stream error', { sessionId });
- *
- * In non-Electron contexts (tests, SSR) it falls back to console.
- */
+/** Renderer logger — forwards to the main process via the `tide:log` IPC, mirroring the main-process createLogger API. Falls back to console in non-Electron contexts. */
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 

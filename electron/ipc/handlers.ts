@@ -1,10 +1,4 @@
-/**
- * IPC handler implementations.
- *
- * Phase 1: Real workspace (file dialog, git detection, real file tree).
- * Provider/session/terminal handlers still return mock data — Phase 2 replaces
- * providers with real persistence, Phase 3 adds chat streaming.
- */
+/** IPC handler implementations: Phase 1 covers real workspace/git/file-tree; provider/session/terminal handlers gain real persistence and chat streaming in later phases. */
 
 import { app, ipcMain, dialog, BrowserWindow } from 'electron';
 import * as fs from 'fs';
@@ -31,12 +25,7 @@ import { appDataDir } from '../appPaths.js';
 const log = createLogger('ipc');
 
 // ── OpenRouter model catalog ──────────────────────────────────────
-// The public OpenRouter /models API is the universal metadata source. It's
-// fetched once at boot, cached to userData, and refreshed every 7 days. When
-// a provider's own /models endpoint returns bare ids (z.ai, OpenAI direct, LM
-// Studio), we enrich them by matching against this catalog — so a model like
-// 'glm-5.2' gets its real pricing, context window, and reasoning config even
-// though z.ai's API returns only `{ id }`.
+// OpenRouter /models is the universal metadata source: fetched at boot, cached to userData, refreshed every 7 days. Bare-id providers (z.ai, OpenAI direct, LM Studio) are enriched by matching against this catalog so they get real pricing/context/reasoning.
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OR_CACHE_FILE = 'openrouter-models.json';
 const OR_REFRESH_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -92,10 +81,7 @@ export function bootstrapCatalog(): Promise<void> {
   return orBooted;
 }
 
-/** Look up a bare model id in the OpenRouter catalog to enrich it with
- *  pricing/context/reasoning. Returns a rich ProviderModelMeta when found,
- *  or null when no match. Matches by exact id, then by the tail after the
- *  last '/' (e.g. 'glm-5.2' matches 'z-ai/glm-5.2'). */
+/** Enrich a bare model id from the OpenRouter catalog (pricing/context/reasoning); matches by exact id, then by the tail after the last '/'. */
 function enrichFromOrCatalog(modelId: string): ProviderModelMeta | null {
   if (!orCatalog) return null;
   const lower = modelId.trim().toLowerCase();
@@ -116,11 +102,7 @@ function isRichProviderModel(m: ProviderModelMeta): boolean {
   return !!(m.context_length || m.pricing || m.reasoning || m.max_completion_tokens || m.input_modalities);
 }
 
-/** For each model in the list that is bare (no rich fields), try to enrich it
- *  from the OpenRouter catalog. CRITICAL: preserves the provider's original id
- *  — the provider's API expects its own id (e.g. 'glm-5.2'), NOT OpenRouter's
- *  canonical id ('z-ai/glm-5.2'). Only the metadata fields (context, pricing,
- *  reasoning, etc.) are copied from the catalog entry. */
+/** Enrich bare-id models from the OpenRouter catalog, CRITICAL: preserving the provider's original id (only metadata fields are copied). */
 function enrichBareModels(models: ProviderModelMeta[]): ProviderModelMeta[] {
   if (!orCatalog || orCatalog.length === 0) return models;
   return models.map((m) => {
@@ -132,12 +114,7 @@ function enrichBareModels(models: ProviderModelMeta[]): ProviderModelMeta[] {
   });
 }
 
-/**
- * Normalize a raw /models response array into ProviderModelMeta objects.
- * Handles both rich (OpenRouter) and bare-id (OpenAI/Anthropic direct, LM
- * Studio) shapes. Reads the rich fields defensively — any field may be absent.
- * Drops entries with no valid `id`. Sorted by id for stable display.
- */
+/** Normalize a raw /models response array into ProviderModelMeta objects, handling both rich and bare-id shapes defensively; drops id-less entries and sorts by id. */
 function normalizeProbeList(raw: unknown[]): ProviderModelMeta[] {
   const out: ProviderModelMeta[] = [];
   for (const item of raw) {
@@ -192,17 +169,7 @@ function normalizeProbeList(raw: unknown[]): ProviderModelMeta[] {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/**
- * Wrapped ipcMain.handle that logs mutation/critical channels. Use for
- * create/delete/update/git/provider operations where a server-side audit
- * trail is valuable. Read-only handlers (list/get) can use ipcMain.handle
- * directly — they're not worth the log volume.
- *
- * Logs at debug on success (with duration), error on failure (with the error).
- * The channel name is the tag suffix, so lines read:
- *   [DEBUG] [ipc] tide:createSession {"ms":12}
- *   [ERROR] [ipc] tide:gitCommit failed {"error":"nothing staged"}
- */
+/** Wrapped ipcMain.handle that logs mutation/critical channels at debug (success, with duration) or error (failure). Use for create/delete/update/git/provider ops; read-only handlers can use ipcMain.handle directly. */
 function handle(
   channel: string,
   fn: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<any> | any,
@@ -297,11 +264,7 @@ export function registerIpcHandlers() {
     }
   });
 
-  // Read an image file as a base64 data URL so the renderer can show it in
-  // an <img> (it can't load file:// URLs directly — no privileges under
-  // contextIsolation). Accepts an absolute path (external attachment) OR a
-  // {workspaceId, relPath} for workspace @file mentions. Caps at 10 MB so
-  // giant raw photos don't blow up the IPC channel.
+  // Read an image as a base64 data URL (renderer can't load file:// under contextIsolation). Accepts an abs path or {workspaceId, relPath}; caps at 10 MB.
   const IMG_MAX_BYTES = 10 * 1024 * 1024;
   const IMG_EXT_MIME: Record<string, string> = {
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
@@ -379,13 +342,7 @@ export function registerIpcHandlers() {
       }
     }
 
-    // New Project / Template flow: no repository, and the path doesn't exist
-    // yet → create the directory. NOTE: we intentionally do NOT `git init`
-    // here when a template will scaffold — most scaffolders (create-next-app,
-    // create-t3-app, nuxi init) refuse to run into a directory that already
-    // contains a .git, aborting with "destination is not empty". Git init is
-    // deferred to after the scaffold step (see below), where we only init if
-    // the scaffolder didn't already.
+    // New Project / Template flow: create the directory. We intentionally do NOT `git init` here when a template will scaffold — most scaffolders abort if .git exists, so git init is deferred to after the scaffold step.
     if (!input.repository && !fs.existsSync(dirPath)) {
       try {
         fs.mkdirSync(dirPath, { recursive: true });
@@ -401,11 +358,7 @@ export function registerIpcHandlers() {
       }
     }
 
-    // Template scaffold: run the template's create command (and optional
-    // separate install) inside the new project dir. Skipped for the Empty
-    // template (no scaffold command) and the Clone-from-URL flow (the repo
-    // already has its files). Commands run with stdio captured so a failure
-    // surfaces a useful stderr message rather than a generic non-zero exit.
+    // Template scaffold: run the template's create + optional install commands (skipped for Empty template and Clone-from-URL); stdio captured so failures surface useful stderr.
     if (template && template.scaffold.length > 0 && !input.repository) {
       // Ensure the dir exists — covers the case where the user picked a
       // template without going through the New Project mkdir branch above
@@ -451,11 +404,7 @@ export function registerIpcHandlers() {
       }
     }
 
-    // Existing local folder flow: if the user opted to initialize git and the
-    // folder isn't already a repo, run `git init` before detection so the
-    // workspace is tracked from the start. Applies only to the local-open
-    // flow (no repository, folder already exists); clone/scaffold flows are
-    // already covered by their own git handling above.
+    // Existing local folder flow: if the user opted into git init and the folder isn't already a repo, run `git init` before detection. (Clone/scaffold flows handle their own git.)
     if (input.initGit && !input.repository && fs.existsSync(dirPath) && !fs.existsSync(path.join(dirPath, '.git'))) {
       try {
         execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
@@ -607,11 +556,7 @@ export function registerIpcHandlers() {
       }
     }
 
-    // Project-level agent guidance — CLAUDE.md or AGENT.md at the root.
-    // This is always-on context (the conventional behavior): every turn
-    // sees it in the system prompt so the model follows repo conventions
-    // without the user having to @-mention it. Capped at 8KB to keep the
-    // prompt bounded.
+    // Project-level agent guidance (CLAUDE.md / AGENT.md at root) is always-on context so the model follows repo conventions without @-mention; capped at 8KB.
     const entries = scanProjectEntries(dirPath);
     for (const ctx of entries.contextFiles) {
       lines.push(`---\n${ctx.path} (project agent guidance — always apply):\n${ctx.content}`);
@@ -622,10 +567,7 @@ export function registerIpcHandlers() {
   });
 
   // ── Read a single file from a workspace (for context injection) ──
-  // Used when the user references a path in their message — the harness
-  // fetches the file and stuffs it into the system prompt so the model
-  // can discuss it without real tool calls. Path is sandboxed to the
-  // workspace root; size and binary files are capped.
+  // Fetches a referenced file into the system prompt so the model can discuss it without tool calls. Sandboxed to workspace root; size/binary capped.
 
   ipcMain.handle(
     'tide:readFileInWorkspace',
@@ -793,23 +735,14 @@ export function registerIpcHandlers() {
     sessions.renameSession(sessionId, title);
   });
 
-  // Best-effort LLM title generation via the system app model (lightweight,
-  // app-owned; see agent/system-model.ts). Looks up the session's first user
-  // message, strips /skill and @agent prefixes, asks for a 3-5 word title,
-  // and renames. Returns the new title or null (caller keeps placeholder).
-  // Fire-and-forget from the renderer on new-session creation — never blocks
-  // the turn. No-op (returns null) if TIDE_SYSTEM_API_KEY isn't configured.
+  // Best-effort LLM title generation: looks up the first user message, asks for a 3-5 word title, renames. Fire-and-forget on new-session creation; returns null if no API key configured.
   handle('tide:generateSessionTitle', async (_e, sessionId: string) => {
     try {
       const session = sessions.getSession(sessionId);
       if (!session) return null;
       const firstUser = session.messages.find((m: any) => m.role === 'user');
       if (!firstUser || !firstUser.content) return null;
-      // Resolve the session's chat provider so title-gen runs on the SAME
-      // model the session chats with (works whenever a turn would). Mirrors
-      // the orchestrator's resolution: exact providerId match, then any
-      // enabled provider serving this modelId. Falls back to the system
-      // model inside generateSessionTitle when no provider resolves.
+      // Resolve the session's chat provider so title-gen runs on the same model it chats with (exact providerId match, then any enabled provider serving this modelId; falls back to system model).
       const providers = store.listProviders();
       let provider = providers.find((p) => p.id === session.providerId);
       if (!provider && session.modelId) {
@@ -880,10 +813,7 @@ export function registerIpcHandlers() {
   });
 
   // ── Worktree lifecycle (per-session git isolation) ──────────────
-  // CreateWorktree runs `git worktree add` against the session's
-  // workspace and persists the metadata; the orchestrator picks up
-  // session.worktree.path on the next turn. removeWorktree is exposed
-  // for manual cleanup but usually deleteSession cascades automatically.
+  // createWorktree runs `git worktree add` and persists metadata (orchestrator picks up session.worktree.path next turn); removeWorktree is for manual cleanup (deleteSession cascades automatically).
 
   handle('tide:session:createWorktree', async (_e, sessionId: string, opts: { branchName: string; baseBranch: string; configFiles?: string[] }) => {
     return sessions.createWorktree(sessionId, opts);
@@ -934,12 +864,7 @@ export function registerIpcHandlers() {
   });
 
   // ── Probe provider's /models endpoint ──────────────────────────────
-  // Fetches the list of models the provider exposes, so the user can
-  // populate the Models table from the API instead of typing each id.
-  // Uses the form's CURRENT values (not the saved provider) so it works
-  // in the add form too, before the provider exists. Returns {ok, models}
-  // or {ok:false, error} — never throws, so the button can show the error
-  // inline without a try/catch at every call site.
+  // Fetches the provider's models using the form's CURRENT values (works in the add form). Returns {ok, models} or {ok:false, error} — never throws.
   handle('tide:provider:probeModels', async (
     _e,
     input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string },
@@ -1017,10 +942,7 @@ export function registerIpcHandlers() {
   });
 
   // ── Test provider connection ─────────────────────────────────────
-  // Sends a minimal chat completion ("Say hello in one word.") to verify
-  // the provider config (baseUrl + apiKey + modelId) actually works end-to-
-  // end. Used by the onboarding form before saving. Returns {ok:true} or
-  // {ok:false, error} — never throws.
+  // Sends a minimal chat completion to verify baseUrl+apiKey+modelId end-to-end (used by onboarding). Returns {ok:true} or {ok:false, error} — never throws.
   handle('tide:provider:testConnection', async (
     _e,
     input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string; modelId: string },

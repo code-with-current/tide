@@ -1,13 +1,4 @@
-/**
- * Pure config storage — no Electron imports, fully testable.
- *
- * Encryption is injected via CryptoOps so the module can run in tests
- * with identity functions. The wrapper (store.ts) wires up Electron's
- * safeStorage at module load time.
- *
- * Public surface mirrors store.ts exactly so callers (handlers.ts,
- * orchestrator.ts, chat.ts, scripts.ts) see no difference.
- */
+/** Pure config storage (no Electron imports, fully testable). Encryption is injected via CryptoOps (the store.ts wrapper wires Electron's safeStorage at load); public surface mirrors store.ts exactly. */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -98,13 +89,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   gitCoAuthorEmail: '309788114+code-with-current@users.noreply.github.com',
 };
 
-// ── RAG config hydration ──────────────────────────────────────────────
-// Per-workspace ragConfig is optional + persisted, so workspaces created
-// before this feature existed have no field. Hydrating at read time gives
-// every caller a fully-shaped RagConfig without each one defending against
-// missing fields. Also clamps chunkTokens to the recorded embedder's max
-// (e.g. a workspace that was local-code-512/512 then flipped to cloud-base
-// must not keep a 512 chunk size the cloud model can't embed).
+// ── RAG config hydration: fill missing fields at read time and clamp chunkTokens to the recorded embedder's max (so a workspace flipped from local to cloud doesn't keep an un-embeddable chunk size).
 
 export const DEFAULT_RAG_CONFIG: RagConfig = {
   embedderId: 'local-code-512',

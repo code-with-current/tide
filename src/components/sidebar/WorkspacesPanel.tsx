@@ -52,12 +52,7 @@ import {
 import type { Workspace } from "@/types";
 import { toast } from "@/lib/toast";
 
-/**
- * Derive a workspace's aggregate status from live signals:
- *   in_progress — at least one of its sessions is currently running a turn
- *   unread      — no sessions running, but at least one has unread output
- *   idle        — nothing to show (no sessions, or all read)
- */
+/** Derive a workspace's aggregate status from live signals: in_progress (at least one session running a turn), unread (no sessions running but at least one has unread output), or idle (nothing to show). */
 function workspaceStatus(
   sessions: { id: string }[] | undefined,
   runningSessionIds: string[],
@@ -104,19 +99,7 @@ export function WorkspacesPanel() {
   }, [workspaces]);
 
   /**
-   * Switch to a workspace and restore its most-recent session in one shot.
-   * Bypasses setActiveWorkspace (which would clear the session) — instead we
-   * fetch the workspace's sessions, pick the latest by updatedAt, and set
-   * both ids together via direct setState.
-   *
-   *   - Sessions exist → activeWorkspaceId + activeSessionId + mainView 'chat'
-   *   - No sessions    → activeWorkspaceId + activeSessionId null + mainView
-   *                      'new' (composer shows the empty state; the panel
-   *                      stays open so the user can see the workspace is
-   *                      selected and ready for a new session).
-   *
-   * Sessions panel is always kept open — that's the dual-panel browsing
-   * concept (workspace list + session list side by side).
+   * Switch to a workspace and restore its most-recent session in one shot. Bypasses setActiveWorkspace (which would clear the session) — instead fetch the workspace's sessions, pick the latest by updatedAt, and set both ids together via direct setState. Sessions exist → activeWorkspaceId + activeSessionId + mainView 'chat'; no sessions → activeWorkspaceId + activeSessionId null + mainView 'new' (composer shows empty state; panel stays open so the user sees the workspace is selected). Sessions panel is always kept open — that's the dual-panel browsing concept.
    */
   // The workspace whose sessions are currently loading (during a switch).
   // Drives a per-row spinner so a slow load reads as "switching," not frozen.
@@ -250,17 +233,7 @@ export function WorkspacesPanel() {
   );
 }
 
-/**
- * WorkspaceItem — sidebar row for one workspace.
- *
- * Outer element is a `<div role="button">` rather than `<Button>` so we can
- * nest the ⋯ menu trigger without HTML-invalid button-in-button. `group` on
- * the row lets the trigger fade in on hover.
- *
- * `archived` (derived from `workspace.archivedAt`) flips which menu items
- * appear. Delete is gated on archive state at the storage layer too, so we
- * hide it entirely for active rows.
- */
+/** WorkspaceItem — sidebar row for one workspace. Outer element is a `<div role="button">` (not `<Button>`) so we can nest the ⋯ menu trigger without an HTML-invalid button-in-button; `group` lets the trigger fade in on hover. `archived` (derived from `workspace.archivedAt`) flips which menu items appear; Delete is gated on archive state at the storage layer too, so it's hidden entirely for active rows. */
 function WorkspaceItem({
   workspace,
   active,
@@ -520,12 +493,7 @@ function WorkspaceItem({
   );
 }
 
-/**
- * Collapsible "Archived" section at the bottom of the WorkspacesPanel.
- * Defaults closed; renders only when there are archived workspaces.
- * Reuses WorkspaceItem (which derives archived state from workspace.archivedAt)
- * so menu items and inline rename are identical.
- */
+/** Collapsible "Archived" section at the bottom of WorkspacesPanel. Defaults closed; renders only when there are archived workspaces. Reuses WorkspaceItem (which derives archived state from workspace.archivedAt) so menu items and inline rename are identical. */
 function ArchivedWorkspacesSection({
   workspaces,
   runningSessionIds,

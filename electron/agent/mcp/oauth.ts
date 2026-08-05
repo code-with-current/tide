@@ -1,32 +1,4 @@
-/**
- * OAuth authProvider for MCP remote servers.
- *
- * Implements the PKCE flow used by the MCP SDK's streamable-http transport:
- *   401 → metadata discovery → browser auth at the server's authorization
- *   endpoint → `tide://oauth/callback?code=...&state=...` redirect → the SDK
- *   exchanges the auth code for tokens → this provider persists them via
- *   Electron `safeStorage` (Keychain on macOS, DPAPI on Windows, libsecret
- *   on Linux; falls back to base64 when no OS keychain is available).
- *
- * The provider is per-server-name: each remote MCP server has its own entry
- * in `mcp-oauth-tokens.json` (the file is a name → encrypted-blob map; the
- * blobs are opaque ciphertext so the file itself carries no secrets).
- *
- * The `tide://` scheme is registered as privileged in main.ts (BEFORE app
- * ready) and Tide registers itself as the OS handler for it
- * (`app.setAsDefaultProtocolClient`). On macOS the OS hands the callback URL
- * to the running instance via `open-url`; on Windows/Linux a second instance
- * is launched with the URL as the last argv arg, and `requestSingleInstanceLock`
- * forwards it to the primary instance via `second-instance`.
- *
- * Storage shape:
- *   {
- *     "github": "<base64 ciphertext>",
- *     "linear": "<base64 ciphertext>"
- *   }
- *
- * The ciphertext decrypts to a JSON blob matching `StoredTokens`.
- */
+/** OAuth authProvider for MCP remote servers: implements the PKCE flow (401 → metadata → browser auth → `tide://oauth/callback` → token exchange), persisting per-server tokens via Electron `safeStorage` (ciphertext blobs in mcp.json). */
 import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,18 +10,7 @@ const log = createLogger('mcp/oauth');
 const OAUTH_TOKENS_FILE = 'mcp-oauth-tokens.json';
 const REDIRECT_URL = 'tide://oauth/callback';
 
-/**
- * Pending OAuth authorization URLs, keyed by server name.
- *
- * The auth flow is DEFERRED: when the SDK's `auth()` decides authorization is
- * needed, it calls `redirectToAuthorization(url)`. We do NOT open the browser
- * there (that would pop it during every init/reload). Instead we stash the URL
- * and set the connection to `needs_oauth`. The user then clicks "Authenticate"
- * in the MCP settings UI, which calls `consumePendingAuthUrl(name)` → opens
- * the browser. This keeps the browser launch user-initiated.
- *
- * One URL per server; a new flow overwrites the previous.
- */
+/** Pending OAuth authorization URLs keyed by server name; auth is deferred so the browser only opens when the user clicks "Authenticate" (one URL per server). */
 const pendingAuthUrls = new Map<string, URL>();
 
 /** Stash the authorization URL produced during a deferred auth flow. */
@@ -134,17 +95,7 @@ export function clearOAuthTokens(serverName: string): void {
   writeTokensFile(file);
 }
 
-/**
- * Called by the `tide://` handler when the OS hands us a callback URL.
- *
- * Parses `code` / `state` / `error` from the query string and forwards to the
- * connection pool's `completeOAuthCallback`, which calls `finishAuth(code)`
- * on the transport that started the flow. Errors are logged; unknown /
- * duplicate callbacks are ignored.
- *
- * NB: this is intentionally a thin parser — it can't import the pool (which
- * imports this module), so it delegates via the `completer` registered below.
- */
+/** Called by the `tide://` handler: parses code/state/error from the callback URL and forwards to the pool's completer (thin parser to avoid circular import). */
 type OAuthCompleter = (code: string, state?: string) => void;
 let completer: OAuthCompleter | undefined;
 
@@ -172,20 +123,7 @@ export function handleOAuthCallback(url: string): void {
   }
 }
 
-/**
- * PKCE code-verifier storage — per server-name, alongside the OAuth tokens.
- *
- * The SDK's PKCE flow is split across two async boundaries:
- *   1. It generates a verifier + challenges, calls `saveCodeVerifier()`, then
- *      `redirectToAuthorization()` (we open the browser). Control returns.
- *   2. Later, after the `tide://oauth/callback` round-trip, the SDK calls
- *      `codeVerifier()` to retrieve the SAME verifier it saved in step 1, so it
- *      can complete the token exchange. That exchange happens inside the SDK
- *      (server-to-server) and never touches Tide.
- *
- * So the verifier must persist between those two calls — we store it next to
- * the tokens. Reused per server-name; each new flow overwrites the previous.
- */
+/** PKCE code-verifier storage per server-name: persists the verifier across the two async boundaries of the SDK's PKCE flow (save before redirect, retrieve after callback). */
 /** Verifiers stored in mcp.json under oauth.verifiers. */
 function readVerifiersFile(): Record<string, string> {
   const full = readFullUserMcpConfig();
@@ -199,19 +137,7 @@ function writeVerifiersFile(data: Record<string, string>): void {
   writeFullUserMcpConfig(full);
 }
 
-/**
- * DCR client-information storage — per server-name, encrypted like the tokens.
- *
- * When an MCP server's authorization server supports Dynamic Client
- * Registration (RFC 7591), the SDK registers Tide as a client and gets back
- * credentials (client_id, optional client_secret, issue/expiry timestamps).
- * Those MUST persist between sessions — otherwise every reconnect re-registers
- * a new client and the old one leaks on the server. Stored next to the tokens,
- * encrypted via safeStorage.
- *
- * Shape matches the SDK's `OAuthClientInformation` (the core creds subset of
- * `OAuthClientInformationMixed`).
- */
+/** DCR client-information storage per server-name (encrypted): persists RFC 7591 Dynamic Client Registration credentials so reconnects reuse the registered client instead of leaking stale ones. */
 interface StoredClientInfo {
   client_id: string;
   client_secret?: string;
@@ -261,31 +187,7 @@ function clearClientInfo(serverName: string): void {
   }
 }
 
-/**
- * Build an `OAuthClientProvider` the MCP SDK expects for SSE / streamable-HTTP
- * servers that require authorization (the 401 → metadata → browser auth →
- * callback → token exchange flow).
- *
- * Implements the full SDK v1.30 `OAuthClientProvider` interface:
- *   - `redirectUrl` / `clientMetadata`: static OAuth client identity.
- *   - `clientInformation()` / `saveClientInformation()`: per-server registered
- *     client credentials, persisted so DCR (Dynamic Client Registration) only
- *     happens once per server — returning sessions reuse the registered client.
- *   - `tokens()` (READER): returns stored tokens so a returning session skips
- *     the browser round-trip. This is the method the OLD implementation got
- *     wrong (it was a writer named `tokens`).
- *   - `saveTokens()`: persist after a successful exchange.
- *   - `redirectToAuthorization()`: open the user's browser at the server's
- *     authorization URL.
- *   - `saveCodeVerifier()` / `codeVerifier()`: PKCE verifier persistence.
- *   - `invalidateCredentials()`: drop tokens + client info on dead refresh.
- *
- * The SDK's `OAuthTokens` shape is SNAKE_CASE (`access_token`, `refresh_token`,
- * `expires_in`) — `expires_in` is a relative TTL in SECONDS (the raw OAuth spec
- * field), NOT absolute millis. We convert to absolute millis on write and back
- * to relative seconds on read so expiry survives app restarts, while keeping
- * the SDK contract exact.
- */
+/** Build the SDK v1.30 `OAuthClientProvider` for authorized remote servers; converts the SDK's snake_case/relative-seconds `expires_in` to absolute millis on write and back on read. */
 export function createAuthProvider(serverName: string) {
   return {
     get redirectUrl(): string {
@@ -385,12 +287,7 @@ export function createAuthProvider(serverName: string) {
       });
     },
 
-    /** The SDK calls this when authorization is needed. We DEFER the browser
-     *  launch — stash the URL and return. The connection is marked
-     *  `needs_oauth` by the caller (connectServer catches the resulting
-     *  Unauthorized), and the user launches the browser explicitly via the
-     *  "Authenticate" button. This prevents the browser popping on every
-     *  init/reload. */
+    /** SDK authorization hook: defer the browser launch by stashing the URL; the user opens it via the "Authenticate" button so it doesn't pop on every init/reload. */
     async redirectToAuthorization(authorizationUrl: URL) {
       log.info('oauth authorization needed', { server: serverName, url: authorizationUrl.origin });
       setPendingAuthUrl(serverName, authorizationUrl);

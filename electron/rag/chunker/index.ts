@@ -1,19 +1,4 @@
-/**
- * AST-aware source chunker for the RAG ingestion pipeline (Phase B).
- *
- * Uses web-tree-sitter (WASM) with vendored TS / TSX / JS grammars.
- * Reads a source file, parses it, and emits one chunk per top-level
- * symbol (function/class/method/const-export). Files with no top-level
- * symbols — scripts, configs, JSON — become a single whole-file chunk.
- *
- * Chunk boundaries always fall on AST symbol nodes; chunks never split
- * a function body. Each chunk carries its symbol name (for FTS), its
- * source text, and its line range — enough metadata to render a hit.
- *
- * Scope: TypeScript + JavaScript for v1. Adding Python/Go/Rust/Java is
- * a mechanical follow-up — same algorithm, different grammar + node
- * type names.
- */
+/** AST-aware source chunker for RAG ingestion: parses a file with web-tree-sitter and emits one chunk per top-level symbol (whole-file fallback otherwise); boundaries never split a function body. */
 import { Parser, Language, type Node } from 'web-tree-sitter';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -22,19 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/**
- * Resolve the grammar directory. After vite bundles the chunker into
- * `dist-electron/main.mjs`, `__dirname` becomes `dist-electron/` and
- * the grammars are staged at `dist-electron/grammars/` (see
- * build/copy-tree-sitter-grammars.mjs --dist). In vitest, `__dirname`
- * is the source file's own dir and the grammars are co-located. In a
- * packaged app, `__dirname` is inside `app.asar` and the grammars ship
- * alongside main.mjs.
- *
- * Try the candidates in order; first one whose grammar set is complete
- * wins. Throws if none match — fail loudly rather than silently running
- * a chunker with no grammar.
- */
+/** Resolve the grammar dir across bundled/vitest/packaged layouts; first candidate with a core grammar wins, else throw. */
 function resolveGrammarDir(): string {
   const candidates = [
     path.join(__dirname, 'grammars'), // bundled (dist-electron or asar)
@@ -260,12 +233,7 @@ export function _resetParsersForTests(): void {
   parserPromise = null;
 }
 
-/** Chunk a source file by absolute path. Returns [] for:
- *  - unknown extensions
- *  - unreadable / binary files (decode error)
- *  - empty files
- *  Otherwise returns at least one chunk (whole-file fallback if no
- *  top-level symbols are found). */
+/** Chunk a source file by path; returns [] for unknown/binary/empty files, otherwise at least one chunk (whole-file fallback). */
 export async function chunkFile(absPath: string): Promise<Chunk[]> {
   const ext = path.extname(absPath).toLowerCase();
   const lang = EXTENSION_MAP[ext];
@@ -310,11 +278,7 @@ export async function chunkFile(absPath: string): Promise<Chunk[]> {
     const node = cursor.currentNode;
     if (!SYMBOL_NODE_TYPES.has(node.type)) continue;
 
-    // For export statements, the exported declaration is the non-keyword
-    // child — find it by skipping `export`/`default`/`*` keyword nodes.
-    // We chunk the inner declaration's range so the chunk text matches
-    // what the user thinks of as the function/class body, NOT the
-    // `export` keyword prefix.
+    // For export statements, chunk the inner declaration's range (skip `export`/`default`/`*`) so chunk text matches the function/class body, not the export prefix.
     let targetNode = node;
     if (node.type === 'export_statement') {
       const inner = node.children.find(
@@ -367,18 +331,7 @@ export async function chunkFile(absPath: string): Promise<Chunk[]> {
   return chunks;
 }
 
-/** Best-effort symbol name extraction. Returns '' if no name is found
- *  (anonymous default exports, type aliases without names, etc.).
- *
- *  web-tree-sitter 0.25 doesn't expose `childForFieldName` reliably
- *  across grammars, so we iterate child nodes by type — robust across
- *  TS/JS/TSX. */
-/** Generic symbol name extraction. Works across all supported grammars
- *  by looking for the first identifier-like child of the symbol node.
- *  Most tree-sitter grammars name the function/class identifier as
- *  `identifier` or `type_identifier` — we accept both plus a few
- *  language-specific variants. For decorated definitions (Python
- *  @decorator), we unwrap to the inner definition first. */
+/** Best-effort symbol name extraction across all grammars: find the first identifier-like child (identifier/type_identifier/etc.), unwrapping Python @decorator first; returns '' for anonymous exports. */
 function extractSymbolName(node: Node): string {
   // Python: @decorator\ndef foo() — unwrap to the inner definition.
   let target = node;
@@ -389,19 +342,7 @@ function extractSymbolName(node: Node): string {
     if (inner) target = inner;
   }
 
-  // Universal: find the first identifier-like child. Covers:
-  // TS/JS (identifier, type_identifier, property_identifier)
-  // Python (identifier)
-  // Go (identifier, type_identifier)
-  // Rust (identifier, type_identifier)
-  // Java/Kotlin/Scala (identifier)
-  // C/C++ (identifier, type_identifier)
-  // C# (identifier)
-  // Ruby (identifier, constant)
-  // PHP (identifier)
-  // Swift (identifier, type_identifier)
-  // Lua (identifier)
-  // Bash (identifier, word)
+  // Universal: find the first identifier-like child (covers identifier/type_identifier/property_identifier/constant/word across all grammars).
   const NAME_TYPES = new Set([
     'identifier', 'type_identifier', 'property_identifier',
     'constant', 'word',

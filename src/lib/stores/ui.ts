@@ -12,11 +12,7 @@ export type ScreenName = 'splash' | 'onboarding' | 'consent' | 'main' | 'setting
 // Re-export for back-compat — ThinkingLevel now lives in @/types (with 'off' added).
 export type { ThinkingLevel };
 
-/**
- * Persist per-session settings to the main process. Fire-and-forget; the
- * in-memory state has already updated, and a failed persist just means the
- * change won't survive a restart.
- */
+/** Persist per-session settings to the main process. Fire-and-forget — in-memory state already updated; a failed persist just means the change won't survive a restart. */
 function persistSessionSettings(
   sessionId: string,
   patch: { modelId?: string; providerId?: string; autonomyMode?: AutonomyMode; thinkingLevel?: ThinkingLevel },
@@ -53,11 +49,7 @@ export interface TerminalInstance {
    *  and clears it after ipc.terminalStart resolves, so the bytes hit a
    *  real PTY instead of being dropped on a not-yet-existing id. */
   pendingCommand?: string;
-  /** True while a script launched via the Run button is running in this
-   *  terminal. Flips to false on Stop (the shell stays alive but the
-   *  foreground process is dead). Drives the Run/Stop button state in
-   *  ChatSubBar — without this we'd key off "tab exists" and the button
-   *  would never flip back to Run after Stop. */
+  /** True while a Run-button-launched script runs in this terminal; flips to false on Stop (shell stays alive). Drives the ChatSubBar Run/Stop button — without it the button would never reset to Run. */
   scriptRunning?: boolean;
 }
 
@@ -78,13 +70,7 @@ export interface OpenFile {
    *  was already read (pasted files, browsed external files) and that may
    *  live outside the workspace. */
   inlineContent?: string;
-  /** True when the file originated as a composer attachment (browsed or
-   *  pasted), NOT a workspace file. The viewer must NEVER attempt a
-   *  workspace disk read for these — they may live outside the workspace,
-   *  and after a reload their inline content is gone (attachments aren't
-   *  persisted). Distinct from inlineContent: an image attachment sets
-   *  external=true with no inlineContent, and the viewer shows a
-   *  placeholder instead of erroring on a disk read. */
+  /** True for composer attachments (not workspace files) — the viewer must NEVER workspace-disk-read these (may live outside workspace; inline content gone after reload). An image attachment sets external=true with no inlineContent and shows a placeholder. */
   external?: boolean;
   /** Byte count of the original file, when known (shown in the header). */
   bytes?: number;
@@ -136,19 +122,7 @@ export const EMPTY_STREAM: SessionStream = Object.freeze({
   finalMessage: null,
 });
 
-/**
- * Make a terminal name unique within its session by appending a numbered
- * suffix when the base name is already taken. First collision → "name (1)",
- * next → "name (2)", etc. Matches the macOS Finder / VS Code convention.
- *
- *   ["Terminal 1"]              + "Terminal 1"  → "Terminal 1 (1)"
- *   ["test", "test (1)"]        + "test"        → "test (2)"
- *   ["npm run dev", "api"]      + "build"       → "build"
- *
- * The (N) suffix is treated as part of the comparison, so re-adding "test"
- * to a list that already has "test" and "test (1)" lands on "test (2)",
- * not "test (1) (1)".
- */
+/** Make a terminal name unique within a session by appending a numbered suffix ("name (1)", "name (2)") when the base name is taken — Finder/VS Code convention. The (N) suffix counts toward comparison so re-adding "test" with "test (1)" present lands on "test (2)". */
 function dedupeTerminalName(base: string, existing: TerminalInstance[]): string {
   const taken = new Set(existing.map((t) => t.name));
   if (!taken.has(base)) return base;
@@ -177,11 +151,7 @@ export interface PendingOptions {
   multiple: boolean;
   options: string[];
   messageId: string;
-  /** The ask_followup_question tool call id. Required for the new live
-   *  pause-and-resume flow — the renderer calls submitFollowup(sessionId,
-   *  toolCallId, answer) so the orchestrator can resolve the awaiting
-   *  tool and continue the turn. Undefined for the legacy persisted-
-   *  followup path (which goes through handleSend as a new user message). */
+  /** The ask_followup_question tool call id — required for live pause-and-resume (submitFollowup resolves the awaiting tool); undefined for the legacy persisted-followup path. */
   toolCallId?: string;
 }
 
@@ -214,50 +184,24 @@ interface UiState {
   /** Modal visibility. */
   dialogs: Dialogs;
 
-  /**
-   * Per-session options popup (model-emitted ```options block). Keyed by
-   * sessionId so each session's popup is independent — switching sessions
-   * doesn't dismiss or leak another session's popup. Consumers read the
-   * active session's entry; undefined means no popup for that session.
-   */
+  /** Per-session options popup (model-emitted ```options block), keyed by sessionId so switching sessions doesn't dismiss or leak another session's popup. */
   pendingOptions: Record<string, PendingOptions>;
 
-  /**
-   * Per-session streaming state. Keyed by sessionId — each session has its
-   * own text/toolCalls/reasoning/usage/etc. so two sessions can stream in
-   * parallel without overwriting each other. Mirrors the queue/terminals/
-   * openFiles pattern. Not persisted (runtime only).
-   */
+  /** Per-session streaming state (keyed by sessionId) so two sessions can stream in parallel without overwriting each other. Runtime only — not persisted. */
   streams: Record<string, SessionStream>;
 
   /** Per-session composer controls (kept here so chat and empty-state stay in sync). */
   selectedModelId: string | null;
-  /**
-   * Provider half of the selection. Kept alongside `selectedModelId` because
-   * the same model id can exist under multiple providers (e.g. an Anthropic-
-   * style and an OpenAI-style gateway exposing the same name); keying on
-   * modelId alone silently resolves to the first-added provider. Null when
-   * restored from an old session that didn't persist it — callers fall back
-   * to first-match by modelId.
-   */
+  /** Provider half of the selection — kept alongside selectedModelId because the same modelId can exist under multiple providers (keying on modelId alone would silently resolve to the first-added). Null when restored from old sessions; callers fall back to first-match. */
   selectedProviderId: string | null;
   autonomyMode: AutonomyMode;
   thinkingLevel: ThinkingLevel;
   /** Starred model IDs (modelId strings). Starred models pin to the top of the picker. */
   starredModels: string[];
-  /**
-   * Sessions currently running a turn. Populated by the chat hook on
-   * stream start/end. Drives the pulsing-dot indicator in SessionsPanel
-   * and disables switching mid-stream.
-   */
+  /** Sessions currently running a turn — drives the pulsing-dot indicator in SessionsPanel and disables switching mid-stream. */
   runningSessionIds: string[];
 
-  /**
-   * Sessions with an unread finished response. Populated when a turn ends
-   * (the green dot points the user to the new content). Cleared when the
-   * user views the session — like an inbox unread badge, not a permanent
-   * "has messages" marker.
-   */
+  /** Sessions with an unread finished response (green dot) — cleared on view, like an inbox unread badge rather than a permanent "has messages" marker. */
   unreadSessionIds: string[];
 
   /** In-memory (not persisted) timestamps of when each session was last
@@ -345,10 +289,7 @@ interface UiState {
   resetStream: (sessionId: string) => void;
   /** Shallow-merge a patch into a session's stream. */
   patchStream: (sessionId: string, patch: Partial<SessionStream>) => void;
-  /** Optimistically drop resolved permission cards from a session's pending
-   *  set (both the inline TurnBlock card and the Inspector Review card use
-   *  this so approve/reject dismisses immediately, independent of the server
-   *  side and of tool_result — which no longer wipes permissionRequest). */
+  /** Optimistically drop resolved permission cards from a session's pending set so approve/reject dismisses immediately (used by both the inline TurnBlock card and the Inspector Review card). */
   removePermissionCards: (sessionId: string, toolCallIds: string[]) => void;
   /** Update a session's toolCalls via an updater function (append/map). */
   setStreamToolCalls: (sessionId: string, updater: (calls: ToolCall[]) => ToolCall[]) => void;
@@ -396,12 +337,7 @@ interface UiState {
   setAppearance: (patch: Partial<Pick<UiState, 'fontScale' | 'reduceMotion' | 'terminalTheme' | 'terminalFontSize' | 'appTheme'>>) => void;
 
   // ─── Keyboard shortcut overrides ────────────────────────────
-  /** Per-action key overrides on top of the registry defaults. Keyed by
-   *  ShortcutDef.id (see lib/shortcuts.ts); value is display tokens.
-   *  Absent entry → use the platform default. Persisted to settings.json
-   *  (via the tide:settings:* IPC) so custom bindings survive restart AND
-   *  are shared across windows. Hydrated by loadShortcuts() on app startup;
-   *  empty {} until that completes (callers fall through to defaults). */
+  /** Per-action key overrides on top of the registry defaults (keyed by ShortcutDef.id). Persisted to settings.json so they survive restart and are shared across windows; hydrated by loadShortcuts() at startup, empty {} until then. */
   shortcutOverrides: Record<string, string[]>;
   /** Hydrate overrides + platform defaults from the backend settings.json.
    *  Called once at app startup; sets shortcutOverrides and seeds the
@@ -604,11 +540,7 @@ export const useUi = create<UiState>()(
     }));
   },
 
-  /**
-   * Apply per-session settings from a freshly loaded session. Called when
-   * the active session changes — restores the model/autonomy/thinking that
-   * were last used in this session.
-   */
+  /** Apply per-session settings from a freshly loaded session (called when the active session changes — restores the model/autonomy/thinking last used in this session). */
   applySessionSettings: (s) =>
     set((state) => ({
       selectedModelId: s.modelId !== undefined ? s.modelId : state.selectedModelId,
@@ -899,11 +831,7 @@ export const useUi = create<UiState>()(
   },
 
   // ─── Keyboard shortcut overrides ────────────────────────────────────
-  // Empty by default — every action uses its registry default until loadShortcuts
-  // hydrates from settings.json (called once at app startup). The actions
-  // update the in-memory store immediately (optimistic) AND fire the IPC to
-  // persist; the IPC's response is the authoritative post-write state, so we
-  // set again on resolve to converge with any concurrent writer.
+  // Empty by default until loadShortcuts() hydrates from settings.json at startup. Actions update optimistically AND persist via IPC; the IPC response is authoritative, so we set again on resolve to converge with concurrent writers.
   shortcutOverrides: {},
   loadShortcuts: async () => {
     try {

@@ -14,28 +14,14 @@ export interface OptionsBlock {
   options: string[];
 }
 
-/**
- * Parse the inner text of an ```options fence into an OptionsBlock.
- * Returns null on malformed JSON — the caller falls back to showing the
- * raw text. We don't want a parser failure to break the chat.
- *
- * Handles both plain-string options (`["A", "B"]`) and object-form options
- * (`[{label: "A", description: "..."}]`) — the model sometimes emits the
- * object form (especially when it has also seen the ask_followup_question
- * tool schema). For objects, extract the label and append the description
- * as a subtitle.
- */
+/** Parse the inner text of an ```options fence; returns null on malformed JSON. Handles plain-string and object-form options (label + description). */
 export function parseOptionsBlock(json: string): OptionsBlock | null {
   try {
     const parsed = JSON.parse(json);
     if (typeof parsed !== 'object' || parsed === null) return null;
     if (typeof parsed.question !== 'string') return null;
     if (!Array.isArray(parsed.options)) return null;
-    // Normalize each option to a display string. Handles:
-    //   - plain string: use as-is
-    //   - {label, description}: "label — description" (or just label)
-    //   - {value, text}: same pattern, value as label
-    //   - other: stringify as fallback
+    // Normalize each option to a display string: plain string (as-is); {label, description} → "label — description" (or label); {value, text} → same pattern with value as label; other → JSON.stringify fallback.
     const opts = parsed.options.map((o: unknown) => {
       if (typeof o === 'string') return o;
       if (typeof o === 'number' || typeof o === 'boolean') return String(o);
@@ -60,11 +46,7 @@ export function parseOptionsBlock(json: string): OptionsBlock | null {
   }
 }
 
-/**
- * Interactive picker for an ```options block. Renders radios (single-select)
- * or checkboxes (multi-select). Submit button is disabled until the user
- * has made a selection.
- */
+/** Interactive picker for an ```options block: radios (single-select) or checkboxes (multi-select); submit disabled until a selection is made. */
 export function OptionsPicker({
   block,
   disabled = false,

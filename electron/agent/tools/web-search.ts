@@ -1,21 +1,4 @@
-/**
- * web_search tool — proxies through the Tide search Cloudflare Worker.
- *
- * Architecture:
- *   Electron client → Cloudflare Worker → DuckDuckGo scrape
- *
- * Why a worker instead of scraping directly from the client:
- *   - Server IP avoids DDG's anti-bot challenges (client residential IPs
- *     sometimes get hit; Cloudflare egress IPs are stable)
- *   - Markup-fix lives in ONE place — redeploy the worker, no client update
- *   - JSON response shape — client doesn't parse HTML at all
- *   - Ad filtering happens server-side; client sees clean results
- *
- * Returns up to 10 results with title, URL, snippet.
- *
- * If the worker URL needs to change, override via TIDE_SEARCH_WORKER_URL env
- * var. Default points at the production deployment.
- */
+/** web_search tool: proxies through the Tide search Cloudflare Worker (→ DuckDuckGo scrape) so server-side IP/anti-bot handling, markup fixes, and ad filtering stay in one place; returns up to 10 results. Override the worker URL via TIDE_SEARCH_WORKER_URL. */
 
 import { tool } from 'ai';
 import { z } from 'zod';

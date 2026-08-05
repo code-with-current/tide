@@ -47,11 +47,7 @@ interface TerminalEntry {
   detectedPorts: Set<number>;
 }
 
-/**
- * Check whether a process (by pid) is still alive. Uses kill(pid, 0) on
- * Unix (no signal sent, just an existence check) and tasklist on Windows.
- * Returns true if the process exists.
- */
+/** Check whether a process (by pid) is alive: kill(pid, 0) on Unix, tasklist on Windows. */
 export function isProcessAlive(pid: number): boolean {
   if (!pid || pid <= 0) return false;
   try {
@@ -74,14 +70,7 @@ export function getTerminalPid(terminalId: string): number | undefined {
 
 const terminals = new Map<string, TerminalEntry>();
 
-/**
- * Scan a chunk of PTY output for dev-server port patterns. Requires a
- * hostname prefix (localhost / 127.0.0.1 / 0.0.0.0 / ::1) to avoid
- * matching timestamps and other colons. Returns unique ports in the
- * 10–65535 range — covers all common dev servers (vite :5173, next :3000,
- * rails :3000, flask :5000, django :8000, etc.) without matching
- * low-numbered false positives like `12:34:56`.
- */
+/** Scan PTY output for dev-server port patterns. Requires a hostname prefix (localhost/127.0.0.1/0.0.0.0/::1) to avoid matching timestamps; returns unique ports in 10–65535 (vite :5173, next :3000, rails :3000, flask :5000, django :8000, …) — no low-numbered false positives like `12:34:56`. */
 const PORT_PATTERN =
   /(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?):(\d{2,5})\b/g;
 
@@ -106,20 +95,7 @@ function getShell(): { cmd: string; args: string[] } {
 }
 
 function resolveCwd(sessionId: string): string {
-  // Use the live session store (per-session files post-rewrite) rather
-  // than reading sessions.json directly — that file is renamed to .bak
-  // after migration, so the old direct read would silently fail and
-  // resolveCwd would fall back to $HOME for every new terminal.
-  //
-  // Preference order:
-  //   1. session.worktree.path — when the session is isolated in a
-  //      worktree, tools + terminals operate there, NOT in the main
-  //      checkout. This is what makes Run-script terminals land in the
-  //      worktree alongside agent edits.
-  //   2. workspace.path (resolved via session.workspaceId)
-  //   3. workspace.path (when sessionId is actually a workspace id —
-  //      e.g. Run button clicked before any session exists)
-  //   4. $HOME as last-resort fallback
+  // Resolve cwd from the live session store (not sessions.json, which is renamed to .bak post-migration). Preference: session.worktree.path, then workspace.path via workspaceId, then workspace.path when sessionId IS a workspace id, then $HOME.
   try {
     const workspaces = store.listWorkspaces();
     const session = sessions.getSession(sessionId);
@@ -215,28 +191,7 @@ export function sendInput(terminalId: string, input: string): void {
   entry?.ptyProc.write(input);
 }
 
-/**
- * Stop the foreground process running inside a terminal's shell.
- *
- * PRIMARY: send Ctrl+C (\x03) to the PTY. The PTY's terminal driver forwards
- * SIGINT to the FOREGROUND process group — the real one (the dev server the
- * user ran + its children), NOT the shell's own group. This is how Ctrl+C
- * works interactively, and it's the only reliable cross-platform way to reach
- * the foreground job: job-control shells put each foreground command in its
- * OWN process group, so signaling the shell's group (-shellPid) misses it.
- *
- * A single \x03 can be swallowed if the process is mid-output or ignores the
- * first SIGINT, so we send it twice with a short gap. If the process still
- * hasn't died after ~1s (stubborn server, swallowed SIGINT), we escalate to a
- * tree-kill: find the shell's descendants and SIGKILL them directly.
- *
- * - Windows: Ctrl+C is also sent via \x03 (ConPTY forwards it), with a
- *   taskkill /T tree-kill fallback on the shell pid.
- *
- * The shell itself stays alive (only the foreground group dies), so onExit
- * does NOT fire — we clear ports explicitly here. Clearing the dedup Set lets
- * a re-run re-emit the port event.
- */
+/** Stop the terminal's foreground process: send Ctrl+C (\x03) twice to the PTY (SIGINT reaches the foreground group, not the shell's group), then escalate to a tree-kill (pkill -P / taskkill /T) after ~1.2s if it survives. The shell stays alive, so ports are cleared explicitly here. */
 export function stopTerminal(terminalId: string): void {
   const entry = terminals.get(terminalId);
   if (!entry) return;

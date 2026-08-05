@@ -22,18 +22,7 @@ import { useUi } from '@/lib/stores/ui';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
-/**
- * Settings → Extensions → MCP.
- *
- * Lists every configured MCP server across the two scopes (global ~/.tide/mcp.json
- * and the active workspace's .mcp.json), with live status pulled from the agent
- * pool. Status updates arrive via the `onMcpStatusChanged` IPC event, which we
- * turn into a `refresh()` call.
- *
- * Note on the IPC surface: the preload bridge exposes `onMcpStatusChanged(cb)`
- * returning void and a separate `removeAllMcpListeners()` — there is no
- * per-subscription unsubscribe handle, so cleanup calls the bulk remover.
- */
+/** Settings → Extensions → MCP: lists servers across global/workspace scopes with live status from the agent pool (refreshed via onMcpStatusChanged IPC event). */
 
 /** Shape of one row returned by window.tideIpc.mcpList(). */
 interface McpStatus {

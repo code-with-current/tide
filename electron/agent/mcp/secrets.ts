@@ -1,11 +1,4 @@
-/**
- * MCP secret storage — resolves {{secret:name}} placeholders from
- * Electron's safeStorage (OS keychain).
- *
- * Two patterns coexist in MCP configs:
- *   1. Inline values — passed through as-is (e.g. "PROXY_API_KEY": "sk-xxx")
- *   2. Placeholder secrets — {{secret:name}} resolved from safeStorage
- */
+/** MCP secret storage: resolves {{secret:name}} placeholders from Electron's safeStorage (OS keychain). Inline values pass through as-is; placeholder secrets are decrypted on demand. */
 import { app, safeStorage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';

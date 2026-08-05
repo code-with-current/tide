@@ -15,24 +15,7 @@ import { useModels } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import type { ModelOption } from '@/lib/queries';
 
-/**
- * Model picker. Reads from the real providers query (useModels) and writes
- * `selectedModelId` to the UI store.
- *
- * Layout:
- *   [🔍 search...]
- *   ★ Starred        (models the user pinned — always at top, but also remain
- *                     visible in their provider group below)
- *   Provider A
- *     ★ model 1      (starred models stay in their group too)
- *       model 2
- *   Provider B
- *     model 3
- *
- * Starred models appear BOTH in the top "Starred" section AND in their
- * provider group — starring is a pin, not a move. The search box filters
- * all models by alias or modelId.
- */
+/** Model picker: reads useModels, writes selectedModelId. Starred pinned section + provider groups (starred stays in both); search filters by alias/modelId. */
 export function ModelSelector({ compact = false }: { compact?: boolean }) {
   const selectedProviderId = useUi((s) => s.selectedProviderId);
   const selectedId = useUi((s) => s.selectedModelId);

@@ -1,10 +1,4 @@
-/**
- * Chat streaming via raw fetch + SSE parsing.
- *
- * Bypasses the Vercel AI SDK's provider adapters (which are too strict for
- * some Anthropic-compatible proxies like z.ai). Sends the request in the
- * provider's native format and parses SSE events manually.
- */
+/** Chat streaming via raw fetch + manual SSE parsing, bypassing the Vercel AI SDK's provider adapters (too strict for some Anthropic-compatible proxies like z.ai); sends the request in the provider's native format. */
 
 import { ipcMain } from 'electron';
 import * as store from '../store.js';

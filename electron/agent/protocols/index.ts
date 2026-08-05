@@ -1,11 +1,4 @@
-/**
- * Protocol dispatcher.
- *
- * Single entry point the orchestrator uses: given the provider's apiStyle +
- * the resolved thinking config, return the per-protocol `{ providerOptions,
- * maxOutputTokens, label }`. The orchestrator never branches on protocol —
- * it just consumes this. Adding a protocol = add a builder file + one case.
- */
+/** Protocol dispatcher: single entry point returning per-protocol `{providerOptions, maxOutputTokens, label}` from apiStyle + thinking config. The orchestrator never branches on protocol; adding one = add a builder file + one case. */
 import type { ApiStyle } from '../../../src/types';
 import { anthropicCallOptions } from './anthropic';
 import { openaiCallOptions } from './openai';

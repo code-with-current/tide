@@ -1,9 +1,4 @@
-/**
- * GeneralSection — dual-column settings: General (left) + Appearance (right).
- *
- * Left column: Start at Login, Notifications, Git Attribution (co-authoring).
- * Right column: Theme, Typography, Terminal, Motion (reuses AppearanceContent).
- */
+/** GeneralSection: dual-column settings — General (left: Startup/Notifications/Git Attribution) + Appearance (right, reuses AppearanceContent). */
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, User } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';

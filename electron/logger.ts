@@ -1,26 +1,4 @@
-/**
- * Tide logging system — structured, leveled, file-backed.
- *
- * No external dependencies. Every log call writes a structured line to BOTH
- * the log file (always-on, sync, survives crashes) and the console (so dev
- * terminal output is preserved). Levels filter what reaches the file.
- *
- * Usage:
- *   import { initLogger, createLogger } from './logger.js';
- *   initLogger(path.join(app.getPath('userData'), 'logs'));
- *   const log = createLogger('agent-sdk');
- *   log.info('turn start', { model: 'claude-sonnet-4-5' });
- *   log.debug('per-step detail', { step: 3 });
- *
- * Format: `2026-07-29T14:30:00.123Z [INFO] [agent-sdk] turn start {"model":"claude-sonnet-4-5"}`
- *
- * File rotation: when tide.log exceeds MAX_LOG_BYTES, it's renamed to
- * tide.log.old (one backup) and a fresh file starts. Best-effort — on rename
- * failure, keeps writing to the current file.
- *
- * Global error capture: initLogger installs uncaughtException +
- * unhandledRejection handlers so silent crashes leave a diagnostic record.
- */
+/** Tide logging system: structured, leveled, file-backed (no external deps). Each call writes to both the log file (sync, survives crashes) and the console. Rotates at 5MB (one .old backup) and installs global error handlers. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -176,14 +154,7 @@ export function createLogger(tag: string): Logger {
   };
 }
 
-/**
- * Initialize the logging system. Call ONCE, after userData is set
- * (app.getPath('userData') must resolve correctly) but before any handler
- * registration. Idempotent — safe to call multiple times.
- *
- * @param logDir Directory for tide.log (created if absent).
- * @param level  Minimum level to write. Defaults to 'debug' in dev, 'info' in prod.
- */
+/** Initialize logging once after userData resolves; idempotent. `logDir` holds tide.log, `level` defaults to 'debug' (dev) / 'info' (prod). */
 export function initLogger(logDir: string, level?: LogLevel): void {
   if (initialized) return;
   initialized = true;
@@ -219,11 +190,7 @@ export function setLogLevel(level: LogLevel): void {
   minLevel = level;
 }
 
-/**
- * Forward a log line from the renderer process (via IPC). Used by the
- * `tide:log` handler so renderer logs land in the same central file.
- * Validates the level string; unknown levels are dropped.
- */
+/** Forward a renderer log line (via IPC `tide:log`) to the central file; unknown levels are dropped. */
 export function forwardLog(level: string, tag: string, msg: string, args?: unknown[]): void {
   if (level in LEVEL_ORDER) {
     write(level as LogLevel, tag, msg, args ?? []);

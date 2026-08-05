@@ -3,11 +3,7 @@ import { cn } from '@/lib/utils';
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-/**
- * Braille-dot ASCII spinner. Cycles through 10 frames at ~12fps.
- * Pairs with `.ascii-spinner` CSS (color + monospace + 1ch width) so the
- * layout doesn't shift as the glyph changes.
- */
+/** Braille-dot ASCII spinner: cycles 10 frames at ~12fps; pairs with `.ascii-spinner` CSS (1ch width, no layout shift). */
 export function AsciiSpinner({
   className,
   frameMs = 80,

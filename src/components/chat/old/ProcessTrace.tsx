@@ -3,13 +3,7 @@ import { Activity, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
-/**
- * Collapsible wrapper for an assistant message's "process" — the reasoning
- * block + all tool calls. Default collapsed so the final text result is the
- * focal point; the user expands this to audit how the answer was produced.
- *
- * Renders nothing when there's no process content (no children).
- */
+/** Collapsible wrapper for an assistant message's "process" (reasoning + tool calls). Default collapsed; renders null when empty. */
 export function ProcessTrace({
   summary,
   children,

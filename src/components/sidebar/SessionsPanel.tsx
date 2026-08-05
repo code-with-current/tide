@@ -235,21 +235,7 @@ export function SessionsPanel() {
   );
 }
 
-/**
- * SessionItem — sidebar row for one session.
- *
- * Outer element is a `<div role="button">` rather than a `<Button>` so we can
- * nest the ⋯ menu trigger without HTML-invalid button-in-button. The `group`
- * class on the row lets the trigger fade in on hover.
- *
- * `archived` flips which menu items appear (active = Rename + Archive;
- * archived = Rename + Unarchive + Delete). Delete is gated on archive state
- * at the storage layer too — it throws if the session isn't archived first,
- * so we hide the menu item entirely for active rows.
- *
- * Inline rename: clicking Rename swaps the title `<div>` for an `<Input>`,
- * auto-focuses + selects, and commits on Enter or blur (Esc cancels).
- */
+/** SessionItem: sidebar row using div role=button (so the ⋯ menu can nest inside); archived rows show Unarchive/Delete, active rows show Rename/Archive; inline rename commits on Enter/blur. */
 function SessionItem({
   session,
   active,
@@ -571,12 +557,7 @@ function SessionItem({
   );
 }
 
-/**
- * Collapsible "Archived" section at the bottom of the SessionsPanel.
- * Defaults closed; shows a count so users know there's something to expand.
- * Each archived row reuses <SessionItem archived /> so the menu and inline
- * rename are identical to the active view.
- */
+/** Collapsible "Archived" section at the bottom of the SessionsPanel; defaults closed, shows a count, and reuses <SessionItem archived />. */
 function ArchivedSessionsSection({ workspaceId }: { workspaceId: string }) {
   const { data: archived } = useArchivedSessions(workspaceId);
   const [open, setOpen] = useState(false);

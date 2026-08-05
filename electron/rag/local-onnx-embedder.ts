@@ -9,19 +9,7 @@ import { appDataDir } from '../appPaths.js';
 // ESM has no global __dirname — derive from import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/**
- * Parent-side client for the local ONNX embedder. Spawns a utilityProcess
- * running embedder-process.js, talks over the default parent↔child port
- * (process.parentPort on the child side; child.on('message', …) + child
- * .postMessage(…) on the parent side), and correlates requests by id.
- * The process is spawned lazily on first embed so workspaces that never
- * use RAG pay nothing.
- *
- * If the process fails to spawn or the model fails to load (caught by the
- * child and returned as {type:'error'}), the parent rejects the pending
- * embed() promise; callers surface that and the resolver then honors the
- * cloud toggle.
- */
+/** Parent-side client for the local ONNX embedder: lazily spawns a utilityProcess running embedder-process.js, talks over the parent↔child port, and correlates requests by id. Errors reject the pending embed() promise so callers can fall back to cloud. */
 export class LocalOnnxEmbedder implements Embedder {
   readonly id = LOCAL_META.id;
   readonly dim = LOCAL_META.dim;

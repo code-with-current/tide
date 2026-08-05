@@ -13,17 +13,7 @@ export function langFromPath(path: string): string {
   );
 }
 
-/**
- * TurnBlock — the orchestrator for the canonical block-stream renderer.
- *
- * Walks `message.blocks` (the new canonical shape). The BlockList component
- * handles all block routing; TurnBlock just sits above it and renders the
- * header + any pending permission prompts.
- *
- * Same data drives both streaming-expanded and completed-collapsed views.
- * Each section manages its own collapse state (component-local) so user
- * overrides stick per turn.
- */
+/** TurnBlock: orchestrator for the canonical block-stream renderer. Renders header + BlockList + provides the permission surface via context. */
 export const TurnBlock = memo(function TurnBlock({
   message, streaming, stopReason,
   onApproveToolCalls, onRejectToolCalls,

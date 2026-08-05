@@ -1,25 +1,4 @@
-/**
- * Human-friendly labels for tool names.
- *
- * Tool names from the model are snake_case identifiers (read_file, edit_file,
- * dispatch_agent). These map to short, verb-based labels that read naturally
- * in the UI card headers:
- *
- *   📝 Read    src/index.ts
- *   ✏️  Edit    src/index.ts
- *   ▶️  Run     npm test
- *   🤖 Agent   explore
- *
- * Design principles:
- *   - Short (1-2 words) — fits next to the arg preview in a compact card
- *   - Action-oriented verb — what the tool DID, not what it's called internally
- *   - Merge similar tools (glob + grep → "Search") — users don't distinguish
- *   - Preserve domain terms (git, MCP) — expanding them is worse
- *
- * For streaming/pending tools, `toolLabel` appends "-ing" for the live view,
- * with per-tool overrides for irregular forms (e.g. "Run" → "Running", not
- * "Runing"; "Dispatch" → "Dispatching").
- */
+/** Human-friendly labels for tool names. Maps snake_case IDs to short UI labels. */
 
 /** Base label (completed state) for each tool. */
 const TOOL_LABELS: Record<string, string> = {
@@ -54,16 +33,7 @@ const TOOL_LABELS: Record<string, string> = {
   memory: 'Memory',
 };
 
-/**
- * Per-tool overrides for the progressive ("-ing") form. Most labels can be
- * derived automatically (Read → Reading, Edit → Editing), but some need
- * explicit forms because:
- *   - The base ends in a consonant that doesn't take -ing cleanly
- *     (Run → "Running" not "Runing")
- *   - The label is multi-word and only the verb inflects
- *     (Dispatch Agent → "Dispatching Agent")
- *   - The label doesn't inflect at all (Plan Ready, Git, MCP)
- */
+/** Per-tool overrides for the progressive ("-ing") form (irregulars + multi-word). */
 const TOOL_PROGRESSIVE: Record<string, string> = {
   bash: 'Running',
   kill_shell: 'Stopping',
@@ -74,34 +44,9 @@ const TOOL_PROGRESSIVE: Record<string, string> = {
   ask_followup_question: 'Asking',
 };
 
-/**
- * Parse an MCP namespaced tool name into a display label.
- *
- * MCP tools arrive from the agent stream under names of the form
- * `mcp__<server>__<tool>` (see electron/agent/mcp/toolset.ts, which mints
- * those keys at AI-SDK tool-registration time). The bare `mcp` entry in
- * TOOL_LABELS handles the legacy catch-all; this helper gives each server's
- * tool a distinct, readable header:
- *
- *   "mcp__github__create_issue"   → "github · create issue"
- *   "mcp__linear__list_teams"     → "linear · list teams"
- *
- * The server segment keeps its raw casing (server names are user-defined and
- * case-meaningful on some transports); only hyphens become spaces. The tool
- * segment gets underscores → spaces (matching the rest of this module's
- * snake_case → display convention).
- *
- * Returns null for anything that isn't an `mcp__server__tool` triple so the
- * caller can fall through to the built-in label table.
- */
+/** Parse `mcp__<server>__<tool>` into `"server · tool"` display label. Returns null if not MCP. */
 export function mcpToolLabel(namespacedName: string): string | null {
-  // `[^_]+` for the server segment would split on underscores in server names
-  // (some MCP servers DO contain them), but the registration key we match here
-  // is always `mcp__<server>__<tool>` with a fixed `__` separator, and the SDK
-  // contract forbids `__` inside either segment. A greedy `[^_]+` would break
-  // on single-underscore server names, so we accept everything up to the next
-  // `__` boundary by matching `([^_]+)` after the first `mcp__` and capturing
-  // the remainder up to end. This matches what toolset.ts emits.
+  // Split on the fixed `__` separator (the SDK contract forbids `__` inside either segment). `[^_]+` after `mcp__` captures the server; the rest is the tool name. Matches what toolset.ts emits.
   const match = namespacedName.match(/^mcp__([^_]+)__(.+)$/);
   if (!match) return null;
   const server = match[1].replace(/-/g, ' ');
@@ -110,14 +55,7 @@ export function mcpToolLabel(namespacedName: string): string | null {
 }
 
 
-/**
- * Get the human-friendly label for a tool name.
- * Falls back to the raw name with underscores replaced by spaces.
- *
- * @param toolName  The snake_case tool identifier.
- * @param status    Optional status — when 'running' or 'pending', uses the
- *                  progressive ("-ing") form for the live streaming view.
- */
+/** Get the human-friendly label for a tool name. Falls back to raw name with spaces. */
 export function toolLabel(toolName: string, status?: string): string {
   // MCP namespaced tools (mcp__server__tool) get a dedicated "server · tool"
   // label — checked first so they bypass the built-in table entirely. Returns

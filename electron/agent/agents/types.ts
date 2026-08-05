@@ -1,19 +1,4 @@
-/**
- * Embedded sub-agent definition contract.
- *
- * An agent is a named, specialized system prompt. The main orchestrator
- * dispatches it via the `dispatch_agent` tool. Agents come in two flavors:
- *
- *   - **Single-shot** (no `allowedTools`): one LLM call, no tools, returns
- *     a report. Used for analysis, planning, research, design.
- *
- *   - **Multi-step** (has `allowedTools`): gets its own tool-call loop via
- *     `streamText` with `stopWhen`. Can read files, search code, and even
- *     dispatch its own sub-agents (recursive, up to MAX_AGENT_DEPTH).
- *
- * All agents inherit the parent turn's provider, model, permissions, and
- * abort signal. Permission gates apply to every tool call inside sub-agents.
- */
+/** Embedded sub-agent definition contract: a named, specialized system prompt dispatched via the `dispatch_agent` tool. Single-shot (no allowedTools → one LLM call) or multi-step (has allowedTools → streamText loop with stopWhen, recursive up to MAX_AGENT_DEPTH). All inherit the parent turn's provider/model/permissions/signal. */
 
 export interface AgentDef {
   /** Stable identifier — matches the `name` field in the dispatch_agent enum. */

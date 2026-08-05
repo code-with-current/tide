@@ -1,23 +1,4 @@
-/**
- * RagIndexProgress — a prominent RAG indexing-progress card.
- *
- * Consumes a `RagInitProgressEvent` (streamed over IPC via useRagInitProgress)
- * and renders nothing when there's no active/failed event, so consumers can
- * mount it unconditionally: `<RagIndexProgress event={initProgress} />`.
- *
- * Three display modes:
- *   • embedding → DETERMINATE bar with a real % (chunksEmbedded / chunksTotal)
- *   • walking / chunking → INDETERMINATE shimmer bar (no reliable total yet)
- *   • failed → destructive accent + the error text
- *
- * The determinate bar reuses the shadcn `Progress` primitive. The
- * indeterminate bar is a CSS class (`.rag-index-bar-indeterminate` in
- * index.css) that slides a highlight across; falls back to a static fill
- * under prefers-reduced-motion.
- *
- * `currentFile` (the file currently being walked/embedded) is surfaced here
- * — it was present in the event payload but previously unused anywhere.
- */
+/** RagIndexProgress: indexing-progress card. embedding → determinate %, walking/chunking → indeterminate shimmer, failed → destructive error. Renders null when idle/done. */
 
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';

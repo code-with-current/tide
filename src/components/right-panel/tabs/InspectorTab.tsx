@@ -50,11 +50,7 @@ export function InspectorTab({ session }: { session: Session }) {
   );
   const { data: gitChanges } = useGitStatus(session.workspaceId, session.worktree ? session.id : undefined);
 
-  // Any of the core async deps still loading → show a skeleton for the
-  // Configuration section instead of fabricated values (e.g. a hardcoded
-  // 100 maxSteps or a raw modelId before the model record resolves). Uses
-  // the queries' isLoading flags (not a value === undefined check) so a
-  // legitimately-missing model doesn't keep the skeleton up forever.
+  // Any core async dep still loading → show a skeleton for the Configuration section (avoids fabricated values like a hardcoded 100 maxSteps). Uses isLoading flags (not value === undefined) so a legitimately-missing model doesn't keep the skeleton up forever.
   const loading =
     modelsLoading || agentSettings === undefined || workspaces === undefined || gitChanges === undefined;
 
@@ -211,12 +207,7 @@ export function InspectorTab({ session }: { session: Session }) {
   );
 }
 
-// Module-level stable empty array. Returning a fresh `[]` from the selector
-// on every call would create a new reference each time, which Zustand's
-// useSyncExternalStore sees as a snapshot change → infinite re-render loop
-// ("getSnapshot should be cached"). A shared constant keeps the empty case
-// referentially stable, matching the codebase's existing pattern
-// (DEFAULT_INSPECTOR_TABS in RightPanel.tsx).
+// Module-level stable empty array (avoids Zustand "getSnapshot should be cached" infinite re-render loop).
 const EMPTY_TOOL_CALLS: readonly never[] = Object.freeze([]);
 
 /** Read the pending permission tool calls for a session from the UI store.
@@ -242,8 +233,6 @@ function autonomyLabel(mode: Session['autonomyMode']) {
 }
 
 // =============================================================
-// Review section — pending approvals. Uses PermissionCard with the
-// variant="split" Inspector layout (split-button dropdowns).
 // Review section removed — permission prompts now render as a floating card
 // above the composer (FloatingPermissionCard in MainScreen).
 // =============================================================

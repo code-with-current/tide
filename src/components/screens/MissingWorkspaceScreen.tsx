@@ -1,16 +1,4 @@
-/**
- * MissingWorkspaceScreen — shown when the active workspace's folder is gone.
- *
- * Replaces the chat/composer body with a warning + two recovery options:
- *   1. Delete Workspace — remove the record (the folder is already gone).
- *   2. I've restored it — re-probes the folder; on success flips back to the
- *      normal new-session view so the user can pick up where they left off.
- *
- * The user is expected to manually recreate/copy the project folder (we do
- * NOT silently mkdir — that would resurrect an empty workspace and mask the
- * problem). The "Reinit" button just re-checks existence; it's a pull, not a
- * create.
- */
+/** MissingWorkspaceScreen: shown when the active workspace's folder is gone. Offers Delete or "I've restored it" (re-probe, no silent mkdir). */
 import { useState } from 'react';
 import { FolderX, Trash2, RefreshCw, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';

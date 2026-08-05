@@ -64,11 +64,7 @@ export function MainScreen() {
   const setSessionsPanelOpen = useUi((s) => s.toggleSessionsPanel);
   const setRightPanelOpen = useUi((s) => s.toggleRightPanel);
   const mainView = useUi((s) => s.mainView);
-  // The right panel is hidden on the new-session screen — it shows session-
-  // specific data (Inspector, files, terminal) that doesn't exist yet before
-  // the first message creates a session. Derived locally (NOT written to the
-  // store) so the user's rightPanelOpen preference is preserved when they
-  // return to chat.
+  // The right panel is hidden on the new-session screen — it shows session-specific data (Inspector, files, terminal) that doesn't exist before the first message creates a session. Derived locally (NOT written to the store) so the user's rightPanelOpen preference is preserved when they return to chat.
   const showRightPanel = rightPanelOpen && mainView !== "new";
   const [fileViewerWidth, setFileViewerWidth] = useState(50); // percent
   const cardRef = useRef<HTMLDivElement>(null);
@@ -289,19 +285,8 @@ export function MainScreen() {
     setRightPanelOpen,
   ]);
 
-  // Scroll behavior:
-  //   - Never force-scroll during streaming. Let the user scroll freely.
-  //   - Auto-scroll ONLY when the user is already at the bottom (they're
-  //     following along) OR when they just sent a message (they want to see
-  //     the response). If they've scrolled up to read history, respect that.
-  //   - Show a floating "scroll to bottom" button above the composer when
-  //     not at the bottom. Add a "new" badge when there's streaming content
-  //     they haven't seen.
-  // isAtBottom tracks whether the user is currently "following" the stream
-  // at the bottom of the chat. userPinnedToBottom is a stronger signal: once
-  // the user actively scrolls UP during streaming, we never auto-scroll again
-  // until they either click the scroll-to-bottom button or send a new message.
-  // This gives the user full freedom to read history while a turn runs.
+  // Scroll behavior: never force-scroll during streaming — auto-scroll ONLY when the user is already at the bottom OR just sent a message; show a floating "scroll to bottom" button (with a "new" badge for unseen streaming content) otherwise.
+  // isAtBottom tracks whether the user is "following" the stream at the bottom. userPinnedToBottom is stronger: once the user actively scrolls UP during streaming, we never auto-scroll again until they click scroll-to-bottom or send a new message — giving them full freedom to read history while a turn runs.
   const [isAtBottom, setIsAtBottom] = useState(true);
   const userPinnedRef = useRef(true); // true = follow; false = user scrolled up
   useEffect(() => {
@@ -333,12 +318,7 @@ export function MainScreen() {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Auto-scroll ONLY when the user is following (hasn't scrolled up).
-  // Once they scroll up during a stream, this effect no-ops until they
-  // click the scroll-to-bottom button or send a new message.
-  // Also no-ops while this screen is hidden (Settings open) — MainScreen is
-  // always-mounted, so without this guard streaming would keep re-rendering
-  // a display:none element and burning CPU.
+  // Auto-scroll ONLY when the user is following (hasn't scrolled up) — once they scroll up during a stream, this effect no-ops until they click scroll-to-bottom or send a new message. Also no-ops while this screen is hidden (Settings open); MainScreen is always-mounted, so without this guard streaming would keep re-rendering a display:none element and burn CPU.
   useEffect(() => {
     if (!isActive) return;
     if (!userPinnedRef.current) return;
@@ -518,11 +498,7 @@ export function MainScreen() {
         sessionId = newSession.id;
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
-        // Best-effort LLM title refinement (first message only — this block
-        // runs only on new-session creation). Fire-and-forget: the placeholder
-        // is already set; this renames server-side on resolve and invalidates
-        // the sessions list so the sidebar picks up the new title. Never
-        // awaits on the send path — a slow/stuck title call can't block the turn.
+        // Best-effort LLM title refinement (first message only). Fire-and-forget: the placeholder is already set; this renames server-side on resolve and invalidates the sessions list so the sidebar picks up the new title. Never awaits on the send path — a slow/stuck title call can't block the turn.
         addTitleGenerating(newSession.id);
         void api
           .generateSessionTitle(newSession.id)
@@ -533,11 +509,7 @@ export function MainScreen() {
           })
           .finally(() => removeTitleGenerating(newSession.id));
 
-        // Worktree isolation — if the user opted in from the new-session
-        // screen, create a git worktree for this session now (before the
-        // turn starts). The orchestrator picks up session.worktree.path
-        // automatically. On failure (branch exists, base missing), warn
-        // and continue without isolation — the user can still chat.
+        // Worktree isolation — if the user opted in from the new-session screen, create a git worktree for this session now (before the turn starts). The orchestrator picks up session.worktree.path automatically. On failure (branch exists, base missing), warn and continue without isolation — the user can still chat.
         if (payload.worktree?.enabled && sessionId) {
           try {
             await api.createWorktree(sessionId, {
@@ -677,14 +649,7 @@ export function MainScreen() {
     ],
   );
 
-  // When any session's stream finishes (finalMessage lands), freeze + persist
-  // that session's assistant message. Iterates over ALL streams rather than
-  // reading a single finalMessage slot — critical for parallel turns where two
-  // sessions may finish close together and would otherwise overwrite each
-  // other's slot before the effect processes them.
-  //
-  // Subscribes to `hasAnyFinalMessage` so the effect fires whenever any
-  // session's finalMessage becomes set, regardless of which is active.
+  // When any session's stream finishes (finalMessage lands), freeze + persist that session's assistant message. Iterates over ALL streams rather than reading a single finalMessage slot — critical for parallel turns where two sessions may finish close together and would otherwise overwrite each other's slot before the effect processes them. Subscribes to `hasAnyFinalMessage` so the effect fires whenever any session's finalMessage becomes set, regardless of which is active.
   useEffect(() => {
     if (!hasAnyFinalMessage) return;
     const streams = useUi.getState().streams;
@@ -740,16 +705,7 @@ export function MainScreen() {
     api.setLastSession(activeSessionId, activeWorkspaceId);
   }, [activeSessionId, activeWorkspaceId]);
 
-  // Notify the main process when the active workspace changes so the MCP
-  // pool can connect project-scoped servers (.mcp.json at the workspace root)
-  // and the MCP IPC handlers know which config file to mutate for
-  // project-scoped add/update/remove. The main side keeps `activeWorkspace`
-  // fresh (see the `tide:mcp:workspaceActivated` handler in main.ts).
-  //
-  // Fires once `workspaces` has loaded and the active entry resolves to a
-  // path; re-fires only when either changes. Fire-and-forget — the IPC is
-  // best-effort and a missed signal just means project servers stay down
-  // until the next change (user-scoped servers are unaffected).
+  // Notify the main process when the active workspace changes so the MCP pool can connect project-scoped servers (.mcp.json at the workspace root) and MCP IPC handlers know which config file to mutate for project-scoped add/update/remove. The main side keeps `activeWorkspace` fresh (see `tide:mcp:workspaceActivated` in main.ts). Fires once `workspaces` has loaded and the active entry resolves to a path; re-fires only when either changes. Fire-and-forget — the IPC is best-effort and a missed signal just means project servers stay down until the next change (user-scoped servers are unaffected).
   useEffect(() => {
     if (!activeWorkspaceId) return;
     const ws = workspaces?.find((w) => w.id === activeWorkspaceId);
@@ -762,12 +718,7 @@ export function MainScreen() {
   // FollowupPrompt component (in the 1code/turn-block path), which routes
   // directly from ask_followup_question tool args — no text regex needed.
 
-  // Submit handler for the popup. Two paths:
-  //   - Live pause flow (toolCallId present): the turn is currently paused
-  //     waiting for this answer. Call submitFollowup IPC — the orchestrator
-  //     resolves the awaiting tool, the turn continues. No new user message.
-  //   - Legacy persisted path (no toolCallId): fall back to handleSend,
-  //     which adds a new user message and starts a fresh turn.
+  // Submit handler for the popup. Live pause flow (toolCallId present): the turn is paused waiting for this answer — call submitFollowup IPC, the orchestrator resolves the awaiting tool and the turn continues (no new user message). Legacy persisted path (no toolCallId): fall back to handleSend, which adds a new user message and starts a fresh turn.
   const handleOptionsSubmit = useCallback(
     (selection: string[]) => {
       const opts = activeSessionId
@@ -1022,12 +973,7 @@ export function MainScreen() {
                           inProgress={isStreaming || !!pendingOptions || submitting}
                           onSubmit={handleSend}
                           onStop={() => {
-                            // abort() requires an explicit sessionId — without
-                            // binding here, the composer's onStop() call would
-                            // pass no arg and ipc.abortTurn(undefined) would
-                            // silently no-op (the orchestrator can't match a
-                            // session). Always abort the active session: the
-                            // stop button represents "stop what I'm looking at".
+                            // abort() requires an explicit sessionId — without binding here, the composer's onStop() would pass no arg and ipc.abortTurn(undefined) would silently no-op (orchestrator can't match a session). Always abort the active session: the stop button represents "stop what I'm looking at".
                             if (activeSessionId) abort(activeSessionId);
                           }}
                         />

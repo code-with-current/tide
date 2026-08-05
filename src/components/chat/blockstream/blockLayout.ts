@@ -1,11 +1,4 @@
-/**
- * Pure layout derivation. Single pass over the block list routes each
- * block to its visual section: thinking, process (non-edit tools +
- * narration), edits (always-visible), answer, followup.
- *
- * Cheap (microseconds for typical turns) and memoized in BlockList via
- * useMemo on the blocks array reference.
- */
+/** Pure layout derivation: single pass over the block list routes each block to its visual section (thinking / process / edits / answer / followup). Cheap (microseconds) and memoized in BlockList via useMemo on the blocks array reference. */
 
 import type { Block, ReasoningBlock, TextBlock, ToolBlock, FollowupBlock } from '@/types';
 import { isFailedStatus } from '@/lib/stream/blockState';

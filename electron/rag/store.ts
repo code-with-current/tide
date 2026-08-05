@@ -1,28 +1,4 @@
-/**
- * Per-workspace RAG storage — SQLite + FTS5 + sqlite-vec.
- *
- * One database per workspace at `<userData>/rag/<workspaceId>/index.db`.
- * The schema holds:
- *
- *   chunks         — metadata + raw content per AST symbol chunk
- *   chunks_fts     — FTS5 over (content, symbol, path) with `chunkId` as
- *                    an UNINDEXED column linking back to chunks.id
- *   chunks_vec     — sqlite-vec vec0 virtual table, 384-dim, keyed by
- *                    rowid (= chunks.rowid) with `+chunkId` aux column
- *                    for easy filtering; populated by the ingestion
- *                    pipeline
- *   meta           — key/value (schemaVersion, embedderId, dim,
- *                    initializedAt, lastIngestedAt)
- *
- * All operations are synchronous — better-sqlite3 is sync by design and
- * batched writes inside a transaction are fast. The ingestion pipeline
- * (Phase C) coordinates async embed calls with sync transactional writes.
- *
- * Migration story: today there's exactly one migration (the initial
- * schema). When the schema changes, bump SCHEMA_VERSION and append a
- * migration step in `migrate()`. The meta-stored version gates which
- * migrations run.
- */
+/** Per-workspace RAG storage (SQLite + FTS5 + sqlite-vec) at `<userData>/rag/<workspaceId>/index.db`. Sync better-sqlite3 writes wrapped in transactions; bump SCHEMA_VERSION and append a step in `migrate()` to evolve the schema. */
 import Database from 'better-sqlite3';
 import { getLoadablePath as getSqliteVecPath } from 'sqlite-vec';
 import * as fs from 'node:fs';
@@ -78,11 +54,7 @@ export function openRagStore(workspaceId: string): RagStore {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
-  // sqlite-vec loads as a SQLite extension. The native .dylib/.so/.dll must
-  // be unpacked from app.asar (asarUnpack in package.json) — otherwise the
-  // path resolves inside the archive and SQLite can't dlopen it. Fix the
-  // path: replace app.asar with app.asar.unpacked so it points to the real
-  // file on disk.
+  // sqlite-vec loads as a SQLite extension; the native binary must be unpacked from app.asar (asarUnpack), so rewrite the path to app.asar.unpacked before dlopen.
   try {
     const vecPath = getSqliteVecPath();
     const realPath = vecPath.replace('app.asar', 'app.asar.unpacked');
@@ -204,11 +176,7 @@ export class RagStore {
       .get(hash) as ChunkRow | undefined;
   }
 
-  /** Upsert chunk rows + their FTS rows in one transaction. Returns the
-   *  chunks' rowids so the caller can pair them with vector writes.
-   *  Vector rows live in a separate table and arrive async via the
-   *  embedder — that's why upsertChunks returns rowids rather than
-   *  also writing vectors. */
+  /** Upsert chunk + FTS rows in one transaction; returns rowids so the caller can pair them with async vector writes. */
   upsertChunks(rows: ChunkRow[]): { id: string; rowid: number }[] {
     if (rows.length === 0) return [];
     const out: { id: string; rowid: number }[] = [];
@@ -246,12 +214,7 @@ export class RagStore {
     return out;
   }
 
-  /** Upsert a batch of (chunkId, rowid, embedding) triples into the
-   *  vector table. rowid must match the chunks rowid (returned from
-   *  upsertChunks). One transaction so a failure rolls back the batch.
-   *  vec0 doesn't support UPSERT — DELETE+INSERT within the tx.
-   *  vec0 also requires BigInt rowids (Number is rejected as "not an
-   *  integer" by the extension's type check), so we coerce here. */
+  /** Upsert (chunkId, rowid, embedding) triples into the vector table in one transaction; rowid must match chunks.rowid. vec0 has no UPSERT (DELETE+INSERT) and requires BigInt rowids. */
   upsertVectors(items: { rowid: number; chunkId: string; embedding: number[] }[]): void {
     if (items.length === 0) return;
     const tx = this.db.transaction((xs: typeof items) => {
@@ -269,10 +232,7 @@ export class RagStore {
     tx(items);
   }
 
-  /** Delete chunk rows + their FTS rows + their vector rows by chunk id.
-   *  vec0 doesn't support FK cascade, so all three deletes are explicit
-   *  AND vec0 deletes by chunkId (the +chunkId aux column) rather than
-   *  rowid — simpler than converting Number→BigInt and equally fast. */
+  /** Delete chunk + FTS + vector rows by chunk id; vec0 has no FK cascade, so all three deletes are explicit and vec0 deletes by the +chunkId aux column. */
   deleteChunks(chunkIds: string[]): void {
     if (chunkIds.length === 0) return;
     const tx = this.db.transaction((ids: string[]) => {
@@ -317,11 +277,7 @@ export class RagStore {
       .filter((x): x is VectorHit => x !== null);
   }
 
-  /** Top-k FTS5 search by bm25 rank. Lower rank = better match.
-   *  Input is sanitized: each token is double-quoted so FTS5 treats
-   *  special characters (?, *, OR, AND, NOT, parentheses) as literal
-   *  text instead of query syntax. Without this, a user query like
-   *  "how does auth work?" crashes with `fts5: syntax error near "?"`. */
+  /** Top-k FTS5 search by bm25 rank (lower = better). Input is sanitized: each token is double-quoted so FTS5 treats special chars (?, *, OR, AND, parentheses) as literal text. */
   queryByFts(text: string, k: number): FtsHit[] {
     const safe = sanitizeFtsQuery(text);
     return this.db
@@ -352,14 +308,7 @@ export class RagStore {
   }
 }
 
-/**
- * Sanitize a natural-language query for FTS5 MATCH. Splits into tokens,
- * wraps each in double quotes so FTS5 treats them as literal phrase
- * tokens. Without this, characters like ?, *, parentheses and reserved
- * words (OR, AND, NOT) cause `fts5: syntax error`.
- *
- * Example: "how does auth work?" → '"how" "does" "auth" "work?"'
- */
+/** Sanitize a natural-language query for FTS5 MATCH: split into tokens, wrap each in double quotes so reserved chars/words are treated as literal phrase tokens. */
 function sanitizeFtsQuery(text: string): string {
   const tokens = text.split(/\s+/).filter((t) => t.length > 0);
   if (tokens.length === 0) return '""';

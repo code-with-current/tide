@@ -1,14 +1,4 @@
-/**
- * Git source control IPC handlers.
- *
- * Each function runs git via spawn (no shell — args passed directly) in the
- * workspace root. No shell quoting needed since args are passed as an array.
- * No remote operations (push/fetch/pull) are exposed.
- *
- * Previously used execAsync (shell string) which required POSIX shell
- * quoting that doesn't work on Windows. Now uses spawn with shell:false
- * — args are passed directly to git, platform-independent.
- */
+/** Git source-control IPC handlers. Each function runs git via spawn with shell:false (args passed directly — no shell quoting, platform-independent) in the workspace root. No remote operations (push/fetch/pull) are exposed. */
 
 import { spawn } from 'child_process';
 import * as path from 'path';
@@ -131,11 +121,7 @@ export async function gitDiff(rootDir: string, filePath: string, staged: boolean
   return parseUnifiedDiff(raw);
 }
 
-// ─── Worktree primitives ─────────────────────────────────────────────
-// Per-session isolation. Each session can spawn its own working tree at
-// <workspace>/<worktreeLocation>/<branchName> so write tools land there
-// instead of the user's main checkout. All shell-quoted via the helper
-// above; no remote operations.
+// ─── Worktree primitives: per-session isolation via <workspace>/<worktreeLocation>/<branchName>; no remote operations.
 
 /** List local branches for the base-branch select dropdown.
  *  Strips the leading `* ` from the current branch and trims whitespace. */

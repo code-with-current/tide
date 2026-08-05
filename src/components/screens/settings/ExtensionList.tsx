@@ -28,23 +28,7 @@ interface ExtensionListProps {
   resetKey?: string;
 }
 
-/**
- * Shared card-wrapped, paginated list for the Extensions settings sections.
- *
- * Each group renders as its own Card:
- *
- *   ┌─ Card ──────────────────────────────┐
- *   │ BUILT-IN                             │ ← header (border-b)
- *   │ [toggle] general-purpose   builtin   │
- *   │ [toggle] explore           builtin   │
- *   │ ...                                  │
- *   ├──────────────────────────────────────┤
- *   │ Showing 1–10 of 47         ‹ ›        │ ← footer (border-t, only if > pageSize)
- *   └──────────────────────────────────────┘
- *
- * Pagination is per-card (each group paginates independently). Pages reset to 1
- * whenever `resetKey` changes (the search filter) or the group contents shift.
- */
+/** Shared card-wrapped, paginated list for Extensions settings. Each group renders as its own card with independent pagination; pages reset on `resetKey` change. */
 export function ExtensionList({
   groups,
   pageSize = 10,

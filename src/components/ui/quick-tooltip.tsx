@@ -1,20 +1,7 @@
 import { type ReactElement, type ReactNode, cloneElement, isValidElement } from 'react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
-/**
- * Convenience wrapper for the common case: wrap a single child, show a
- * text tooltip on hover. Reduces the 4-element shadcn boilerplate to one.
- *
- *   <Tip label="Send">
- *     <button>…</button>
- *   </Tip>
- *
- * Forwards unknown props (onClick, aria-*, anything passed by a parent
- * Slot such as `PopoverTrigger asChild` or `DropdownMenuTrigger asChild`)
- * onto the child via cloneElement. Without this forwarding, wrapping a
- * trigger button in <Tip> would silently swallow the trigger's handlers
- * and the popover/menu would never open.
- */
+/** Tip: one-line text tooltip wrapper around a single child. Forwards unknown props (onClick, aria-*, Slot trigger handlers) via cloneElement. */
 export function Tip({
   label,
   children,

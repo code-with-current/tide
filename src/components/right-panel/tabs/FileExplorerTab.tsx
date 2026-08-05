@@ -17,13 +17,7 @@ function langFromName(name: string): string {
   return (ext && map[ext]) || 'text';
 }
 
-/**
- * Persistent expanded-folder state per workspace.
- *
- * Stores expanded folder PATHS in localStorage keyed by workspaceId.
- * Default: empty set = all folders collapsed.
- * Survives app restarts via localStorage (scoped to the renderer origin).
- */
+/** Persistent expanded-folder state per workspace (localStorage-keyed, default all collapsed, survives restarts). */
 function useExpandedFolders(workspaceId: string | null) {
   const storageKey = workspaceId ? `tide:fe:expanded:${workspaceId}` : null;
 

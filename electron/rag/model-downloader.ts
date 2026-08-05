@@ -1,19 +1,4 @@
-/**
- * Lazy downloader for the local RAG embedding model.
- *
- * The model (isuruwijesiri/all-MiniLM-L6-v2-code-search-512, ≈22 MB) is
- * fetched from HuggingFace CDN on first RAG enable, then cached in
- * userData/models/ — the same path the embedder (embedder-process.ts)
- * already checks via TIDE_MODELS_DIR. This replaces the pre-bundled copy,
- * saving ~44 MB from the shipped app (the model was bundled twice: once
- * from electron/rag/models and once from dist-electron/models).
- *
- * Download is atomic per-file: each file is written to <name>.tmp then
- * renamed, so a crashed/interrupted download never leaves a half-written
- * model that would pass localModelExists() but fail to load.
- *
- * Mirrors the fetch + cache pattern in electron/agent/model-prices.ts.
- */
+/** Lazy downloader for the local RAG embedding model (≈22 MB), fetched from HuggingFace on first RAG enable and cached under userData/models/ with atomic per-file writes. */
 import { app } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -28,11 +13,7 @@ const log = createLogger('rag');
 /** Base URL for model files on HuggingFace. */
 const HF_BASE = `https://huggingface.co/${MODEL_ID}/resolve/main`;
 
-/**
- * Files that constitute the model. The ONNX weights dominate; the three
- * JSON files are the tokenizer + config that @xenova/transformers needs
- * to build the feature-extraction pipeline.
- */
+/** Files that constitute the model: ONNX weights plus tokenizer + config JSONs required by @xenova/transformers. */
 const MODEL_FILES: readonly string[] = [
   'onnx/model_quantized.onnx',
   'tokenizer.json',
@@ -52,11 +33,7 @@ export function getModelDownloadDir(): string {
   return path.join(appDataDir(), 'models');
 }
 
-/**
- * Download a single file from HuggingFace to destPath, atomically.
- * Streams to a .tmp sibling, then renames. Calls onProgress with bytes
- * received so far (relative to this file's Content-Length).
- */
+/** Download a single file atomically (stream to .tmp sibling then rename), reporting bytes received against the file's Content-Length. */
 async function downloadFile(
   relativePath: string,
   destPath: string,
@@ -101,13 +78,7 @@ async function downloadFile(
   void fileSizeHint; // Content-Length is read inline; hint kept for future use
 }
 
-/**
- * Download all model files to userData/models/. Idempotent — files that
- * already exist at the correct size are skipped. Reports aggregate
- * progress via onProgress (received/total across all files).
- *
- * Returns the path to the downloaded model directory.
- */
+/** Download all model files to userData/models/ (idempotent, skipping complete files); reports aggregate progress and returns the model directory path. */
 export async function downloadModel(
   onProgress?: DownloadProgressCallback,
 ): Promise<string> {

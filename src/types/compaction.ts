@@ -1,10 +1,4 @@
-/**
- * Compaction settings — when/how the agent layer summarizes older
- * conversation to stay under the model's context window. Lives in
- * config.json under `compaction`; editable from Settings → Agent.
- *
- * See docs/plans/2026-07-22-vercel-ai-sdk-migration-design.md Section 8.
- */
+/** Compaction settings (config.json → `compaction`, editable via Settings → Agent): how the agent summarizes older conversation to stay under the context window. See vercel-ai-sdk-migration-design.md §8. */
 export interface CompactionSettings {
   /** Master switch. When false, long sessions eventually hit the context wall. */
   enabled: boolean;
@@ -23,11 +17,7 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   onFailure: 'truncate',
 };
 
-/**
- * Clamp/repair a settings object. Used at load time and when the user
- * edits the Settings panel — prevents bad values from reaching the
- * compaction loop. Returns a new object; input is not mutated.
- */
+/** Clamp/repair a settings object (used at load time + Settings panel edits) to prevent bad values from reaching the compaction loop. Returns a new object; input is not mutated. */
 export function validateCompactionSettings(input: Partial<CompactionSettings> | undefined): CompactionSettings {
   const out: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, ...input };
   if (typeof out.threshold !== 'number' || !Number.isFinite(out.threshold)) {

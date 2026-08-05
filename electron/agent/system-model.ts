@@ -1,29 +1,4 @@
-/**
- * System app model — a single lightweight model the app uses for internal,
- * non-user-facing tasks (session-title generation today; future: summaries,
- * classifications, etc.).
- *
- * Distinct from the user-configured chat providers in three ways:
- *   1. Credentials live in the app's `.env` (app infrastructure), not in the
- *      encrypted per-user provider store. Loaded once at process start by
- *      `process.loadEnvFile()` in electron/main.ts.
- *   2. The endpoint/model are fixed app defaults — title generation is never
- *      billed against the user's chat quota and never depends on which
- *      provider a session happens to use.
- *   3. It has no tools, no thinking, no per-call provider options — it's the
- *      narrow "transform this text" path.
- *
- * `runSystemTask` is the general-purpose entry point: a one-shot `generateText`
- * with caller-supplied system prompt + token cap. Callers wrap their own
- * try/catch to map failure to their UX (title gen → null → keep placeholder);
- * this module throws rather than swallowing, so a genuinely broken config is
- * diagnosable at the call site instead of silently degrading.
- *
- * The endpoint is OpenAI-compatible (OpenRouter by default). The base URL is
- * normalized: a trailing `/chat/completions` is stripped so both the full
- * endpoint and the bare base (`.../v1`) work as TIDE_SYSTEM_BASE_URL — pasting
- * either form from an OpenRouter dashboard "chat completions" URL just works.
- */
+/** System app model: a lightweight OpenAI-compatible model for internal non-user tasks (title gen, etc.), distinct from user chat providers — creds in .env, fixed defaults, throws on misconfiguration so callers catch and degrade. */
 import { generateText, embedMany, type LanguageModel, type EmbeddingModel } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
@@ -64,20 +39,12 @@ function readConfig(): ResolvedConfig {
   return { baseUrl, apiKey, modelId };
 }
 
-/**
- * True iff an API key is configured. Cheap check for callers that want to skip
- * the task entirely (and avoid constructing a model) when the system model
- * isn't set up — e.g. a dev machine without a key shouldn't spam the console.
- */
+/** True iff an API key is configured, so callers can cheaply skip tasks when the system model isn't set up. */
 export function isSystemModelConfigured(): boolean {
   return !!process.env[ENV.apiKey];
 }
 
-/**
- * Resolve (and memoize) the LanguageModel for the system app model.
- * @throws if TIDE_SYSTEM_API_KEY is unset — callers who prefer a soft skip
- *         should gate on `isSystemModelConfigured()` first.
- */
+/** Resolve (and memoize) the system LanguageModel; @throws if TIDE_SYSTEM_API_KEY is unset (gate on isSystemModelConfigured for a soft skip). */
 export function getSystemModel(): LanguageModel {
   if (cached) return cached;
   const { baseUrl, apiKey, modelId } = readConfig();
@@ -104,16 +71,7 @@ export interface SystemTaskInput {
   abortSignal?: AbortSignal;
 }
 
-/**
- * General-purpose one-shot text generation on the system model. No tools, no
- * thinking — for lightweight transformation tasks (summarize, classify,
- * title-ify). Returns the raw model text; the caller is responsible for any
- * cleaning/trimming specific to its use case.
- *
- * @throws on provider error, timeout, abort, or missing configuration. The
- *         contract is: failures surface here, not silently absorbed. Most
- *         callers should catch and degrade gracefully.
- */
+/** One-shot text generation on the system model for lightweight transforms (no tools/thinking); @throws on provider/timeout/abort/config errors so callers catch and degrade. */
 export async function runSystemTask(input: SystemTaskInput): Promise<string> {
   const result = await generateText({
     model: getSystemModel(),
@@ -126,31 +84,16 @@ export async function runSystemTask(input: SystemTaskInput): Promise<string> {
 }
 
 // ─── Embedding path ────────────────────────────────────────────────────
-// Parallels the chat path above: same OpenRouter creds + base URL, but
-// hits the /embeddings route via .embeddingModel() instead of the chat
-// route. One new env var (TIDE_RAG_EMBEDDING_MODEL); auth is shared with
-// title generation so RAG introduces no new credential surface.
+// Parallels the chat path above: same OpenRouter creds + base URL, but hits /embeddings via .embeddingModel(). One new env var (TIDE_RAG_EMBEDDING_MODEL); auth is shared with title generation so RAG introduces no new credential surface.
 
 let cachedEmbedder: EmbeddingModel | null = null;
 
-/**
- * True iff an API key is configured — gates the cloud embedder. Same gate
- * as isSystemModelConfigured; exported separately so RAG code reads intent
- * ("can I embed?") rather than mechanism ("is the key set?").
- */
+/** True iff an API key is configured; gates the cloud embedder (separate from isSystemModelConfigured so RAG code reads intent). */
 export function isRagCloudConfigured(): boolean {
   return !!process.env[ENV.apiKey];
 }
 
-/**
- * Resolve (and memoize) the EmbeddingModel for the cloud embedder. Same
- * construction as getSystemModel — createOpenAICompatible with the shared
- * base URL + key — but via .embeddingModel() against the /embeddings
- * route with TIDE_RAG_EMBEDDING_MODEL (default base MiniLM).
- *
- * @throws if TIDE_SYSTEM_API_KEY is unset — callers should gate on
- *         isRagCloudConfigured() first if they prefer a soft skip.
- */
+/** Resolve (and memoize) the cloud EmbeddingModel via .embeddingModel() with shared creds; @throws if TIDE_SYSTEM_API_KEY is unset. */
 export function getSystemEmbedder(): EmbeddingModel {
   if (cachedEmbedder) return cachedEmbedder;
   const { baseUrl, apiKey } = readConfig();
@@ -168,11 +111,7 @@ export function getSystemEmbedder(): EmbeddingModel {
   return cachedEmbedder;
 }
 
-/**
- * Embed a batch via the cloud path. 30s abort — generous for OpenRouter
- * free-route queueing (observed in title-gen). Ingestion calls batch for
- * throughput; per-query calls embed a single-element array.
- */
+/** Embed a batch via the cloud path with a 30s abort (generous for OpenRouter free-route queueing). */
 export async function runSystemEmbedding(texts: string[]): Promise<number[][]> {
   const { embeddings } = await embedMany({
     model: getSystemEmbedder(),

@@ -1,56 +1,7 @@
-/**
- * Orchestrator — SDK-driven agent loop (Phase 3 Task 3.4).
- *
- * Replaces the hand-rolled `while (iteration < MAX_ITERATIONS)` loop in
- * orchestrator.ts with a single Vercel AI SDK `streamText` call. The SDK
- * owns the model↔tool round-tripping (stopWhen step cap, tool dispatch,
- * retries); Tide owns the rendering projection and the consent layer.
- *
- * Data flow:
- *
- *   streamText stream  ──▶  part translator  ──▶  AgentEvent  (agent:event)
- *                          └▶  block bookkeeping  ──▶  Block[] on turn_end
- *
- * Per the design (§"Parts → Renderer Data Flow"), the IPC channel keeps its
- * name (`agent:event`) and Phase 4 swaps its PAYLOAD shape from the legacy
- * `AgentEvent` union to the canonical `PartEvent` union — at which point this
- * translator's legacy emissions are removed and `useParts` consumes parts
- * directly. During Phase 3 this module emits only the legacy AgentEvent
- * stream (the "temporary parts→blocks adapter"); the existing renderer works
- * unchanged. (An earlier draft emitted parts on a sibling `agent:part`
- * channel; that was a divergence from the design and has been removed.)
- *
- * Coexistence: `registerAgentSdkHandlers` registers the SAME AGENT_COMMANDS
- * as the legacy `registerAgentHandlers`. ipcMain rejects duplicate handles,
- * so only one path is active per process — main.ts swaps via the
- * `USE_SDK_ORCHESTRATOR` flag. The legacy orchestrator.ts stays as fallback.
- *
- * Transitional limitations while Phase 2/3 finish (no changes needed here
- * when they land — the architecture is already the target shape):
- *
- *   • Only 5 tools are SDK-converted (bash, read_file, list_dir, write_file,
- *     edit_file). buildToolset advertises just these. ask_followup_question,
- *     dispatch_agent, etc. are unavailable on this path until Tasks 2.3+.
- *
- *   • Permission gating (withPermission) rides through ctx.emit, but the 5
- *     converted tools don't call it in their execute bodies yet (Task 3.2).
- *     Until 3.2 lands, write/bash tools run ungated HERE — smoke-test in
- *     'full' mode or with read-only tools. The bridge below is already
- *     wired so the moment 3.2 adds `withPermission(ctx, 'bash', …)` inside
- *     each execute, every mode is safe with zero orchestrator changes.
- *
- * Plan slices (docs/plans/2026-07-22-vercel-ai-sdk-migration.md §3.4):
- *   A. streamText skeleton + part subscription
- *   B. tool dispatch via buildToolset
- *   C. usage accounting via finish-step / totalUsage
- *   D. abort handling
- *   E. step cap → forced wrap-up call
- */
+/** Orchestrator — SDK-driven agent loop (Phase 3 Task 3.4). Replaces the hand-rolled loop with a single Vercel AI SDK `streamText` call: the SDK owns model↔tool round-tripping; Tide owns rendering + consent. Emits the legacy `AgentEvent` stream during Phase 3; Phase 4 swaps the payload to `PartEvent`. Active when `USE_SDK_ORCHESTRATOR` is set (legacy orchestrator.ts stays as fallback). Plan slices A–E in docs/plans/2026-07-22-vercel-ai-sdk-migration.md §3.4. */
 
 import { streamText, isStepCount } from 'ai';
-// v7 renamed CoreMessage → ModelMessage. (ResponseMessage — assistant + tool
-// turns the SDK hands back from a completed call — is NOT re-exported by the
-// public surface, so runStream returns the broader ModelMessage[] instead.)
+// v7 renamed CoreMessage → ModelMessage. ResponseMessage isn't re-exported, so runStream returns ModelMessage[].
 import type { LanguageModelUsage, ModelMessage } from 'ai';
 import type { WebContents } from 'electron';
 import { app, BrowserWindow, Notification } from 'electron';
@@ -139,17 +90,7 @@ const MAX_STEPS = 100; // default; overridden by agentSettings.maxSteps at turn 
 /** Auto-reject window for a permission prompt. Matches the legacy gate. */
 const PERMISSION_TIMEOUT_MS = 10 * 60 * 1000; // default; overridden by agentSettings.permissionTimeoutMin
 
-/**
- * Tide thinking level → Anthropic `providerOptions.anthropic.thinking.budgetTokens`.
- * Same levels/values as the legacy orchestrator; the SDK spells the field
- * `budgetTokens` (camelCase) instead of Anthropic's native `budget_tokens`.
- *   off    → thinking disabled (no reasoning budget)
- *   low    → 1_024    (bare minimum — quick tasks)
- *   medium → 8_000    (default — most work)
- *   high   → 24_000   (deep analysis, multi-file investigations)
- *   extra  → 48_000   (hard problems, design tradeoffs)
- *   max    → 64_000   (max reasoning — leave room for the answer)
- */
+/** Tide thinking level → Anthropic `providerOptions.anthropic.thinking.budgetTokens`. Same levels as the legacy orchestrator; the SDK spells the field `budgetTokens`. */
 const THINKING_BUDGET: Record<string, number> = {
   low: 1_024,
   medium: 8_000,
@@ -158,60 +99,23 @@ const THINKING_BUDGET: Record<string, number> = {
   max: 64_000,
 };
 
-/**
- * Output-token escalation + resume — borrowed from Claude Code's query loop.
- *
- * The default `maxOutputTokens` (8192 answer budget, set per-protocol) is
- * enough for ~95% of turns. When a step ends with `finishReason='length'`,
- * the model was cut off mid-thought — usually because it was reasoning
- * through something complex or writing a long file. Two recovery tiers:
- *
- *   1. ESCALATE: retry the SAME request once at ESCALATED_MAX_TOKENS. This
- *      often succeeds with no follow-up turn — the model just needed more
- *      room to finish. Way cheaper than a correction turn (no extra user
- *      message, prompt cache stays warm).
- *
- *   2. RESUME: if escalation is exhausted (or already at/above the cap), inject
- *      a terse "resume" user message and re-stream. The wording is load-
- *      bearing — see RESUME_MESSAGE below. Capped at MAX_RESUME_ATTEMPTS.
- *
- * Only the length signal triggers this path. Other finish reasons (stop,
- * content-filter, tool-calls) are handled by the skill-correction loop or
- * the natural turn-end path.
- */
+/** Output-token escalation + resume on `finishReason='length'`. Tier 1: retry at ESCALATED_MAX_TOKENS (cheaper than a correction turn). Tier 2: inject a "resume" user message (see RESUME_MESSAGE), capped at MAX_RESUME_ATTEMPTS. Other finish reasons take their natural paths. */
 const ESCALATED_MAX_TOKENS = 65_535; // 2^16-1 — Gemini's hard cap; safe everywhere.
 const MAX_RESUME_ATTEMPTS = 3;
 
-/** Turn-level retry for transient provider errors (network, 5xx, empty stream).
- *  These are NOT retried by the SDK (maxRetries:0) — we handle them here so the
- *  UI can show "Retrying 1/3…" and surface a human-friendly error only after
- *  all attempts fail. Aborts and permission errors skip the retry loop. */
+/** Turn-level retry for transient provider errors (network, 5xx, empty stream) — not retried by the SDK (`maxRetries:0`); surfaced to the UI as "Retrying 1/3…". Aborts and permission errors skip this loop. */
 const TURN_MAX_RETRIES = 2; // 1 initial call + 2 retries = 3 total attempts
 
-/**
- * The exact wording Claude Code uses to resume after a max-output-tokens hit.
- * Every clause is load-bearing:
- *   - "Resume directly" — don't restart, don't reconsider.
- *   - "no apology, no recap" — suppresses the model's reflexive "Sorry, I was
- *     just explaining…" preamble, which wastes ~50-200 tokens per occurrence.
- *   - "Pick up mid-thought" — for the common case where the cut happened
- *     inside a reasoning chain or a file write.
- *   - "Break remaining work into smaller pieces" — prevents the next step
- *     from hitting the cap again for the same reason.
- */
+/** The exact wording Claude Code uses to resume after a max-output-tokens hit. Every clause is load-bearing ("no apology, no recap" suppresses the model's preamble). */
 const RESUME_MESSAGE =
   'Output token limit hit. Resume directly — no apology, no recap of what you ' +
   'were doing. Pick up mid-thought if that is where the cut happened. Break ' +
   'remaining work into smaller pieces.';
 
 // ─── Per-turn live state ─────────────────────────────────────────────
-// The block bookkeeping mirrors the legacy ActiveTurn so the EXISTING
-// renderer (which renders Block[]) keeps working. This is the "temporary
-// parts→blocks adapter" from plan Slice A — removed in Phase 4 Task 4.4
-// once components consume DerivedView directly.
+// Block bookkeeping mirrors the legacy ActiveTurn so the existing renderer (Block[]) keeps working — the "temporary parts→blocks adapter" (Slice A), removed in Phase 4 Task 4.4.
 
-/** Ordered timeline entry — text segment or tool-call reference. Module-scope
- *  because Rolldown dislikes inline types inside function bodies. */
+/** Ordered timeline entry — text segment or tool-call reference. Module-scope because Rolldown dislikes inline types inside function bodies. */
 type TimelineEntry =
   | { type: 'text'; text: string }
   | { type: 'tool'; toolIndex: number };
@@ -224,8 +128,7 @@ interface SdkTurn {
   autonomyMode: AutonomyMode;
   /** Block mirror for the legacy renderer. */
   blocks: Block[];
-  /** Open text block id, or null when the next delta should open a fresh one
-   *  (e.g. right after a tool landed). */
+  /** Open text block id, or null when the next delta should open a fresh one. */
   currentTextBlockId: string | null;
   /** Single stable reasoning block id for the whole turn (legacy behavior). */
   reasoningBlockId: string | null;
@@ -236,18 +139,13 @@ interface SdkTurn {
   toolCalls: ToolCall[];
   timeline: TimelineEntry[];
   usage: Usage;
-  /** The LAST MAIN-STEP's usage only (not accumulated, not sub-agent).
-   *  The context-window meter reads this to show "how full is the context
-   *  right now" — the model's most recent request is what fills the window. */
+  /** The LAST MAIN-STEP's usage only (not accumulated). The context-window meter reads this. */
   lastStepUsage: Usage | null;
   /** finish-step parts observed — detects the step-cap (Slice E). */
   stepsCompleted: number;
-  /** Effective per-turn step cap (agentSettings.maxSteps || MAX_STEPS).
-   *  Snapshot at turn start so module-level helpers (runStream,
-   *  stopReasonFor) can read it without closing over runSdkTurn's locals. */
+  /** Effective per-turn step cap. Snapshotted at turn start so module-level helpers can read it. */
   maxSteps: number;
-  /** Effective per-turn permission prompt timeout in ms. Same snapshot
-   *  rationale as maxSteps — bridgeToolEmit reads it at emit time. */
+  /** Effective per-turn permission prompt timeout in ms. Same snapshot rationale as maxSteps. */
   permissionTimeoutMs: number;
   /** True if the stream reported a terminal error part. */
   errored: string | null;
@@ -261,8 +159,6 @@ interface SdkTurn {
 const activeTurns = new Map<string, SdkTurn>();
 
 // ─── Per-session sequence counter (mirrors legacy orchestrator) ──────
-// Monotonic per session so the renderer can reorder parallel-tool events
-// and detect gaps after a reload.
 const seqCounters = new Map<string, number>();
 function nextSeq(sessionId: string): number {
   const n = (seqCounters.get(sessionId) ?? 0) + 1;
@@ -272,18 +168,9 @@ function nextSeq(sessionId: string): number {
 
 // ─── IPC registration (drop-in swap for registerAgentHandlers) ───────
 
-/**
- * Registers the SDK-driven agent commands on the SAME AGENT_COMMANDS the
- * legacy orchestrator uses. ipcMain rejects duplicate `handle` registrations,
- * so main.ts must call exactly one of {registerAgentHandlers,
- * registerAgentSdkHandlers}. Approval/rejection route through the
- * module-scoped permission-resolver (per-session, single-slot, serialized).
- */
+/** Registers the SDK-driven agent commands on the SAME AGENT_COMMANDS the legacy orchestrator uses. ipcMain rejects duplicate handles, so main.ts must call exactly one of {registerAgentHandlers, registerAgentSdkHandlers}. Approval/rejection route through the module-scoped permission-resolver. */
 
-// Active tool contexts by session — lets the renderer push live autonomy-mode
-// changes to a running turn (e.g. the user changes the PermissionModeSelector
-// dropdown while the stream is active). Registered when a turn starts,
-// cleaned up when it ends.
+// Active tool contexts by session — lets the renderer push live autonomy-mode changes to a running turn. Registered when a turn starts, cleaned up when it ends.
 const activeCtxs = new Map<string, ToolContext>();
 
 export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
@@ -324,10 +211,7 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
       newMode?: AutonomyMode,
       remember?: boolean,
     ) => {
-      // "Always Allow" — derive a rule from the approved call and persist it
-      // to .agent/settings.json. Takes effect immediately (in-memory) AND
-      // survives across sessions (file-backed). No separate session/project
-      // scope — all rules are project-level.
+      // "Always Allow" — derive a rule from the approved call, persist to .agent/settings.json (in-memory + file-backed, project-level scope).
       if (remember && toolCallIds[0]) {
         const ask = getPendingAsk(sessionId, toolCallIds[0]);
         if (ask) {
@@ -335,12 +219,7 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
           if (spec) log.info('permission rule added', { tool: ask.toolName, spec });
         }
       }
-      // newMode (plan→edit escalation) sticks for the rest of the turn —
-      // withPermission mutates ctx.autonomyMode from verdict.newMode. Also
-      // persist it to the session record so the NEXT turn starts in the new
-      // mode even if the renderer's own persist call lost the race or got
-      // overwritten by session rehydration. Mirrors the legacy orchestrator
-      // (orchestrator.ts); best-effort.
+      // newMode (plan→edit escalation) sticks for the rest of the turn. Also persist to the session record so the next turn starts in the new mode (best-effort, mirrors the legacy orchestrator).
       if (newMode) {
         try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch { /* best-effort persist */ }
       }
@@ -380,31 +259,22 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
 }
 
 function send(wc: WebContents, _sessionId: string, event: AgentEvent) {
-  // _sessionId is unused: every AgentEvent already carries its own sessionId
-  // field. Kept in the signature to match the legacy emit() call shape.
+  // _sessionId is unused: every AgentEvent carries its own sessionId. Kept in the signature to match the legacy emit() call shape.
   if (!wc.isDestroyed()) wc.send(AGENT_EVENT_CHANNEL, event);
 }
 
 // ─── The loop ────────────────────────────────────────────────────────
 
-/** SDK-driven turn entry point. Exported so the IPC handler (above) and the
- *  regression test can invoke it directly without going through ipcMain. */
+/** SDK-driven turn entry point. Exported so the IPC handler and regression test can invoke it directly without going through ipcMain. */
 export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   const { sessionId, messages, modelId, providerId, autonomyMode, thinkingLevel } = payload;
 
   // ── Resolve provider + workspace root ──────────────────────────────
-  // Same resolution rules as the legacy orchestrator, ported verbatim:
-  // session.worktree.path wins, then the session's workspace, then default
-  // workspace, then cwd. Falling back to workspaces[0] here was the
-  // multi-workspace footgun the legacy loop explicitly guards against.
+  // Same resolution as the legacy orchestrator: worktree.path → session workspace → default workspace → cwd.
   const providers = store.listProviders();
   let provider = providers.find((p) => p.id === providerId);
   let providerFallback = false;
-  // Graceful recovery for orphaned sessions: if the session's provider was
-  // deleted (stale providerId), fall back to any enabled provider that serves
-  // this modelId — matching the renderer's useModelOption resolution. This
-  // unblocks the turn instead of hard-crashing; the user can re-bind the
-  // session in the picker. Only fails if NO provider serves the model.
+  // Graceful recovery for orphaned sessions: if the session's provider was deleted, fall back to any enabled provider serving this modelId (unblocks the turn; user can re-bind in the picker).
   if (!provider && modelId) {
     provider = providers.find((p) => p.enabled && p.models.some((m) => m.modelId === modelId));
     providerFallback = !!provider;
@@ -437,28 +307,16 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
     } else if (session?.workspaceId) {
       workspaceRoot = workspaces.find((w) => w.id === session.workspaceId)?.path;
     }
-    // Surface the sticky skill ref so the marker loop below can decide whether
-    // to re-inject the body on this continuation turn. Without this, a multi-
-    // turn skill session loses its skill context after turn 1 (the marker was
-    // stripped from the persisted message; the orchestrator rebuilt the system
-    // prompt from scratch with no skill body).
+    // Surface the sticky skill ref so the marker loop can decide whether to re-inject the body on this continuation turn.
     priorSkillRef = session?.activeSkillRef;
   } catch {
     // Sessions module may not be loaded in some contexts — fall through.
   }
   workspaceRoot ??= workspaces.find((w) => w.isDefault)?.path ?? workspaces[0]?.path ?? process.cwd();
-  // The `??=` chain's final fallback is process.cwd(), so workspaceRoot is
-  // always a string here. Bind a definitively-typed const so the ToolContext
-  // (which requires `string`, not `string | undefined`) typechecks cleanly —
-  // `let`-declared variables keep their original union type even after `??=`.
+  // The `??=` chain's final fallback is process.cwd(), so workspaceRoot is always a string here. Bind a typed const so ToolContext (requires `string`) typechecks.
   const root: string = workspaceRoot ?? process.cwd();
 
-  // Liveness check: refuse to start a turn against a missing workspace root.
-  // Without this, the turn proceeds and individual tools fail inconsistently
-  // (write_file is guarded, but the model flails on read/bash/list failures
-  // before the user understands why). Surface the problem up front with a
-  // clear, actionable message. The throw propagates to the IPC handler which
-  // emits it as a turn error event.
+  // Liveness check: refuse to start a turn against a missing workspace root (otherwise tools fail inconsistently).
   if (!fs.existsSync(root)) {
     const where = worktreeMeta
       ? `worktree (${worktreeMeta.branch})`
@@ -472,10 +330,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   }
 
   // ── Build the SDK conversation (ModelMessage[]) + system prompt ─────
-  // The first system message becomes the top-level `system` option; the SDK
-  // (like Anthropic) takes system out-of-band rather than inline. User
-  // messages with attachments expand into multi-part text content so the
-  // model sees each attachment as its own block.
+  // The first system message becomes the top-level `system` option (Anthropic takes system out-of-band). User messages with attachments expand into multi-part text content.
   let systemPrompt = '';
   const convo: ModelMessage[] = [];
   for (const m of messages) {
@@ -520,23 +375,8 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   };
   activeTurns.set(sessionId, turn);
 
-  // Execute skill invocations for any `[[LOAD_SKILL:…]]` markers BEFORE the
-  // model thinks. For each marker, the orchestrator reads the SKILL.md, emits
-  // a visible load_skill tool card, strips the marker from the user message,
-  // and appends the skill body to the SYSTEM PROMPT (not the user message).
-  //
-  // System-prompt placement is the key fix: the original code put the body in
-  // the user message with a CRITICAL directive, which GLM-5.2 ignored — it
-  // dove into exploration without following the skill. System-prompt
-  // instructions carry higher priority and are harder for the model to
-  // bypass. The model retains full tool access (it can explore the project,
-  // write files, etc.) which is required for process skills like brainstorming
-  // that need to read project state and write design docs.
-  // Create the turn controller — shared between prepareStep + onStepEnd hooks
-  // for skill gating, tool restriction, and budget nudges. Set the compaction
-  // config's context window from the model's known capability so autocompact
-  // fires at the right threshold (not the generic 128K default).
-  // effectiveMaxSteps was snapshot above onto turn.maxSteps; reused here.
+  // Execute skill invocations for any `[[LOAD_SKILL:…]]` markers BEFORE the model thinks: read SKILL.md, emit a visible load_skill card, strip the marker, append the body to the SYSTEM PROMPT (not the user message — GLM-5.2 ignored user-message directives).
+  // Create the turn controller — shared between prepareStep + onStepEnd hooks. Set the compaction config's context window from the model's known capability.
   const turnController = createTurnController(effectiveMaxSteps);
   const knownCtxWindow = contextWindowSize(modelId);
   // Read compaction settings from agentSettings (Settings → Permissions & Caps).
@@ -562,12 +402,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   }
 
   // ── Skill pipeline: markers → sticky ref → discovery index ──────────
-  // processSkillMarkers pre-reads any `[[LOAD_SKILL:...]]` markers and emits
-  // the visible tool cards. applyStickySkillRef then handles the cross-turn
-  // lifecycle: persist on new marker, re-inject on continuation, clear on
-  // new slash command. injectSkillBodies places the accumulated bodies at the
-  // top of the system prompt, and injectSkillDiscoveryIndex adds the compact
-  // available-skills list so the model can autonomously call load_skill.
+  // processSkillMarkers pre-reads markers + emits tool cards; applyStickySkillRef handles cross-turn lifecycle; injectSkillBodies/injectSkillDiscoveryIndex place bodies + the available-skills list in the system prompt.
   const { skillBodies: markerSkillBodies, loaded: loadedThisTurn } = await processSkillMarkers(
     wc, turn, convo, root, turnController,
   );
@@ -605,14 +440,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
       `the full file or an exact-string search the index might miss.`;
   }
 
-  // Resolve the model + thinking budget. `null` budget → thinking disabled.
-  // Thinking is also disabled when the model doesn't support reasoning —
-  // sending reasoning_effort or budget_tokens to an unsupported model wastes
-  // tokens or triggers a provider error.
-  // EXCEPTION: when the model's reasoning is mandatory (always on, sourced
-  // from a live provider response), force a thinking budget even if the
-  // session's level is 'off' — the model reasons regardless, so omitting the
-  // config is wrong.
+  // Resolve the model + thinking budget. `null` budget → thinking disabled. Thinking is also disabled when the model doesn't support reasoning. EXCEPTION: mandatory-reasoning models force a budget even at level 'off'.
   const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
   const modelSupportsThinking = supportsThinking(modelId);
   const modelEntry = provider.models.find((m) => m.modelId === modelId);
@@ -632,12 +460,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   // Session-scoped rules live in the rules module (in-memory).
   const permissionRules = loadPermissionRules(root);
 
-  // The ToolContext closure. Tools read ctx.{workspaceRoot, autonomyMode,
-  // abortSignal, ...} at execution time. ctx.emit is the BRIDGE that turns
-  // a tool's PartEvent-shaped emission (e.g. withPermission's
-  // `{ type: 'permission', ... }`) into the legacy AgentEvent the renderer
-  // needs. Until Task 3.2 wires withPermission into each execute, this is
-  // dormant; the bridge is ready for the moment it does.
+  // The ToolContext closure. ctx.emit is the BRIDGE that turns a tool's PartEvent-shaped emission into the legacy AgentEvent the renderer needs. Dormant until Task 3.2 wires withPermission into each execute.
   const ctx: ToolContext = {
     sessionId,
     workspaceRoot: root,
@@ -677,11 +500,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   });
 
   // ── Turn-level retry loop ───────────────────────────────────────────
-  // Wraps the entire try/catch. On transient provider errors (network, 5xx,
-  // empty stream, timeout), we retry up to TURN_MAX_RETRIES times, emitting a
-  // `retry` event each time so the UI can show "Retrying 1/2…". After all
-  // retries are exhausted, the final error is sent as a terminal `error` event.
-  // Aborts (user Stop) skip retrying and flush partial work immediately.
+  // Retry transient provider errors up to TURN_MAX_RETRIES times (emits `retry` events for UI). Aborts flush immediately.
   let retryCount = 0;
 
   turnRetryLoop: for (;;) {
@@ -701,20 +520,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
     });
 
     // ── Length-cap recovery: escalate, then resume ───────────────────
-    // A finishReason='length' means the model was cut off mid-thought by
-    // max_output_tokens — NOT done thinking. Two cheap recovery tiers before
-    // we fall through to the skill-correction / wrap-up paths:
-    //
-    //   TIER 1 — Escalate: retry once at ESCALATED_MAX_TOKENS with the SAME
-    //   messages (no user message appended). Often succeeds with zero extra
-    //   tokens beyond the longer generation. Cache stays warm.
-    //
-    //   TIER 2 — Resume: inject RESUME_MESSAGE as a user turn and re-stream.
-    //   The wording suppresses apology/recap waste. Capped at MAX_RESUME_ATTEMPTS.
-    //
-    // Only triggered when the FINAL finishReason was 'length' AND no error AND
-    // no abort. A subsequent 'length' after escalation → tier 2. A 'stop' after
-    // escalation → skill-correction loop below handles it.
+    // finishReason='length' = cut off mid-thought. Tier 1: retry at ESCALATED_MAX_TOKENS (same messages, cache warm). Tier 2: inject RESUME_MESSAGE as a user turn (capped at MAX_RESUME_ATTEMPTS). Only on final finishReason='length' with no error/abort.
     let escalated = false; // tier 1 fires at most once per turn
     let resumes = 0;       // tier 2 cap
     while (
@@ -723,8 +529,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
       turn.finishReason === 'length' &&
       (resumes < MAX_RESUME_ATTEMPTS || !escalated)
     ) {
-      // Tier 1 — escalate (only once, and only if we haven't already exceeded
-      // the cap via thinking-budget math).
+      // Tier 1 — escalate (only once).
       if (!escalated) {
         escalated = true;
         log.warn(
@@ -768,25 +573,14 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
         turnController,
         hookConfig,
         workspaceRoot: root,
-        // Keep the escalated cap so the resumed turn has the same breathing
-        // room — otherwise we'd just hit the default 8K again immediately.
+        // Keep the escalated cap so the resumed turn has the same breathing room.
         maxOutputTokensOverride: ESCALATED_MAX_TOKENS,
       });
     }
 
     // ── Skill premature-stop correction loop ─────────────────────────
-    // onStepEnd detects when the model stopped before finishing an active
-    // skill (text-only step + checklist incomplete) and stashes a correction
-    // message in ctrl.needsCorrection. BUT: the SDK only continues the
-    // multi-step loop when a step ends with tool calls. A finishReason='stop'
-    // step is a HARD stop — no further prepareStep is called, so the
-    // stashed correction evaporates. Same problem for stop-hook soft blocks.
-    //
-    // Fix: after each stream returns, if the controller still wants a
-    // correction AND the last step was a natural stop, re-invoke runStream
-    // with the prior messages + the correction as a fresh user turn. This is
-    // the ONLY way to resume after a stop. Capped to avoid runaway loops;
-    // shared between skill-gate corrections and stop-hook soft blocks.
+    // ── Skill premature-stop correction loop ─────────────────────────
+    // onStepEnd stashes a correction when the model stopped mid-skill, but finishReason='stop' is a HARD stop — the SDK won't call prepareStep again. Fix: re-invoke runStream with the correction as a fresh user turn (capped; shared between skill-gate and stop-hook soft blocks).
     const MAX_CORRECTIONS = 3;
     let corrections = 0;
     while (
@@ -799,8 +593,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
       corrections++;
       const correction = turnController.needsCorrection;
       turnController.needsCorrection = null;
-      // Re-entering the stream clears the prior stop reason; reset so the
-      // loop condition re-evaluates cleanly against the NEW step's finish.
+      // Re-entering the stream clears the prior stop reason; reset so the loop re-evaluates cleanly.
       turn.finishReason = null;
       log.warn(
         'resuming after stop — injecting correction',
@@ -827,22 +620,14 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
     }
 
     // ── Slice E: step cap → forced wrap-up ──────────────────────────
-    // The SDK stops at isStepCount(MAX_STEPS) only if the model kept calling
-    // tools (a natural end stops earlier). On a cap hit with no trailing
-    // text answer, force one final no-tools call with a wrap-up instruction —
-    // matches the legacy MAX_ITERATIONS tail. If we already have an answer
-    // or errored, skip. The primary call's responseMessages are appended so
-    // the wrap-up model can see — and report on — its own in-progress work.
+    // On a step-cap hit (model kept calling tools) with no trailing answer, force one final no-tools wrap-up call. responseMessages are appended so the model can report on its in-progress work.
     const capHit = turn.stepsCompleted >= effectiveMaxSteps;
     const hasAnswer = turn.finalText.trim().length > 0;
     if (capHit && !hasAnswer && !turn.errored && !controller.signal.aborted) {
       log.warn('step cap hit; forcing wrap-up call', { cap: effectiveMaxSteps });
       await runStream(wc, turn, {
         model,
-        // The wrap-up directive is intentionally terse — no preamble, no recap
-        // of what was done. Lead with the imperative, then the constraint.
-        // Same philosophy as RESUME_MESSAGE: suppress the model's reflexive
-        // "Sorry, I'll wrap up…" preamble, which wastes tokens at the cap.
+        // Terse wrap-up directive — suppresses the reflexive "Sorry, I'll wrap up…" preamble (same philosophy as RESUME_MESSAGE).
         system:
           systemPrompt +
           '\n\nYou have reached the step limit. Wrap up now — no preamble, no recap. ' +
@@ -928,20 +713,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
 
 // ─── Slice A–D: the stream runner ────────────────────────────────────
 
-/**
- * Whether the turn controller has a pending correction that should re-enter
- * the stream. Two producers set `needsCorrection`:
- *   1. `onStepEnd` skill gate — premature stop with checklist incomplete
- *   2. `onStepEnd` stop hook — soft block (blocking errors returned)
- *   3. `checkBudgetNudge` — step/token pressure (informational nudge)
- *
- * Budget nudges are informational and should NOT re-enter the loop on their
- * own (they're meant for the NEXT prepareStep inside an active multi-step
- * stream, not a fresh one). Only skill-gate and stop-hook corrections should
- * force a re-stream. We detect them by the `stopHookActive` flag (set
- * alongside stop-hook corrections) or by an active skill whose checklist is
- * incomplete (skill-gate corrections are only set when `!allChecklistDone`).
- */
+/** Whether the turn controller has a pending correction that should re-enter the stream. Producers: skill gate (premature stop), stop hook (soft block), budget nudge (informational — does NOT re-enter on its own). Only skill-gate and stop-hook corrections force a re-stream. */
 function ctrlHasPendingCorrection(ctrl: TurnController): boolean {
   if (!ctrl.needsCorrection) return false;
   if (ctrl.stopHookActive) return true;
@@ -967,19 +739,11 @@ interface StreamArgs {
   workspaceRoot: string;
   /** True when this is the forced step-cap wrap-up call (no tools). */
   wrapUp?: boolean;
-  /**
-   * Override the per-protocol maxOutputTokens resolution. Used by the length-
-   * cap escalation path (runSdkTurn) to retry at ESCALATED_MAX_TOKENS without
-   * waiting for a follow-up turn. Undefined → resolve normally (default 8192).
-   */
+  /** Override the per-protocol maxOutputTokens resolution. Used by the length-cap escalation path; undefined → default 8192. */
   maxOutputTokensOverride?: number;
 }
 
-/**
- * Runs one `streamText` call and translates its stream parts into the legacy
- * AgentEvent stream while maintaining the block mirror. Used for both the
- * primary multi-step call and the forced wrap-up.
- */
+/** Runs one `streamText` call and translates its stream parts into the legacy AgentEvent stream while maintaining the block mirror. Used for both the primary multi-step call and the forced wrap-up. */
 async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Promise<ModelMessage[]> {
   // Pricing rates for real cost calculation — resolved from the provider's
   // model entry (persisted at fetch time from the provider's /models response).
@@ -1042,11 +806,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
     abortSignal: args.signal,
     providerOptions,
     // ── TOOL CALL REPAIR ──
-    // Some models (GLM, Gemini) leak XML artifacts into JSON tool arguments:
-    //   {"path":"file.ts"}</tool_call>
-    // The SDK's JSON parser fails on the trailing `</tool_call>`. This repair
-    // function strips XML artifacts and returns the CLEANED STRING (not a
-    // parsed object) — the SDK re-parses it via doParseToolCall.
+    // Some models (GLM, Gemini) leak XML artifacts into JSON tool arguments (e.g. trailing `</tool_call>`). This strips them and returns the cleaned STRING (not a parsed object) — the SDK re-parses via doParseToolCall.
     repairToolCall: async ({ toolCall }) => {
       const input = toolCall.input;
       // Only repair if input is a string (the raw, unparseable JSON).
@@ -1085,16 +845,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
     },
 
     // ── BETWEEN-STEP HOOK: mutate before each step ──
-    // prepareStep is called before EVERY step (including the first). It can
-    // override tools, messages, system, model, etc. We use it to:
-    //   1. Compact context if approaching the window (async — forked summarizer)
-    //   2. Inject correction messages (from onStepEnd deviation/budget flags)
-    //   3. Restrict tools when a skill declares activeToolSet
-    //
-    // All three concerns are COMBINED into a single returned object. The prior
-    // implementation early-returned on the first match, which silently dropped
-    // the others — e.g. a compaction on a skill turn meant the skill's
-    // activeToolSet was never applied (the model briefly saw the full toolset).
+    // prepareStep runs before every step: (1) compact context if near the window, (2) inject correction messages from onStepEnd flags, (3) restrict tools per the active skill. All three are combined into one returned object (prior impl early-returned, silently dropping the others).
     async prepareStep({ messages }) {
       // Wrap-up call: no hooks — just force a plain prose answer.
       if (args.wrapUp) return undefined;
@@ -1108,10 +859,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
       const forceCompact = messages.some((m) =>
         typeof m.content === 'string' && m.content.includes('[[FORCE_COMPACT]]')
       );
-      // Use the LAST step's actual input tokens (what the model saw) rather
-      // than the cumulative sum across all steps. The context window is filled
-      // by the messages sent — each step re-sends the full conversation, so
-      // the last step's inputTokens IS the current context size.
+      // Use the LAST step's actual input tokens — each step re-sends the full conversation, so lastStepInputTokens IS the current context size.
       const lastStepInputTokens = ctrl.budget.lastInputTokens || undefined;
       if (
         forceCompact ||
@@ -1153,12 +901,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
         }
       }
 
-      // 2. Inject correction if onStepEnd flagged a deviation or budget nudge.
-      // Budget nudges are informational (no re-stream) — they ride along here
-      // only because prepareStep is also the natural injection point INSIDE a
-      // running multi-step loop. The post-stream re-entry loop in runSdkTurn
-      // decides whether to start a fresh stream; this just delivers the nudge
-      // when the loop is still active.
+      // 2. Inject correction if onStepEnd flagged a deviation or budget nudge. Budget nudges ride along here only because prepareStep is the natural injection point inside a running multi-step loop; the post-stream re-entry loop decides whether to start a fresh stream.
       if (ctrl.needsCorrection) {
         const base = nextMessages ?? messages;
         nextMessages = [...base, { role: 'user' as const, content: ctrl.needsCorrection }];
@@ -1180,23 +923,14 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
     },
 
     // ── BETWEEN-STEP HOOK: inspect after each step ──
-    // onStepEnd fires after each LLM call + tool execution completes. It's
-    // awaited before the next step starts. We use it to:
-    //   1. Track skill checklist progress
-    //   2. Detect premature stops (model stopped before skill is done)
-    //   3. Nudge on budget (approaching step cap or context limit)
+    // onStepEnd fires after each LLM call + tool execution: (1) track skill checklist progress, (2) detect premature stops, (3) nudge on budget.
     async onStepEnd(step) {
       ctrl.stepCount = step.stepNumber + 1;
       ctrl.budget.inputTokens += step.usage?.inputTokens ?? 0;
       ctrl.budget.outputTokens += step.usage?.outputTokens ?? 0;
-      // Track the LAST step's actual input tokens — this is what the model
-      // saw in its context window (the full conversation + system prompt).
-      // Used by autocompact's threshold check: the cumulative sum is wrong
-      // because each step re-sends the entire conversation.
+      // Track the LAST step's actual input tokens — what the model saw (the full conversation + system prompt). Used by autocompact's threshold check.
       ctrl.budget.lastInputTokens = step.usage?.inputTokens ?? ctrl.budget.lastInputTokens;
-      // Capture the MAIN orchestrator's per-step usage as lastStepUsage.
-      // This fires for every main-loop step (not sub-agent steps, which have
-      // their own streamText in runtime.ts). The context meter reads this.
+      // Capture the MAIN orchestrator's per-step usage as lastStepUsage (the context meter reads this).
       if (step.usage) {
         turn.lastStepUsage = sdkUsageToTide(
           step.usage as LanguageModelUsage,
@@ -1230,19 +964,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
       }
 
       // ── Todo gate ──────────────────────────────────────────────────
-      // Open todos must be finished before the model moves on to unrelated
-      // work. After each step, if todos exist with pending items AND the
-      // model did NOT just call todo_write, inject a reminder naming the
-      // next open item. The model can either work on it or explicitly close
-      // it via todo_write — but it can't silently drift away.
-      //
-      // Skip when:
-      //   - turn.errored / abort (no point nagging during teardown)
-      //   - step is a natural stop (finish='stop') — the post-stream
-      //     correction loop in runSdkTurn handles resumption, and we don't
-      //     want to duplicate the nudge
-      //   - model already has a pending correction (skill gate fired) — the
-      //     skill correction takes priority since it covers the same ground
+      // If open todos exist and the model did NOT just call todo_write, inject a reminder naming the next open item. Skip when: errored/abort, finish='stop' (post-stream correction loop handles it), or a skill correction is already pending.
       if (!turn.errored && !ctrl.needsCorrection && step.finishReason !== 'stop') {
         const todos = getSessionTodos(turn.sessionId);
         const open = todos.filter((t) => t.status !== 'completed');
@@ -1268,10 +990,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
       checkBudgetNudge(ctrl);
 
       // ── Stop hooks ──
-      // Run when the model naturally terminates (no tool calls, finish='stop').
-      // Skip on wrap-up calls and when stopHookActive is already set (prevents
-      // infinite loops — a blocking hook that triggers another stop sees the
-      // flag and can choose not to re-block).
+      // Run on natural termination (finish='stop'). Skip on wrap-up calls and when stopHookActive is set (prevents infinite re-blocking loops).
       const naturalStop = step.finishReason === 'stop' &&
         (!step.toolCalls || step.toolCalls.length === 0);
       if (naturalStop && !args.wrapUp && args.hookConfig && args.hookConfig.stop.length > 0) {
@@ -1297,13 +1016,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
     },
   });
 
-  // v7 renamed fullStream → stream (identical TextStreamPart stream; the old
-  // name is just deprecated). Yields text deltas, tool calls/results, and
-  // errors — everything the translator needs.
-  // Wrap in try/catch — the SDK's stream finalization can throw when MCP
-  // tool calls have schema mismatches (the `hasFinished` crash). Catching
-  // here lets the turn end gracefully with whatever blocks were streamed
-  // before the crash, instead of killing the whole turn.
+  // v7 renamed fullStream → stream (the old name is deprecated). Yields text/tool/error parts. Wrap in try/catch — SDK stream finalization can throw on MCP schema mismatches; catching lets the turn end gracefully with partial blocks.
   try {
     for await (const part of result.stream) {
       translatePart(wc, turn, part, modelEntry);
@@ -1314,11 +1027,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
     turn.errored = turn.errored ?? streamErr?.message;
   }
 
-  // responseMessages = the assistant + tool turns the model produced this call.
-  // Handed back so the forced wrap-up can seed its conversation with the
-  // model's own in-progress work — without it the wrap-up can't see what was
-  // done during the capped primary call. ResponseMessage is a subset of
-  // ModelMessage, so the cast-free widening is safe.
+  // responseMessages = the assistant + tool turns the model produced this call. Returned so the wrap-up call can seed its conversation with in-progress work.
   try {
     return await result.responseMessages;
   } catch {
@@ -1328,19 +1037,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
   }
 }
 
-/**
- * The heart of the parts→events adapter. Each SDK stream part becomes one or
- * more legacy AgentEvents on `agent:event` (the current renderer's format),
- * plus a mutation to the block mirror shipped on turn_end.
- *
- * Phase 4 will swap this translator for `useParts` + `deriveView` consuming
- * parts directly; until then, this is the "temporary parts→blocks adapter"
- * the design specifies for Phase 3.
- *
- * Adding a new part type = adding a case here. The switch is exhaustive over
- * the part types this orchestrator cares about; unhandled ones (source, file,
- * raw, …) are ignored since no current tool emits them.
- */
+/** The parts→events adapter. Each SDK stream part becomes one or more legacy AgentEvents on `agent:event`, plus a block-mirror mutation shipped on turn_end. Phase 4 swaps this for `useParts` + `deriveView` consuming parts directly. */
 function translatePart(
   wc: WebContents,
   turn: SdkTurn,
@@ -1607,11 +1304,7 @@ function translatePart(
     // ── Terminal ────────────────────────────────────────────────────
     case 'finish': {
       if (p.finishReason) turn.finishReason = p.finishReason;
-      // totalUsage is the MAIN stream's accumulated usage (not sub-agents).
-      // Use it as the authoritative turn.usage, overriding the sub-agent-
-      // inflated accumulateUsage total. Also use it as a lastStepUsage
-      // fallback when finish-step didn't fire on the final step (some
-      // providers skip the last finish-step and go straight to finish).
+      // totalUsage is the MAIN stream's accumulated usage (not sub-agents). Use as the authoritative turn.usage, overriding the sub-agent-inflated total. Also a lastStepUsage fallback when the final finish-step was skipped.
       if (p.totalUsage) {
         const finishUsage = sdkUsageToTide(p.totalUsage as LanguageModelUsage, modelEntry, turn.usage.calls || 1);
         turn.usage = finishUsage;
@@ -1800,17 +1493,7 @@ function fireTurnEndNotification(wc: WebContents, sessionId: string, stopReason:
   }
 }
 
-/**
- * Finalize the block list at turn_end: abort still-running tools if the turn
- * was aborted, and mark trailing text blocks as the answer. Mirrors the
- * legacy orchestrator's finalizeBlocks (the rule the deriveView pure
- * function in Phase 4 will eventually own).
- *
- * The answer phase begins after the LAST tool call. Text before is narration
- * ("let me check…"); text after is the deliverable. Treating every tool
- * block as the bound — with no skip-set taxonomy — handles bookkeeping
- * (todo_write), yields (ask_followup_question), and real actions uniformly.
- */
+/** Finalize the block list at turn_end: abort still-running tools if aborted, mark trailing text blocks as the answer (text after the LAST tool call is the deliverable; text before is narration). Mirrors the legacy orchestrator's finalizeBlocks. */
 function finalizeBlocks(turn: SdkTurn, stopReason: TurnEndStopReason): Block[] {
   const stopped = stopReason === 'aborted';
   const blocks: Block[] = turn.blocks.map((b) => {
@@ -1844,12 +1527,7 @@ function patchToolBlock(turn: SdkTurn, toolCallId: string, patch: Partial<ToolBl
 
 // ─── Tool → legacy event bridge (the ctx.emit translator) ───────────
 
-/**
- * Tools emit PartEvent-shaped objects via ctx.emit (see withPermission's
- * `ctx.emit({ type: 'permission', ... })`). This bridge translates those
- * into the legacy AgentEvents the current renderer consumes. Dormant until
- * Task 3.2 puts withPermission inside each execute — but ready for it.
- */
+/** Tools emit PartEvent-shaped objects via ctx.emit (e.g. withPermission's `{ type: 'permission', ... }`). This bridge translates them into the legacy AgentEvents the renderer consumes. Dormant until Task 3.2. */
 function bridgeToolEmit(wc: WebContents, turn: SdkTurn, raw: unknown): void {
   if (!raw || typeof raw !== 'object') return;
   const e = raw as { type?: string; [k: string]: unknown };
@@ -1930,58 +1608,14 @@ function toCoreMessage(m: TurnMessage): ModelMessage | null {
   return { role: 'assistant', content: m.content };
 }
 
-/**
- * Execute skill invocations for any `[[LOAD_SKILL:<path>|<name>]]` markers —
- * BEFORE the model generates. For each marker:
- *
- *   1. Reads the SKILL.md via `runLoadSkill` (read_file's logic + skill-root
- *      allowlist).
- *   2. Emits the FULL tool lifecycle (start → call → executing → result) so
- *      the renderer shows a visible `load_skill` tool card.
- *   3. Adds the call to `turn.toolCalls` + `turn.blocks` so it persists on
- *      turn_end.
- *   4. Strips the marker from the user message and returns the skill body
- *      wrapped in a process-enforcement directive (for system-prompt injection
- *      by the caller).
- *
- * The caller appends the returned `skillBody` to the system prompt — NOT the
- * user message. System-prompt placement gives the skill's process higher
- * instruction priority than a user-message directive, which GLM-5.2 was
- * ignoring. The model retains full tool access so process skills that need
- * to explore the project or write files (brainstorming, TDD, etc.) work.
- *
- * Returns `{ text, skillBody }`: the cleaned user text (marker removed) and
- * the accumulated skill bodies for system-prompt injection.
- */
+/** Execute `[[LOAD_SKILL:<path>|<name>]]` markers BEFORE generation: read each SKILL.md, emit the full tool lifecycle (visible load_skill card), add to turn.toolCalls/blocks, strip the marker, return the skill body wrapped in a process-enforcement directive for system-prompt injection. System-prompt placement (not user message) gives the skill higher priority; model keeps full tool access. */
 // ─── Skill pipeline: marker processing + sticky ref + discovery index ──
-//
-// Three helpers below (`processSkillMarkers`, `applyStickySkillRef`,
-// `injectSkillDiscoveryIndex`) keep the runSdkTurn container readable. Each
-// owns ONE concern; runSdkTurn just calls them in order with the shared
-// `turnController` + `systemPrompt` state.
-//
-// Data flow:
-//
-//   processSkillMarkers → { skillBodies, loaded, turnController.skill }
-//                              ↓
-//   applyStickySkillRef  → mutates skillBodies + turnController.skill
-//                          (re-inject on continuation OR clear on new /cmd)
-//                              ↓
-//   injectSkillDiscoveryIndex → mutates systemPrompt with the available list
+// Three helpers (`processSkillMarkers`, `applyStickySkillRef`, `injectSkillDiscoveryIndex`) keep runSdkTurn readable — each owns one concern, called in order with shared `turnController` + `systemPrompt` state.
 
 /** Sticky skill reference persisted across turns on the session. */
 type SkillRef = { name: string; path: string; loadedAt: string };
 
-/**
- * Process `[[LOAD_SKILL:path|name]]` markers across all user messages.
- * - Pre-reads each skill body via runLoadSkill.
- * - Emits the synthetic tool lifecycle (visible load_skill card in the UI).
- * - Populates `turnController.skill` (checklist + allowedTools).
- * - Strips the marker from the persisted message.
- *
- * Returns the accumulated bodies + the list of freshly-loaded refs (which the
- * caller persists as a sticky ref so continuation turns re-inject the body).
- */
+/** Process `[[LOAD_SKILL:path|name]]` markers across all user messages: pre-read each body via runLoadSkill, emit the synthetic tool lifecycle, populate `turnController.skill`, strip the marker. Returns the accumulated bodies + freshly-loaded refs (persisted as a sticky ref for continuation turns). */
 async function processSkillMarkers(
   wc: WebContents,
   turn: SdkTurn,
@@ -2011,20 +1645,7 @@ async function processSkillMarkers(
   return { skillBodies, loaded };
 }
 
-/**
- * Resolve the sticky skill ref for this turn. Three cases:
- *
- *   1. NEW marker processed → persist/replace (last-loaded wins).
- *   2. NO marker + priorRef exists + latest user msg isn't a slash command →
- *      re-read body from disk + populate turnController (continuation turn).
- *   3. NO marker + priorRef exists + user typed `/something-else` → clear.
- *
- * Case 2 is the bug fix for sessions like s_nn5dweps where skill context
- * vanished after turn 1. Mutates `skillBodies` in place when re-injecting.
- *
- * Returns the effective activeSkillRef for this turn (used by the discovery
- * index to filter the entry whose body is already in context).
- */
+/** Resolve the sticky skill ref for this turn. (1) NEW marker → persist/replace. (2) NO marker + priorRef + not a slash command → re-read body + populate turnController (continuation turn; the bug fix for skill context vanishing after turn 1). (3) NO marker + priorRef + user typed `/something-else` → clear. Returns the effective activeSkillRef. */
 async function applyStickySkillRef(
   sessionId: string,
   convo: ModelMessage[],
@@ -2103,12 +1724,7 @@ async function applyStickySkillRef(
   }
 }
 
-/**
- * Inject the accumulated skill bodies into the TOP of the system prompt
- * (right after the identity line). Models weight the beginning of the
- * system prompt highest; a skill buried after 4000+ words of tool docs gets
- * deprioritized. The bodies are already wrapped with ACTIVE SKILL directives.
- */
+/** Inject the accumulated skill bodies at the TOP of the system prompt (models weight the beginning highest; a skill buried after 4000+ words of tool docs gets deprioritized). Bodies are already wrapped with ACTIVE SKILL directives. */
 function injectSkillBodies(systemPrompt: string, skillBodies: string): string {
   if (!skillBodies) return systemPrompt;
   const identityEnd = systemPrompt.indexOf('\n#');
@@ -2118,15 +1734,7 @@ function injectSkillBodies(systemPrompt: string, skillBodies: string): string {
   return `${skillBodies}\n${systemPrompt}`;
 }
 
-/**
- * Inject a compact `# Available Skills` index into the system prompt so the
- * model can autonomously call `load_skill({path})` when the user's request
- * matches a skill they didn't explicitly invoke. Always present (even when a
- * skill is active) so the model can chain to follow-up skills mid-turn.
- *
- * The active skill's entry is filtered out — its body is already in context.
- * Best-effort: if the scan fails, the system prompt is unchanged.
- */
+/** Inject a compact `# Available Skills` index so the model can autonomously call `load_skill({path})` when a request matches a skill the user didn't explicitly invoke. The active skill's entry is filtered out (body already in context). Best-effort. */
 function injectSkillDiscoveryIndex(
   systemPrompt: string,
   root: string,
@@ -2161,29 +1769,7 @@ function injectSkillDiscoveryIndex(
   return `${skillIndex}\n${systemPrompt}`;
 }
 
-/**
- * Inject a generic skill-chaining directive.
- *
- * When an active skill is in context, ALWAYS surface every OTHER installed
- * skill as a chainable follow-up — no regex parsing of the active skill body,
- * no keyword matching against the user message. The model decides when to
- * chain; our job is to make sure it (a) knows what's available and (b) knows
- * it MUST actually invoke load_skill rather than improvising from memory.
- *
- * Why not detect "Use <name>" patterns in the active skill body? Because
- * skills reference follow-ups in too many forms to match reliably — prose,
- * headings, code comments, frontmatter, etc. A general directive is both
- * simpler and more robust: every installed skill shows up, and the model
- * picks based on its read of the active skill's intent + the user's request.
- *
- * Why this matters: without it, models claim "I'm using the X skill" while
- * never actually calling load_skill — they write from training data, the
- * activeSkillRef never transitions, and the active skill's checklist step
- * stays open forever. (Root cause of session s_uo6j1v8p.)
- *
- * No-op when there's no active skill OR no other installed skills to chain to.
- * Best-effort: if the scan fails, the system prompt is unchanged.
- */
+/** Inject a generic skill-chaining directive: when a skill is active, surface every OTHER installed skill as a chainable follow-up. No regex/keyword matching (skills reference follow-ups in too many forms) — the model picks based on intent. Without this, models claim "I'm using X" while never calling load_skill. No-op with no active skill or no other installed skills. */
 function injectSkillChainingReminder(
   systemPrompt: string,
   root: string,
@@ -2424,11 +2010,7 @@ interface PricingRates {
   cacheWrite: number;
 }
 
-/** Compute USD cost from token counts × per-token rates.
- *  Cost = (non-cached input × input rate) + (output × output rate)
- *       + (cache read × cache-read rate) + (cache write × cache-write rate).
- *  Cache-read tokens are billed at their own (lower) rate; non-cached input
- *  tokens are billed at the full input rate. */
+/** Compute USD cost = (non-cached input × input rate) + (output × output rate) + (cache read × cache-read rate) + (cache write × cache-write rate). */
 function computeCost(u: Pick<Usage, 'inputTokens' | 'outputTokens' | 'cacheRead' | 'cacheWrite'>, r: PricingRates): number {
   const nonCachedInput = Math.max(0, (u.inputTokens || 0) - (u.cacheRead || 0));
   return (

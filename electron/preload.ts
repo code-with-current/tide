@@ -1,10 +1,4 @@
-/**
- * Preload script — runs in the renderer process before the page loads.
- *
- * Exposes a narrow, named API to the renderer via `contextBridge`. The renderer
- * never gets direct access to `ipcRenderer`, Node, or the filesystem — only
- * the specific methods listed here.
- */
+/** Preload script: runs in the renderer before page load and exposes a narrow, named API via contextBridge. The renderer never gets direct ipcRenderer/Node/filesystem access — only the methods listed here. */
 
 import { contextBridge, ipcRenderer } from 'electron';
 

@@ -24,12 +24,7 @@ export interface ResolveResult {
 const localInstance = new LocalOnnxEmbedder();
 const cloudInstance = new CloudEmbedder();
 
-/**
- * Build-time resolution. Prefers local; falls back to cloud only when all
- * three of (local unavailable, cloudAllowed, cloud configured) hold; else
- * throws — the caller surfaces "RAG unavailable" honestly rather than
- * silently degrading.
- */
+/** Build-time resolution: prefer local; fall back to cloud only when (local unavailable + cloudAllowed + cloud configured); otherwise throw so "RAG unavailable" surfaces honestly. */
 export function resolveForBuild(input: ResolveInput): ResolveResult {
   const { config, localAvailable, cloudConfigured } = input;
   if (localAvailable) {
@@ -49,13 +44,7 @@ export function resolveForBuild(input: ResolveInput): ResolveResult {
   );
 }
 
-/**
- * Query-time resolution. Reads the index's recorded embedderId and returns
- * that exact embedder — never crosses, even if the other path is now
- * available. A local-built index whose local runtime has since died
- * throws "rebuild required" rather than silently re-embedding via cloud
- * (the vectors would be in a different space and produce garbage scores).
- */
+/** Query-time resolution: return the embedder matching the index's recorded embedderId — never cross (a local-built index whose local runtime died throws "rebuild required"; crossing vector spaces would yield garbage scores). */
 export function resolveForQuery(input: ResolveInput): ResolveResult {
   const { config, localAvailable, cloudConfigured } = input;
   if (config.embedderId === 'local-code-512') {

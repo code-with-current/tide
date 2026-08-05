@@ -1,8 +1,4 @@
-/**
- * Pure helpers for the block-stream model. Shared by the orchestrator
- * (electron/) and the streamReducer (renderer/). No React, no Zustand —
- * safe to import from anywhere.
- */
+/** Pure helpers for the block-stream model, shared by orchestrator and streamReducer. No React, no Zustand. */
 
 import type { FollowupMode, ToolName } from '@/types';
 
@@ -38,19 +34,7 @@ function normalizeOption(o: unknown): string {
   return String(o);
 }
 
-/**
- * Derive a FollowupMode from a parsed `ask_followup_question` arguments
- * object. Returns null if args don't match the expected shape.
- *
- * Three modes (see spec §10):
- *   - options:  { question, options: [...], multiple? }
- *   - question: { question }
- *   - null:     anything else (caller decides what to do — usually skip)
- *
- * Note: 'blank' mode is decided by the reducer when the tool_call_start
- * arrives but args haven't landed yet. This function only runs once args
- * are present.
- */
+/** Derive a FollowupMode from ask_followup_question args (options / question / null). 'blank' mode is decided earlier by the reducer on tool_call_start; this runs only once args have landed. */
 export function deriveFollowupMode(args: Record<string, unknown>): FollowupMode | null {
   if (Array.isArray(args.options) && args.options.length > 0) {
     return {

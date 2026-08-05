@@ -12,19 +12,7 @@ import { cn } from '@/lib/utils';
 
 const MD_EXTENSIONS = new Set(['md', 'mdx', 'markdown']);
 
-/**
- * Dedicated File Viewer panel — a second right panel separate from the tabbed
- * RightPanel. Its only job is viewing files.
- *
- *   - Tab strip: every open file for the active session; click to focus, × to
- *     close. Sourced from the ui store's per-session `openFiles`.
- *   - Body: reads the REAL file content via `readFileInWorkspace` (sandboxed
- *     on the main side) and renders as monospace text with line numbers.
- *     Markdown files get a preview/code toggle (rendered via MemoizedMarkdown).
- *
- * Opening a file anywhere (tool card, Explorer, Source Control) calls
- * `openFile`, which flips `fileViewerOpen` true and reveals this panel.
- */
+/** Dedicated File Viewer panel (separate from the tabbed RightPanel): tab strip of open files + body reading real file content (with markdown preview/code toggle). */
 export function FileViewerPanel() {
   const activeSessionId = useUi((s) => s.activeSessionId);
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
@@ -221,11 +209,7 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
     );
   }
 
-  // Image preview — short-circuits BEFORE the text disk-read/error checks.
-  // Images attach by path and have no text content, so they get their own
-  // loader (readImageFile → base64 data URL) rendered via the Image UI
-  // component. Works for both external attachments (absPath) and workspace
-  // @file mentions (relPath).
+  // Image preview — short-circuits BEFORE the text disk-read/error checks. Images have no text content, so they get their own loader (readImageFile → base64 data URL) rendered via the Image UI component; works for external attachments (absPath) and workspace @file mentions (relPath).
   if (file.isImage) {
     return <ImageBody file={file} workspaceId={workspaceId} />;
   }
@@ -316,13 +300,7 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
   );
 }
 
-/**
- * Image viewer — reads the image as a base64 data URL via the
- * `readImageFile` IPC (the renderer can't load file:// URLs under
- * contextIsolation) and renders it with the standard Image UI component.
- * Handles both external attachments (absPath) and workspace @file mentions
- * (relPath). Falls back to a friendly error if the file is gone.
- */
+/** Image viewer: reads images as base64 data URLs via readImageFile IPC (renderer can't load file:// under contextIsolation); supports external + workspace sources. */
 function ImageBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
   const [state, setState] = useState<
     | { loading: true }
@@ -400,13 +378,7 @@ function formatBytesStatic(b?: number): string | null {
   return b != null ? (b > 1024 ? `${Math.ceil(b / 1024)}KB` : `${b}B`) : null;
 }
 
-/**
- * Highlighted code viewer — react-syntax-highlighter (Prism engine, oneDark
- * theme). Pure JS, no WASM, no CSP issues. Renders synchronously — colors
- * appear on first paint, no async wait.
- *
- * Built-in line numbers + changed-line tint via wrapLongLines + custom styles.
- */
+/** Highlighted code viewer using react-syntax-highlighter (Prism + oneDark): synchronous render, line numbers, changed-line tint. */
 function HighlightedCode({
   content,
   language,

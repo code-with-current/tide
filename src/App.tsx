@@ -41,13 +41,7 @@ function App() {
     });
   }, []);
 
-  // Global keyboard shortcuts. For each registered shortcut, check whether
-  // the event matches its effective binding (user override → platform default
-  // → hardcoded fallback) and, on first match, dispatch the action. Reads
-  // overrides fresh per-event so rebinding via Settings → Shortcuts takes
-  // effect immediately. Field-typed inputs are skipped so chat typing
-  // doesn't trigger J/K etc.; Esc/⌘-combos still get through because they're
-  // either not typeable or are app-level.
+  // Global keyboard shortcuts: on match (user override → platform default → hardcoded fallback), dispatch the action. Reads overrides fresh per-event; field-typed inputs are skipped (Esc/⌘-combos still get through).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;

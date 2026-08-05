@@ -1,20 +1,4 @@
-/**
- * ConfirmPopover — a reusable popover confirmation dialog anchored to a trigger.
- *
- * Wraps the shadcn Popover with a title + description + confirm/cancel buttons.
- * Use it anywhere you need a lightweight "are you sure?" before a destructive
- * action, without a full-screen modal dialog.
- *
- * Example:
- *   <ConfirmPopover
- *     trigger={<button><Trash2 /></button>}
- *     title="Remove server?"
- *     description="This will disconnect and delete the config entry."
- *     confirmLabel="Remove"
- *     destructive
- *     onConfirm={handleRemove}
- *   />
- */
+/** ConfirmPopover: lightweight popover confirmation (title + description + confirm/cancel) anchored to a trigger; use instead of a full modal for destructive actions. */
 import { useState, type ReactNode } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';

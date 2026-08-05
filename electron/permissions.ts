@@ -1,30 +1,4 @@
-/**
- * macOS system-permission management — thin wrapper over the optional native
- * module `node-mac-permissions`.
- *
- * The app requests three permissions that meaningfully help a coding agent:
- *   - Accessibility         (global shortcuts / automation)
- *   - Full Disk Access      (reading project files anywhere on disk)
- *   - Protected Folders     (Desktop / Documents / Downloads — the folders
- *                            macOS sandboxes even from Full Disk Access)
- *
- * None of these can be programmatically GRANTED — the OS only lets an app
- * open System Settings to the relevant pane; the user toggles manually. So
- * "request" here means "navigate to the pane"; the consent screen re-checks
- * status when the user returns (focus listener).
- *
- * Safety: `node-mac-permissions` has no Windows/Linux bindings, so it's an
- * optionalDependency. We load it with the `node-pty` pattern (createRequire +
- * try/catch) gated by `process.platform === 'darwin'`. On non-mac platforms
- * (or if the native binding fails to load) every function returns a safe
- * default that makes the consent screen a no-op — it won't show, and nothing
- * crashes.
- *
- * NOTE on the stderr noise: the native module logs a harmless
- * "Incorrect NSStringEncoding value 0x8000100 detected" warning on some
- * macOS versions. That's a library/OS interop quirk, not our bug — safe to
- * ignore.
- */
+/** macOS permission wrapper over the optional `node-mac-permissions` module: requests Accessibility, Full Disk Access, and protected-folders access (the OS only opens System Settings — the user toggles manually). On non-mac or missing bindings every function returns a safe no-op default. */
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -59,12 +33,7 @@ export interface PermissionStatus {
   folders: 'unknown' | null;
 }
 
-/**
- * Read the current authorization status. On non-mac, or if the native module
- * failed to load, returns a status whose platform field is 'other' — the
- * consent screen uses that to short-circuit (don't show). Synchronous native
- * call; cheap to run on the routing path.
- */
+/** Read the current authorization status; on non-mac or missing module returns platform 'other' so the consent screen short-circuits. */
 export function getPermissionStatus(): PermissionStatus {
   if (!isMac || !macPerms) {
     return {
@@ -84,14 +53,7 @@ export function getPermissionStatus(): PermissionStatus {
   }
 }
 
-/**
- * True iff the consent screen should show. Returns false on non-mac, when
- * the native module isn't loadable, or when the checkable permissions are
- * already authorized. Folders can't be checked, so they alone never trigger
- * the screen (we surface them only once the screen is already showing for
- * accessibility/full-disk). This keeps the screen from nagging a fully-set-up
- * user on every launch.
- */
+/** True iff the consent screen should show: false on non-mac/missing module or when accessibility + full-disk are already authorized (folders can't be checked, so they never trigger the screen alone). */
 export function shouldShowConsent(): boolean {
   if (!isMac || !macPerms) return false;
   const s = getPermissionStatus();
@@ -99,16 +61,7 @@ export function shouldShowConsent(): boolean {
   return s.accessibility !== 'authorized' || s.fullDiskAccess !== 'authorized';
 }
 
-/**
- * Open System Settings to the relevant pane for the given permission. The OS
- * does NOT grant on call — the user toggles manually. Folders open the
- * Files-and-Folders pane for each of desktop/documents/downloads in turn
- * (one combined row in the consent UI maps to three prompts).
- *
- * Returns 'opened' on success, 'unavailable' on non-mac/missing module.
- * Errors are swallowed (best-effort navigation; the pane may differ by OS
- * version) but logged.
- */
+/** Open System Settings to the relevant pane (the OS doesn't grant on call); folders open the Files-and-Folders pane for desktop/documents/downloads. Returns 'opened' on success or 'unavailable' on non-mac/missing module; errors swallowed. */
 export async function requestPermission(type: PermissionType): Promise<'opened' | 'unavailable'> {
   if (!isMac || !macPerms) return 'unavailable';
   try {

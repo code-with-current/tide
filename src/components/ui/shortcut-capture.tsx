@@ -1,19 +1,4 @@
-/**
- * ShortcutCapture — a clickable kbd display that, when active, listens for
- * the next key combo and reports it as display tokens via onCapture.
- *
- * Behavior:
- *   - Idle: renders the current binding as a KbdGroup (or "Unbound" if empty).
- *   - Click: enters "listening" mode — shows a pulsing "Press keys…" prompt
- *     and captures the next non-pure-modifier combo.
- *   - Capture: on the first key with a non-modifier component (or Escape to
- *     cancel, Backspace to clear), calls onCapture(tokens) and exits listening.
- *   - Escape while listening cancels without firing onCapture.
- *
- * Built on the existing shadcn Kbd/KbdGroup primitives — no new visual
- * language. The capture logic uses lib/shortcuts.ts's eventToTokens so the
- * stored tokens match the registry's format exactly.
- */
+/** ShortcutCapture: clickable kbd display that captures the next key combo when active. Idle shows binding, click listens, Escape cancels, Backspace clears. */
 import { useEffect, useRef, useState } from 'react';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { eventToTokens } from '@/lib/shortcuts';

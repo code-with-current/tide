@@ -30,22 +30,7 @@ function buildBlockEntries(content: string) {
   });
 }
 
-/**
- * Detect if a markdown block is a fenced mermaid code block.
- * Returns `{ code, closed }` if yes, null if no.
- *
- * Handles two shapes:
- *  - Closed fence:  ```mermaid\n...\n```   (with optional trailing whitespace)
- *  - Open fence:    ```mermaid\n...        (streaming — closing ``` not yet
- *                 received). `closed` is false so the caller can route to
- *                 MermaidDiagram with `streaming=true` (shows a placeholder
- *                 instead of letting Streamdown render a partial code block).
- *
- * The trailing-whitespace tolerance fixes a real bug: when a mermaid block is
- * the LAST block in the content, parseMarkdownIntoBlocks leaves a trailing
- * newline after the closing ```, and the old `$` anchor failed to match —
- * silently dropping the diagram and rendering it as plain code.
- */
+/** Detect fenced mermaid blocks (closed or open/streaming); returns {code, closed} or null. Trailing-whitespace tolerant. */
 function extractMermaid(text: string): { code: string; closed: boolean } | null {
   const trimmedStart = text.replace(/^\s+/, '');
   if (!trimmedStart.startsWith('```mermaid')) return null;

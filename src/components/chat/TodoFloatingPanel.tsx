@@ -4,14 +4,7 @@ import { useTodos } from '@/hooks/useTodos';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
-/**
- * Floating todo panel — sits at the top-right of the chat column, above the
- * scroll content. Semi-transparent dark-grey so it floats over the chat
- * without blocking it. Collapsible (defaults open while work is in flight,
- * collapses to a compact summary chip when done).
- *
- * Renders nothing when there's no todo list for the active session.
- */
+/** Floating todo panel: top-right of chat column, collapsible, auto-collapses when all done and re-expands on new in-progress task. Renders null when no todos. */
 export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | undefined }) {
   const todos = useTodos(sessionId);
   const [collapsed, setCollapsed] = useState(false);

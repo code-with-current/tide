@@ -1,15 +1,4 @@
-/**
- * slash_command tool — dispatch to a user-defined slash command.
- *
- * Slash commands (e.g. /refactor, /deploy, /test) let users bundle a prompt
- * prefix + tool whitelist into a reusable macro. The model can invoke one
- * explicitly via this tool, which looks up the command and returns its
- * system-prompt injection.
- *
- * Commands live in <userData>/commands/*.md (one file per command, first
- * line is the description). If a command isn't found, the tool returns a
- * helpful error so the model can fall back to direct work.
- */
+/** slash_command tool: dispatch to a user-defined slash command (a prompt-prefix macro in <userData>/commands/*.md, first line = description); returns the body as system-prompt injection or a helpful error if not found. */
 
 import * as fs from 'fs';
 import * as path from 'path';

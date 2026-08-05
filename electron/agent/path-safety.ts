@@ -1,15 +1,4 @@
-/**
- * Path sandboxing for tools.
- *
- * Per design doc §8: every file-touching tool MUST resolve its target path
- * against the workspace root and refuse anything that escapes it. We use
- * `path.relative()` + a leading-`..` check — *not* string-prefix matching,
- * which is wrong on `workspace-evil/` vs `workspace/`.
- *
- * Symlinks: resolved with `fs.realpath` and re-verified. A symlink whose
- * target escapes the workspace is refused. A symlink whose target stays
- * inside is allowed. This is the middle option from the design doc's list.
- */
+/** Path sandboxing: resolve tool target paths against the workspace root and refuse escapes, using path.relative() + leading-`..` check (string-prefix matching is unsafe). */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -26,15 +15,7 @@ export class PathEscapeError extends Error {
   }
 }
 
-/**
- * Resolve a (possibly relative, possibly absolute) path against the workspace
- * root and verify the result is inside the root. Returns the resolved
- * absolute path on success, throws `PathEscapeError` on escape.
- *
- * Does NOT resolve symlinks — for tools that follow links, call
- * `assertResolvedInside()` after opening. For write/destructive tools that
- * must not follow symlinks, open with `O_NOFOLLOW` separately.
- */
+/** Resolve a path against the workspace root and verify it's inside; throws PathEscapeError on escape. Does NOT resolve symlinks. */
 export function resolveInsideWorkspace(workspaceRoot: string, target: string): string {
   const root = path.resolve(workspaceRoot);
   // Allow absolute paths that point inside the root, plus relative paths.
@@ -51,11 +32,7 @@ export function resolveInsideWorkspace(workspaceRoot: string, target: string): s
   return abs;
 }
 
-/**
- * After resolving a real path (e.g. via `fs.realpath`), verify it's still
- * inside the workspace. Use for tools that read symlinks — defends against
- * a symlink whose link itself is inside the root but whose target escapes.
- */
+/** After resolving a real path (e.g. via `fs.realpath`), verify it's still inside the workspace — defends against a symlink whose link is inside root but whose target escapes. */
 export function assertResolvedInside(workspaceRoot: string, resolvedAbs: string): void {
   const root = path.resolve(workspaceRoot);
   const rel = path.relative(root, resolvedAbs);
@@ -88,16 +65,7 @@ export function resolveAndFollowSymlinks(workspaceRoot: string, target: string):
   return real;
 }
 
-/**
- * Resolve an absolute target under the user's skill/agent roots (~/.claude or
- * ~/.agent), following symlinks + re-verifying. Used by read_file so the model
- * can load skill/agent/context files that live OUTSIDE the workspace (e.g.
- * `~/.claude/skills/brainstorming/SKILL.md`) — the progressive-disclosure
- * model where a `/name` invocation hands the model a path to read on demand.
- *
- * Only the user's own `.claude`/`.agent` dirs are reachable this way; arbitrary
- * filesystem access is still refused. Throws `PathEscapeError` otherwise.
- */
+/** Resolve a target under ~/.claude, ~/.agent, or ~/.zcode, following symlinks + re-verifying; used by read_file for out-of-workspace skill/context files. */
 export function resolveUnderSkillRoot(target: string): string {
   const home = os.homedir();
   const resolved = path.resolve(target);
@@ -108,13 +76,7 @@ export function resolveUnderSkillRoot(target: string): string {
     if (e.code === 'ENOENT') real = resolved;
     else throw e;
   }
-  // Windows + macOS are case-insensitive; also, on Windows `fs.realpathSync`
-  // may return an 8.3 short path (e.g. C:\Users\USER~1\.claude) while
-  // `os.homedir()` returns the long path (C:\Users\user.name). Resolve the
-  // home dir through realpath too so both sides are normalized the same
-  // way, and compare case-insensitively on case-insensitive filesystems.
-  // Without this, skill loading fails on Windows when the username
-  // contains a dot (USER~1 vs user.name) — see the path-safety-windows test.
+  // Windows + macOS are case-insensitive. On Windows, `fs.realpathSync` may return an 8.3 short path (C:\Users\USER~1\.claude) while `os.homedir()` returns the long path (C:\Users\user.name). Resolve home through realpath too so both sides normalize identically, and compare case-insensitively — otherwise skill loading fails on Windows when the username contains a dot (see path-safety-windows test).
   let realHome = home;
   try {
     realHome = fs.realpathSync(home);

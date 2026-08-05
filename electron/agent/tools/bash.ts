@@ -1,25 +1,4 @@
-/**
- * bash tool — shell execution in the workspace root.
- *
- * Runs commands via the user's shell with full operator support (pipes,
- * redirects, &&, ||). Risk is bounded by the autonomy-mode permission gate:
- * bash is riskTier 'destructive', so it always prompts in ask/edit modes
- * and only auto-runs in 'full'.
- *
- * A small hard blocklist catches the most catastrophic patterns (rm -rf /,
- * sudo, fork bombs). Everything else is allowed — the model is expected to
- * run real dev tooling (build, test, lint, install) which is the whole
- * point of having a bash tool.
- *
- * Output is capped at 50 KB and 1000 lines. Commands time out at
- * `timeoutMs` and are killed.
- *
- * Migration state (Phase 2): the file exports BOTH the legacy
- * `bashTool: ToolRegistration` (keeps the existing orchestrator working)
- * AND the new `createBashTool(ctx)` SDK factory (for the Phase 3
- * orchestrator rewrite). Both share the same `runBash` body. Phase 3
- * deletes the legacy export.
- */
+/** bash tool: shell execution in the workspace root with full operator support. Bounded by the autonomy-mode permission gate (riskTier 'destructive') plus a hard blocklist for catastrophic patterns. Output capped at 50KB / 1000 lines. Exports both legacy `bashTool` and new `createBashTool(ctx)` sharing one `runBash` body. */
 
 import { spawn } from 'child_process';
 import { toolEnv, wrapWithShell, killProcessTree } from './tool-env';
@@ -33,14 +12,7 @@ import { withPermission } from '../permission-wrapper';
 const MAX_OUTPUT = 50 * 1024;
 const MAX_LINES = 1000;
 
-/**
- * Hard blocklist — patterns that are dangerous regardless of context.
- * Matched as case-insensitive substrings against the raw command.
- *
- * These are the patterns where the cost of a mistake is catastrophic and
- * irreversible (wiping the system, opening a root shell, etc.). Everything
- * else is allowed — the permission gate is the user's consent layer.
- */
+/** Hard blocklist: catastrophic/irreversible patterns (rm -rf /, sudo, fork bombs, etc.), matched case-insensitively against the raw command. */
 const BLOCKED_PATTERNS: RegExp[] = [
   /\brm\s+(-[a-z]*r[a-z]*f?|--recursive)\s+([-~./]|\/(?:usr|etc|var|bin|sbin|System|Library|Users|home|root|boot|dev|proc|sys)\b)/i,
   /\brm\s+(-[a-z]*r[a-z]*f?|--recursive)\s+\/$/i,
@@ -199,15 +171,7 @@ export const bashTool: ToolRegistration = {
 };
 
 // ─── New SDK factory envelope (Phase 3+) ───────────────────────────────
-//
-// Permission gating is applied HERE, inside execute, via withPermission —
-// NOT at the orchestrator layer. This matches the other converted tools
-// (read_file, write_file, …): each tool owns its consent check so the SDK
-// can dispatch freely and the gate travels with the tool. ctx arrives via
-// closure; withPermission reads ctx.autonomyMode and either runs the body
-// (auto), emits a permission request and awaits the verdict (ask / blocked),
-// or returns a rejection. bash is riskTier 'destructive' → auto-approves
-// only in 'full' mode; ask/edit modes prompt, plan mode requests escalation.
+// Permission gating is applied here inside execute via withPermission (not at the orchestrator layer); bash auto-approves only in 'full' mode.
 
 export function createBashTool(ctx: ToolContext) {
   return tool({

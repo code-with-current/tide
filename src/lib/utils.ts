@@ -6,19 +6,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/**
- * Platform detection for the renderer. Electron's renderer runs as Chromium, so
- * `navigator.platform` / `userAgent` is the source of truth (not process.platform,
- * which isn't available under contextIsolation). All three are derived once.
- *
- *   mac     — traffic lights top-LEFT; built-in file manager is "Finder".
- *   win     — caption buttons top-RIGHT; built-in file manager is "File Explorer".
- *   linux   — caption buttons top-RIGHT; file manager varies ("Files").
- *
- * Note: OS-specific display labels (e.g. the file-manager name shown in the
- * open-in-app menu) come from the backend, which has process.platform. These
- * constants are for renderer-side layout/behavior branching only.
- */
+/** Platform detection for the renderer (mac/win/linux). Source: navigator.platform/userAgent. */
 const _ua =
   typeof navigator !== 'undefined'
     ? navigator.platform || navigator.userAgent
@@ -86,13 +74,7 @@ export function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/**
- * Bucket sessions into Today / Yesterday / Older groups, with the most
- * recently updated session on top within each bucket. `updatedAt` is
- * bumped whenever a message is added (see sessions.ts addMessage /
- * addAssistantMessage), so this reflects "latest activity" rather than
- * creation order.
- */
+/** Bucket sessions into Today / Yesterday / Older groups, sorted by updatedAt desc. */
 export function bucketByRecency<T extends { updatedAt: string }>(
   items: T[],
 ): { label: string; items: T[] }[] {

@@ -1,11 +1,4 @@
-/**
- * list_dir tool — non-recursive directory listing.
- *
- * Returns a `file_list` display with names + kinds. Caps at 500 entries to
- * bound output size.
- *
- * Migration state (Phase 2): dual export per the bash.ts pattern.
- */
+/** list_dir tool: non-recursive directory listing returning a file_list display (names + kinds), capped at 500 entries. Dual export per the bash.ts pattern. */
 
 import * as fs from 'fs';
 import { tool } from 'ai';

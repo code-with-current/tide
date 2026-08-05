@@ -1,18 +1,4 @@
-/**
- * Hook configuration — loads tool/stop hooks from user config files.
- *
- * Hooks are user-defined shell commands that run before/after tool calls
- * (PreToolUse/PostToolUse) or when the model naturally terminates (Stop).
- * They can deny tools, modify input/output, inject context, or block
- * continuation.
- *
- * Config sources (in priority order):
- *   1. Project: `.agents/hooks.json` in the workspace root
- *   2. User: `~/.tide/hooks.json` (or `~/.tide-dev/hooks.json` in dev)
- *
- * Both are merged; project hooks take precedence for the same event+tool
- * pattern.
- */
+/** Hook configuration: loads PreToolUse/PostToolUse/Stop hooks from `.agents/hooks.json` (project) and `~/.tide/hooks.json` (user); both are merged with project taking precedence. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { appDataDir } from '../../appPaths.js';
@@ -39,11 +25,7 @@ export interface HookConfig {
 const EMPTY_CONFIG: HookConfig = { preToolUse: [], postToolUse: [], stop: [] };
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-/**
- * Load hooks from project + user config files. Returns an empty config if
- * neither file exists or both are malformed (hooks are opt-in; absence is
- * not an error).
- */
+/** Load hooks from project + user config files. Returns empty config if neither exists or both are malformed (hooks are opt-in; absence is not an error). */
 export function loadHookConfig(workspaceRoot: string): HookConfig {
   const projectPath = path.join(workspaceRoot, '.agents', 'hooks.json');
   const userPath = path.join(appDataDir(), 'hooks.json');

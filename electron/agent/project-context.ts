@@ -1,34 +1,4 @@
-/**
- * Scan project-level and user-level agent context.
- *
- * Sources, in priority order (first match wins on name collisions):
- *
- *   Project (per-workspace):
- *     <workspace>/.claude/CLAUDE.md | AGENT.md   → contextFiles
- *     <workspace>/.claude/skills/<name>.md       → skills
- *     <workspace>/.claude/skills/<name>/SKILL.md → skills (modern convention)
- *     <workspace>/.claude/agents/<name>.md       → agents
- *     <workspace>/.claude/agents/<name>/SKILL.md → agents
- *     ...same for .agent/...
- *
- *   User (global, ~):
- *     ~/.claude/skills/...    → skills (source: 'user')
- *     ~/.claude/agents/...    → agents (source: 'user')
- *     ...same for .agent/...
- *
- * Both `.claude` and `.agent` are scanned (previously only the first found
- * was scanned, which silently dropped anything in the other). Project
- * entries take precedence over user entries on name conflicts — a
- * project-local skill always shadows a globally-installed one with the
- * same name, mirroring PATH lookup precedence.
- *
- * Each entry carries `source: 'project' | 'user'` so the renderer can badge
- * it. Symlinks are followed (user skills are typically symlinked into
- * ~/.claude/skills/ from elsewhere).
- *
- * The scanner is defensive: missing files / unreadable folders are skipped
- * silently. No file is required — this just surfaces what exists.
- */
+/** Scan project-level and user-level agent context (.claude/.agent/.zcode at both workspace and ~). Project entries shadow user entries on name collisions; each entry carries `source: 'project' | 'user'`. Defensive: missing/unreadable files are skipped silently. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -130,15 +100,7 @@ export function scanProjectEntries(workspaceRoot: string): ProjectEntries {
   return result;
 }
 
-/**
- * Scan one skills/ or agents/ directory. Handles three entry shapes:
- *   - `<name>.md` flat file (legacy + simple case)
- *   - `<name>/SKILL.md` directory (modern Claude Code convention)
- *   - symlinks to either of the above (resolved via fs.statSync)
- *
- * `.DS_Store`, hidden files, and other extensions are skipped. `seen` is
- * local to one scan dir — cross-dir dedupe happens in the caller.
- */
+/** Scan one skills/ or agents/ directory. Handles flat `<name>.md` files, dir-based `<name>/SKILL.md`, and symlinks (classified via statSync, which follows the link). Dotfiles and non-.md entries are skipped. */
 function scanSkillOrAgentDir(
   subAbs: string,
   _sub: SubDir,
@@ -200,12 +162,7 @@ function scanSkillOrAgentDir(
   return out;
 }
 
-/**
- * Push entries from `src` into `dst`, skipping any whose name already
- * exists in `dst`. This is what gives project entries precedence over
- * user entries — project entries are merged first, so user collisions
- * are silently dropped.
- */
+/** Push entries from `src` into `dst`, skipping name collisions — this gives project entries precedence (merged first) over user entries. */
 function mergeDedup(dst: ProjectContextFile[], src: ProjectContextFile[]): void {
   for (const entry of src) {
     if (dst.some((existing) => existing.name === entry.name)) continue;
@@ -231,11 +188,7 @@ function samePath(a: string, b: string): boolean {
   }
 }
 
-/**
- * Read a markdown file capped at MAX_FILE_BYTES. Derives a short description
- * from the first non-empty, non-frontmatter line. Returns null if the file
- * can't be read or is empty.
- */
+/** Read a markdown file capped at MAX_FILE_BYTES; derives a short description from the first non-empty, non-frontmatter line. Returns null if unreadable or empty. */
 function readFileCapped(
   absPath: string,
   relPath: string,

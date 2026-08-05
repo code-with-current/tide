@@ -1,16 +1,4 @@
-/**
- * Per-session, per-toolCallId permission resolver + pending-ask store.
- *
- * Replaces the single-slot session resolver: the SDK runs a step's tool calls
- * in parallel, so multiple gated tools can await a verdict at once. Each
- * pending ask is keyed by its toolCallId (the model's real id, threaded via
- * AsyncLocalStorage in buildToolset), so the UI can render one card per call
- * and resolve them independently — no serialization, no flicker.
- *
- * IPC integration: the approve/reject handlers call
- * `resolvePermission(sessionId, toolCallIds, verdict)`. `abortPermission`
- * (turn abort / stop) rejects everything still pending for the session.
- */
+/** Per-session, per-toolCallId permission resolver + pending-ask store: parallel tool calls each await their own verdict (keyed by toolCallId via AsyncLocalStorage), so the UI renders one card per call with no serialization. approve/reject → resolvePermission; stop → abortPermission. */
 
 import type { AutonomyMode } from '../../src/types';
 

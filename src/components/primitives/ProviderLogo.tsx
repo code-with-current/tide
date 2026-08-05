@@ -1,16 +1,4 @@
-/**
- * ProviderLogo — the real brand mark for an LLM provider's API style.
- *
- * Used in place of the letter avatars (A/O) in the protocol picker, the
- * provider list rows, and anywhere else a provider is identified at a
- * glance. Rendered as an inline SVG (not an <img>) so the mark inherits
- * `currentColor` and themes correctly on dark/light backgrounds — the raw
- * OpenAI SVG hardcodes fill="black", which is invisible on the app's dark
- * surface, so we recolor via the container's text color.
- *
- * `className` sizes/colors the mark; default size-4 + text-white to sit
- * inside the brand-tinted avatar tiles used in the picker + list.
- */
+/** ProviderLogo: real brand mark for an LLM provider, rendered as inline SVG (inherits currentColor so the OpenAI knot isn't invisible on dark backgrounds). */
 
 // OpenAI knot mark — viewBox 0 0 25 25. Source path is authored with a
 // (1420,360) offset; we translate it back into the viewport here rather

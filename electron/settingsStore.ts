@@ -1,20 +1,4 @@
-/**
- * Pure settings storage — reads/writes `<userData>/settings.json`. No Electron
- * imports, fully testable (mirrors configStore.ts's pattern).
- *
- * Distinct from config.json on purpose: config.json holds encrypted API keys
- * and workspaces; settings.json holds non-secret UI preferences (shortcut
- * bindings today, future appearance/behavior knobs as the file grows). Keeping
- * them separate means a settings reset never touches credentials, and the
- * shortcut editor doesn't need to round-trip through the encrypted store.
- *
- * Path is passed in (the wrapper resolves it via app.getPath('userData'),
- * which after the userData relocation is `~/.tide` in prod / `~/.tide-dev`
- * in dev — both platform-aware via the user's home).
- *
- * Shortcut defaults are platform-aware: macOS uses ⌘ (Cmd) tokens, Windows
- * and Linux use Ctrl. See defaultShortcutsForPlatform().
- */
+/** Pure settings storage for `<userData>/settings.json` (no Electron imports, fully testable). Kept separate from config.json so a settings reset never touches credentials; holds non-secret UI prefs (shortcuts today). Platform-aware shortcut defaults (macOS ⌘ / Win+Linux Ctrl). */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createLogger } from './logger.js';

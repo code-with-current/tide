@@ -12,20 +12,7 @@ import {
   keysToCombo,
 } from '@/lib/shortcuts';
 
-/**
- * Settings → Shortcuts.
- *
- * Backed by the shortcut registry (lib/shortcuts.ts) and the UI store's
- * `shortcutOverrides` (persisted to localStorage). Each row shows the action
- * and a ShortcutCapture; clicking the capture, pressing a new combo, persists
- * an override. Conflicts (same combo used by another action) are flagged
- * inline with a warning icon. "Reset all" clears every override back to the
- * registry defaults.
- *
- * Actions marked `implemented: false` in the registry are shown but display a
- * "not yet wired" hint — they rebind and persist correctly, but no key
- * listener fires them yet. Honest rather than silently no-op'ing.
- */
+/** Settings → Shortcuts: per-action ShortcutCapture rows backed by the shortcut registry + UI-store overrides. Conflicts flagged; unimplemented actions shown honestly. */
 export function ShortcutsSection() {
   const overrides = useUi((s) => s.shortcutOverrides);
   const setShortcut = useUi((s) => s.setShortcut);

@@ -1,19 +1,4 @@
-/**
- * Config persistence — thin wrapper around configStore.
- *
- * The actual storage logic lives in ./configStore.js, parameterized by
- * directory + CryptoOps. This file wires Electron's safeStorage and
- * preserves the exact public API every existing caller relies on.
- *
- * IMPORTANT: the store is lazily initialized on first access, NOT at module
- * import time. This is because app.setPath('userData', '~/.tide') runs inside
- * app.whenReady() in main.ts — if we called appDataDir() at import
- * time (before whenReady), we'd get the stock Electron path
- * (~/Library/Application Support/tide) instead of the relocated ~/.tide,
- * causing the store to read/write the wrong location. The lazy proxy defers
- * the createConfigStore call until the first method access, which always
- * happens inside whenReady (via IPC handler registration).
- */
+/** Config persistence — thin wrapper around configStore that wires Electron's safeStorage and preserves the existing public API. Lazily initialized on first access (NOT at import) so appDataDir() resolves correctly after app.whenReady's userData relocation. */
 
 import { app, safeStorage } from 'electron';
 import * as sessionsModule from './ipc/sessions.js';

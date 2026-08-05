@@ -28,14 +28,7 @@ export interface SlashPickerProps {
   onHighlight: (index: number) => void;
 }
 
-/**
- * Mention suggestions panel — rendered inline above the composer (like the
- * QueuedMessages panel), NOT as a floating portal. This keeps it in the
- * normal flow: it pushes the composer down instead of floating over content.
- *
- * Flat list (no tabs) — keeps the UX fast and uncluttered. Keyboard
- * navigation (Arrow/Enter/Escape) is handled by the parent (ChatComposer).
- */
+/** Mention suggestions panel — rendered inline above the composer (NOT a floating portal), so it pushes the composer down instead of floating over content. Flat list (no tabs) keeps the UX fast and uncluttered. Keyboard navigation (Arrow/Enter/Escape) is handled by the parent (ChatComposer). */
 export function SlashPicker({
   items,
   highlightedIndex,
@@ -103,15 +96,7 @@ export function SlashPicker({
   );
 }
 
-/**
- * Filter a mention catalog by a slash query. Matches if the query appears
- * anywhere in the name OR description (case-insensitive). Name matches
- * rank higher (prefix beats substring) so `/ref` puts `refactor` before
- * `web-refresh` even though both technically match.
- *
- * Exported so the parent (ChatComposer) owns filtering — the picker stays
- * purely presentational and re-renders only when `items` changes.
- */
+/** Filter a mention catalog by a slash query. Matches if the query appears anywhere in the name OR description (case-insensitive); name matches rank higher (prefix beats substring) so `/ref` puts `refactor` before `web-refresh`. Exported so the parent (ChatComposer) owns filtering — the picker stays purely presentational. */
 export function filterMentions(catalog: Mention[], query: string, limit = 8): Mention[] {
   const q = query.trim().toLowerCase();
   if (!q) return catalog.slice(0, limit);
@@ -129,22 +114,7 @@ export function filterMentions(catalog: Mention[], query: string, limit = 8): Me
   return scored.slice(0, limit).map((s) => s.m);
 }
 
-/**
- * Detect a `/query` pattern at the editor's current cursor position.
- * Returns the query string + a Range covering `/query` (for replacement
- * + popover anchoring) when the cursor is at the end of a slash token
- * preceded by start-of-text or whitespace. Returns null otherwise.
- *
- * Examples that trigger:
- *   "|" = cursor
- *   "/ref|"              → { query: "ref", range: /ref }
- *   "hello /ref|"        → { query: "ref", range: /ref }
- *   "/|"                 → { query: "", range: / }
- *
- * Examples that DON'T trigger (avoids mid-word slashes like URLs):
- *   "https://example|"   → null (slash mid-word)
- *   "and/or|"            → null (slash mid-word)
- */
+/** Detect a `/query` at the editor's cursor. Returns { query, range, rect } when the cursor sits at the end of a slash token preceded by start-of-text or whitespace; null otherwise. Triggers: `/ref|`, `hello /ref|`, `/|`. Does NOT trigger mid-word (e.g. `https://example|`, `and/or|`) to avoid matching URLs. */
 export function detectSlashQueryAt(
   editor: HTMLElement,
 ): { query: string; range: Range; rect: DOMRect } | null {
@@ -182,17 +152,7 @@ export function detectSlashQueryAt(
   return { query, range, rect: range.getBoundingClientRect() };
 }
 
-/**
- * Detect an `@query` pattern at the editor's cursor — same logic as
- * detectSlashQueryAt but for `@` (project file/folder references).
- *
- * Examples that trigger:
- *   "@src/|"           → { query: "src/", ... }
- *   "look at @index|"  → { query: "index", ... }
- *
- * Unlike `/`, the query allows path characters (/, ., _) so the user can
- * type `@src/components/Foo` to narrow down.
- */
+/** Detect an `@query` at the editor's cursor — same logic as detectSlashQueryAt but for `@` (project file/folder references). Triggers: `@src/|`, `look at @index|`. Unlike `/`, the query allows path characters (/, ., _) so the user can type `@src/components/Foo` to narrow down. */
 export function detectAtQueryAt(
   editor: HTMLElement,
 ): { query: string; range: Range } | null {
