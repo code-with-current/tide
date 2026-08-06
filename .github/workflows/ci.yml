@@ -31,10 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm version comes from `packageManager` in package.json (corepack);
+      # don't set `version` here or action-setup errors on the mismatch.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@v4
