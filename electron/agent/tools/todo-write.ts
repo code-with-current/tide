@@ -122,13 +122,24 @@ export async function runTodoWrite(todos: TodoItem[], sessionId: string): Promis
     currentGroup.items = todos;
     currentGroup.title = deriveTitle(todos);
   } else {
-    // New group — append.
-    groups.push({
-      id: `tg_${Math.random().toString(36).slice(2, 8)}`,
-      title: deriveTitle(todos),
-      items: todos,
-      createdAt: Date.now(),
-    });
+    // Potential new group. But if the current group is NOT 100% complete yet,
+    // treat this as an update instead — merge into the current group.
+    // This prevents the model from creating fragmented todo lists mid-task.
+    const currentAllDone = currentGroup && currentGroup.items.length > 0
+      && currentGroup.items.every((t) => t.status === 'completed');
+    if (currentGroup && !currentAllDone) {
+      // Current group still has pending/in-progress work — update it, don't create a new group.
+      currentGroup.items = todos;
+      currentGroup.title = deriveTitle(todos);
+    } else {
+      // Current group is complete (or no groups yet) — safe to create a new group.
+      groups.push({
+        id: `tg_${Math.random().toString(36).slice(2, 8)}`,
+        title: deriveTitle(todos),
+        items: todos,
+        createdAt: Date.now(),
+      });
+    }
   }
 
   sessionGroups.set(sid, groups);
@@ -170,15 +181,18 @@ export const todoWriteTool: ToolRegistration = {
     name: 'todo_write',
     description:
       'Maintain a structured todo list for the current task. Call this BEFORE starting ' +
-      'multi-step work to plan, then update statuses as you progress. Replaces the current ' +
-      'list on each call. Use sparingly — only for tasks with 3+ distinct steps. For simple ' +
-      'one-shot answers, skip this tool. The UI shows progress as a floating checklist.',
+      'multi-step work to plan, then UPDATE statuses as you progress. ' +
+      'IMPORTANT: When updating, send the SAME items with changed statuses — do NOT create ' +
+      'a new list with different items. Mark completed items as "completed", the current one ' +
+      'as "in_progress", and keep pending ones as "pending". Only create a fresh list when ALL ' +
+      'items in the current list are completed and you are starting a new task. ' +
+      'Use for tasks with 3+ distinct steps. For simple one-shot answers, skip this tool.',
     input_schema: {
       type: 'object',
       properties: {
         todos: {
           type: 'array',
-          description: 'The complete todo list. Replaces the current list.',
+          description: 'The complete todo list. Send the SAME items with updated statuses — do NOT replace with a new list unless all current items are completed.',
           items: {
             type: 'object',
             properties: {
@@ -213,11 +227,14 @@ export function createTodoWriteTool(ctx: ToolContext) {
   return tool({
     description:
       'Maintain a structured todo list for the current task. Call this BEFORE starting ' +
-      'multi-step work to plan, then update statuses as you progress. Replaces the current ' +
-      'list on each call. Use sparingly — only for tasks with 3+ distinct steps. For simple ' +
-      'one-shot answers, skip this tool. The UI shows progress as a floating checklist.',
+      'multi-step work to plan, then UPDATE statuses as you progress. ' +
+      'IMPORTANT: When updating, send the SAME items with changed statuses — do NOT create ' +
+      'a new list with different items. Mark completed items as "completed", the current one ' +
+      'as "in_progress", and keep pending ones as "pending". Only create a fresh list when ALL ' +
+      'items in the current list are completed and you are starting a new task. ' +
+      'Use for tasks with 3+ distinct steps. For simple one-shot answers, skip this tool.',
     inputSchema: z.object({
-      todos: z.array(todoItemSchema).describe('The complete todo list. Replaces the current list.'),
+      todos: z.array(todoItemSchema).describe('The complete todo list. Send the SAME items with updated statuses — do NOT replace with a new list unless all current items are completed.'),
     }),
     execute: async ({ todos }) =>
       withPermission(ctx, 'todo_write', { todos }, () => runTodoWrite(todos as TodoItem[], ctx.sessionId)),

@@ -79,14 +79,36 @@ export class StickyScroll {
     this._setPinned(true);
   }
 
-  /** Explicit scroll-to-bottom (jump button). */
+  /** Explicit scroll-to-bottom (jump button or session switch). Temporarily
+   *  removes content-visibility so scrollHeight reflects real layout, then
+   *  restores it after scrolling. */
   scrollToBottom({ smooth = false }: { smooth?: boolean } = {}): void {
     this._setPinned(true);
-    if (smooth) {
-      this.scrollEl.scrollTo({ top: this.scrollEl.scrollHeight, behavior: 'smooth' });
-    } else {
-      this._stickToBottom();
-    }
+    // Force layout of all content-visibility:auto elements so scrollHeight
+    // is accurate. Without this, off-screen messages use their
+    // contain-intrinsic-size estimate and we scroll to the wrong position.
+    const content = this.scrollEl.firstElementChild as HTMLElement | null;
+    const wrappers = content?.querySelectorAll('[style*="content-visibility"]') ?? [];
+    wrappers.forEach((el) => { (el as HTMLElement).style.contentVisibility = 'visible'; });
+
+    const doScroll = () => {
+      if (smooth) {
+        this.scrollEl.scrollTo({ top: this.scrollEl.scrollHeight, behavior: 'smooth' });
+      } else {
+        this._stickToBottom();
+      }
+      // Restore content-visibility after the browser has computed the real
+      // scrollHeight and we've scrolled to it. Two RAFs: one for layout,
+      // one for paint settle.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          wrappers.forEach((el) => { (el as HTMLElement).style.contentVisibility = ''; });
+        });
+      });
+    };
+
+    // One RAF to let the forced layout settle before scrolling.
+    requestAnimationFrame(doScroll);
   }
 
   /** Preserve scroll position when prepending older history above. */
