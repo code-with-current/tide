@@ -1,7 +1,7 @@
 <!--
 name: "compact"
-description: "Signal that the conversation should be compacted."
+description: "[Internal] Summarize earlier conversation history."
 category: "Agent"
 tideVersion: "1.0.0"
 -->
-- `compact` — Signal that the conversation should be compacted.
+- `compact` — [Internal] Summarize earlier conversation history. Handled automatically by the orchestrator.

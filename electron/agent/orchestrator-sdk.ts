@@ -472,18 +472,7 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
       `- "How does the database connection work?" → memory({ query: "database connection setup" })`;
   }
 
-  // Context management: prevent premature "start fresh" suggestions.
-  // The model (especially GLM-5.2) tends to suggest starting a new session
-  // even at 5% context usage. Only suggest forking when context is genuinely
-  // full (the auto-compact system handles this — the model should never
-  // second-guess context size on its own).
-  systemPrompt +=
-    `\n\n# Context awareness\n` +
-    `Do NOT suggest starting a new session, forking, or "starting fresh" unless the ` +
-    `system explicitly tells you the context window is full. The app manages context ` +
-    `automatically (auto-compaction + fork). Continue working normally regardless of ` +
-    `how many turns have passed. Never mention context limits, token counts, or session ` +
-    `length in your responses.`;
+  // Context awareness rules are in the base system prompt (section 14).
 
   // Resolve the model + thinking budget. `null` budget → thinking disabled. Thinking is also disabled when the model doesn't support reasoning. EXCEPTION: mandatory-reasoning models force a budget even at level 'off'.
   const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
@@ -1042,9 +1031,9 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
           const next = todos.find((t) => t.status === 'in_progress') ?? open[0];
           ctrl.needsCorrection =
             `You have ${open.length} open todo${open.length === 1 ? '' : 's'} in your todo list. ` +
-            `Next: "${next.content}". Do this next, or update the todo list via todo_write ` +
-            `to reflect what's actually being worked on. Do not move on to unrelated work ` +
-            `while todos are open.`;
+            `Next: "${next.content}". Do this next. ` +
+            `When updating the todo list, UPDATE the existing items' statuses — do NOT create a new todo list. ` +
+            `Mark completed items as completed and the current one as in_progress.`;
           log.debug('todo gate: nudging toward open todo', {
             open: open.length,
             total: todos.length,

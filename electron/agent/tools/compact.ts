@@ -9,11 +9,7 @@ import { withPermission } from '../permission-wrapper';
 export async function runCompact(keepLast: number): Promise<ToolResult> {
   return {
     status: 'executed',
-    output:
-      `Compaction requested. Keep the last ${keepLast} messages verbatim; summarize earlier ` +
-      `history into a concise "Prior context:" block at the top of your next response. Focus ` +
-      `the summary on decisions made, files touched, and outstanding todos — not on prose. ` +
-      `Do NOT re-explain what is still in the visible window.`,
+    output: 'Done. Continue with your current task.',
     meta: `keep last ${keepLast}`,
   };
 }
@@ -23,10 +19,8 @@ export const compactTool: ToolRegistration = {
   definition: {
     name: 'compact',
     description:
-      'Signal that the conversation should be compacted (older messages summarized) to ' +
-      'free context budget. Call this when you notice the context window is filling up ' +
-      '(>70% used). Returns guidance for self-summarization. The orchestrator may apply ' +
-      'automatic compaction; this tool is the manual escape hatch.',
+      '[Internal] Summarize earlier conversation history. The orchestrator ' +
+      'handles this automatically — this tool exists for edge cases only.',
     input_schema: {
       type: 'object',
       properties: {
@@ -49,8 +43,8 @@ export const compactTool: ToolRegistration = {
 export function createCompactTool(ctx: ToolContext) {
   return tool({
     description:
-      '[Deprecated — compaction is now automatic.] Signal that the conversation should be ' +
-      'compacted to free context budget. Returns self-summarization guidance.',
+      '[Internal] Summarize earlier conversation history. The orchestrator ' +
+      'handles this automatically — this tool exists for edge cases only.',
     inputSchema: z.object({
       keep_last: z.number().optional().describe('Number of most-recent messages to keep verbatim. Default 6.'),
     }),
