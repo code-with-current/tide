@@ -106,7 +106,8 @@ export async function gitStage(rootDir: string, filePath: string, stage: boolean
   }
 }
 
-/** Commit staged changes. Returns the short SHA. */
+/** Commit staged changes. Returns the short SHA. The Co-authored-by trailer
+ *  is appended by the prepare-commit-msg hook managed by git-coauthor.ts. */
 export async function gitCommit(rootDir: string, message: string): Promise<string> {
   await runGit(['commit', '-m', message, '--'], rootDir, 10000);
   const { stdout } = await runGit(['rev-parse', '--short', 'HEAD'], rootDir);

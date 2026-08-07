@@ -9,8 +9,6 @@ import { getToolMeta } from './tool-meta';
 import type { ToolResult, ToolRegistration } from './types';
 import type { ToolContext } from './tool-context';
 import { withPermission } from '../permission-wrapper';
-import { createConfigStore } from '../../configStore.js';
-import { appDataDir } from '../../appPaths.js';
 
 const MAX_OUTPUT = 50 * 1024;
 
@@ -31,45 +29,10 @@ export async function runGit(
 
   const sub = argv[0];
 
-  // ── Co-authoring: when gitCoAuthored is enabled in General settings,
-  //    append a Co-authored-by trailer to commit messages. The trailer
-  //    uses the user-configurable name + email (defaults to Tide /
-  //    309788114+code-with-current@users.noreply.github.com).
+  // Co-authored-by trailer is handled by the prepare-commit-msg git hook
+  // managed by git-coauthor.ts — works for every commit path (agent tool,
+  // bash, UI panel, external terminal).
   let effectiveArgv = argv;
-  if (sub === 'commit') {
-    try {
-      const store = createConfigStore(appDataDir());
-      const gs = store.getGeneralSettings();
-      if (gs.gitCoAuthored) {
-        const trailer = `\n\nCo-authored-by: ${gs.gitCoAuthorName} <${gs.gitCoAuthorEmail}>`;
-        effectiveArgv = argv.map((arg) => {
-          // -m "message" → append trailer inside the quotes
-          if (arg.startsWith('-m "') && arg.endsWith('"')) {
-            return arg.slice(0, -1) + trailer + '"';
-          }
-          // -m "message (unterminated quote — skip)
-          if (arg === '-m') return arg; // next arg is the message, handled below
-          return arg;
-        });
-        // Handle the case where -m and the message are separate args:
-        // ["commit", "-m", "my message"] → append trailer to the message arg
-        const mIdx = effectiveArgv.indexOf('-m');
-        if (mIdx >= 0 && mIdx + 1 < effectiveArgv.length) {
-          const msgArg = effectiveArgv[mIdx + 1];
-          if (!msgArg.startsWith('-')) {
-            effectiveArgv[mIdx + 1] = msgArg + trailer;
-          }
-        }
-        // Handle --message="..." form
-        effectiveArgv = effectiveArgv.map((arg) => {
-          if (arg.startsWith('--message=') && !arg.includes('Co-authored-by')) {
-            return arg + trailer.replace(/\n/g, '\\n');
-          }
-          return arg;
-        });
-      }
-    } catch { /* config unreadable — skip co-authoring */ }
-  }
 
   return new Promise((resolve) => {
     const start = Date.now();
@@ -149,7 +112,7 @@ export const gitTool: ToolRegistration = {
   definition: {
     name: 'git',
     description:
-      'Run any git subcommand in the workspace. Pass args as an array of strings.',
+'Run any git subcommand in the workspace. Pass args as an array of strings.',
     input_schema: {
       type: 'object',
       properties: {
@@ -177,7 +140,7 @@ export const gitTool: ToolRegistration = {
 export function createGitTool(ctx: ToolContext) {
   return tool({
     description:
-      'Run any git subcommand in the workspace. Pass args as an array of strings.',
+'Run any git subcommand in the workspace. Pass args as an array of strings.',
     inputSchema: z.object({
       args: z.array(z.string()).describe('Subcommand + flags, e.g. ["status", "--short"] or ["log", "-n", "5"].'),
     }),

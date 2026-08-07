@@ -21,6 +21,7 @@ import { forwardLog, createLogger } from '../logger.js';
 import type { Workspace, FileNode, ProviderModelMeta } from '../../src/types';
 import type { AgentSettings, GeneralSettings } from '../configStore.js';
 import { appDataDir } from '../appPaths.js';
+import { syncCoAuthorHook, syncAllWorkspaceHooks } from '../git-coauthor.js';
 
 const log = createLogger('ipc');
 
@@ -430,6 +431,7 @@ export function registerIpcHandlers() {
     };
 
     store.addWorkspace(workspace);
+    syncCoAuthorHook(dirPath);
     return workspace;
   });
 
@@ -788,6 +790,9 @@ export function registerIpcHandlers() {
   ipcMain.handle('tide:updateGeneralSettings', async (_e, patch: Partial<GeneralSettings>) => {
     log.info('general settings updated', { keys: Object.keys(patch) });
     store.updateGeneralSettings(patch);
+    if ('gitCoAuthored' in patch || 'gitCoAuthorName' in patch || 'gitCoAuthorEmail' in patch) {
+      syncAllWorkspaceHooks();
+    }
     // Side-effect: apply login item immediately.
     if ('startAtLogin' in patch) {
       try {

@@ -97,7 +97,7 @@ export function GeneralSection() {
             <Card>
               <SettingsRow
                 title="Co-author commits"
-                description="Append a Co-authored-by trailer to git commits made by the agent."
+                description="Install a git hook that appends a Co-authored-by trailer to every commit in all workspaces."
                 last={!gitExpanded}
               >
                 <div className="flex items-center gap-2">

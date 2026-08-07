@@ -41,6 +41,7 @@ import { registerOpenInAppHandlers } from './ipc/openInApp.js';
 import { registerSettingsHandlers } from './ipc/settings.js';
 import { registerExtensionsHandlers } from './ipc/extensions.js';
 import { registerMcpHandlers } from './ipc/mcp.js';
+import { syncAllWorkspaceHooks } from './git-coauthor.js';
 import { initUserServers, initBuiltinServers } from './agent/mcp/pool.js';
 import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
@@ -192,6 +193,10 @@ if (!gotLock) {
     // leave the user with hardcoded macOS defaults until a restart.
     registerSettingsHandlers();
     log.info('core IPC handlers registered', { ms: Date.now() - t0 });
+
+    // Sync co-author hooks for all workspaces (settings may have changed
+    // while the app was closed).
+    try { syncAllWorkspaceHooks(); } catch { /* non-fatal */ }
 
     // Create the window NOW — don't block first paint on the remaining handlers. Renderer needs core IPC (workspaces/sessions/settings, registered above) on mount; chat/agent/MCP/extensions are only used on user action, so deferred to next tick via setImmediate. Cuts time-to-first-paint by the cost of loading + registering ~6 handler modules.
     createWindow();
