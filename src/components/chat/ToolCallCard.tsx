@@ -48,6 +48,7 @@ const toolIcon: Record<ToolName, React.ReactNode> = {
   dispatch_agent: <Bot className="size-3.5 text-reasoning" />,
   load_skill: <BookOpen className="size-3.5 text-info" />,
   memory: <Brain className="size-3.5 text-muted-foreground/60" />,
+  init: <Brain className="size-3.5 text-muted-foreground/60" />,
   todo_write: <ListChecks className="size-3.5 text-info" />,
   web_fetch: <Globe className="size-3.5 text-info" />,
   web_search: <Search className="size-3.5 text-info" />,

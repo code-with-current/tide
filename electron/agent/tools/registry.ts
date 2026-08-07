@@ -25,6 +25,7 @@ import { compactTool } from './compact';
 import { slashCommandTool } from './slash-command';
 import { directoryTreeTool } from './directory-tree';
 import { readMediaFileTool } from './read-media-file';
+import { initTool } from './init';
 
 // New SDK factory imports (Phase 2+). Aliased to avoid colliding with the
 // legacy ToolContext shape from ./types.
@@ -50,6 +51,7 @@ import { createAskFollowupTool } from './ask-followup';
 import { createCompactTool } from './compact';
 import { createDirectoryTreeTool } from './directory-tree';
 import { createReadMediaFileTool } from './read-media-file';
+import { createInitTool } from './init';
 import { memoryTool, createMemoryTool } from './memory';
 import type { ToolContext as SdkToolContext } from './tool-context';
 import { withToolHooks } from '../hooks/with-tool-hooks';
@@ -86,6 +88,7 @@ const REGISTRY: Record<string, ToolRegistration> = {
   compact: compactTool,
   slash_command: slashCommandTool,
   memory: memoryTool,
+  init: initTool,
 };
 
 /** Definitions to send to the model (shape matches Anthropic's `tools` field). */
@@ -171,6 +174,7 @@ const FACTORIES = {
   ask_followup_question: createAskFollowupTool,
   compact: createCompactTool,
   memory: createMemoryTool,
+  init: createInitTool,
 } as const;
 
 /** Maps alternative tool names models may emit (e.g. `local_shell_call` from other agent frameworks) to Tide's canonical names. */
