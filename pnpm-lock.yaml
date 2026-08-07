@@ -149,10 +149,6 @@ importers:
       zustand:
         specifier: ^5.0.14
         version: 5.0.14(@types/react@19.2.17)(immer@11.1.15)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
-    optionalDependencies:
-      node-mac-permissions:
-        specifier: ^2.5.0
-        version: 2.5.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -205,6 +201,10 @@ importers:
       wait-on:
         specifier: ^9.0.10
         version: 9.1.0
+    optionalDependencies:
+      node-mac-permissions:
+        specifier: ^2.5.0
+        version: 2.5.0
 
 packages:
 
@@ -7007,7 +7007,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.4
+      semver: 7.8.5
       serialize-error: 7.0.1
     optional: true
 
@@ -7895,7 +7895,7 @@ snapshots:
 
   node-abi@4.33.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-addon-api@6.1.0: {}
 
@@ -7905,7 +7905,7 @@ snapshots:
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-gyp@12.4.0:
     dependencies:
@@ -7914,7 +7914,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.5
       tar: 7.5.21
       tinyglobby: 0.2.17
       undici: 6.27.0

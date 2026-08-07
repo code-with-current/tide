@@ -38,8 +38,7 @@
     "publish:linux:deb:armv7l": "node build/build.js target=linux arch=armv7l type=deb publish=always",
     "publish:linux:appImage": "node build/build.js target=linux arch=x64 type=appImage publish=always",
     "publish:linux:rpm": "node build/build.js target=linux arch=x64 type=rpm publish=always",
-    "publish:linux:pacman": "node build/build.js target=linux arch=x64 type=pacman publish=always",
-    "postinstall": "electron-rebuild -f -w node-pty -w better-sqlite3 -w sharp"
+    "publish:linux:pacman": "node build/build.js target=linux arch=x64 type=pacman publish=always"
   },
   "build": {
     "appId": "com.tide.code",
