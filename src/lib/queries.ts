@@ -228,6 +228,21 @@ export function useDeleteSession(workspaceId: string) {
   });
 }
 
+export function useForkSession(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { sourceId: string; newModelId: string; opts?: { providerId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' } }) =>
+      api.forkSession(args.sourceId, args.newModelId, args.opts),
+    onSuccess: (newSession: any) => {
+      qc.invalidateQueries({ queryKey: qk.sessions(workspaceId) });
+      // Auto-switch to the forked session.
+      if (newSession?.id) {
+        useUi.getState().setActiveSession(newSession.id);
+      }
+    },
+  });
+}
+
 // ===== Workspace lifecycle: archive/unarchive/delete + rename (uses api.updateWorkspace; invalidates session queries too because cascades move/remove sessions).
 
 export function useRenameWorkspace() {

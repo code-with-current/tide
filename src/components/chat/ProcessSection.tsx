@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, ChevronUp, Wrench } from 'lucide-react';
+import { ChevronRight, ChevronUp, Wrench, Clock } from 'lucide-react';
 import type { TextBlock, ToolBlock } from '@/types';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { OneCodeToolRow, OneCodeExploringGroup } from './OneCodeToolRow';
-import { buildProcessSummary } from '@/lib/stream/blockState';
+import { buildProcessSummary, formatMs } from '@/lib/stream/blockState';
 import { toolBlockToToolCall } from '@/components/chat/blockstream/blockAdapter';
 import { Button } from '@/components/ui/button';
 
-const EXPLORING = new Set(['read_file', 'grep', 'glob', 'list_dir']);
+const EXPLORING = new Set(['read_file', 'grep', 'glob', 'list_dir', 'directory_tree']);
 
 type RenderItem =
   | { kind: 'text'; block: TextBlock }
@@ -53,7 +53,8 @@ export function ProcessSection({
     if (!streaming) setOpen(false);
   }, [streaming]);
 
-  const summary = buildProcessSummary(totals);
+  const summary = buildProcessSummary({ ...totals, totalMs: 0 });
+  const timeStr = totals.totalMs > 0 ? formatMs(totals.totalMs) : '';
 
   // Build the emission-order render items.
   const items = groupExploring(
@@ -70,6 +71,12 @@ export function ProcessSection({
         <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
         <Wrench className="size-3" />
         <span>{summary}</span>
+        {timeStr && (
+          <span className="flex items-center gap-0.5 text-muted-foreground/50">
+            <Clock className="size-2.5" />
+            {timeStr}
+          </span>
+        )}
       </span>
       {open && (
         <div className="mt-1.5 ml-5 pl-3 border-l border-input animate-slide-up">

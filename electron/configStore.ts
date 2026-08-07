@@ -86,7 +86,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   notifications: true,
   gitCoAuthored: true,
   gitCoAuthorName: 'Tide',
-  gitCoAuthorEmail: '309788114+code-with-current@users.noreply.github.com',
+  gitCoAuthorEmail: '314188112+tide-code@users.noreply.github.com',
 };
 
 // ── RAG config hydration: fill missing fields at read time and clamp chunkTokens to the recorded embedder's max (so a workspace flipped from local to cloud doesn't keep an un-embeddable chunk size).

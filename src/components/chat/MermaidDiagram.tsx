@@ -1,5 +1,6 @@
-/** Mermaid renderer: lazy-loads the library, renders SVG, falls back to a code block on error; click opens a full-screen pan/zoom overlay. */
+/** Mermaid renderer: lazy-loads the library, renders SVG, falls back to a code block on error; click opens a full-screen pan/zoom overlay (rendered via portal to escape overflow-hidden containers). */
 import { memo, useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, ZoomIn, X, ZoomOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -44,20 +45,23 @@ function DiagramZoomOverlay({
   svg: string;
   onClose: () => void;
 }) {
-  const [zoom, setZoom] = useState(2.5);
+  // zoom=1 means the diagram's "natural" zoomed view (2.5x actual scale).
+  // Display: 100% = 2.5x actual, 200% = 5x actual, etc.
+  const BASE = 2.5;
+  const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
   const reset = useCallback(() => {
-    setZoom(2.5);
+    setZoom(1);
     setPan({ x: 0, y: 0 });
   }, []);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom((z) => Math.min(5, Math.max(0.3, z * delta)));
+    setZoom((z) => Math.max(0.1, z * delta));
   }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
@@ -86,12 +90,12 @@ function DiagramZoomOverlay({
       if (e.key === '0') { reset(); return; }
       if (e.key === '=' || e.key === '+') {
         e.preventDefault();
-        setZoom((z) => Math.min(5, z * 1.25));
+        setZoom((z) => z * 1.25);
         return;
       }
       if (e.key === '-' || e.key === '_') {
         e.preventDefault();
-        setZoom((z) => Math.max(0.3, z * 0.8));
+        setZoom((z) => Math.max(0.1, z * 0.8));
         return;
       }
     };
@@ -99,9 +103,9 @@ function DiagramZoomOverlay({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, reset]);
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-[2px]"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       onWheel={onWheel}
       onMouseDown={onMouseDown}
@@ -114,7 +118,7 @@ function DiagramZoomOverlay({
       <div
         className="select-none"
         style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom * BASE})`,
           transformOrigin: 'center center',
           transition: dragging.current ? 'none' : 'transform 0.1s ease-out',
         }}
@@ -129,7 +133,7 @@ function DiagramZoomOverlay({
         <button
           data-zoom-control
           className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
-          onClick={() => setZoom((z) => Math.max(0.3, z * 0.8))}
+          onClick={() => setZoom((z) => Math.max(0.1, z * 0.8))}
           title="Zoom out (−)"
         >
           <ZoomOut className="size-4" />
@@ -143,7 +147,7 @@ function DiagramZoomOverlay({
         <button
           data-zoom-control
           className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
-          onClick={() => setZoom((z) => Math.min(5, z * 1.25))}
+          onClick={() => setZoom((z) => z * 1.25)}
           title="Zoom in (+)"
         >
           <ZoomIn className="size-4" />
@@ -153,7 +157,7 @@ function DiagramZoomOverlay({
           data-zoom-control
           className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
           onClick={reset}
-          title="Reset to 250% (press 0)"
+          title="Reset to 100% (press 0)"
         >
           <span className="text-[10px] font-medium">Fit</span>
         </button>
@@ -168,7 +172,8 @@ function DiagramZoomOverlay({
       >
         <X className="size-4" />
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -334,12 +339,11 @@ export const MermaidDiagram = memo(function MermaidDiagram({
       </div>
     );
   }
-
   return (
     <>
       <div
         className={cn(
-          'mermaid-render group relative flex justify-center overflow-x-auto py-2 rounded-lg',
+          'mermaid-render group relative flex justify-center overflow-x-auto py-2 rounded-lg p-3 border border-muted/10 bg-muted/20',
           'cursor-zoom-in hover:bg-secondary/30 transition-colors',
           className,
         )}

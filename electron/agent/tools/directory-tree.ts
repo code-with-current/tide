@@ -1,4 +1,4 @@
-/** directory_tree tool: recursive JSON tree ({name, type, children?}) respecting .gitignore with depth/entry caps. Native replacement for the MCP filesystem server's directory_tree (no IPC overhead, no npx spawn, goes through Tide's path-safety + permission gates). */
+/** directory_tree tool: recursive tree view formatted like the `tree` command (compact, readable). Respects .gitignore with depth/entry caps. */
 import * as fs from 'fs';
 import * as path from 'path';
 import { tool } from 'ai';
@@ -71,7 +71,7 @@ export async function runDirectoryTree(
 
   try {
     const tree = buildTree(abs, 0);
-    const output = JSON.stringify(tree, null, 2);
+    const output = formatTree(tree);
     const note = truncationNote.truncated
       ? `\n\n(truncated at ${MAX_ENTRIES} entries)`
       : '';
@@ -83,6 +83,25 @@ export async function runDirectoryTree(
   } catch (e: any) {
     return { status: 'failed', output: `Cannot read tree: ${e.message}` };
   }
+}
+
+/** Format tree nodes as an indented tree (like the `tree` command). Dirs end with `/`. */
+function formatTree(nodes: TreeNode[]): string {
+  const lines: string[] = [];
+  function walk(node: TreeNode, prefix: string, isLast: boolean) {
+    const connector = isLast ? '└── ' : '├── ';
+    const suffix = node.type === 'dir' ? '/' : '';
+    lines.push(`${prefix}${connector}${node.name}${suffix}`);
+    const children = node.children ?? [];
+    const childPrefix = prefix + (isLast ? '    ' : '│   ');
+    for (let i = 0; i < children.length; i++) {
+      walk(children[i], childPrefix, i === children.length - 1);
+    }
+  }
+  for (let i = 0; i < nodes.length; i++) {
+    walk(nodes[i], '', i === nodes.length - 1);
+  }
+  return lines.join('\n');
 }
 
 // ─── Legacy envelope ──────────────────────────────────────────────────

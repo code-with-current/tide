@@ -128,7 +128,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   getSession: (id: string) => ipcRenderer.invoke('tide:getSession', id),
   createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:createSession', workspaceId, title, modelId, opts),
-  updateSessionSettings: (sessionId: string, patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
+  updateSessionSettings: (sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:updateSessionSettings', sessionId, patch),
   addMessage: (sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }) =>
     ipcRenderer.invoke('tide:addMessage', sessionId, role, content, extra),
@@ -171,6 +171,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:session:createWorktree', sessionId, opts),
   removeWorktree: (sessionId: string) =>
     ipcRenderer.invoke('tide:session:removeWorktree', sessionId),
+  forkSession: (
+    sourceId: string,
+    newModelId: string,
+    opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  ) =>
+    ipcRenderer.invoke('tide:session:fork', sourceId, newModelId, opts),
   listBranches: (workspaceId: string) =>
     ipcRenderer.invoke('tide:workspace:listBranches', workspaceId),
   listConfigFiles: (workspaceId: string) =>
@@ -192,6 +198,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // of model ids the API exposes, or an error message.
   probeProviderModels: (input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string }) =>
     ipcRenderer.invoke('tide:provider:probeModels', input),
+  detectProviderProtocol: (input: { baseUrl: string; apiKey: string }) =>
+    ipcRenderer.invoke('tide:provider:detectProtocol', input),
   testProviderConnection: (input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string; modelId: string }) =>
     ipcRenderer.invoke('tide:provider:testConnection', input),
 

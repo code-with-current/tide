@@ -7,8 +7,9 @@ export function isSecretPath(p: string): boolean {
   const base = path.basename(p).toLowerCase();
   const ext = path.extname(base).toLowerCase();
 
-  // Exact-name secrets
-  if (base === '.env' || base.startsWith('.env.')) return true;
+  // Exact-name secrets — block .env and .env.local/.env.production etc,
+  // but ALLOW .env.example and .env.template (safe template files with no real secrets).
+  if (base === '.env' || (base.startsWith('.env.') && !isEnvTemplate(base))) return true;
   if (base === 'credentials' || base === 'credentials.json') return true;
   if (base.startsWith('id_rsa') || base.startsWith('id_ecdsa') || base.startsWith('id_ed25519')) return true;
   if (base === 'htpasswd' || base === '.htpasswd') return true;
@@ -18,6 +19,11 @@ export function isSecretPath(p: string): boolean {
   if (['.pem', '.key', '.p12', '.pfx', '.keystore', '.jks'].includes(ext)) return true;
 
   return false;
+}
+
+/** `.env.example` / `.env.template` / `.env.sample` are safe template files (placeholders, no real secrets). */
+function isEnvTemplate(base: string): boolean {
+  return base === '.env.example' || base === '.env.template' || base === '.env.sample';
 }
 
 /** Minimal inline-content redaction (currently passthrough). Hook every read tool through it now so a future regex scanner slots in here without touching call sites. */

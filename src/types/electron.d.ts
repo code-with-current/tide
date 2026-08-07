@@ -195,7 +195,7 @@ declare global {
       removeTodosListener(): void;
       getSession(id: string): Promise<any>;
       createSession(workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }): Promise<any>;
-      updateSessionSettings(sessionId: string, patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }): Promise<void>;
+      updateSessionSettings(sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }): Promise<void>;
       addMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }): Promise<void>;
       addAssistantMessage(
         sessionId: string,
@@ -222,6 +222,11 @@ declare global {
         opts: { branchName: string; baseBranch: string; configFiles?: string[] },
       ): Promise<{ branch: string; path: string; baseBranch: string; baseCommit: string; ahead: number; behind: number }>;
       removeWorktree(sessionId: string): Promise<void>;
+      forkSession(
+        sourceId: string,
+        newModelId: string,
+        opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+      ): Promise<import('./index').Session>;
       listBranches(workspaceId: string): Promise<string[]>;
       listConfigFiles(workspaceId: string): Promise<string[]>;
 
@@ -242,6 +247,11 @@ declare global {
         baseUrl: string;
         apiKey: string;
       }): Promise<{ ok: true; models: import('./index').ProviderModelMeta[] } | { ok: false; error: string }>;
+      /** Auto-detect the API protocol (OpenAI vs Anthropic) by probing both /models endpoints. */
+      detectProviderProtocol(input: {
+        baseUrl: string;
+        apiKey: string;
+      }): Promise<{ apiStyle: 'openai' | 'anthropic'; models: import('./index').ProviderModelMeta[] } | { error: string }>;
       /** Test provider connection by sending a minimal chat completion. */
       testProviderConnection(input: {
         apiStyle: import('./index').ApiStyle;

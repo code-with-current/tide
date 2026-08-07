@@ -59,7 +59,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
   const selectedModelId = useUi((s) => s.selectedModelId);
   const selectedProviderId = useUi((s) => s.selectedProviderId);
   const model = useModelOption(selectedProviderId, selectedModelId);
-  const supported = model ? (model.reasoning ?? supportsThinking(model.modelId)) : false;
+  const supported = model ? (model.reasoning ?? supportsThinking(model.modelId, model)) : false;
   const mandatory = model?.reasoningMandatory;
   const efforts = model?.supportedEfforts;
 

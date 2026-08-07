@@ -21,6 +21,7 @@ import type {
   RagWorkspaceOpResult,
   Workspace,
   WorkspaceScript,
+  Session,
 } from '@/types';
 
 // ── Electron detection ──────────────────────────────────────────
@@ -222,7 +223,7 @@ export async function createSession(
 
 export async function updateSessionSettings(
   sessionId: string,
-  patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' },
 ): Promise<void> {
   if (ipc) return ipc.updateSessionSettings(sessionId, patch);
   await delay(50);
@@ -339,6 +340,16 @@ export async function createWorktree(
 
 export async function removeWorktree(sessionId: string): Promise<void> {
   if (ipc) await ipc.removeWorktree(sessionId);
+}
+
+/** Fork a session into a new session with a different model; an LLM summary of the source conversation is generated and stored as the first message. */
+export async function forkSession(
+  sourceId: string,
+  newModelId: string,
+  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+): Promise<Session> {
+  if (ipc) return ipc.forkSession(sourceId, newModelId, opts);
+  throw new Error('forkSession requires Electron IPC');
 }
 
 export async function listBranches(workspaceId: string): Promise<string[]> {

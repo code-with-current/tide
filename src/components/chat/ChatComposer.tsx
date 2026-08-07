@@ -3,7 +3,7 @@ import { ClipboardPaste, FileCode2, FileText, Image as ImageIcon } from 'lucide-
 import { Chip } from '@/components/primitives';
 import { cn } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
-import { useModelOption, supportsThinking } from '@/lib/queries';
+import { useModelOption, supportsThinking, useSessions } from '@/lib/queries';
 import { ModelSelector } from './composer/ModelSelector';
 import { PermissionModeSelector } from './composer/PermissionModeSelector';
 import { ThinkingLevelSelector } from './composer/ThinkingLevelSelector';
@@ -13,6 +13,7 @@ import { SlashPicker, filterMentions, detectSlashQueryAt, detectAtQueryAt } from
 import { ProjectFilePicker } from './composer/ProjectFilePicker';
 import { SendStopButton } from './composer/SendStopButton';
 import { QueuedMessages } from './composer/QueuedMessages';
+import { ForkSessionDialog } from '@/components/modals/ForkSessionDialog';
 import type { MessageAttachment } from '@/types';
 import * as api from '@/lib/api/client';
 
@@ -87,13 +88,20 @@ export function ChatComposer({
   // changes to trigger re-renders for the chars counter + send-button state.
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // Thinking support — hide the selector entirely when the model doesn't
-  // support reasoning, instead of dimming it.
+  // Fork-session dialog state. The model is locked on existing sessions;
+  // clicking the locked ModelSelector opens this dialog.
+  const [forkOpen, setForkOpen] = useState(false);
+  const { data: sessions } = useSessions(useUi((s) => s.activeWorkspaceId) ?? '');
+  const activeSession = sessionId ? sessions?.find((s) => s.id === sessionId) : undefined;
+  // Locked when an existing session has messages (model is immutable post-creation).
+  const modelLocked = !!(sessionId && activeSession && activeSession.messages.length > 0);
+
+  // Thinking support — hide the selector entirely when the model doesn't support reasoning.
   const selectedModelId = useUi((s) => s.selectedModelId);
   const selectedProviderId = useUi((s) => s.selectedProviderId);
   const modelOption = useModelOption(selectedProviderId, selectedModelId);
   const thinkingSupported = modelOption
-    ? (modelOption.reasoning ?? supportsThinking(modelOption.modelId))
+    ? (modelOption.reasoning ?? supportsThinking(modelOption.modelId, modelOption))
     : false;
 
   const mentionsRef = useRef<Map<string, Mention>>(new Map());
@@ -843,7 +851,7 @@ export function ChatComposer({
           {/* Bottom row — selectors, counters, send/stop */}
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
             <PermissionModeSelector />
-            <ModelSelector />
+            <ModelSelector locked={modelLocked} onLockedClick={() => setForkOpen(true)} />
             {thinkingSupported && <ThinkingLevelSelector />}
 
             {!compact && attachments.length > 0 && (
@@ -877,6 +885,16 @@ export function ChatComposer({
           </div>
         </div>
       </div>
+      {modelLocked && sessionId && (
+        <ForkSessionDialog
+          open={forkOpen}
+          onOpenChange={setForkOpen}
+          sourceSessionId={sessionId}
+          sourceTitle={activeSession?.title ?? 'this session'}
+          sourceModelId={activeSession?.modelId}
+          sourceProviderId={activeSession?.providerId}
+        />
+      )}
     </div>
   );
 }

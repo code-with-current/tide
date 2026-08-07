@@ -74,6 +74,22 @@ export interface StoredSession {
     path: string;
     loadedAt: string;
   };
+  /** Lineage: set when this session was forked from another (model change). */
+  forkedFrom?: {
+    sessionId: string;
+    title: string;
+  };
+  /** Persisted todo groups — survives app restart. */
+  todoGroups?: Array<{
+    id: string;
+    title: string;
+    items: Array<{
+      content: string;
+      status: 'pending' | 'in_progress' | 'completed';
+      priority?: 'high' | 'medium' | 'low';
+    }>;
+    createdAt: number;
+  }>;
 }
 
 /** Shape persisted into StoredSession.activity. Structurally compatible with
@@ -112,13 +128,22 @@ export interface SessionStore {
       providerId?: string;
     },
   ): StoredSession;
-  updateSessionSettings(
-    sessionId: string,
-    patch: {
-      modelId?: string;
+  /** Fork a session into a new session with a different model. Copies workspaceId/autonomy/thinking; starts with empty messages (the summary is added separately). Sets forkedFrom lineage. */
+  forkSession(
+    sourceId: string,
+    newModelId: string,
+    opts?: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
       thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
+    },
+  ): StoredSession;
+  /** Patch a session's mutable settings. NOTE: modelId/providerId are intentionally NOT mutable here — a session's model is locked at creation. Changing models requires forking into a new session (see forkSession). */
+  updateSessionSettings(
+    sessionId: string,
+    patch: {
+      autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
+      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
     },
   ): void;
   addMessage(sessionId: string, role: StoredMessage['role'], content: string, extra?: { attachments?: any[]; mentions?: any[] }): void;
@@ -185,6 +210,10 @@ export interface SessionStore {
     sessionId: string,
     ref: { name: string; path: string; loadedAt: string } | undefined,
   ): void;
+  /** Write a full session object back to disk + cache. Used by the streaming flush to persist partial assistant turns. */
+  updateSession(session: StoredSession): void;
+  /** Persist todo groups so they survive app restart. */
+  setTodoGroups(sessionId: string, groups: Array<{ id: string; title: string; items: Array<{ content: string; status: string; priority?: string }>; createdAt: number }>): void;
   /** Hook called BEFORE the session JSON is unlinked during delete.
    *  Lets the runtime cascade-remove the worktree directory + branch.
    *  Set via `setDeleteHook` so the store stays decoupled from git. */
@@ -264,6 +293,37 @@ export function createSessionStore(rootDir: string): SessionStore {
     writeSession(session);
     cache.set(session.id, session);
     return session;
+  }
+
+  function forkSession(
+    sourceId: string,
+    newModelId: string,
+    opts?: {
+      autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
+      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      providerId?: string;
+    },
+  ): StoredSession {
+    ensureLoaded();
+    const source = cache.get(sourceId);
+    if (!source) throw new Error(`forkSession: source session ${sourceId} not found`);
+    const now = new Date().toISOString();
+    const forked: StoredSession = {
+      id: `s_${Math.random().toString(36).slice(2, 10)}`,
+      workspaceId: source.workspaceId,
+      title: `Fork of ${source.title}`,
+      modelId: newModelId,
+      providerId: opts?.providerId,
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+      autonomyMode: opts?.autonomyMode ?? source.autonomyMode ?? 'ask',
+      thinkingLevel: opts?.thinkingLevel ?? source.thinkingLevel ?? 'medium',
+      forkedFrom: { sessionId: source.id, title: source.title },
+    };
+    writeSession(forked);
+    cache.set(forked.id, forked);
+    return forked;
   }
 
   function migrateLegacy(): void {
@@ -351,20 +411,17 @@ export function createSessionStore(rootDir: string): SessionStore {
     return cache.get(id);
   }
 
+  /** Model is locked: only autonomy/thinking are mutable on an existing session. To change the model, fork (see forkSession). */
   function updateSessionSettings(
     sessionId: string,
     patch: {
-      modelId?: string;
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
       thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
-      providerId?: string;
     },
   ): void {
     ensureLoaded();
     const s = cache.get(sessionId);
     if (!s) return;
-    if (patch.modelId !== undefined) s.modelId = patch.modelId;
-    if (patch.providerId !== undefined) s.providerId = patch.providerId;
     if (patch.autonomyMode !== undefined) s.autonomyMode = patch.autonomyMode;
     if (patch.thinkingLevel !== undefined) s.thinkingLevel = patch.thinkingLevel;
     s.updatedAt = new Date().toISOString();
@@ -576,6 +633,21 @@ export function createSessionStore(rootDir: string): SessionStore {
     writeSession(s);
   }
 
+  function updateSession(session: StoredSession): void {
+    ensureLoaded();
+    cache.set(session.id, session);
+    writeSession(session);
+  }
+
+  function setTodoGroups(sessionId: string, groups: Array<{ id: string; title: string; items: Array<{ content: string; status: string; priority?: string }>; createdAt: number }>): void {
+    ensureLoaded();
+    const s = cache.get(sessionId);
+    if (!s) return;
+    s.todoGroups = groups as any;
+    s.updatedAt = new Date().toISOString();
+    writeSession(s);
+  }
+
   function clearAllSessions(): void {
     // Wipe in-memory state.
     cache.clear();
@@ -672,6 +744,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     listSessions,
     getSession,
     createSession,
+    forkSession,
     updateSessionSettings,
     addMessage,
     addAssistantMessage,
@@ -685,6 +758,8 @@ export function createSessionStore(rootDir: string): SessionStore {
     listArchived,
     setWorktree,
     setActiveSkillRef,
+    updateSession,
+    setTodoGroups,
     setDeleteHook,
   };
 }

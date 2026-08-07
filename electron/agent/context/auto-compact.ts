@@ -1,9 +1,6 @@
 /** Context autocompact: when a conversation nears the model's context window, summarize old messages and keep recent ones verbatim to avoid 413 errors. Runs between steps via the SDK's `prepareStep` hook; the forked summarizer uses the main-loop model. Three layers: char-based token estimate, threshold check (default 75%), forked generateText summarization. */
-import { generateText } from 'ai';
-import { resolveModel } from '../provider-factory.js';
-import { resolveProtocolOptions } from '../protocols/index.js';
-import { resolveMaxOutputTokens } from '../model-capabilities.js';
 import { createLogger } from '../../logger.js';
+import { generateSessionSummary } from './summarize.js';
 import type { Provider } from '../../../src/types/index.js';
 import type { ModelMessage } from 'ai';
 
@@ -123,7 +120,7 @@ export async function compactConversation(
 
   // Fork a summarizer call
   try {
-    const summary = await summarizeMessages(oldMessages, ctx);
+    const summary = await generateSessionSummary(oldMessages, ctx);
 
     const summaryMessage: ModelMessage = {
       role: 'user',
@@ -179,64 +176,5 @@ export async function compactConversation(
 
 // ─── Summarization ──────────────────────────────────────────────────────
 
-/**
- * Fork a generateText call to summarize old conversation messages.
- * Uses the same provider/model/protocol as the main turn.
- */
-async function summarizeMessages(
-  messages: ModelMessage[],
-  ctx: { provider: Provider; modelId: string; signal: AbortSignal },
-): Promise<string> {
-  if (!ctx.provider.apiKey) {
-    throw new Error('Cannot compact: provider has no API key');
-  }
+// summarizeMessages + serializeForSummary extracted to ./summarize.ts (shared with session-fork).
 
-  const model = resolveModel(ctx.provider, { modelId: ctx.modelId, contextWindow: 0 } as any);
-  const proto = resolveProtocolOptions(
-    ctx.provider.apiStyle,
-    { budgetTokens: 4096 },
-    { hasTools: false, modelId: ctx.modelId, maxOutputTokens: resolveMaxOutputTokens(ctx.modelId) },
-  );
-
-  // Serialize old messages into a single text block for the summarizer
-  const serialized = serializeForSummary(messages);
-
-  const result = await generateText({
-    model,
-    system:
-      'You are a conversation summarizer. Create a concise, information-dense summary ' +
-      'of the conversation below. Preserve: decisions made, files created/edited, ' +
-      'errors encountered and their resolutions, the current task state, and any ' +
-      'important context the model needs to continue. Drop pleasantries, redundant ' +
-      'tool outputs, and anything not essential for continuing the work. ' +
-      'Format as bullet points under a "## Prior Context" heading.',
-    prompt: serialized,
-    providerOptions: proto.providerOptions,
-    maxOutputTokens: Math.min(proto.maxOutputTokens, 4096),
-    abortSignal: ctx.signal,
-  });
-
-  return (result.text ?? '').trim() || '(Summary generation returned empty content)';
-}
-
-/** Serialize messages into a text block for summarization, stripping tool-result bodies (replaced with a placeholder) to keep input manageable. */
-function serializeForSummary(messages: ModelMessage[]): string {
-  const parts: string[] = [];
-  for (const msg of messages) {
-    const role = msg.role.toUpperCase();
-    if (typeof msg.content === 'string') {
-      parts.push(`[${role}]\n${msg.content.slice(0, 2000)}`);
-    } else if (Array.isArray(msg.content)) {
-      const texts: string[] = [];
-      for (const part of msg.content) {
-        if (typeof part === 'object' && part !== null && 'text' in part) {
-          texts.push(String((part as { text: string }).text).slice(0, 2000));
-        }
-      }
-      if (texts.length > 0) {
-        parts.push(`[${role}]\n${texts.join('\n')}`);
-      }
-    }
-  }
-  return parts.join('\n\n---\n\n');
-}

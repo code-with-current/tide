@@ -1,5 +1,4 @@
 import {
-  PanelLeft,
   PanelRight,
   Terminal,
   PanelRightClose,
@@ -7,7 +6,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/quick-tooltip";
 import { useUi } from "@/lib/stores/ui";
-import { isMac } from "@/lib/utils";
+import { cn, isMac } from "@/lib/utils";
 import { OpenInAppMenu } from "./OpenInAppMenu";
 /** Windows/Linux caption buttons (titleBarOverlay) need right-side clearance. */
 const CAPTION_PAD = isMac ? 0 : 140;
@@ -15,12 +14,12 @@ const CAPTION_PAD = isMac ? 0 : 140;
 export function WindowTopBar() {
   const toggleTerminal = useUi((s) => s.toggleTerminal);
   const toggleRightPanel = useUi((s) => s.toggleRightPanel);
-  const toggleLeftPanel = useUi((s) => s.toggleLeftPanel);
+  // const toggleLeftPanel = useUi((s) => s.toggleLeftPanel);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
   // const terminalOpen = useUi((s) => s.terminalOpen);
   // const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   // const leftPanelOpen = useUi((s) => s.leftPanelOpen);
-  // const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
+  const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
 
   return (
     <div
@@ -32,6 +31,7 @@ export function WindowTopBar() {
           lights render at (12,12) over the far left — but the panel
           column starts at 220px so there's no collision. */}
       <div className="flex items-center gap-1.5" style={{ width: 220 }}>
+        {/*
         <Tip
           label={`Workspaces Panel`}
         >
@@ -43,7 +43,7 @@ export function WindowTopBar() {
           >
             <PanelLeft className="size-3.5" />
           </Button>
-        </Tip>
+        </Tip>*/}
         <Tip
           label={`Sessions Panel`}
         >
@@ -53,7 +53,7 @@ export function WindowTopBar() {
             className="p-1.5"
             onClick={toggleSessionsPanel}
           >
-            <PanelRightClose className="size-3.5" />
+            <PanelRightClose className={cn("size-3.5 transition-transform", { "rotate-180": sessionsPanelOpen })} />
           </Button>
         </Tip>
       </div>

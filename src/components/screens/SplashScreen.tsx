@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Logo } from '@/components/primitives';
+import { LogoText } from '@/components/primitives';
 import { useUi } from '@/lib/stores/ui';
 import { useProviders, useWorkspaces } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import { Spinner } from '../ui/spinner';
-import tideLogoUrl from '@/assets/logo.png';
+import tideLogoUrl from '@/assets/tide-logo.png';
 import { Badge } from '../ui/badge';
 
 export function SplashScreen() {
@@ -72,10 +72,10 @@ export function SplashScreen() {
         // Cheap native call (instant-false on non-mac); shows the consent
         // screen once if Accessibility/Full Disk Access aren't authorized yet.
         api.shouldShowConsent().then((showConsent) => {
-          setScreen(showConsent ? 'consent' : 'main');
+         setScreen(showConsent ? 'consent' : 'main');
         });
       } else {
-        setScreen('onboarding');
+       setScreen('onboarding');
       }
     }, 1500);
     return () => clearTimeout(t);
@@ -91,9 +91,9 @@ export function SplashScreen() {
       {/* Giant logo watermark — bleeds left, ultra-subtle */}
       <div
         className="absolute pointer-events-none"
-        style={{ top: '-10%', right: '-20%', opacity: 0.01 }}
+        style={{ top: '-5%', right: '-10%', opacity: 0.03 }}
       >
-        <img src={tideLogoUrl} alt="" style={{ height: '500%', objectFit: 'contain' }} />
+        <img src={tideLogoUrl} alt="" style={{ height: '800%', objectFit: 'contain' }} />
       </div>
       {/* Grain texture */}
       <div
@@ -107,12 +107,12 @@ export function SplashScreen() {
           className="absolute inset-0 -m-5 blur-2xl"
         />
         <div className="relative">
-          <Logo size={88} />
+          {/*<Logo size={88} />*/}
         </div>
       </div>
 
       <div className="flex flex-col items-center gap-2">
-        <div className="text-3xl font-semibold tracking-tight">Tide</div>
+        <LogoText size={50} />
         <div className="text-sm text-muted-foreground/60">Code with the current</div>
       </div>
 

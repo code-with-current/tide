@@ -1,7 +1,8 @@
 import { memo, useMemo } from 'react';
 import type { Message } from '@/types';
 import { useUi } from '@/lib/stores/ui';
-import { TurnHeader } from './TurnHeader';
+import { useSessions } from '@/lib/queries';
+import { TurnHeader, TurnWorkingFooter } from './TurnHeader';
 import { BlockList } from '@/components/chat/blockstream/BlockList';
 import { PermissionSurfaceContext, type PermissionSurface } from './permission-context';
 
@@ -26,7 +27,12 @@ export const TurnBlock = memo(function TurnBlock({
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
 }) {
   const activeSessionId = useUi(s => s.activeSessionId);
+  const activeWorkspaceId = useUi(s => s.activeWorkspaceId);
   const openFile = useUi(s => s.openFile);
+  const { data: sessions } = useSessions(activeWorkspaceId ?? null);
+  const activeSession = activeSessionId
+    ? sessions?.find((s) => s.id === activeSessionId)
+    : undefined;
   // The live pending-permission set (session-scoped). Provided to descendants
   // (OneCodeToolRow) via PermissionSurfaceContext so each pending tool row can
   // render its own inline <PermissionCard> without prop-drilling. The zustand
@@ -57,7 +63,7 @@ export const TurnBlock = memo(function TurnBlock({
 
   return (
     <PermissionSurfaceContext.Provider value={permissionSurface}>
-      <div className="flex flex-col gap-0">
+      <div className="flex flex-col gap-0 mb-15">
         <TurnHeader
           blocks={message.blocks}
           streaming={streaming}
@@ -71,7 +77,13 @@ export const TurnBlock = memo(function TurnBlock({
           sessionId={activeSessionId}
           messageId={message.id}
           onViewFile={handleViewFile}
+          sessionTitle={activeSession?.title}
+          sessionModelId={activeSession?.modelId}
+          sessionProviderId={activeSession?.providerId}
         />
+        {streaming && (
+          <TurnWorkingFooter totalMs={message.blocks?.reduce((sum, b) => sum + (b.kind === 'tool' ? (b.durationMs ?? 0) : 0), 0)} />
+        )}
       </div>
     </PermissionSurfaceContext.Provider>
   );

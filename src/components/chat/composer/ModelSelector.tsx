@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Check, Brain, Star, Search, Loader2 } from 'lucide-react';
+import { ChevronDown, Check, Brain, Star, Search, Loader2, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,25 +15,38 @@ import { useModels } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import type { ModelOption } from '@/lib/queries';
 
-/** Model picker: reads useModels, writes selectedModelId. Starred pinned section + provider groups (starred stays in both); search filters by alias/modelId. */
-export function ModelSelector({ compact = false }: { compact?: boolean }) {
+/** Model picker. When `locked`, renders a static label (the session's model is immutable); clicking it opens the Fork dialog instead of a dropdown. */
+export function ModelSelector({ compact = false, locked = false, onLockedClick }: { compact?: boolean; locked?: boolean; onLockedClick?: () => void }) {
   const selectedProviderId = useUi((s) => s.selectedProviderId);
   const selectedId = useUi((s) => s.selectedModelId);
   const setSelected = useUi((s) => s.setSelectedModel);
   const starred = useUi((s) => s.starredModels);
   const toggleStar = useUi((s) => s.toggleStarredModel);
   const { models, isLoading } = useModels();
-  // Price label is now persisted on the model (sourced from the provider's
-  // /models response at fetch time) — no catalog enrichment roundtrip needed.
   const [query, setQuery] = useState('');
 
-  // Resolve by (providerId, modelId). Falls back to first-match by modelId
-  // when selectedProviderId is null (old session restored without provider).
   const selected =
     models.find((m) => m.providerId === selectedProviderId && m.modelId === selectedId) ??
     models.find((m) => m.modelId === selectedId);
 
-  // Filter by search query (alias or modelId, case-insensitive).
+  // ── Locked mode: static label, click opens Fork dialog ──
+  if (locked) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-muted-foreground hover:text-foreground', compact && 'px-1.5')}
+        onClick={onLockedClick}
+        title="Model is locked for this session. Click to fork into a new session."
+      >
+        {!compact && (
+          <span className="truncate max-w-[160px]">{selected?.alias ?? selectedId ?? 'Unknown'}</span>
+        )}
+        <Lock className="size-3 text-muted-foreground/50" />
+      </Button>
+    );
+  }
+
   const q = query.trim().toLowerCase();
   const filtered = q
     ? models.filter(

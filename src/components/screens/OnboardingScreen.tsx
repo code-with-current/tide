@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import tideLogoPng from '@/assets/logo.png';
-import { TideBrandMark } from '@/components/primitives/TideBrandMark';
+import { LogoText } from '@/components/primitives';
 import {
   ArrowLeft, ArrowRight, ShieldCheck, Loader2,
   Folder, CheckCircle2, HardDrive, Globe,
@@ -52,11 +52,10 @@ export function OnboardingScreen() {
 
   return (
     <div className="flex-1 flex overflow-hidden flex-col"
-      style={{ background: 'linear-gradient(165deg, #0d0f13 0%, #08090c 100%)' }}
-
+ style={{ background: 'linear-gradient(180deg, #0d0f13 0%, #08090c 100%)' }}
     >
       <div
-        className="absolute inset-0 opacity-[0.02] pointer-events-none z-0"
+        className="absolute inset-0 opacity-[0.01] pointer-events-none z-0"
         style={{
           backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
         }}
@@ -64,14 +63,14 @@ export function OnboardingScreen() {
       {/* Drag region — top strip only, so the rest of the onboarding screen
           (inputs, buttons) is interactive. Matches the window top bar height
           (h-10 = 40px). */}
-      <div className="drag-region h-10 flex-shrink-0 bg-transparent" />
+      <div className="absolute w-full top-0 drag-region h-10 flex-shrink-0 bg-transparent z-10" />
       {/* Content row — panels sit side-by-side below the drag strip */}
       <div className="flex-1 flex overflow-hidden relative">
       {/* Grain texture */}
 
       {/* ─── LEFT: Brutal brand panel ─── */}
       <div
-        className="hidden md:flex w-[38%] min-w-[380px] flex-col relative overflow-hidden"
+        className="hidden md:flex w-[38%] min-w-[380px] flex-col relative overflow-hidden bg-card/40"
       >
         {/* Giant logo watermark — bleeds left, ultra-subtle */}
         <div
@@ -273,14 +272,12 @@ function ProviderStep({
     <div className="flex flex-col h-full" style={{ animation: 'fadeIn 0.3s ease-out' }}>
       {/* Mobile brand */}
       <div className="md:hidden flex items-center gap-2 px-6 pt-4">
-        <TideBrandMark size="sm" />
-        <span className="text-[14px] font-semibold">Tide</span>
+        <LogoText size={35} />
       </div>
 
       <div className="flex-1 flex flex-col justify-center px-6 md:px-8 py-6 mx-auto w-full overflow-y-auto scroll">
         <div className="flex justify-start items-end gap-2.5 mb-5">
-          <TideBrandMark size="md" />
-          <span className="text-[15px] font-semibold tracking-tight">Tide</span>
+          <LogoText size={35} />
         </div>
         <Card className="relative">
           <CardContent>
@@ -730,8 +727,7 @@ function WorkspaceStep({
     <div className="flex flex-col h-full" style={{ animation: 'fadeIn 0.3s ease-out' }}>
       <div className="flex-1 flex flex-col justify-center px-8 md:px-12 py-8 w-full overflow-y-auto scroll">
         <div className="flex justify-start items-end gap-2.5 mb-5">
-          <TideBrandMark size="md" />
-          <span className="text-[15px] font-semibold tracking-tight">Tide</span>
+          <LogoText size={20} />
         </div>
       <Card>
         <CardContent>

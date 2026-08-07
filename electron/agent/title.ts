@@ -1,82 +1,81 @@
-/** LLM session-title generation: prefers the session's own provider+model, falls back to the system model, and returns null (caller keeps placeholder) on any failure. Fire-and-forget, best-effort, ~80 tokens / 30s. */
-import { generateText, type LanguageModel } from 'ai';
-import { runSystemTask, isSystemModelConfigured } from './system-model.js';
+/** LLM session-title generation: uses the SAME provider+model+protocol as the session's chat turn — no separate model resolution, no system-model fallback. Returns null (caller keeps placeholder) on any failure. Fire-and-forget, best-effort. */
+import { generateText } from 'ai';
 import { resolveModel } from './provider-factory.js';
-import { stripCommandPrefix } from '../../src/lib/session-title.js';
+import { resolveProtocolOptions } from './protocols/index.js';
+import { resolveMaxOutputTokens } from './model-capabilities.js';
+import { createLogger } from '../logger.js';
 import type { Provider } from '../../src/types';
 
-const TITLE_SYSTEM =
-  'Generate a concise 3-5 word title summarizing what the user is asking for. ' +
-  'Reply with ONLY the title — no quotes, no trailing punctuation, no explanation.';
+const log = createLogger('title');
 
-export interface TitleModelSource {
-  /** The session's chat provider (already API-key-resolved by the store). */
-  provider?: Provider;
-  /** The modelId the session chats with. */
-  modelId?: string;
+const TITLE_SYSTEM =
+  'You are a Project Manager and System Engineer.' +
+  'Generate a concise 3-5 word title summarizing what the user is asking for the workspace. ' +
+  'Reply with ONLY the title — no quotes, no trailing punctuation, no explanation. ' +
+  'If the message starts with a /command or @agent (e.g. /code-reviewer, @planner), ' +
+  'that context is relevant — reflect the invocation in the title when it adds meaning.';
+
+function extractSubject(raw: string): { stripped: string; prompt: string } {
+  const trimmed = raw.trim();
+  const cmdMatch = trimmed.match(/^\/([A-Za-z0-9_-]+)(?:\s+(.*))?$/s);
+  const agentMatch = trimmed.match(/^@([A-Za-z0-9_-]+)(?:\s+(.*))?$/s);
+  const skill = cmdMatch?.[1];
+  const agent = agentMatch?.[1];
+  const rest = cmdMatch?.[2] ?? agentMatch?.[2] ?? trimmed;
+  const stripped = (rest ?? '').trim();
+  const parts: string[] = [];
+  if (skill) parts.push(`Skill invoked: ${skill}`);
+  if (agent) parts.push(`Agent: ${agent}`);
+  if (rest?.trim()) parts.push(rest.trim());
+  const prompt = parts.length > 1 ? parts.join('\n') : (rest?.trim() ?? trimmed);
+  return { stripped, prompt };
 }
 
-/** @param firstMessage raw first user message (stripped here); @param source chat provider+model (falls back to system model); @returns cleaned title or null (caller keeps placeholder). */
+export interface TitleModelSource {
+  provider: Provider;
+  modelId: string;
+}
+
+/** Generate a session title using the session's own provider+model (same resolution path as the orchestrator). @returns cleaned title or null. */
 export async function generateSessionTitle(
   firstMessage: string,
-  source?: TitleModelSource,
+  source: TitleModelSource,
 ): Promise<string | null> {
-  const subject = stripCommandPrefix(firstMessage);
-  if (!subject) return null;
+  const { stripped, prompt } = extractSubject(firstMessage);
+  if (!stripped && !prompt) return null;
 
-  // Resolve the model to run title-gen on. Prefer the session's chat model;
-  // fall back to the system model. If neither resolves, bail (keep the
-  // placeholder) — title generation is best-effort.
-  let model: LanguageModel | null = null;
-  if (source?.provider && source.provider.apiKey && source.modelId) {
-    // Match the orchestrator's model-entry lookup: find the Model whose
-    // modelId the session uses so resolveModel gets a well-formed entry.
-    const modelEntry = source.provider.models.find(
-      (m) => m.modelId === source.modelId,
-    );
-    try {
-      model = resolveModel(
-        source.provider,
-        modelEntry ?? {
-          id: source.modelId,
-          alias: source.modelId,
-          modelId: source.modelId,
-          contextWindow: 0,
-          providerId: source.provider.id,
-        },
-      );
-    } catch {
-      model = null; // fall through to system model
-    }
+  if (!source.provider.apiKey) {
+    log.warn('title-gen: provider has no apiKey', { provider: source.provider.id });
+    return null;
   }
-  if (!model && !isSystemModelConfigured()) return null;
 
   try {
-    const raw = model
-      ? (
-          await generateText({
-            model,
-            system: TITLE_SYSTEM,
-            prompt: subject,
-            maxOutputTokens: 80,
-            abortSignal: AbortSignal.timeout(30_000),
-          })
-        ).text
-      : await runSystemTask({
-          system: TITLE_SYSTEM,
-          prompt: subject,
-          maxOutputTokens: 80,
-          abortSignal: AbortSignal.timeout(30_000),
-        });
-    const clean = raw
+    // Mirror the orchestrator's exact model + protocol resolution.
+    const model = resolveModel(source.provider, { modelId: source.modelId, contextWindow: 0 } as any);
+    const modelEntry = source.provider.models.find((m) => m.modelId === source.modelId);
+    const proto = resolveProtocolOptions(
+      source.provider.apiStyle,
+      null, // no thinking for title-gen
+      { hasTools: false, modelId: source.modelId, maxOutputTokens: resolveMaxOutputTokens(source.modelId, modelEntry) },
+    );
+
+    const result = await generateText({
+      model,
+      system: TITLE_SYSTEM,
+      prompt,
+      providerOptions: proto.providerOptions,
+      maxOutputTokens: Math.min(proto.maxOutputTokens, 80),
+      abortSignal: AbortSignal.timeout(30_000),
+    });
+
+    const clean = (result.text ?? '')
       .trim()
-      .replace(/^["'`]+|["'`.]+$/g, '') // strip wrapping quotes / backticks
-      .replace(/\s*[.\s]+$/, '') // trailing period / whitespace
+      .replace(/^["'`]+|["'`.]+$/g, '')
+      .replace(/\s*[.\s]+$/, '')
       .slice(0, 80);
     return clean || null;
-  } catch {
-    // Provider error, timeout, or non-200 — keep the placeholder. Don't
-    // surface: title generation is best-effort, never user-facing as a fault.
+  } catch (e: any) {
+    log.warn('title-gen failed', { err: e?.message, provider: source.provider.id, modelId: source.modelId });
     return null;
   }
 }

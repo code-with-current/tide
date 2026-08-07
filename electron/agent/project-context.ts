@@ -3,6 +3,27 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { BUILTIN_SKILLS } from '../../src/lib/prompts/_skills-bundle.js';
+
+/** Ensure built-in skills exist as real files on disk so the orchestrator's
+ *  LOAD_SKILL path + read_file tool can resolve them. Written once to
+ *  <appData>/builtin-skills/<name>.md. Returns the abs paths. */
+function ensureBuiltinSkillFiles(): Array<{ name: string; description: string; absPath: string; body: string }> {
+  const dir = path.join(os.homedir(), '.tide' + (process.env.NODE_ENV === 'development' ? '-dev' : ''), 'builtin-skills');
+  const out: Array<{ name: string; description: string; absPath: string; body: string }> = [];
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch { /* exists */ }
+  for (const skill of BUILTIN_SKILLS) {
+    const filePath = path.join(dir, `${skill.name}.md`);
+    try {
+      // Always overwrite so app updates refresh the skill content.
+      fs.writeFileSync(filePath, `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n${skill.body}`, 'utf-8');
+    } catch { /* read-only — skip */ }
+    out.push({ name: skill.name, description: skill.description, absPath: filePath, body: skill.body });
+  }
+  return out;
+}
 
 const MAX_FILE_BYTES = 16 * 1024; // 16 KB cap per file — keep picker fast
 
@@ -39,7 +60,7 @@ export interface ProjectEntries {
   agents: ProjectContextFile[];
 }
 
-const CONTEXT_FILE_NAMES = ['CLAUDE.md', 'AGENT.md'];
+const CONTEXT_FILE_NAMES = ['CLAUDE.md', 'AGENT.md', 'AGENTS.md'];
 // `.zcode` is the app's own config dir (~/.zcode/skills); `.claude`/`.agent`
 // cover the broader ecosystem. All three are scanned at project + user level.
 const PROJECT_DIRS = ['.claude', '.agent', '.zcode'];
@@ -57,6 +78,20 @@ export function scanProjectEntries(workspaceRoot: string): ProjectEntries {
     root = fs.realpathSync(workspaceRoot);
   } catch {
     return result;
+  }
+
+  // 0. Built-in app skills (bundled with Tide, always available).
+  // Written to disk so the orchestrator's LOAD_SKILL + read_file can resolve them.
+  const builtinFiles = ensureBuiltinSkillFiles();
+  for (const skill of builtinFiles) {
+    result.skills.push({
+      name: skill.name,
+      description: skill.description,
+      source: 'project',
+      path: `<builtin>/${skill.name}`,
+      absPath: skill.absPath,
+      body: skill.body,
+    });
   }
 
   // 1. Root-level CLAUDE.md / AGENT.md — project only (no user equivalent).

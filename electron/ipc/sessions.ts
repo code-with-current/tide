@@ -228,13 +228,73 @@ export function createSession(
   return hydrate(store().createSession(workspaceId, title, modelId, opts));
 }
 
-export function updateSessionSettings(
-  sessionId: string,
-  patch: {
-    modelId?: string;
+/** Fork a session into a new session with a different model, generating an LLM summary of the source conversation as the first message. The source session is preserved unchanged. */
+export async function forkWithSummary(
+  sourceId: string,
+  newModelId: string,
+  opts?: {
     autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
     thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
     providerId?: string;
+  },
+): Promise<HydratedSession> {
+  // 1. Create the fork (empty messages, new model, lineage set).
+  const forked = store().forkSession(sourceId, newModelId, opts);
+  const source = store().getSession(sourceId);
+
+  // 2. Generate the summary using the DESTINATION model (best-effort).
+  let summary: string;
+  if (source && source.messages.length > 0) {
+    try {
+      // Resolve the destination provider.
+      const { listProviders } = await import('../store.js');
+      const providers = listProviders();
+      let provider = opts?.providerId ? providers.find((p) => p.id === opts.providerId) : undefined;
+      if (!provider) {
+        provider = providers.find((p) => p.enabled && p.models.some((m) => m.modelId === newModelId));
+      }
+      if (provider?.apiKey) {
+        // Convert stored messages → ModelMessage for the summarizer.
+        const modelMessages = source.messages
+          .filter((m) => m.content)
+          .map((m) => ({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: m.content,
+          })) as any[];
+        const { generateSessionSummary } = await import('../agent/context/summarize.js');
+        summary = await generateSessionSummary(modelMessages, {
+          provider,
+          modelId: newModelId,
+          signal: AbortSignal.timeout(45_000),
+        });
+      } else {
+        throw new Error('destination provider has no API key');
+      }
+    } catch (e: any) {
+      log.warn('fork summary generation failed — using fallback', { err: e?.message });
+      summary = `Forked from "${source?.title ?? 'session'}'. Continue from here.`;
+    }
+  } else {
+    summary = `Forked from "${source?.title ?? 'session'}". No prior messages to summarize.`;
+  }
+
+  // 3. Store the summary as the first assistant message with a forkSummary marker.
+  store().addAssistantMessage(forked.id, {
+    content: summary,
+    turn: {
+      forkSummary: true,
+      sourceTitle: source?.title ?? 'session',
+    },
+  });
+
+  return hydrate(store().getSession(forked.id)!);
+}
+
+export function updateSessionSettings(
+  sessionId: string,
+  patch: {
+    autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
+    thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
   },
 ): void {
   store().updateSessionSettings(sessionId, patch);
@@ -291,6 +351,48 @@ export function addAssistantMessage(
   },
 ): void {
   store().addAssistantMessage(sessionId, message);
+}
+
+/** Update the last assistant message in-place (used by the streaming flush to persist partial state). If no assistant message exists yet, creates one. */
+export function updatePartialAssistantMessage(
+  sessionId: string,
+  messageId: string,
+  message: {
+    content: string;
+    blocks?: any[];
+    reasoning?: string;
+    toolCalls?: any[];
+    timeline?: any[];
+  },
+): void {
+  const s = store().getSession(sessionId);
+  if (!s) return;
+  // Find the assistant message by messageId (set as the message id in addAssistantMessage).
+  const last = s.messages[s.messages.length - 1];
+  if (last && last.role === 'assistant' && last.id === messageId) {
+    // Update in-place.
+    last.content = message.content;
+    if (message.blocks) last.blocks = message.blocks;
+    if (message.reasoning !== undefined) last.reasoning = message.reasoning;
+    if (message.toolCalls) last.toolCalls = message.toolCalls;
+    if (message.timeline) last.timeline = message.timeline;
+    last.createdAt = last.createdAt ?? new Date().toISOString();
+    s.updatedAt = new Date().toISOString();
+    store().updateSession(s);
+  } else {
+    // First flush — create the message.
+    store().addAssistantMessage(sessionId, {
+      content: message.content,
+      blocks: message.blocks as Block[],
+      reasoning: message.reasoning,
+      toolCalls: message.toolCalls,
+      timeline: message.timeline,
+    });
+    // Fix the id to match messageId so subsequent flushes find it.
+    const msg = s.messages[s.messages.length - 1];
+    if (msg) msg.id = messageId;
+    store().updateSession(s);
+  }
 }
 
 export function addUsage(

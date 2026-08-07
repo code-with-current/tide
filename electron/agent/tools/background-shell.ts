@@ -80,6 +80,13 @@ function killBackground(id: string): boolean {
   return true;
 }
 
+/** Kill ALL background shells — called on app quit so dev servers don't outlive the process. */
+export function killAllBackgroundShells(): void {
+  for (const [id] of shells) {
+    killBackground(id);
+  }
+}
+
 // ─── Shared bodies ─────────────────────────────────────────────────────
 // Neither reads ctx — both address the in-process shell registry by id.
 

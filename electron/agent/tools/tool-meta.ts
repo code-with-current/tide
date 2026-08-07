@@ -18,7 +18,7 @@ const FULL_ONLY: AutonomyMode[] = ['full'];
 
 export const toolMeta: Record<ToolName, ToolMeta> = {
   // ─── Commands ───────────────────────────────────────────────────────
-  bash:          { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 120_000, category: 'commands' },
+  bash:          { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 500_000, category: 'commands' },
   bash_output:   { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 5_000,   category: 'commands' },
   kill_shell:    { riskTier: 'write',       autoApproveIn: WRITE_MODES, timeoutMs: 5_000, category: 'commands' },
   git:           { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 15_000,  category: 'commands' },
@@ -32,6 +32,7 @@ export const toolMeta: Record<ToolName, ToolMeta> = {
   // ─── Exploration (read-only) ────────────────────────────────────────
   read_file:     { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   list_dir:      { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 5_000,   category: 'exploration' },
+  directory_tree:{ riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   glob:          { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   grep:          { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   web_fetch:     { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 15_000,  category: 'exploration' },

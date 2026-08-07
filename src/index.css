@@ -288,6 +288,11 @@ body {
 /* ============================================================ */
 /* Scrollbars                                                   */
 /* ============================================================ */
+/* Reserve scrollbar gutter so the layout doesn't shift when the
+   vertical scrollbar appears/disappears during scroll. */
+.scroll {
+  scrollbar-gutter: stable;
+}
 .scroll::-webkit-scrollbar,
 *::-webkit-scrollbar {
   width: 8px;
@@ -588,17 +593,20 @@ body {
    Tighter than full prose: chat messages are compact, not docs.
    ───────────────────────────────────────────────────────────── */
 .prose-chat {
-  font-size: 0.9rem;       /* text-sm */
+  font-size: 0.9rem;
   line-height: 1.6;
   color: var(--color-ink);
 }
-.prose-chat > :first-child { margin-top: 10px; }
+.prose-chat > :first-child { margin-top: 0; }
 .prose-chat > :last-child  { margin-bottom: 0; }
+/* Spacing between separate Streamdown blocks (MemoizedMarkdown splits content
+   into top-level blocks). Each block gets bottom margin; the last gets none. */
+.prose-chat > div { margin-bottom: 0.6em; }
+.prose-chat > div:last-child { margin-bottom: 0; }
+.prose-chat > div:empty { margin-bottom: 0; }
 
 /* ─────────────────────────────────────────────────────────────
    highlight.js theme — github-dark (for the File Viewer panel).
-   Inline (not imported) so Vite doesn't try to resolve a CSS
-   file from the package; this is a compact subset.
    ───────────────────────────────────────────────────────────── */
 .hljs { color: #c9d1d9; background: transparent; }
 .hljs-comment, .hljs-quote { color: #8b949e; font-style: italic; }
@@ -619,23 +627,35 @@ body {
 .hljs-params { color: #c9d1d9; }
 .hljs-link { color: #a5d6ff; text-decoration: underline; }
 
-.prose-chat p         { margin: -0.5em 0; }
+/* ── Element spacing (consistent vertical rhythm) ──
+   Base unit: 0.85em (~12px at 0.9rem). All block elements use
+   this for bottom margin. Headings get extra top space. */
+
+.prose-chat p         { margin: 0 0 0.6em; }
+.prose-chat p:last-child { margin-bottom: 0; }
+
 .prose-chat h1,
 .prose-chat h2,
 .prose-chat h3,
-.prose-chat h4        { font-weight: 600; line-height: 1.1; margin: 0.1em 0 0.3em; }
-.prose-chat h1        { font-size: 1.25rem; }
-.prose-chat h2        { font-size: 1.125rem; }
+.prose-chat h4        { font-weight: 600; line-height: 1.3; margin: 1.4em 0 0.35em; }
+.prose-chat h1        { font-size: 1.3rem; }
+.prose-chat h2        { font-size: 1.15rem; }
 .prose-chat h3        { font-size: 1rem; }
 .prose-chat h4        { font-size: 0.9rem; color: var(--color-muted); }
+.prose-chat h1:first-child,
+.prose-chat h2:first-child,
+.prose-chat h3:first-child,
+.prose-chat h4:first-child { margin-top: 0; }
 
 .prose-chat ul,
-.prose-chat ol        { margin: 0.1em 0; padding-left: 1.25em; }
+.prose-chat ol        { margin: 0 0 0.85em; padding-left: 1.4em; }
 .prose-chat ul        { list-style: disc; }
 .prose-chat ol        { list-style: decimal; }
-.prose-chat li        { margin: 0.1em 0; }
+.prose-chat li        { margin: 0.3em 0; }
 .prose-chat li::marker { color: var(--color-faint); }
-.prose-chat li > p    { margin: 0.1em 0; }
+.prose-chat li > p    { margin: 0.2em 0; }
+.prose-chat ul:last-child,
+.prose-chat ol:last-child { margin-bottom: 0; }
 
 /* Task lists from GFM ("- [ ]" / "- [x]") */
 .prose-chat input[type="checkbox"] {
@@ -668,13 +688,24 @@ body {
 .prose-chat em        { font-style: italic; }
 
 .prose-chat blockquote {
-  margin: 0.4em 0;
-  padding: 0.2em 0 0.2em 0.9em;
-  border-left: 2px solid var(--color-line);
-  color: var(--color-muted);
+  margin: 0 0 0.85em;
+  padding: 0.6em 0.9em;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  border-radius: 0 0.25rem 0.25rem 0;
 }
+.prose-chat blockquote:last-child { margin-bottom: 0; }
+.prose-chat blockquote p { margin: 0; }
 
-.prose-chat hr        { border: 0; border-top: 1px solid var(--color-line-soft); margin: 0.6em 0; }
+.prose-chat hr        { border: 0; border-top: 1px solid var(--color-line-soft); margin: 1.2em 0; }
+
+/* Tables — explicit consistent margin */
+.prose-chat table     { margin: 0 0 0.85em; border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+.prose-chat table:last-child { margin-bottom: 0.85em; }
+.prose-chat th,
+.prose-chat td        { border: 1px solid var(--border); padding: 0.4em 0.7em; text-align: left; }
+.prose-chat th        { background: var(--muted); font-weight: 600; }
 
 /* Inline code — small pill, distinct from the chat surface. */
 .prose-chat code      {
@@ -690,13 +721,14 @@ body {
 /* Outer wrapper — flatten Streamdown's rounded-xl border bg-sidebar p-2. */
 .prose-chat [data-streamdown="code-block"] {
   position: relative;
-  margin: 0.7em 0;
+  margin: 0 0 0.5em;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   gap: 0;
 }
+.prose-chat [data-streamdown="code-block"]:last-child { margin-bottom: 0; }
 .prose-chat [data-streamdown="code-block-header"] {
   display: none;
 }
@@ -706,17 +738,15 @@ body {
   position: relative;
   font-size: 12.5px;
   line-height: 1.6;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
 }
-/* Generous, even padding; room at the bottom for the language badge. */
+/* Tight padding; room at the bottom for the language pill. */
 .prose-chat [data-streamdown="code-block-body"] pre {
-  padding: 0.85rem 1rem 1.5rem 0.5rem;
+  padding: 0.5rem 0.75rem 1.75rem 0.25rem;
 }
 
-/* ── Line numbers ───────────────────────────────────────────────────
-   Streamdown adds class "block" + before:* utilities to each line <span>,
-   and [counter-increment:line_0] [counter-reset:line] on <code>. We write
-   the CSS those utilities would produce. The counter is named "line". */
+/* ── Line numbers ─────────────────────────────────────────────────── */
 .prose-chat [data-streamdown="code-block-body"] code {
   counter-reset: line;
 }
@@ -725,8 +755,8 @@ body {
   counter-increment: line;
   content: counter(line);
   display: inline-block;
-  width: 1.5rem;
-  margin-right: 1rem;
+  width: 1.25rem;
+  margin-right: 0.5rem;
   text-align: right;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10.5px;
@@ -735,19 +765,14 @@ body {
   opacity: 0.35;
   user-select: none;
   pointer-events: none;
-  /* tab-size on the gutter so wrapped lines don't shift it */
   flex-shrink: 0;
 }
-/* The per-line span must be block-level for the ::before to sit in the gutter. */
 .prose-chat [data-streamdown="code-block-body"] code > span.block,
 .prose-chat [data-streamdown="code-block-body"] code > span[class*="block"] {
   display: block;
 }
 
-/* ── Copy button — top-right floating chip, reveal on hover ──────────
-   Streamdown wraps it in an outer sticky bar (no data attr) + inner
-   code-block-actions chip. The sticky bar is always the first child of
-   code-block when controls are on — target it by position, not :has(). */
+/* ── Copy button — inside the container, top-right ────────────────── */
 .prose-chat [data-streamdown="code-block"] > div:first-child:where(:not([data-streamdown])) {
   position: absolute;
   top: 0;
@@ -766,8 +791,8 @@ body {
   box-shadow: none;
 }
 .prose-chat [data-streamdown="code-block-copy-button"] {
-  margin: 0.5rem 0.5rem 0 0;
-  padding: 0.3rem;
+  margin: 0.35rem 0.5rem 0 0;
+  padding: 0.25rem;
   border-radius: 0.375rem;
   background: color-mix(in srgb, var(--background) 60%, transparent);
   color: var(--muted-foreground);
@@ -785,20 +810,23 @@ body {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 
-/* ── Language badge — bottom-right, quiet, always visible ─────────── */
+/* ── Language pill — bottom-right, always visible ─────────────────── */
 .prose-chat [data-streamdown="code-block-body"][data-language]:not([data-language=""])::after {
   content: attr(data-language);
   position: absolute;
-  right: 0.75rem;
-  bottom: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.4rem;
   z-index: 1;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--background) 50%, transparent);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 10px;
-  line-height: 1;
+  font-size: 9.5px;
+  line-height: 1.2;
   text-transform: lowercase;
   letter-spacing: 0.02em;
   color: var(--muted-foreground);
-  opacity: 0.4;
+  opacity: 0.55;
   pointer-events: none;
   user-select: none;
 }
@@ -841,16 +869,14 @@ body {
    flow with its own border. Controls float top-right and only appear on
    hover, like the code-block copy button. */
 
-/* Strip the outer wrapper: no border, no bg-sidebar, no padding, no gap.
-   position:relative anchors the floating control cluster. */
+/* Table wrapper — rounded container with subtle background. */
 .prose-chat [data-streamdown="table-wrapper"] {
   position: relative;
-  margin: 0.7em 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  gap: 0;
+  margin: 0 0 0.85em;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  overflow: hidden;
 }
 /* Controls row → absolute top-right overlay, hidden until hover.
    This is the <div class="flex items-center justify-end gap-1"> that
@@ -888,23 +914,23 @@ body {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 /* Inner scroll container — strip its border/bg/rounding so the table
-   floats bare in the chat. Keep overflow-x for wide tables. */
+   floats bare in the chat. overflow-x for wide tables, but contained
+   so it doesn't cause parent scrollbar glitches. */
 .prose-chat [data-streamdown="table-wrapper"] > div:last-child {
   border: 0;
   border-radius: 0;
   background: transparent;
   overflow-x: auto;
+  max-width: 100%;
+  scrollbar-gutter: stable;
 }
-/* The table itself — clean border, readable sizing. */
+/* The table itself — clean, no outer border (container provides it). */
 .prose-chat [data-streamdown="table"] {
   margin: 0;
   border-collapse: collapse;
   font-size: 0.82em;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
-  border: 1px solid var(--color-line-soft);
-  border-radius: 0.5rem;
-  overflow: hidden;
 }
 .prose-chat [data-streamdown="table"] th,
 .prose-chat [data-streamdown="table"] td {
@@ -913,18 +939,19 @@ body {
   text-align: left;
 }
 .prose-chat [data-streamdown="table"] th {
-  background: var(--color-surface-2);
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
   font-weight: 600;
 }
 /* Bare <table> without a Streamdown wrapper — fallback styling. */
 .prose-chat table:not(:where([data-streamdown] *)) {
-  margin: 0.6em 0;
+  margin: 0 0 0.85em;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
   border-collapse: collapse;
   font-size: 0.82em;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
-  border: 1px solid var(--color-line-soft);
-  border-radius: 0.5rem;
   overflow: hidden;
 }
 .prose-chat table:not(:where([data-streamdown] *)) th,

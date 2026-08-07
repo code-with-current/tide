@@ -35,6 +35,8 @@ import { registerChatHandlers } from './ipc/chat.js';
 import { registerAgentHandlers } from './agent/orchestrator.js';
 import { registerAgentSdkHandlers } from './agent/orchestrator-sdk.js';
 import { registerScriptHandlers, killAllScripts } from './ipc/scripts.js';
+import { killAllBackgroundShells } from './agent/tools/background-shell.js';
+import { abortAllTurns } from './agent/orchestrator-sdk.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
 import { registerSettingsHandlers } from './ipc/settings.js';
 import { registerExtensionsHandlers } from './ipc/extensions.js';
@@ -259,11 +261,14 @@ if (!gotLock) {
 
 app.on('window-all-closed', () => {
   killAllScripts();
+  killAllBackgroundShells();
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', () => {
+  abortAllTurns();
   killAllScripts();
+  killAllBackgroundShells();
 });
