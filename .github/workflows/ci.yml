@@ -1,0 +1,59 @@
+# CI — runs on every push to master and every PR.
+#
+# Why this exists: green main is a P0. Before this workflow the only CI was
+# release.yml, which fires on v* tags — so a broken main could sit for days
+# and only surface at release time. This gates the default branch on the
+# cheap, fast checks (lint, typecheck+build, unit tests) so a red main is
+# visible immediately, not at the next release.
+#
+# Toolchain intentionally mirrors release.yml (pnpm 10, Node 22,
+# --frozen-lockfile) so a push build and a release build can never disagree
+# about the environment. Native modules (node-pty, sharp) rebuild in
+# postinstall exactly as they do on the release linux leg.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint · build · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm version comes from `packageManager` in package.json (corepack);
+      # don't set `version` here or action-setup errors on the mismatch.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      # build = `tsc -b && vite build`: typechecks the whole project
+      # (renderer + main via tsconfig references) then builds the renderer.
+      # This is the type gate — a red build here means main doesn't compile.
+      - name: Build (typecheck + renderer)
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test

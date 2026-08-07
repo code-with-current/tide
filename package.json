@@ -2,6 +2,7 @@
   "name": "tide",
   "private": true,
   "version": "0.0.2-pre",
+  "packageManager": "pnpm@10.27.0",
   "description": "Tide — Code with the current.",
   "type": "module",
   "main": "dist-electron/main.mjs",
