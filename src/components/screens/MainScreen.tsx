@@ -316,10 +316,25 @@ export function MainScreen() {
     prevHistoryLenRef.current = newLen;
   }, [chatHistory]);
 
-  // When switching sessions, snap to bottom.
+  // When switching sessions, re-pin without scrolling. The messages haven't
+  // loaded yet (async api.getSession below), so scrolling now would pin
+  // against stale heights. The ResizeObserver re-sticks as content renders.
   useEffect(() => {
-    stickyRef.current?.scrollToBottom();
+    stickyRef.current?.resetPin();
   }, [activeSessionId]);
+
+  // Snap to bottom once a session's messages finish loading. This runs after
+  // setChatHistory + setSessionLoading(false) have been applied, so the
+  // content is real; the ResizeObserver continues re-sticking as content-
+  // visibility heights settle.
+  const prevLoadingRef = useRef(false);
+  useEffect(() => {
+    const wasLoading = prevLoadingRef.current;
+    prevLoadingRef.current = sessionLoading;
+    if (!sessionLoading && wasLoading) {
+      requestAnimationFrame(() => stickyRef.current?.scrollToBottom());
+    }
+  }, [sessionLoading]);
 
   const scrollToBottom = useCallback(() => {
     stickyRef.current?.scrollToBottom({ smooth: true });
