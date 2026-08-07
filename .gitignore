@@ -53,6 +53,8 @@ AGENTS.md
 GEMINI.md
 *.md
 !README.md
+# Prompt sources — app source code, not docs.
+!src/lib/prompts/**/*.md
 docs/plans/
 # Auto-generated prompt bundle (from build/promptMarkdownUtils.mjs)
 src/lib/prompts/_system-prompt-bundle.ts

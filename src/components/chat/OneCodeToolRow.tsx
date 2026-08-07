@@ -49,6 +49,7 @@ const ICON: Record<ToolName, React.ReactNode> = {
   dispatch_agent: <Bot className="size-3 text-muted-foreground/60" />,
   load_skill: <BookOpen className="size-3 text-muted-foreground/60" />,
   memory: <BookOpen className="size-3 text-muted-foreground/60" />,
+  init: <BookOpen className="size-3 text-muted-foreground/60" />,
   todo_write: <ListChecks className="size-3 text-muted-foreground/60" />,
   web_fetch: <Globe className="size-3 text-muted-foreground/60" />,
   web_search: <Search className="size-3 text-muted-foreground/60" />,

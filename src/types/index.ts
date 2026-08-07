@@ -345,7 +345,8 @@ export type ToolName =
   | 'slash_command'
   | 'load_skill'
   | 'mcp'
-  | 'memory';
+  | 'memory'
+  | 'init';
 
 export type ToolCallStatus =
   | 'pending'

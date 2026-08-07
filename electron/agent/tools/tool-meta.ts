@@ -53,6 +53,7 @@ export const toolMeta: Record<ToolName, ToolMeta> = {
   // so gating them would defeat the purpose. Path-safety.ts enforces
   // confinement at execute time.
   memory:              { riskTier: 'read_only', autoApproveIn: ALL_MODES, timeoutMs: 5_000, category: 'other' },
+  init:                { riskTier: 'read_only', autoApproveIn: ALL_MODES, timeoutMs: 5_000, category: 'other' },
 };
 
 export function getToolMeta(name: ToolName): ToolMeta {
