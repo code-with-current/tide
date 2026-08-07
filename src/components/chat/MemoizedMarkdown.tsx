@@ -107,7 +107,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   );
 
   return (
-    <div className={cn('prose-chat flex flex-col gap-3', className)} onClick={handleClick}>
+    <div className={cn('prose-chat', className)} onClick={handleClick}>
       {blockEntries.map((entry: { key: string; text: string }, i: number) => {
         const mermaid = extractMermaid(entry.text);
 

@@ -1,6 +1,8 @@
 import { type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import tideLogoUrl from '@/assets/logo.png';
+import tideLogoUrl from '@/assets/tide-logo.png';
+import tideTextUrl from '@/assets/tide-text.png';
+
 
 export type ChipTone = 'default' | 'accent' | 'ok' | 'warn' | 'bad' | 'info' | 'reason' | 'openai' | 'anthropic';
 
@@ -110,6 +112,20 @@ export function Logo({ size = 24 }: { size?: number }) {
       aria-hidden
       className="rounded-[22%] object-contain"
       style={{ width: size, height: size }}
+    />
+  );
+}
+
+
+export function LogoText({ size = 24 }: { size?: number }) {
+  return (
+    <img
+      src={tideTextUrl}
+      alt="Tide"
+      height={size}
+      aria-hidden
+      className="rounded-[22%] object-contain"
+      style={{ height: size }}
     />
   );
 }

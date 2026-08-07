@@ -1,4 +1,5 @@
-import { Check, X, AlertTriangle, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, X, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { AsciiSpinner } from '@/components/AsciiSpinner';
@@ -14,21 +15,43 @@ function formatDuration(ms?: number): string {
   return `${m}m${s}s`;
 }
 
+/** The "⠴ working" spinner + live elapsed timer, shown at the BOTTOM of the turn while streaming. */
+export function TurnWorkingFooter({ totalMs }: { totalMs?: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const id = setInterval(() => setElapsed(Date.now() - start), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const elapsedStr = formatDuration(elapsed);
+  const toolStr = formatDuration(totalMs);
+
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 font-mono py-0.5">
+      <div className="flex items-center gap-2">
+        <AsciiSpinner className="text-muted-foreground" />
+        <span className="text-muted-foreground">working</span>
+      </div>
+      <div className="flex items-center gap-1 text-muted-foreground/50">
+        <Clock className="size-3" />
+        <span>{elapsedStr}</span>
+        {toolStr && <span className="text-muted-foreground/30">/ {toolStr} tools</span>}
+      </div>
+    </div>
+  );
+}
+
 export function TurnHeader({
   turn,
   streaming,
   stopReason,
   blocks,
 }: {
-  /** @deprecated — kept for back-compat. When `blocks` is present it wins. */
   turn?: Turn;
   streaming: boolean;
-  /** From SessionStream.stopReason — 'aborted' renders as stopped. */
   stopReason?: string | null;
-  /** When present, totals are derived from this instead of `turn`. */
   blocks?: Block[];
 }) {
-  // Derive totals from blocks if present; fall back to legacy turn.
   let totalMs: number | undefined;
   let anyFailed: boolean | undefined;
   if (blocks) {
@@ -46,24 +69,13 @@ export function TurnHeader({
     totalMs = turn?.totalMs;
     anyFailed = turn?.anyFailed;
   }
-  const duration = formatDuration(totalMs);
+  const toolDuration = formatDuration(totalMs);
+  // Wall-clock turn time — from Turn.totalMs (includes LLM time + tool time).
+  const wallClock = formatDuration(turn?.totalMs);
 
-  // Working state — animated braille spinner + "working" label.
-  if (streaming) {
-    return (
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 font-mono py-0.5">
-        <AsciiSpinner className="text-muted-foreground" />
-        <span className="text-muted-foreground">working</span>
-        {duration && <span>· {duration}</span>}
-      </div>
-    );
-  }
+  if (streaming) return null;
 
-  // Completed states.
   const stopped = stopReason === 'aborted';
-  // A turn is "failed" if stopReason says so, OR if it produced zero content
-  // (no text answer, no tool blocks) — the latter catches old sessions that
-  // were persisted before stopReason was saved.
   const hasContent = blocks
     ? blocks.some((b) => b.kind === 'text' || b.kind === 'tool' || b.kind === 'reasoning')
     : !!(turn?.answer || turn?.commands?.length || turn?.edits?.length || turn?.exploration?.length);
@@ -78,12 +90,20 @@ export function TurnHeader({
         : 'text-success';
 
   return (
-    <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
+    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
       <Icon className={cn('size-3', tone)} />
       <span className={tone}>
         {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
       </span>
-      {duration && <span>· {duration}</span>}
+      {wallClock && (
+        <span className="flex items-center gap-0.5 text-muted-foreground/50">
+          <Clock className="size-2.5" />
+          {wallClock}
+        </span>
+      )}
+      {toolDuration && toolDuration !== wallClock && (
+        <span className="text-muted-foreground/30">· {toolDuration} tools</span>
+      )}
     </div>
   );
 }

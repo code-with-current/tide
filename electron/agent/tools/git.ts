@@ -1,14 +1,4 @@
-/**
- * git tool — restricted git operations.
- *
- * Allows the read-only inspection subset (status, diff, log, show, branch,
- * ls-files, blame) plus the safe write operations (commit on the current
- * branch). Refuses anything that touches remotes (push, fetch, pull) or
- * that rewrites history (reset --hard, rebase, force-push).
- *
- * Worktree note: without §6 isolation, all git ops target the user's real
- * repo. The permission gate forces `ask` for this tool regardless of mode.
- */
+/** git tool: all git subcommands allowed. The permission gate (riskTier: destructive → ask/full only) is the safety layer, not a command allowlist. */
 
 import { spawn } from 'child_process';
 import { toolEnv, killProcessTree } from './tool-env';
@@ -23,29 +13,6 @@ import { createConfigStore } from '../../configStore.js';
 import { appDataDir } from '../../appPaths.js';
 
 const MAX_OUTPUT = 50 * 1024;
-
-/** Whitelisted subcommands. Value = allowed flag patterns (regex); null = any flags. */
-const ALLOWED_SUBCOMMANDS: Record<string, RegExp | null> = {
-  status: null,
-  diff: null,
-  log: null,
-  show: null,
-  branch: null,
-  'ls-files': null,
-  blame: null,
-  shortlog: null,
-  describe: null,
-  remote: /^(-v|--verbose)$/,
-  'rev-parse': /^(-\S+|\S+)$/,
-  commit: /^(-m\s|--message=?.*|-a|--all|-s|--signoff|--amend.*)$/,
-};
-
-/** Hard-refused subcommands regardless of mode (mutation of shared state). */
-const ALWAYS_BLOCKED = new Set([
-  'push', 'pull', 'fetch', 'reset', 'rebase', 'cherry-pick', 'revert',
-  'merge', 'init', 'clone', 'mv', 'rm', 'clean', 'reflog', 'gc',
-  'stash', 'submodule', 'config', 'tag', 'worktree', 'update-ref',
-]);
 
 /** Shared body — needs workspaceRoot (cwd) + timeoutMs (spawn timeout). */
 export async function runGit(
@@ -63,30 +30,6 @@ export async function runGit(
   }
 
   const sub = argv[0];
-  if (ALWAYS_BLOCKED.has(sub)) {
-    return {
-      status: 'rejected',
-      output: `Refused: "git ${sub}" mutates shared state or rewrites history. Not allowed.`,
-    };
-  }
-  if (!(sub in ALLOWED_SUBCOMMANDS)) {
-    const allowed = Object.keys(ALLOWED_SUBCOMMANDS).sort().join(', ');
-    return {
-      status: 'rejected',
-      output: `Refused: "git ${sub}" is not on the allowlist. Allowed: ${allowed}.`,
-    };
-  }
-  const flagRule = ALLOWED_SUBCOMMANDS[sub];
-  if (flagRule) {
-    for (const f of argv.slice(1)) {
-      if (!flagRule.test(f)) {
-        return {
-          status: 'rejected',
-          output: `Refused: flag "${f}" not allowed with "git ${sub}".`,
-        };
-      }
-    }
-  }
 
   // ── Co-authoring: when gitCoAuthored is enabled in General settings,
   //    append a Co-authored-by trailer to commit messages. The trailer
@@ -206,10 +149,7 @@ export const gitTool: ToolRegistration = {
   definition: {
     name: 'git',
     description:
-      'Run a restricted git subcommand in the workspace. Allowed: status, diff, ' +
-      'log, show, branch, ls-files, blame, describe, remote -v, rev-parse, commit. ' +
-      'Forbidden: anything that touches remotes (push/pull/fetch) or rewrites ' +
-      'history (reset --hard, rebase). Pass args as an array of strings.',
+      'Run any git subcommand in the workspace. Pass args as an array of strings.',
     input_schema: {
       type: 'object',
       properties: {
@@ -237,10 +177,7 @@ export const gitTool: ToolRegistration = {
 export function createGitTool(ctx: ToolContext) {
   return tool({
     description:
-      'Run a restricted git subcommand in the workspace. Allowed: status, diff, ' +
-      'log, show, branch, ls-files, blame, describe, remote -v, rev-parse, commit. ' +
-      'Forbidden: anything that touches remotes (push/pull/fetch) or rewrites ' +
-      'history (reset --hard, rebase). Pass args as an array of strings.',
+      'Run any git subcommand in the workspace. Pass args as an array of strings.',
     inputSchema: z.object({
       args: z.array(z.string()).describe('Subcommand + flags, e.g. ["status", "--short"] or ["log", "-n", "5"].'),
     }),

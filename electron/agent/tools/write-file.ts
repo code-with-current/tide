@@ -1,11 +1,10 @@
-/** write_file tool: create or overwrite a file (distinct from edit_file, which targets a unique match in an existing file). Refuses secret-blocklist paths and paths escaping the workspace; dual export per the bash.ts pattern. */
+/** write_file tool: create or overwrite a file (distinct from edit_file, which targets a unique match in an existing file). The permission gate (riskTier: write → ask/edit/full) is the safety layer. */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { resolveInsideWorkspace } from '../path-safety';
-import { isSecretPath } from '../redaction';
 import { withPermission } from '../permission-wrapper';
 import type { ToolRegistration } from './types';
 import type { ToolContext } from './tool-context';
@@ -21,13 +20,6 @@ export async function runWriteFile(
   display?: { kind: 'text'; text: string };
 }> {
   if (!relPath) return { status: 'failed', output: 'Missing required arg: path' };
-
-  if (isSecretPath(relPath)) {
-    return {
-      status: 'rejected',
-      output: `Refused: "${relPath}" is on the secret blocklist.`,
-    };
-  }
 
   // Refuse to write if the workspace root is missing — otherwise
   // mkdirSync({recursive:true}) would silently resurrect a deleted workspace

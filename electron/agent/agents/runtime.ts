@@ -86,11 +86,12 @@ async function runSingleShotAgent(
   start: number,
 ): Promise<ToolResult> {
   const { agent, task, provider, modelId, signal, onUsage } = opts;
+  const modelEntry = provider.models.find((m) => m.modelId === modelId);
 
   const proto = resolveProtocolOptions(
     provider.apiStyle,
     { budgetTokens: thinkingBudget },
-    { hasTools: false, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId) },
+    { hasTools: false, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry) },
   );
 
   try {
@@ -154,7 +155,7 @@ async function runMultiStepAgent(
   const proto = resolveProtocolOptions(
     provider.apiStyle,
     { budgetTokens: thinkingBudget },
-    { hasTools: true, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId) },
+    { hasTools: true, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry) },
   );
 
   log.info('multi-step agent', { name: agent.name, depth: depth ?? 0, tools: agent.allowedTools, maxSteps });

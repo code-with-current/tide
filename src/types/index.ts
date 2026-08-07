@@ -327,6 +327,7 @@ export type ToolName =
   | 'multi_edit'
   | 'write_file'
   | 'list_dir'
+  | 'directory_tree'
   | 'glob'
   | 'bash'
   | 'bash_output'

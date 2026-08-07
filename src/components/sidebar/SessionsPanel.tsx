@@ -9,6 +9,7 @@ import {
   ArchiveIcon,
   ChevronDown,
   FolderOpen,
+  GitFork,
   X,
 } from "lucide-react";
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -27,6 +28,7 @@ import { bucketByRecency, cn, formatRelative } from "@/lib/utils";
 import { getEffectiveKeys } from "@/lib/shortcuts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ForkSessionDialog } from "@/components/modals/ForkSessionDialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -269,6 +271,7 @@ function SessionItem({
   const [isRenaming, setIsRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(session.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [forkOpen, setForkOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -403,6 +406,9 @@ function SessionItem({
                     >
                       <Pencil className="size-3.5" /> Rename
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setForkOpen(true)}>
+                      <GitFork className="size-3.5" /> Fork…
+                    </DropdownMenuItem>
                     {!archived ? (
                       <DropdownMenuItem
                         onClick={() => archiveSession.mutate(session.id)}
@@ -508,6 +514,9 @@ function SessionItem({
         >
           <Pencil className="size-3.5" /> Rename
         </ContextMenuItem>
+        <ContextMenuItem onClick={() => setForkOpen(true)}>
+          <GitFork className="size-3.5" /> Fork…
+        </ContextMenuItem>
         {!archived ? (
           <ContextMenuItem onClick={() => archiveSession.mutate(session.id)}>
             <Archive className="size-3.5" /> Archive
@@ -553,6 +562,14 @@ function SessionItem({
           </ContextMenuSubContent>
         </ContextMenuSub>
       </ContextMenuContent>
+      <ForkSessionDialog
+        open={forkOpen}
+        onOpenChange={setForkOpen}
+        sourceSessionId={session.id}
+        sourceTitle={session.title}
+        sourceModelId={'modelId' in session ? session.modelId : undefined}
+        sourceProviderId={'providerId' in session ? session.providerId : undefined}
+      />
     </ContextMenu>
   );
 }

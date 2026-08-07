@@ -12,6 +12,7 @@ import {
   Search,
   KeyRound,
   RefreshCw,
+  Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
@@ -312,6 +313,9 @@ function ProviderFormDialog({
   const [rows, setRows] = useState<Row[]>([
     { alias: "", modelId: "", context: "" },
   ]);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [detected, setDetected] = useState(false);
 
   // Follow the protocol with its canonical endpoint when toggling style
   // (only if the URL is empty or still a default). Mirrors ProviderDetail.
@@ -354,6 +358,44 @@ function ProviderFormDialog({
       next[i] = { ...next[i], ...patch };
       return next;
     });
+
+  const detectProtocol = async () => {
+    if (!baseUrl.trim() || !apiKey.trim()) return;
+    setDetecting(true);
+    setDetectError(null);
+    setDetected(false);
+    try {
+      const result = await window.tideIpc?.detectProviderProtocol({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim() });
+      if (!result) {
+        setDetectError('IPC unavailable.');
+      } else if ('error' in result) {
+        setDetectError(result.error);
+      } else {
+        setApiStyle(result.apiStyle);
+        setDetected(true);
+        if (result.models.length > 0) {
+          setRows(result.models.map((m: any) => ({
+            alias: m.alias ?? m.modelId ?? m.id,
+            modelId: m.modelId ?? m.id,
+            context: m.contextWindow ? String(m.contextWindow) : "",
+            catalogId: m.catalogId,
+            reasoning: m.reasoning,
+            reasoningMandatory: m.reasoningMandatory,
+            supportedEfforts: m.supportedEfforts,
+            priceLabel: m.priceLabel,
+            inputCostPerToken: m.inputCostPerToken,
+            outputCostPerToken: m.outputCostPerToken,
+            cacheReadCostPerToken: m.cacheReadCostPerToken,
+            cacheWriteCostPerToken: m.cacheWriteCostPerToken,
+          })));
+        }
+      }
+    } catch (e: any) {
+      setDetectError(e?.message ?? 'Detection failed.');
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -441,6 +483,34 @@ function ProviderFormDialog({
                 . Stored in the OS keychain.
               </p>
             </FormField>
+          </div>
+
+          {/* Auto-detect protocol + fetch models */}
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              disabled={!baseUrl.trim() || !apiKey.trim() || detecting}
+              onClick={detectProtocol}
+            >
+              {detecting ? (
+                <><RefreshCw className="size-3.5 animate-spin" /> Detecting…</>
+              ) : detected ? (
+                <><Check className="size-3.5 text-success" /> Detected: {apiStyle}</>
+              ) : (
+                <><Zap className="size-3.5" /> Auto-Detect Protocol</>
+              )}
+            </Button>
+            {detectError && (
+              <span className="text-[11px] text-destructive/80">{detectError}</span>
+            )}
+            {detected && !detectError && (
+              <span className="text-[11px] text-muted-foreground/60">
+                Protocol + {rowsToModels().length} models auto-filled.
+              </span>
+            )}
           </div>
 
           <div className="space-y-2">

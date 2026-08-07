@@ -1,17 +1,16 @@
-/** Pure layout derivation: single pass over the block list routes each block to its visual section (thinking / process / edits / answer / followup). Cheap (microseconds) and memoized in BlockList via useMemo on the blocks array reference. */
+/** Pure layout derivation: single pass over the block list routes each block to its visual section (thinking / process / answer / followup). Edits render inline within the process section in emission order. */
 
 import type { Block, ReasoningBlock, TextBlock, ToolBlock, FollowupBlock } from '@/types';
 import { isFailedStatus } from '@/lib/stream/blockState';
 
 export interface TurnLayout {
   thinking?: ReasoningBlock;
-  /** Non-edit tools + narration text, in emission order. */
+  /** All tools (including edits) + narration text, in emission order. */
   process: Array<ToolBlock | TextBlock>;
-  /** Edit tool blocks — hoisted into their own always-visible section. */
+  /** Kept for back-compat — always empty now (edits merged into process). */
   edits: ToolBlock[];
   answer?: TextBlock;
   followup?: FollowupBlock;
-  /** Derived totals for the header + process summary line. */
   totals: {
     commands: number;
     edits: number;
@@ -36,19 +35,15 @@ export function deriveLayout(blocks: Block[] | undefined): TurnLayout {
         if (!layout.thinking) layout.thinking = b;
         break;
       case 'tool':
-        // Tally totals regardless of where it renders.
         layout.totals[b.category]++;
         if (isFailedStatus(b.status)) layout.totals.failedCount++;
         if (b.durationMs != null) layout.totals.totalMs += b.durationMs;
-        // Edits are hoisted; everything else goes in process.
-        if (b.category === 'edits') layout.edits.push(b);
-        else layout.process.push(b);
+        // All tools (including edits) render inline in process, in emission order.
+        layout.process.push(b);
         break;
       case 'text':
         if (b.isAnswer) {
           if (!layout.answer) layout.answer = b;
-          // Defensive: a second answer block (shouldn't happen with the
-          // reducer's positional rule) gets appended.
           else layout.answer.text += '\n\n' + b.text;
         } else {
           layout.process.push(b);

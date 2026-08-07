@@ -185,20 +185,16 @@ export type { VectorHit, FtsHit };
 export function createMemoryTool(ctx: ToolContext) {
   return tool({
     description:
-      'Semantic search over the active workspace\'s RAG index. Use this when you ' +
-      'need to find code by MEANING — concepts, intent, "how is X handled" — rather ' +
-      'than exact strings (use grep for exact matches). Returns up to K chunks ranked ' +
-      'by vector similarity + FTS5 text match, each with file path, line range, ' +
-      'symbol name, and source body. Requires the workspace to have RAG enabled AND ' +
-      'ingested via Settings → Memory & RAG; the tool returns a hint instead of failing ' +
-      'if either precondition is missing.',
+      'FIRST tool to call for ANY codebase question. Searches the workspace RAG index ' +
+      'by meaning and returns ranked code chunks in ~0.5s. Call this BEFORE directory_tree, ' +
+      'list_dir, read_file, or grep. Returns file path + line range + source body for each match. ' +
+      'Example: memory({ query: "how is authentication handled" }) → returns the auth files + code.',
     inputSchema: z.object({
       query: z
         .string()
         .describe(
-          'What to look for. Natural language ("how do we handle user auth") OR ' +
-          'code-shaped ("fetchUser", "function add(a, b)") both work — the embedder ' +
-          'is code-tuned.',
+          'Natural language query describing what you are looking for. Examples: ' +
+          '"user authentication flow", "database connection setup", "API route definitions".',
         ),
       k: z
         .number()
@@ -221,13 +217,13 @@ export const memoryTool: ToolRegistration = {
   definition: {
     name: 'memory' as const,
     description:
-      'Semantic search over the active workspace\'s RAG index. Use for meaning-based ' +
-      'lookups: "how is X handled", "where do we validate Y". Returns top-K chunks ' +
-      'with file path + line range + symbol + body.',
+      'FIRST tool to call for ANY codebase question. Searches the workspace RAG index ' +
+      'by meaning and returns ranked code chunks in ~0.5s. Call BEFORE directory_tree, ' +
+      'list_dir, read_file, or grep. Returns file path + line range + source body.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'What to look for (natural language or code-shaped).' },
+        query: { type: 'string', description: 'Natural language: "how is authentication handled", "database setup", "API routes".' },
         k: { type: 'number', description: `Top-K results. Default ${DEFAULT_K}, max ${MAX_K}.` },
       },
       required: ['query'],

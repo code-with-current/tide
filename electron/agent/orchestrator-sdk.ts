@@ -158,6 +158,34 @@ interface SdkTurn {
 
 const activeTurns = new Map<string, SdkTurn>();
 
+/** Abort all active turns and persist their partial state. Called on app quit so in-progress responses aren't lost. */
+export function abortAllTurns(): void {
+  for (const [sessionId, turn] of activeTurns) {
+    try {
+      turn.controller.abort();
+      // Persist the partial assistant message directly to the session store
+      // (the renderer's freeze effect won't run — the app is quitting).
+      const blocks = finalizeBlocks(turn, 'aborted');
+      const { addAssistantMessage, addUsage } = require('../ipc/sessions.js') as typeof import('../ipc/sessions.js');
+      addAssistantMessage(sessionId, {
+        content: turn.finalText || '',
+        blocks,
+        reasoning: turn.finalReasoning || undefined,
+        reasoningTokens: turn.usage.reasoningTokens || undefined,
+        toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+        timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
+        turn: { stopReason: 'aborted' },
+      });
+      if (turn.usage.inputTokens > 0 || turn.usage.outputTokens > 0) {
+        addUsage(sessionId, turn.usage, turn.lastStepUsage ?? turn.usage);
+      }
+    } catch (e) {
+      log.warn('abortAllTurns: failed to persist partial turn', { sessionId, err: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  activeTurns.clear();
+}
+
 // ─── Per-session sequence counter (mirrors legacy orchestrator) ──────
 const seqCounters = new Map<string, number>();
 function nextSeq(sessionId: string): number {
@@ -378,7 +406,8 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   // Execute skill invocations for any `[[LOAD_SKILL:…]]` markers BEFORE the model thinks: read SKILL.md, emit a visible load_skill card, strip the marker, append the body to the SYSTEM PROMPT (not the user message — GLM-5.2 ignored user-message directives).
   // Create the turn controller — shared between prepareStep + onStepEnd hooks. Set the compaction config's context window from the model's known capability.
   const turnController = createTurnController(effectiveMaxSteps);
-  const knownCtxWindow = contextWindowSize(modelId);
+  const modelEntry = provider.models.find((m) => m.modelId === modelId);
+  const knownCtxWindow = contextWindowSize(modelId, modelEntry);
   // Read compaction settings from agentSettings (Settings → Permissions & Caps).
   // Falls back to defaults if missing or disabled.
   const compactionEnabled = agentSettings.compactionEnabled ?? true;
@@ -431,19 +460,34 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   const ragEnabled = store.listRagEnabledWorkspaces().includes(workspaceId);
   if (ragEnabled) {
     systemPrompt +=
-      `\n\n# Codebase recall\n` +
-      `The \`memory\` tool is available and this workspace has a semantic index ` +
-      `(RAG). For questions about HOW the codebase works — architecture, patterns, ` +
-      `"where is X handled", "how does Y work" — call \`memory\` FIRST with a natural-language ` +
-      `query. It returns ranked code chunks in one call (~0.5s) and is much faster than ` +
-      `exploring with list_dir + read_file. Fall back to read_file/grep only when you need ` +
-      `the full file or an exact-string search the index might miss.`;
+      `\n\n# ⚡ Codebase recall — ALWAYS START HERE\n` +
+      `The \`memory\` tool searches the workspace's semantic index (RAG) and returns ranked code chunks in ~0.5s.\n\n` +
+      `MANDATORY: Before using directory_tree, list_dir, read_file, or grep to explore the codebase, ` +
+      `you MUST call \`memory\` first with a natural-language query describing what you're looking for. ` +
+      `Only fall back to directory_tree/read_file/grep if memory returns no relevant results, or you need ` +
+      `the complete file contents (memory returns ~20-line chunks).\n\n` +
+      `Examples:\n` +
+      `- "How is user authentication handled?" → memory({ query: "user authentication flow" })\n` +
+      `- "Where are API routes defined?" → memory({ query: "API route definitions" })\n` +
+      `- "How does the database connection work?" → memory({ query: "database connection setup" })`;
   }
+
+  // Context management: prevent premature "start fresh" suggestions.
+  // The model (especially GLM-5.2) tends to suggest starting a new session
+  // even at 5% context usage. Only suggest forking when context is genuinely
+  // full (the auto-compact system handles this — the model should never
+  // second-guess context size on its own).
+  systemPrompt +=
+    `\n\n# Context awareness\n` +
+    `Do NOT suggest starting a new session, forking, or "starting fresh" unless the ` +
+    `system explicitly tells you the context window is full. The app manages context ` +
+    `automatically (auto-compaction + fork). Continue working normally regardless of ` +
+    `how many turns have passed. Never mention context limits, token counts, or session ` +
+    `length in your responses.`;
 
   // Resolve the model + thinking budget. `null` budget → thinking disabled. Thinking is also disabled when the model doesn't support reasoning. EXCEPTION: mandatory-reasoning models force a budget even at level 'off'.
   const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
-  const modelSupportsThinking = supportsThinking(modelId);
-  const modelEntry = provider.models.find((m) => m.modelId === modelId);
+  const modelSupportsThinking = supportsThinking(modelId, modelEntry);
   const reasoningMandatory = modelEntry?.reasoningMandatory === true;
   let thinking = modelSupportsThinking ? thinkingPayload(thinkingLevel) : null;
   if (reasoningMandatory && !thinking) {
@@ -501,6 +545,25 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
 
   // ── Turn-level retry loop ───────────────────────────────────────────
   // Retry transient provider errors up to TURN_MAX_RETRIES times (emits `retry` events for UI). Aborts flush immediately.
+
+  // Periodic flush: save partial state to the session store every 5s during streaming
+  // so a crash / force-quit doesn't lose in-progress work. Cleared on turn end.
+  const flushTimer = setInterval(() => {
+    try {
+      const blocks = finalizeBlocks(turn, 'aborted');
+      if (turn.finalText || turn.toolCalls.length > 0 || turn.blocks.length > 0) {
+        const { updatePartialAssistantMessage } = require('../ipc/sessions.js') as typeof import('../ipc/sessions.js');
+        updatePartialAssistantMessage(sessionId, messageId, {
+          content: turn.finalText || '',
+          blocks,
+          reasoning: turn.finalReasoning || undefined,
+          toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+          timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
+        });
+      }
+    } catch { /* best-effort — don't crash the stream over a flush */ }
+  }, 5_000);
+
   let retryCount = 0;
 
   turnRetryLoop: for (;;) {
@@ -700,6 +763,10 @@ export async function runSdkTurn(wc: WebContents, payload: RunTurnPayload) {
   } // end try
   } // end turnRetryLoop for(;;)
 
+  clearInterval(flushTimer);
+  activeTurns.delete(sessionId);
+  activeCtxs.delete(sessionId);
+
   // Runs once after the retry loop exits (success, abort, or terminal error).
   clearSession(sessionId);
   // NOTE: clearSessionRules intentionally NOT called here. Session-scoped
@@ -766,7 +833,7 @@ async function runStream(wc: WebContents, turn: SdkTurn, args: StreamArgs): Prom
   const resolved = resolveProtocolOptions(
     args.provider.apiStyle,
     args.thinking,
-    { hasTools, modelId: args.modelId, maxOutputTokens: resolveMaxOutputTokens(args.modelId), providerBaseUrl: args.provider.baseUrl },
+    { hasTools, modelId: args.modelId, maxOutputTokens: resolveMaxOutputTokens(args.modelId, args.provider.models.find((m) => m.modelId === args.modelId)), providerBaseUrl: args.provider.baseUrl },
   );
   // An explicit override (length-cap escalation) wins over the protocol's
   // default — the model already proved it needs more room than the default

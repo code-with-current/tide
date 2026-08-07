@@ -3,7 +3,6 @@ import type { Block } from '@/types';
 import { deriveLayout } from './blockLayout';
 import { ThinkingSection } from '@/components/chat/ThinkingSection';
 import { ProcessSection } from '@/components/chat/ProcessSection';
-import { EditsSection } from '@/components/chat/EditsSection';
 import { AnswerBlock } from '@/components/chat/AnswerBlock';
 import { FollowupPrompt } from '@/components/chat/FollowupPrompt';
 
@@ -22,18 +21,18 @@ interface BlockListProps {
   blocks: Block[] | undefined;
   streaming: boolean;
   stopped?: boolean;
-  /** Turn-level stop reason — suppresses the "tool-only" placeholder
-   *  when the turn failed ('refusal') so we don't show a neutral message
-   *  on top of an error. */
   stopReason?: string | null;
   sessionId: string | null;
   messageId: string;
   onViewFile?: (path: string) => void;
+  sessionTitle?: string;
+  sessionModelId?: string;
+  sessionProviderId?: string;
 }
 
 /** Walks the canonical block list and routes each block via deriveLayout. Memoized sections; preserves scroll on streaming→completed transition when answer is in view. */
 export const BlockList = memo(function BlockList({
-  blocks, streaming, stopped, stopReason, sessionId, messageId, onViewFile,
+  blocks, streaming, stopped, stopReason: _stopReason, sessionId, messageId, onViewFile, sessionTitle, sessionModelId, sessionProviderId,
 }: BlockListProps) {
   const layout = useMemo(() => deriveLayout(blocks), [blocks]);
 
@@ -115,20 +114,16 @@ export const BlockList = memo(function BlockList({
         </div>
       )}
 
-      {layout.edits.length > 0 && (
-        <EditsSection
-          edits={layout.edits}
-          onViewFile={onViewFile}
-        />
-      )}
-
       <div ref={answerRef}>
         <AnswerBlock
           text={layout.answer?.text ?? ''}
           streaming={streaming}
           stopped={stopped}
-          failed={stopReason === 'refusal'}
           hasProcessContent={hasProcessContent}
+          sessionId={sessionId}
+          sessionTitle={sessionTitle}
+          sessionModelId={sessionModelId}
+          sessionProviderId={sessionProviderId}
         />
       </div>
 

@@ -9,7 +9,7 @@ import { workspaces as mockWorkspaces, sessionsByWorkspace, allSessions, fileTre
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry';
-import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
+import { getSessionTodos, getSessionGroups, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, gitStage, gitCommit, gitDiff } from './git.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
@@ -653,15 +653,13 @@ export function registerIpcHandlers() {
   // to the renderer whenever a tool call updates it so the floating panel
   // reflects progress live.
   ipcMain.handle('tide:listTodos', async (_e, sessionId: string) => {
-    return getSessionTodos(sessionId);
+    return getSessionGroups(sessionId);
   });
 
   ipcMain.handle('tide:subscribeTodos', (event) => {
     const wc = event.sender;
-    const onUpdate = ({ sessionId, todos }: { sessionId: string; todos: any[] }) => {
-      // Filter to the active window's sessions — every renderer receives
-      // updates; each drops events for sessions it isn't viewing.
-      if (!wc.isDestroyed()) wc.send('todos:updated', { sessionId, todos });
+    const onUpdate = ({ sessionId, groups }: { sessionId: string; groups: any[] }) => {
+      if (!wc.isDestroyed()) wc.send('todos:updated', { sessionId, groups });
     };
     todoEvents.on(onUpdate);
     // Only register the 'closed' cleanup listener ONCE per WebContents —
@@ -686,7 +684,7 @@ export function registerIpcHandlers() {
   handle('tide:updateSessionSettings', async (
     _e,
     sessionId: string,
-    patch: { modelId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+    patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' },
   ) => {
     return sessions.updateSessionSettings(sessionId, patch);
   });
@@ -742,7 +740,7 @@ export function registerIpcHandlers() {
       if (!session) return null;
       const firstUser = session.messages.find((m: any) => m.role === 'user');
       if (!firstUser || !firstUser.content) return null;
-      // Resolve the session's chat provider so title-gen runs on the same model it chats with (exact providerId match, then any enabled provider serving this modelId; falls back to system model).
+      // Resolve the session's chat provider — same path as the orchestrator.
       const providers = store.listProviders();
       let provider = providers.find((p) => p.id === session.providerId);
       if (!provider && session.modelId) {
@@ -750,6 +748,7 @@ export function registerIpcHandlers() {
           (p) => p.enabled && p.models.some((m) => m.modelId === session.modelId),
         );
       }
+      if (!provider) return null;
       const title = await generateSessionTitle(String(firstUser.content), {
         provider,
         modelId: session.modelId,
@@ -821,6 +820,15 @@ export function registerIpcHandlers() {
 
   handle('tide:session:removeWorktree', async (_e, sessionId: string) => {
     await sessions.removeWorktree(sessionId);
+  });
+
+  handle('tide:session:fork', async (
+    _e,
+    sourceId: string,
+    newModelId: string,
+    opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  ) => {
+    return sessions.forkWithSummary(sourceId, newModelId, opts);
   });
 
   ipcMain.handle('tide:workspace:listBranches', async (_e, workspaceId: string) => {
@@ -932,6 +940,69 @@ export function registerIpcHandlers() {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, error: msg };
     }
+  });
+
+  // ── Auto-detect API protocol from baseUrl + apiKey ────────────────
+  // Probes both OpenAI and Anthropic /models endpoints in parallel; returns
+  // whichever protocol gets a valid JSON response. Used by the Add Provider
+  // form to auto-select the protocol when the user enters baseUrl + apiKey.
+  handle('tide:provider:detectProtocol', async (
+    _e,
+    input: { baseUrl: string; apiKey: string },
+  ): Promise<{ apiStyle: 'openai' | 'anthropic'; models: ProviderModelMeta[] } | { error: string }> => {
+    const { baseUrl, apiKey } = input;
+    if (!baseUrl.trim() || !apiKey.trim()) return { error: 'Base URL and API key are required.' };
+    const cleanBase = baseUrl.replace(/\/+$/, '');
+
+    // Build candidate URLs for both protocols.
+    const candidates: Array<{ style: 'openai' | 'anthropic'; url: string; headers: Record<string, string> }> = [];
+    // OpenAI: {baseUrl}/models
+    candidates.push({
+      style: 'openai',
+      url: `${cleanBase}/models`,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    });
+    // Anthropic: {baseUrl}/v1/models (or {baseUrl}/models if /v1 already present)
+    const hasVersion = /\/v\d+$/.test(cleanBase);
+    candidates.push({
+      style: 'anthropic',
+      url: hasVersion ? `${cleanBase}/models` : `${cleanBase}/v1/models`,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    });
+
+    // Race both probes — first valid JSON response with a models array wins.
+    const probe = async (c: typeof candidates[0]): Promise<{ style: 'openai' | 'anthropic'; models: ProviderModelMeta[] } | null> => {
+      try {
+        const res = await fetch(c.url, { method: 'GET', headers: c.headers, signal: AbortSignal.timeout(8_000) });
+        if (!res.ok) return null;
+        const ct = res.headers.get('content-type') ?? '';
+        let parsed: any;
+        if (ct.includes('application/json')) {
+          parsed = await res.json();
+        } else {
+          const text = await res.text().catch(() => '');
+          parsed = JSON.parse(text); // throws if not JSON → null
+        }
+        const list = parsed?.data ?? parsed?.models;
+        if (Array.isArray(list) && list.length > 0) {
+          await bootstrapCatalog();
+          return { style: c.style, models: enrichBareModels(normalizeProbeList(list)) };
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
+    const results = await Promise.allSettled(candidates.map(probe));
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) return r.value;
+    }
+    return { error: 'Could not detect API protocol — neither OpenAI nor Anthropic endpoint responded with a valid models list. Check the base URL and API key.' };
   });
 
   // ── Renderer log forwarding ───────────────────────────────────────

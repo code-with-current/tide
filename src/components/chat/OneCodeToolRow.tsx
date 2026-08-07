@@ -4,6 +4,7 @@ import {
   FilePen,
   Terminal,
   Folder,
+  FolderTree,
   GitBranch,
   Bot,
   ListChecks,
@@ -38,6 +39,7 @@ const ICON: Record<ToolName, React.ReactNode> = {
   multi_edit: <FilePen className="size-3 text-muted-foreground/60" />,
   write_file: <FilePen className="size-3 text-muted-foreground/60" />,
   list_dir: <Folder className="size-3 text-muted-foreground/60" />,
+  directory_tree: <FolderTree className="size-3 text-muted-foreground/60" />,
   glob: <FileSearch className="size-3 text-muted-foreground/60" />,
   bash: <Terminal className="size-3 text-muted-foreground/60" />,
   bash_output: <Terminal className="size-3 text-muted-foreground/60" />,
@@ -139,20 +141,16 @@ function hasBody(call: ToolCall): boolean {
   if (call.display?.kind === 'command') return true;
   if (call.display?.kind === 'file_list') return true;
   if (call.display?.kind === 'file_loaded') return true;
-  if (call.output && call.toolName === 'bash') return true;
-  // ask_followup_question always has a body — the question, the options,
-  // and (once resolved) the user's answer. Without this, the row's expand
-  // button stays disabled and FollowupToolBody never renders, so the
-  // answer is invisible even though it's stored on call.output.
   if (call.toolName === 'ask_followup_question') return true;
+  // Any tool with output text has a body — MCP tools, bash, git, etc.
+  if (call.output) return true;
   return false;
 }
 
-/** Initial open state for the row body. ask_followup_question defaults to
- *  expanded — the question + answer are the whole point of the row and
- *  shouldn't require a click to reveal. Other tools start collapsed. */
+/** Initial open state for the row body. ask_followup_question + directory_tree default to expanded — their results are most useful at a glance. */
+/** Initial open state for the row body. ask_followup_question + directory_tree default to expanded. */
 function initialOpenFor(call: ToolCall): boolean {
-  return call.toolName === 'ask_followup_question';
+  return call.toolName === 'ask_followup_question' || call.toolName === 'directory_tree';
 }
 
 /** Inline expandable body — shown below the row when expanded. */

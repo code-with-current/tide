@@ -12,10 +12,10 @@ export type ScreenName = 'splash' | 'onboarding' | 'consent' | 'main' | 'setting
 // Re-export for back-compat — ThinkingLevel now lives in @/types (with 'off' added).
 export type { ThinkingLevel };
 
-/** Persist per-session settings to the main process. Fire-and-forget — in-memory state already updated; a failed persist just means the change won't survive a restart. */
+/** Persist per-session settings to the main process. Only autonomyMode/thinkingLevel are mutable (model is locked at creation; changing it requires forking). Fire-and-forget. */
 function persistSessionSettings(
   sessionId: string,
-  patch: { modelId?: string; providerId?: string; autonomyMode?: AutonomyMode; thinkingLevel?: ThinkingLevel },
+  patch: { autonomyMode?: AutonomyMode; thinkingLevel?: ThinkingLevel },
 ): void {
   try {
     void updateSessionSettings(sessionId, patch);
@@ -506,12 +506,8 @@ export const useUi = create<UiState>()(
   closeAllDialogs: () => set({ dialogs: { addWorkspace: false, addProvider: false } }),
   setSelectedModel: (providerId, selectedModelId) => {
     set({ selectedProviderId: providerId, selectedModelId });
-    // Persist to the active session, if any. Fire-and-forget; the api client
-    // is safe to call from anywhere and we don't need to await it here.
-    const sid = get().activeSessionId;
-    if (sid && selectedModelId) {
-      void persistSessionSettings(sid, { modelId: selectedModelId, providerId: providerId ?? undefined });
-    }
+    // Model is locked at session creation — don't persist to an existing session.
+    // This selection only affects the NEXT session created (new-session screen).
   },
   setAutonomyMode: (autonomyMode) => {
     set({ autonomyMode });

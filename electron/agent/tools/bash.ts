@@ -1,4 +1,4 @@
-/** bash tool: shell execution in the workspace root with full operator support. Bounded by the autonomy-mode permission gate (riskTier 'destructive') plus a hard blocklist for catastrophic patterns. Output capped at 50KB / 1000 lines. Exports both legacy `bashTool` and new `createBashTool(ctx)` sharing one `runBash` body. */
+/** bash tool: shell execution in the workspace root with full operator support. Supports background mode for long-running processes (dev servers, watchers). Bounded by the autonomy-mode permission gate (riskTier 'destructive') plus a hard blocklist for catastrophic patterns. Output capped at 50KB / 1000 lines. */
 
 import { spawn } from 'child_process';
 import { toolEnv, wrapWithShell, killProcessTree } from './tool-env';
@@ -8,6 +8,7 @@ import type { ToolRegistration } from './types';
 import type { ToolContext } from './tool-context';
 import { getToolMeta } from './tool-meta';
 import { withPermission } from '../permission-wrapper';
+import { spawnBackground, safeCwd } from './background-shell';
 
 const MAX_OUTPUT = 50 * 1024;
 const MAX_LINES = 1000;
@@ -37,11 +38,12 @@ function blockedReason(command: string): string | null {
   return null;
 }
 
-/** Shared execute body — parameterized so both envelopes can call it. */
+/** Shared execute body — parameterized so both envelopes can call it. When background is true, spawns via spawnBackground and returns immediately. */
 export async function runBash(
   command: string,
   workspaceRoot: string,
   timeoutMs: number,
+  background?: boolean,
 ): Promise<{
   status: 'executed' | 'failed' | 'rejected' | 'timeout';
   output: string;
@@ -54,6 +56,19 @@ export async function runBash(
 
   const blocked = blockedReason(trimmed);
   if (blocked) return { status: 'rejected', output: blocked };
+
+  // Background mode: spawn in the process registry, return immediately with the shell id.
+  // The model polls output via bash_output and stops it via kill_shell.
+  if (background) {
+    const id = `sh_${Math.random().toString(36).slice(2, 8)}`;
+    spawnBackground(id, trimmed, safeCwd(workspaceRoot));
+    return {
+      status: 'executed',
+      output: `Backgrounded as ${id}. Use bash_output({ shell_id: "${id}" }) to read new output, kill_shell({ shell_id: "${id}" }) to stop it.`,
+      meta: 'backgrounded',
+      display: { kind: 'command', command: trimmed },
+    };
+  }
 
   // Platform-aware shell wrapping: Unix uses $SHELL -l -c (resolves nvm/fnm),
   // Windows uses cmd.exe /c. toolEnv() augments PATH for GUI app context.
@@ -80,9 +95,11 @@ export async function runBash(
       if (!isWin) setTimeout(() => killProcessTree(child.pid, 'SIGKILL'), 500);
     }, timeoutMs);
 
-    // Early timeout for commands that are likely stuck (no output after 15s
-    // AND the command is not a known long-runner). Prevents a hung `npm
-    // install` or network fetch from blocking the agent for 2 minutes.
+    // Early timeout for commands that are likely stuck (no output after 60s
+    // AND the command is not a known long-runner). Package managers (npm,
+    // pnpm, yarn, pip, cargo, bun) can go silent for 30s+ while resolving.
+    const LONG_RUNNERS = /\b(npm|npx|pnpm|yarn|pnpx|pip|pip3|uv|poetry|cargo|go\s+mod|bun|brew|apt|dnf|gem\s+install)\b/;
+    const earlyKillAfter = LONG_RUNNERS.test(trimmed) ? 120_000 : 60_000;
     const earlyKill = setTimeout(() => {
       if (killed) return;
       if (stdout.length === 0 && stderr.length === 0) {
@@ -90,7 +107,7 @@ export async function runBash(
         killProcessTree(child.pid, 'SIGTERM');
         if (!isWin) setTimeout(() => killProcessTree(child.pid, 'SIGKILL'), 500);
       }
-    }, 15_000);
+    }, earlyKillAfter);
 
     child.stdout?.on('data', (d: Buffer) => {
       if (stdout.length >= MAX_OUTPUT) { truncated = true; return; }
@@ -154,20 +171,24 @@ export const bashTool: ToolRegistration = {
       'Use for builds, tests, linters, installs, git operations, and ad-hoc ' +
       'inspection. Output is capped at 50KB / 1000 lines. Avoid destructive ' +
       'system commands — they are blocked. Prefer the dedicated tools ' +
-      '(read_file, grep, glob) when they fit; use bash when they do not.',
+      '(read_file, grep, glob) when they fit; use bash when they do not. ' +
+      'For long-running commands (dev servers, watchers), set background:true ' +
+      'to spawn in the background — the command returns immediately with a ' +
+      'shell_id; poll output via bash_output, stop via kill_shell.',
     input_schema: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'Shell command to run.' },
+        background: { type: 'boolean', description: 'If true, spawn in the background and return a shell_id immediately. Use bash_output to poll and kill_shell to stop.', default: false },
       },
       required: ['command'],
     },
   },
   riskTier: 'destructive',
   requiresWorktree: false,
-  timeoutMs: 60_000,
+  timeoutMs: 500_000,
   autoApproveIn: ['full'],
-  execute: async (args, ctx) => runBash(String(args.command ?? ''), ctx.workspaceRoot, ctx.timeoutMs),
+  execute: async (args, ctx) => runBash(String(args.command ?? ''), ctx.workspaceRoot, ctx.timeoutMs, args.background === true),
 };
 
 // ─── New SDK factory envelope (Phase 3+) ───────────────────────────────
@@ -181,13 +202,17 @@ export function createBashTool(ctx: ToolContext) {
       'Use for builds, tests, linters, installs, git operations, and ad-hoc ' +
       'inspection. Output is capped at 50KB / 1000 lines. Avoid destructive ' +
       'system commands — they are blocked. Prefer the dedicated tools ' +
-      '(read_file, grep, glob) when they fit; use bash when they do not.',
+      '(read_file, grep, glob) when they fit; use bash when they do not. ' +
+      'For long-running commands (dev servers, watchers), set background:true ' +
+      'to spawn in the background — the command returns immediately with a ' +
+      'shell_id; poll output via bash_output, stop via kill_shell.',
     inputSchema: z.object({
       command: z.string().describe('Shell command to run.'),
+      background: z.boolean().optional().describe('If true, spawn in the background and return a shell_id immediately. Use bash_output to poll and kill_shell to stop.'),
     }),
-    execute: async ({ command }) =>
-      withPermission(ctx, 'bash', { command }, () =>
-        runBash(command, ctx.workspaceRoot, getToolMeta('bash').timeoutMs),
+    execute: async ({ command, background }) =>
+      withPermission(ctx, 'bash', { command, background }, () =>
+        runBash(command, ctx.workspaceRoot, getToolMeta('bash').timeoutMs, background === true),
       ),
   });
 }

@@ -12,6 +12,7 @@ import { NoWorkspaceState } from "@/components/chat/NoWorkspaceState";
 import { MissingWorkspaceScreen } from "./MissingWorkspaceScreen";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { VirtualizedChatList } from "@/components/chat/VirtualizedChatList";
+import { StickyScroll } from "@/lib/sticky-scroll";
 import { OptionsPopup } from "@/components/chat/OptionsPopup";
 import { TodoFloatingPanel } from "@/components/chat/TodoFloatingPanel";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
@@ -31,6 +32,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { createLogger } from "@/lib/logger";
 import { toast } from "@/lib/toast";
+import { cn, isMac } from "@/lib/utils";
 
 const log = createLogger("main-screen");
 
@@ -60,7 +62,6 @@ export function MainScreen() {
   // always-mounted (so TerminalPanel + xterm state survive Settings visits);
   // this flag lets effects no-op while hidden to avoid wasted work (auto-
   // scroll, streaming re-renders) on a display:none element.
-  const isActive = useUi((s) => s.screen === "main");
   const setSessionsPanelOpen = useUi((s) => s.toggleSessionsPanel);
   const setRightPanelOpen = useUi((s) => s.toggleRightPanel);
   const mainView = useUi((s) => s.mainView);
@@ -285,90 +286,43 @@ export function MainScreen() {
     setRightPanelOpen,
   ]);
 
-  // Scroll behavior: never force-scroll during streaming — auto-scroll ONLY when the user is already at the bottom OR just sent a message; show a floating "scroll to bottom" button (with a "new" badge for unseen streaming content) otherwise.
-  // isAtBottom tracks whether the user is "following" the stream at the bottom. userPinnedToBottom is stronger: once the user actively scrolls UP during streaming, we never auto-scroll again until they click scroll-to-bottom or send a new message — giving them full freedom to read history while a turn runs.
+  // StickyScroll — manages auto-scroll-to-bottom during streaming, unpin
+  // when user scrolls up, and the scroll-to-bottom button visibility.
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const userPinnedRef = useRef(true); // true = follow; false = user scrolled up
+  const stickyRef = useRef<StickyScroll | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    let rafPending = false;
-    let lastScrollTop = el.scrollTop;
-    const onScroll = () => {
-      if (rafPending) return;
-      rafPending = true;
-      requestAnimationFrame(() => {
-        rafPending = false;
-        const distanceFromBottom =
-          el.scrollHeight - el.scrollTop - el.clientHeight;
-        const atBottom = distanceFromBottom < 80;
-        // Detect an active upward scroll by the user (not a programmatic
-        // scroll-to-bottom). When detected, mark them as "not following"
-        // so the streaming auto-scroll effect leaves them alone.
-        if (el.scrollTop < lastScrollTop - 4 && !atBottom) {
-          userPinnedRef.current = false;
-        }
-        // Scrolling back to the bottom re-enables following.
-        if (atBottom) userPinnedRef.current = true;
-        lastScrollTop = el.scrollTop;
-        setIsAtBottom(atBottom);
-      });
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+    const scrollEl = scrollRef.current;
+    const contentEl = contentRef.current;
+    if (!scrollEl) return;
+    const sticky = new StickyScroll(scrollEl, { threshold: 80 });
+    sticky.onPinChange = (pinned) => setIsAtBottom(pinned);
+    if (contentEl) sticky.observe(contentEl);
+    stickyRef.current = sticky;
+    return () => { sticky.disconnect(); stickyRef.current = null; };
   }, []);
 
-  // Auto-scroll ONLY when the user is following (hasn't scrolled up) — once they scroll up during a stream, this effect no-ops until they click scroll-to-bottom or send a new message. Also no-ops while this screen is hidden (Settings open); MainScreen is always-mounted, so without this guard streaming would keep re-rendering a display:none element and burn CPU.
-  useEffect(() => {
-    if (!isActive) return;
-    if (!userPinnedRef.current) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const rafId = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(rafId);
-  }, [
-    isActive,
-    chatHistory.length,
-    streamingText,
-    streamingReasoning,
-    streamingToolCalls.length,
-    isStreaming,
-  ]);
-
-  // When the user sends a message (chatHistory grows with a user msg), snap
-  // to the bottom immediately and re-enable following.
+  // When the user sends a message, snap to bottom and re-pin.
   const prevHistoryLenRef = useRef(0);
   useEffect(() => {
     const newLen = chatHistory.length;
     if (newLen > prevHistoryLenRef.current) {
       const lastMsg = chatHistory[newLen - 1];
       if (lastMsg?.role === "user") {
-        const el = scrollRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-        userPinnedRef.current = true;
-        setIsAtBottom(true);
+        stickyRef.current?.scrollToBottom();
       }
     }
     prevHistoryLenRef.current = newLen;
   }, [chatHistory]);
 
-  // When switching sessions, snap to bottom and re-enable following.
+  // When switching sessions, snap to bottom.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    userPinnedRef.current = true;
-    setIsAtBottom(true);
+    stickyRef.current?.scrollToBottom();
   }, [activeSessionId]);
 
   const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    userPinnedRef.current = true;
-    setIsAtBottom(true);
+    stickyRef.current?.scrollToBottom({ smooth: true });
   }, []);
 
   // The streaming assistant message — built from the active session's stream.
@@ -477,6 +431,7 @@ export function MainScreen() {
       setSubmitting(true);
 
       let sessionId = activeSessionId;
+      let isNewSession = false;
 
       // Create a new session if none active.
       if (!sessionId && activeWorkspaceId) {
@@ -496,18 +451,11 @@ export function MainScreen() {
           },
         );
         sessionId = newSession.id;
+        isNewSession = true;
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
-        // Best-effort LLM title refinement (first message only). Fire-and-forget: the placeholder is already set; this renames server-side on resolve and invalidates the sessions list so the sidebar picks up the new title. Never awaits on the send path — a slow/stuck title call can't block the turn.
-        addTitleGenerating(newSession.id);
-        void api
-          .generateSessionTitle(newSession.id)
-          .then((generated) => {
-            if (generated && activeWorkspaceId) {
-              qc.invalidateQueries({ queryKey: ["sessions", activeWorkspaceId] });
-            }
-          })
-          .finally(() => removeTitleGenerating(newSession.id));
+        // Title generation moved below — it must run AFTER addMessage persists
+        // the first user message, otherwise the handler finds no user message.
 
         // Worktree isolation — if the user opted in from the new-session screen, create a git worktree for this session now (before the turn starts). The orchestrator picks up session.worktree.path automatically. On failure (branch exists, base missing), warn and continue without isolation — the user can still chat.
         if (payload.worktree?.enabled && sessionId) {
@@ -560,6 +508,21 @@ export function MainScreen() {
         // auto-derived from the first user message.
         if (activeWorkspaceId) {
           qc.invalidateQueries({ queryKey: ["sessions", activeWorkspaceId] });
+        }
+
+        // Title generation: fire AFTER addMessage persists the user message.
+        // The handler reads session.messages to find the first user message —
+        // if it runs before addMessage, it finds nothing and returns null.
+        if (isNewSession && sessionId) {
+          addTitleGenerating(sessionId);
+          void api
+            .generateSessionTitle(sessionId)
+            .then((generated) => {
+              if (generated && activeWorkspaceId) {
+                qc.invalidateQueries({ queryKey: ["sessions", activeWorkspaceId] });
+              }
+            })
+            .finally(() => removeTitleGenerating(sessionId));
         }
       }
 
@@ -750,9 +713,9 @@ export function MainScreen() {
           The transparent window shows the desktop around this card. */}
       <div
         ref={cardRef}
-        className="flex-1 flex flex-col min-w-0 min-h-0
-         overflow-hidden border border-input rounded-2xl drop-shadow-lg bg-background relative
-        "
+        className={cn("flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden border border-input rounded-2xl drop-shadow-lg bg-background relative",
+          isMac ? "my-3 mr-3" : ""
+        )}
       >
         {/* Top bar — spans sessions → right panel, inside the card.
             Panel toggle icons (left), drag region (center), terminal +
@@ -813,15 +776,15 @@ export function MainScreen() {
                       <TodoFloatingPanel sessionId={activeSessionId} />
                       <div
                         ref={scrollRef}
-                        className="flex-1 min-h-0 overflow-y-auto scroll px-6 py-5"
+                        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scroll px-6 py-5"
                       >
-                        <div className="max-w-3xl mx-auto flex flex-col gap-3">
+                        <div ref={contentRef} className="max-w-3xl mx-auto flex flex-col min-w-0 overflow-hidden">
                           {sessionLoading && chatHistory.length === 0 ? (
                             // Session messages are loading on switch — show a
                             // skeleton instead of flashing an empty chat.
                             <LoadingRows count={4} className="px-1" rowClassName="h-12" />
                           ) : (
-                            <VirtualizedChatList messages={chatHistory} scrollRef={scrollRef} />
+                            <VirtualizedChatList messages={chatHistory} />
                           )}
 
                           {streamingMessage && (
