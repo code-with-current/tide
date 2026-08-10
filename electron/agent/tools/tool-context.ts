@@ -7,6 +7,26 @@ import type { RuleSet } from '../permissions/rules.js';
 /** Minimal emit signature — the orchestrator injects a part-shaped event. */
 export type ToolEmit = (event: unknown) => void;
 
+/** Callback a sub-agent uses to surface its internal tool-call lifecycle as
+ *  real (nested) AgentEvents. The orchestrator injects this when building the
+ *  top-level ToolContext; sub-agents read it and call it per part. Each event
+ *  is an AgentEvent-shaped object (without seq — the bridge assigns one). */
+export type EmitToolEvent = (event: {
+  type: 'tool_call_start' | 'tool_call_delta' | 'tool_call' | 'tool_executing' | 'tool_result';
+  parentToolCallId: string;
+  toolCallId: string;
+  toolName?: string;
+  delta?: string;
+  arguments?: Record<string, unknown>;
+  argPreview?: string;
+  riskTier?: import('../../../../src/types/index.js').RiskTier;
+  status?: import('../../../../src/types/index.js').ToolCallStatus;
+  output?: string;
+  display?: import('../../../../src/types/index.js').ToolDisplay;
+  durationMs?: number;
+  meta?: string;
+}) => void;
+
 export interface ToolContext {
   sessionId: string;
   workspaceRoot: string;
@@ -23,6 +43,11 @@ export interface ToolContext {
   onUsage: (u: Usage) => void;
   /** Emit an IPC event to the renderer (part-shaped). */
   emit: ToolEmit;
+  /** Surface a sub-agent's internal tool-call lifecycle as nested AgentEvents.
+   *  Set by the orchestrator on the top-level ctx; sub-agents call this for
+   *  each tool part they iterate. Undefined on legacy/contexts that don't
+   *  support sub-agent event streaming (sub-agent tools stay invisible). */
+  emitToolEvent?: EmitToolEvent;
   /** Abort signal for the parent turn — checked by long-running tools. */
   abortSignal: AbortSignal;
   /** Recursion depth for sub-agent dispatch. 0 = main orchestrator, 1+ = nested.

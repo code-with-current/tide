@@ -172,7 +172,12 @@ declare global {
         /** Existing local folder flow: run `git init` when the folder isn't
          *  already a git repo. Ignored for clone/scaffold flows. */
         initGit?: boolean;
+        /** Correlates tide:workspace:progress milestone events back to this
+         *  request (the workspace id doesn't exist yet). */
+        requestId?: string;
       }): Promise<import('./index').Workspace>;
+      /** Subscribe to workspace-creation milestones (tide:workspace:progress). */
+      onWorkspaceProgress: (cb: (e: import('./index').WorkspaceProgressEvent) => void) => () => void;
 
       // Sessions
       listSessions(workspaceId: string): Promise<any[]>;
@@ -189,7 +194,7 @@ declare global {
       }>;
       // Todos — model-maintained via the todo_write tool. Live updates stream
       // via onTodosUpdated; the floating panel subscribes per active session.
-      listTodos(sessionId: string): Promise<{ content: string; status: 'pending' | 'in_progress' | 'completed'; priority?: 'high' | 'medium' | 'low' }[]>;
+      listTodos(sessionId: string): Promise<{ content: string; status: 'pending' | 'in_progress' | 'completed' | 'cancelled'; priority?: 'high' | 'medium' | 'low' }[]>;
       subscribeTodos(): Promise<void>;
       onTodosUpdated(callback: (data: { sessionId: string; todos: any[] }) => void): void;
       removeTodosListener(): void;
@@ -200,6 +205,11 @@ declare global {
       addAssistantMessage(
         sessionId: string,
         message: { content: string; reasoning?: string; reasoningTokens?: number; toolCalls?: any[] },
+      ): Promise<void>;
+      finalizeAssistantMessage(
+        sessionId: string,
+        messageId: string,
+        message: { content: string; reasoning?: string; reasoningTokens?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
       ): Promise<void>;
       addSessionUsage(
         sessionId: string,
@@ -353,6 +363,7 @@ declare global {
 
       // ── Git source control ──
       gitStatus: (workspaceId: string, sessionId?: string) => Promise<any[]>;
+      gitBranchInfo: (workspaceId: string, sessionId?: string) => Promise<{ branch: string | null; headCommit: string | null }>;
       gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitCommit: (workspaceId: string, message: string, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;
       gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string) => Promise<any[]>;

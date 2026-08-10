@@ -40,6 +40,12 @@ export const TurnBlock = memo(function TurnBlock({
   const permissionRequest = useUi((s) =>
     activeSessionId ? s.streams[activeSessionId]?.permissionRequest : null,
   );
+  // Whether autocompact is running for this turn — drives the in-stream
+  // "Compacting context" indicator inside BlockList. Read from the same store
+  // so it updates live without going through the memo comparator.
+  const compacting = useUi((s) =>
+    activeSessionId ? Boolean(s.streams[activeSessionId]?.compacting) : false,
+  );
   const handleViewFile = (path: string) => {
     if (!path || !activeSessionId) return;
     openFile(activeSessionId, { id: path, path, language: langFromPath(path) });
@@ -80,6 +86,7 @@ export const TurnBlock = memo(function TurnBlock({
           sessionTitle={activeSession?.title}
           sessionModelId={activeSession?.modelId}
           sessionProviderId={activeSession?.providerId}
+          compacting={compacting}
         />
         {streaming && (
           <TurnWorkingFooter totalMs={message.blocks?.reduce((sum, b) => sum + (b.kind === 'tool' ? (b.durationMs ?? 0) : 0), 0)} />

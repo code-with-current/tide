@@ -3,7 +3,7 @@
 import type { SessionStream, ToolCallStatus } from '@/types';
 import type { Block, FollowupBlock, ReasoningBlock, TextBlock, ToolBlock } from '@/types';
 import type { AgentEvent } from '@/lib/agent/events';
-import { categorizeTool, deriveFollowupMode } from './blockState';
+import { categorizeTool, deriveFollowupMode, isBookkeepingTool } from './blockState';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('streamReducer');
@@ -82,6 +82,9 @@ function applyToolStart(state: SessionStream, e: Extract<AgentEvent, { type: 'to
     category: categorizeTool(e.toolName),
     status: 'pending', arguments: {}, argPreview: '', riskTier: 'read_only',
     createdAtSeq: e.seq, modifiedAtSeq: e.seq,
+    // Carry the sub-agent origin marker so the renderer can nest this block
+    // under its dispatch_agent parent. Undefined for top-level tool calls.
+    ...(e.parentToolCallId ? { parentToolCallId: e.parentToolCallId } : {}),
   };
   return {
     ...state,
@@ -191,10 +194,15 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
     return b;
   });
 
-  // The answer phase begins after the last tool call: text before = narration, after = deliverable. Treating every kind==='tool' as the bound (no skip-set) handles todo_write/ask_followup_question/bash/edit_file uniformly, and lets trailing followup blocks pass through. Mirrors orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag.
+  // The answer phase begins after the last *work* tool call: text before =
+  // narration, after = deliverable. Bookkeeping tools (todo_write,
+  // ask_followup_question, exit_plan_mode, compact, slash_command, load_skill)
+  // are skipped so a trailing "mark plan done" doesn't demote the report to
+  // narration. Mirrors orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag.
   let lastToolIdx = -1;
   for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === 'tool') { lastToolIdx = i; break; }
+    const b = blocks[i];
+    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
   }
   for (let i = lastToolIdx + 1; i < blocks.length; i++) {
     if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;

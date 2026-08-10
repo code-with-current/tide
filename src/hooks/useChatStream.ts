@@ -303,6 +303,7 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
         retry: null,
         compacting: false,
         finalMessage: {
+          messageId: event.messageId,
           content: event.content ?? '',
           timeline: event.timeline,
           blocks: event.blocks,

@@ -30,7 +30,7 @@ export function TurnWorkingFooter({ totalMs }: { totalMs?: number }) {
     <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60 font-mono py-0.5">
       <div className="flex items-center gap-2">
         <AsciiSpinner className="text-muted-foreground" />
-        <span className="text-muted-foreground">working</span>
+        <span className="text-muted-foreground">Working</span>
       </div>
       <div className="flex items-center gap-1 text-muted-foreground/50">
         <Clock className="size-3" />

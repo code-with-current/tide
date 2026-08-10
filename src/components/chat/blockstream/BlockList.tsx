@@ -1,10 +1,13 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
-import type { Block } from '@/types';
+import type { Block, ToolBlock } from '@/types';
 import { deriveLayout } from './blockLayout';
+import { summarizeFileChanges } from '@/lib/stream/blockState';
 import { ThinkingSection } from '@/components/chat/ThinkingSection';
 import { ProcessSection } from '@/components/chat/ProcessSection';
 import { AnswerBlock } from '@/components/chat/AnswerBlock';
 import { FollowupPrompt } from '@/components/chat/FollowupPrompt';
+import { FileChangesSummary } from './FileChangesSummary';
+import { CompactingIndicator } from '@/components/chat/CompactingIndicator';
 
 /** Look up the tool block for a followup and check if it has terminal status.
  *  Used to suppress popup re-firing on persisted messages that were already
@@ -28,13 +31,31 @@ interface BlockListProps {
   sessionTitle?: string;
   sessionModelId?: string;
   sessionProviderId?: string;
+  /** True while autocompact is summarizing context for this turn.
+   *  Renders an in-stream indicator so the user understands the pause. */
+  compacting?: boolean;
 }
 
 /** Walks the canonical block list and routes each block via deriveLayout. Memoized sections; preserves scroll on streaming→completed transition when answer is in view. */
 export const BlockList = memo(function BlockList({
-  blocks, streaming, stopped, stopReason: _stopReason, sessionId, messageId, onViewFile, sessionTitle, sessionModelId, sessionProviderId,
+  blocks, streaming, stopped, stopReason: _stopReason, sessionId, messageId, onViewFile, sessionTitle, sessionModelId, sessionProviderId, compacting,
 }: BlockListProps) {
   const layout = useMemo(() => deriveLayout(blocks), [blocks]);
+  const fileChanges = useMemo(() => summarizeFileChanges(blocks ?? []), [blocks]);
+  // Index child tool blocks by their parentToolCallId so ProcessSection can
+  // pass each dispatch_agent's children to its OneCodeToolRow for nested
+  // rendering. Children are excluded from layout.process by deriveLayout.
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, ToolBlock[]>();
+    for (const b of blocks ?? []) {
+      if (b.kind === 'tool' && b.parentToolCallId) {
+        const arr = map.get(b.parentToolCallId);
+        if (arr) arr.push(b);
+        else map.set(b.parentToolCallId, [b]);
+      }
+    }
+    return map;
+  }, [blocks]);
 
   // Refs for scroll-preservation math during the streaming → completed transition.
   const thinkingRef = useRef<HTMLDivElement>(null);
@@ -110,11 +131,20 @@ export const BlockList = memo(function BlockList({
             totals={layout.totals}
             streaming={streaming}
             onViewFile={onViewFile}
+            childrenByParent={childrenByParent}
           />
         </div>
       )}
 
-      <div ref={answerRef}>
+      {/* Compaction indicator — renders inline between the process section
+          and the answer so the user sees *where* the pause is happening.
+          Compaction always occurs between model steps, so it visually
+          belongs here, not floating above the whole turn. */}
+      {streaming && compacting && (
+        <CompactingIndicator />
+      )}
+
+      <div ref={answerRef} data-answer-root>
         <AnswerBlock
           text={layout.answer?.text ?? ''}
           streaming={streaming}
@@ -126,6 +156,14 @@ export const BlockList = memo(function BlockList({
           sessionProviderId={sessionProviderId}
         />
       </div>
+
+      {fileChanges.length > 0 && (
+        <FileChangesSummary
+          changes={fileChanges}
+          streaming={streaming}
+          onViewFile={onViewFile}
+        />
+      )}
 
       {layout.followup && (
         <FollowupPrompt
@@ -148,5 +186,6 @@ export const BlockList = memo(function BlockList({
   prev.stopped === next.stopped &&
   prev.stopReason === next.stopReason &&
   prev.sessionId === next.sessionId &&
-  prev.messageId === next.messageId
+  prev.messageId === next.messageId &&
+  prev.compacting === next.compacting
 );

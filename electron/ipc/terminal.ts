@@ -14,12 +14,36 @@ import type { WebContents } from 'electron';
 const log = createLogger('terminal');
 const require = createRequire(import.meta.url);
 import * as os from 'node:os';
+import * as path from 'node:path';
 let pty: any = null;
 try {
   pty = require('node-pty');
 } catch (e) {
   log.error('node-pty failed to load', { err: e });
 }
+
+/** node-pty forks a `spawn-helper` binary which then posix_spawnp's the shell.
+ *  That helper can lose its executable bit (pnpm/git/archive side-effects);
+ *  without it posix_spawn fails with EACCES, surfaced as a generic
+ *  "posix_spawnp failed". Restore +x on every launch so it self-heals. */
+function ensureSpawnHelperExecutable(): void {
+  try {
+    const ptyMain = require.resolve('node-pty');
+    const base = path.dirname(ptyMain);
+    for (const prebuilds of [path.join(base, 'prebuilds'), path.join(base, '..', 'prebuilds')]) {
+      let arches: string[];
+      try { arches = fs.readdirSync(prebuilds); } catch { continue; }
+      for (const arch of arches) {
+        const helper = path.join(prebuilds, arch, 'spawn-helper');
+        try {
+          const st = fs.statSync(helper);
+          if (!(st.mode & 0o111)) fs.chmodSync(helper, st.mode | 0o111);
+        } catch { /* helper not here — try next dir */ }
+      }
+    }
+  } catch { /* best-effort — never block terminal init */ }
+}
+ensureSpawnHelperExecutable();
 
 interface TerminalEntry {
   ptyProc: any;

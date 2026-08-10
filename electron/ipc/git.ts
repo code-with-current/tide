@@ -143,6 +143,18 @@ export async function currentBranch(rootDir: string): Promise<string | undefined
   } catch { return undefined; }
 }
 
+/** Live branch + short HEAD commit for the session's working directory
+ *  (workspace root or a session worktree). Used by the Inspector so the Git
+ *  section reflects branch changes made by tools mid-session (e.g. a new
+ *  branch created via the git tool), instead of the stale persisted value. */
+export async function branchInfo(rootDir: string): Promise<{ branch: string | null; headCommit: string | null }> {
+  try {
+    const branch = await currentBranch(rootDir);
+    const { stdout: head } = await runGit(['rev-parse', '--short', 'HEAD'], rootDir);
+    return { branch: branch ?? null, headCommit: head.trim() || null };
+  } catch { return { branch: null, headCommit: null }; }
+}
+
 /** Create a worktree at <rootDir>/<worktreeLocation>/<branchName>
  *  branched from `baseBranch`. Returns the absolute path + the base
  *  commit SHA. Throws on git failure (e.g., branch already exists,

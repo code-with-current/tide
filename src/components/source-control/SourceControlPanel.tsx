@@ -73,7 +73,7 @@ export function SourceControlPanel() {
   const stageMutation = useGitStage(workspaceId ?? '', gitSessionId);
   const commitMutation = useGitCommit(workspaceId ?? '', gitSessionId);
 
-  const viewMode = useTabs(s => s.scViewMode[sessionId ?? 'default'] ?? 'list') as ViewMode;
+  const viewMode = useTabs(s => s.scViewMode[sessionId ?? 'default'] ?? 'tree') as ViewMode;
   const setViewMode = useCallback((mode: ViewMode) => useTabs.getState().setScViewMode(sessionId ?? 'default', mode), [sessionId]);
   const [selectedFile] = useState<GitFileChange | null>(null);
   const [stagedOpen, setStagedOpen] = useState(true);

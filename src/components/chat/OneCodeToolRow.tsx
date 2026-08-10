@@ -127,7 +127,12 @@ function targetOf(call: ToolCall): string {
     case 'web_search':
       return String(a.url ?? a.query ?? '');
     case 'dispatch_agent':
-      return String(a.agentName ?? a.agent ?? '');
+      // Prefer the title (distinguishes parallel same-type dispatches);
+      // fall back to the agent name from args, then the display payload.
+      if (a.title) return String(a.title);
+      if (a.agentName ?? a.agent) return String(a.agentName ?? a.agent);
+      if (call.display?.kind === 'agent') return call.display.agentName;
+      return '';
     case 'todo_write':
       return Array.isArray(a.todos) ? `${a.todos.length} items` : '';
     default:
@@ -155,7 +160,7 @@ function initialOpenFor(call: ToolCall): boolean {
 }
 
 /** Inline expandable body — shown below the row when expanded. */
-function RowBody({ call, onViewFile }: { call: ToolCall; onViewFile?: (p: string) => void }) {
+function RowBody({ call, onViewFile, childToolCalls }: { call: ToolCall; onViewFile?: (p: string) => void; childToolCalls?: ToolCall[] }) {
   const d = call.display;
   if (d?.kind === 'diff') {
     return (
@@ -177,7 +182,7 @@ function RowBody({ call, onViewFile }: { call: ToolCall; onViewFile?: (p: string
     );
   }
   if (d?.kind === 'agent') {
-    return <AgentBody d={d} />;
+    return <AgentBody d={d} childToolCalls={childToolCalls} onViewFile={onViewFile} />;
   }
   // ask_followup_question — structured body showing the question, the
   // options (with the user's pick highlighted), and the answer line.
@@ -224,15 +229,23 @@ function RowBody({ call, onViewFile }: { call: ToolCall; onViewFile?: (p: string
   return null;
 }
 
-/** Expandable body for dispatch_agent. Shows the task, sub-agent reasoning
- *  (collapsible), final report, and token usage. Sub-agent reasoning is
- *  hidden by default — it's verbose and the user usually wants the report.
- *  Usage renders as a compact chip line. */
-function AgentBody({ d }: { d: Extract<ToolDisplay, { kind: 'agent' }> }) {
+/** Expandable body for dispatch_agent. Shows the task, the sub-agent's
+ *  internal tool calls (nested, live-streaming), sub-agent reasoning
+ *  (collapsible), final report, and token usage. Tool calls render between
+ *  the task and report so the user sees *what the subagent did* before its
+ *  conclusion. Each child is a full OneCodeToolRow — expandable, with its
+ *  own status glyph, accent, and inline permission card. */
+function AgentBody({ d, childToolCalls, onViewFile }: {
+  d: Extract<ToolDisplay, { kind: 'agent' }>;
+  childToolCalls?: ToolCall[];
+  onViewFile?: (p: string) => void;
+}) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [showReport, setShowReport] = useState(true);
+  const [showToolCalls, setShowToolCalls] = useState(true);
   const u = d.usage;
   const totalTokens = u ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0) : 0;
+  const hasToolCalls = !!(childToolCalls && childToolCalls.length > 0);
 
   return (
     <div className="py-2 space-y-2">
@@ -241,6 +254,31 @@ function AgentBody({ d }: { d: Extract<ToolDisplay, { kind: 'agent' }> }) {
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">task</div>
         <div className="text-[12px] text-muted-foreground whitespace-pre-wrap">{d.task}</div>
       </div>
+
+      {/* Sub-agent tool calls — nested, live-streaming. Each child is a full
+          OneCodeToolRow, composition copied from OneCodeExploringGroup.
+          Defaults to expanded so the user sees the subagent working in real
+          time; collapses to a count badge once done. */}
+      {hasToolCalls && (
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowToolCalls(s => !s)}
+            className="text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
+          >
+            <ChevronRight className={cn('size-2.5 transition-transform', showToolCalls && 'rotate-90')} />
+            tool calls · {childToolCalls!.length}
+          </Button>
+          {showToolCalls && (
+            <div className="mt-1 ml-[3px] pl-3 border-l border-input space-y-0.5 animate-slide-up">
+              {childToolCalls!.map(c => (
+                <OneCodeToolRow key={c.id} call={c} onViewFile={onViewFile} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Reasoning — collapsible, hidden by default. */}
       {d.reasoning && d.reasoning.trim() && (
@@ -448,10 +486,14 @@ export const OneCodeToolRow = memo(function OneCodeToolRow({
   call,
   onViewFile,
   streaming: _streaming = false,
+  childToolCalls,
 }: {
   call: ToolCall;
   onViewFile?: (p: string) => void;
   streaming?: boolean;
+  /** Child tool calls for a dispatch_agent — rendered as a nested expandable
+   *  list inside the agent body. Undefined for non-agent rows. */
+  childToolCalls?: ToolCall[];
 }) {
   // Default to expanded for ask_followup_question once it has a result —
   // the answer is the whole point of the row and shouldn't require a click
@@ -482,10 +524,20 @@ export const OneCodeToolRow = memo(function OneCodeToolRow({
   // the user a one-glance read on what happened without expanding.
   const statusLabel = statusLabelOf(call);
 
+  // Sub-agent dispatch gets a distinct visual treatment so it reads as a
+  // delegated task rather than "just another tool row". Identified by the
+  // agent display kind (carried on the result) or the dispatch_agent tool
+  // name (during running, before the result lands).
+  const isSubagent = call.toolName === 'dispatch_agent' || call.display?.kind === 'agent';
+  // Sub-agent accent: primary-tinted regardless of status (it's a delegated
+  // agent, not a direct file/shell op) — makes it visually pop from the
+  // muted-foreground tool rows around it.
+  const subagentAccent = isSubagent ? 'bg-primary/60' : accentClass(call);
+
   return (
     <div className="group relative pl-3">
       {/* Left accent line */}
-      <div className={cn('absolute left-0 top-1 bottom-1 w-[2px] rounded-full', accentClass(call))} />
+      <div className={cn('absolute left-0 top-1 bottom-1 w-[2px] rounded-full', subagentAccent)} />
 
       {/* Status row — one line, dense */}
       <button
@@ -500,10 +552,29 @@ export const OneCodeToolRow = memo(function OneCodeToolRow({
         <span className="inline-flex w-3 justify-center flex-shrink-0">
           <StatusGlyph call={call} />
         </span>
-        {ICON[call.toolName]}
-        <span className="text-muted-foreground">{toolLabel(call.toolName, call.status)}</span>
+        {isSubagent
+          ? <Bot className="size-3 text-primary/80" />
+          : ICON[call.toolName]}
+        <span className={cn(isSubagent ? 'text-primary/80 font-medium' : 'text-muted-foreground')}>
+          {isSubagent
+            ? (call.display?.kind === 'agent'
+                ? call.display.agentName
+                : String(call.arguments?.name ?? 'agent'))
+            : toolLabel(call.toolName, call.status)}
+        </span>
+        {/* Sub-agent badge — small pill so a glance distinguishes a delegated
+            agent from a direct tool call. Renders after the label, before the
+            target, mirroring how status tags sit on other rows. */}
+        {isSubagent && (
+          <span className="inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9.5px] uppercase tracking-wider text-primary/70">
+            subagent
+          </span>
+        )}
         {target && (
-          <span className="text-muted-foreground/60 truncate flex-1 text-left">
+          <span className={cn(
+            'truncate flex-1 text-left',
+            isSubagent ? 'text-muted-foreground' : 'text-muted-foreground/60',
+          )}>
             {partial && call.toolName !== 'bash' && call.toolName !== 'bash_output'
               ? <span className="opacity-60">{target}</span>
               : target}
@@ -534,7 +605,7 @@ export const OneCodeToolRow = memo(function OneCodeToolRow({
       {/* Expandable body */}
       {open && (
         <div className="pl-5 border-l border-input ml-[3px] animate-slide-up">
-          <RowBody call={call} onViewFile={onViewFile} />
+          <RowBody call={call} onViewFile={onViewFile} childToolCalls={childToolCalls} />
           <Button
             variant="outline"
             size="xs"
@@ -575,6 +646,13 @@ function statusLabelOf(call: ToolCall): string {
     if (out === 'end_turn' || out === 'max_tokens' || out === 'tool_use') return out;
     return '';
   }
+  // Write / edit tools: while args are streaming (pending), show a live
+  // progress label derived from the partial content so the user knows the
+  // model is composing the file — not just a bare spinner.
+  if (call.status === 'pending' && (call.toolName === 'write_file' || call.toolName === 'edit_file' || call.toolName === 'multi_edit' || call.toolName === 'notebook_edit')) {
+    const prog = writeProgressLabel(call);
+    if (prog) return prog;
+  }
   // Bash / git: prefer exit code from meta ("exit 0", "exit 1").
   if (call.toolName === 'bash' || call.toolName === 'git' || call.toolName === 'bash_output') {
     const meta = call.meta ?? '';
@@ -596,6 +674,55 @@ function statusLabelOf(call: ToolCall): string {
   if (call.status === 'timeout') return 'timeout';
   if (call.status === 'aborted') return 'aborted';
   return '';
+}
+
+/** Extract a live progress label from a write/edit tool's partial input while
+ *  the model is still streaming the file content as arguments. The partial
+ *  JSON is incomplete (can't JSON.parse it), so we find the content field
+ *  marker and measure what's arrived so far. Returns '' if we can't derive a
+ *  size (e.g. args haven't started streaming yet). */
+function writeProgressLabel(call: ToolCall): string {
+  const partial = call._partialInput ?? '';
+  if (!partial || partial.length < 20) return '';
+
+  const isWrite = call.toolName === 'write_file' || call.toolName === 'notebook_edit';
+  const verb = isWrite ? 'writing' : 'editing';
+
+  // For write_file: the content streams as `"content":"..."` — usually the
+  // last (and largest) field. Find the marker and count chars after it.
+  // For edit_file: `"new_string":"..."` is the replacement being composed.
+  const marker = isWrite ? '"content":"' : '"new_string":"';
+  const idx = partial.indexOf(marker);
+  if (idx < 0) {
+    // Marker not arrived yet — at least show the verb + path if we have it.
+    const pathMatch = partial.match(/"path":\s*"([^"]*)"/);
+    if (pathMatch) return `${verb} ${pathMatch[1]}…`;
+    return '';
+  }
+
+  // Everything after the marker opening quote is the (still-streaming) content.
+  // Strip the trailing `"` if the JSON happened to close (rare mid-stream).
+  const contentStart = idx + marker.length;
+  let content = partial.slice(contentStart);
+  // Remove a trailing close-quote + brace if present (the JSON closed).
+  content = content.replace(/"\s*\}?\s*$/, '');
+
+  const lineCount = content.split('\n').length;
+  const charCount = content.length;
+
+  // Extract path for context.
+  const pathMatch = partial.match(/"path":\s*"([^"]*)"/);
+  const path = pathMatch ? pathMatch[1] : '';
+
+  if (isWrite) {
+    return path
+      ? `${verb} ${path} · ${lineCount.toLocaleString()} lines`
+      : `${verb} · ${lineCount.toLocaleString()} lines`;
+  }
+  // edit_file: chars are more relevant than lines (edits are usually small).
+  return path
+    ? `${verb} ${path} · ${charCount.toLocaleString()} chars`
+    : `${verb} · ${charCount.toLocaleString()} chars`;
 }
 
 /** Exploring group: collapses consecutive read-only investigation (read_file/grep/glob/list_dir) into one expandable line. */

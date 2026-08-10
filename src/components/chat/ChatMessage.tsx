@@ -1,5 +1,5 @@
 import { memo, useState, useMemo, useCallback, type ReactNode } from 'react';
-import { Copy, Check, FileCode2, FileText, Image as ImageIcon, ClipboardPaste, GitFork } from 'lucide-react';
+import { Copy, Check, FileCode2, FileText, Image as ImageIcon, ClipboardPaste } from 'lucide-react';
 import type { Message } from '@/types';
 import { formatTime } from '@/lib/utils';
 import { useUi, type OpenFile } from '@/lib/stores/ui';
@@ -176,7 +176,7 @@ function ChatMessageImpl({
       [activeSessionId, message.attachments, openFile],
     );
     return (
-      <div className="group flex justify-end mb-3">
+      <div className="group flex justify-end">
         <div className="max-w-[85%] flex flex-col items-end gap-1">
           <div className="rounded-2xl rounded-br-md bg-primary/20 text-white px-3.5 py-2.5">
             {chips.length > 0 && (
@@ -216,26 +216,6 @@ function ChatMessageImpl({
               {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
             </button>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ===== ASSISTANT — fork-summary card (carried context from a forked session) =====
-  const forkSummary = (message as any).turn?.forkSummary;
-  if (forkSummary) {
-    const sourceTitle = (message as any).turn?.sourceTitle ?? 'a previous session';
-    return (
-      <div className="flex flex-col gap-1 py-2">
-        <div className="flex items-center gap-1.5 text-[0.7rem] text-muted-foreground/70 font-medium">
-          <GitFork className="size-3" />
-          Summary from "{sourceTitle}"
-        </div>
-        <div className="text-sm text-muted-foreground/90 border-l-2 border-border/60 pl-3 py-1">
-          <MemoizedMarkdown content={message.content} />
-        </div>
-        <div className="text-[0.7rem] text-muted-foreground/50 pl-3">
-          Send a message to continue.
         </div>
       </div>
     );

@@ -9,7 +9,7 @@ import type {
   ToolBlock,
   ToolCall,
 } from '@/types';
-import { categorizeTool, deriveFollowupMode } from './blockState';
+import { categorizeTool, deriveFollowupMode, isBookkeepingTool } from './blockState';
 
 /** Convert a legacy ToolCall into a ToolBlock. Mirrors the live wire
  *  format (block id = toolCallId). */
@@ -34,7 +34,7 @@ export function toolCallToBlock(call: ToolCall): ToolBlock {
   };
 }
 
-/** Redetermine each text block's `isAnswer` flag (matches streamReducer.applyTurnEnd / orchestrator.finalizeBlocks): the answer phase begins after the last tool call. Idempotent; returns a new message, original untouched. */
+/** Redetermine each text block's `isAnswer` flag (matches streamReducer.applyTurnEnd / orchestrator.finalizeBlocks): the answer phase begins after the last *work* tool call — bookkeeping tools (todo_write, ask_followup_question, etc.) are skipped so a trailing "mark plan done" doesn't demote the report. Idempotent; returns a new message, original untouched. */
 function redetermineAnswerFlag(message: Message): Message {
   if (!message.blocks || message.blocks.length === 0) return message;
   const blocks = message.blocks.map(b =>
@@ -42,7 +42,8 @@ function redetermineAnswerFlag(message: Message): Message {
   );
   let lastToolIdx = -1;
   for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === 'tool') { lastToolIdx = i; break; }
+    const b = blocks[i];
+    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
   }
   for (let i = lastToolIdx + 1; i < blocks.length; i++) {
     if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
@@ -183,12 +184,14 @@ export function migrateMessageToBlocks(message: Message): Message {
     blocks.push(toolCallToBlock(call));
   }
 
-  // 3. Mark the answer: every text block after the last tool call. Matches
+  // 3. Mark the answer: every text block after the last *work* tool call.
+  //    Bookkeeping tools (todo_write etc.) are skipped so a trailing
+  //    "mark plan done" doesn't demote the report to narration. Matches
   //    the live reducer's applyTurnEnd and redetermineAnswerFlag above.
-  //    Text before the last tool is narration; text after is the deliverable.
   let lastToolIdx = -1;
   for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === 'tool') { lastToolIdx = i; break; }
+    const b = blocks[i];
+    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
   }
   for (let i = lastToolIdx + 1; i < blocks.length; i++) {
     if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;

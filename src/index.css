@@ -12,6 +12,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+/* Lock scrolling to the app shell — the window/html/body must never scroll,
+   only the dedicated chat scroll container does. Prevents the whole-screen
+   scrollbar flash on session switch / large content. */
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 ::selection { background: color-mix(in srgb, var(--primary) 25%, transparent); }
 .scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .scroll::-webkit-scrollbar-track { background: transparent; }

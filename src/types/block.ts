@@ -55,6 +55,11 @@ export interface ToolBlock extends BaseBlock {
   display?: ToolDisplay;
   durationMs?: number;
   meta?: string;
+  /** When set, this tool call ran inside a sub-agent dispatched by the
+   *  named parent dispatch_agent tool call. The renderer nests these
+   *  under the parent block instead of rendering them as siblings.
+   *  Undefined for top-level (main-orchestrator) tool calls. */
+  parentToolCallId?: string;
 }
 
 export interface FollowupBlock extends BaseBlock {

@@ -28,7 +28,7 @@ import { bucketByRecency, cn, formatRelative } from "@/lib/utils";
 import { getEffectiveKeys } from "@/lib/shortcuts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ForkSessionDialog } from "@/components/modals/ForkSessionDialog";
+import { initiateFork } from "@/lib/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -271,7 +271,6 @@ function SessionItem({
   const [isRenaming, setIsRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(session.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [forkOpen, setForkOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -406,7 +405,7 @@ function SessionItem({
                     >
                       <Pencil className="size-3.5" /> Rename
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setForkOpen(true)}>
+                    <DropdownMenuItem onClick={() => initiateFork(session.id)}>
                       <GitFork className="size-3.5" /> Fork…
                     </DropdownMenuItem>
                     {!archived ? (
@@ -514,7 +513,7 @@ function SessionItem({
         >
           <Pencil className="size-3.5" /> Rename
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => setForkOpen(true)}>
+        <ContextMenuItem onClick={() => initiateFork(session.id)}>
           <GitFork className="size-3.5" /> Fork…
         </ContextMenuItem>
         {!archived ? (
@@ -562,14 +561,6 @@ function SessionItem({
           </ContextMenuSubContent>
         </ContextMenuSub>
       </ContextMenuContent>
-      <ForkSessionDialog
-        open={forkOpen}
-        onOpenChange={setForkOpen}
-        sourceSessionId={session.id}
-        sourceTitle={session.title}
-        sourceModelId={'modelId' in session ? session.modelId : undefined}
-        sourceProviderId={'providerId' in session ? session.providerId : undefined}
-      />
     </ContextMenu>
   );
 }

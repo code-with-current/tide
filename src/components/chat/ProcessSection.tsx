@@ -41,12 +41,15 @@ function groupExploring(items: RenderItem[]): RenderItem[] {
 }
 
 export function ProcessSection({
-  blocks, totals, streaming, onViewFile,
+  blocks, totals, streaming, onViewFile, childrenByParent,
 }: {
   blocks: Array<ToolBlock | TextBlock>;
   totals: { commands: number; edits: number; exploration: number; other: number; failedCount: number; totalMs: number };
   streaming: boolean;
   onViewFile?: (path: string) => void;
+  /** Child tool blocks indexed by their parent dispatch_agent's toolCallId.
+   *  Each parent row receives its children for nested rendering. */
+  childrenByParent?: Map<string, ToolBlock[]>;
 }) {
   const [open, setOpen] = useState(streaming);
   useEffect(() => {
@@ -117,6 +120,7 @@ export function ProcessSection({
                   call={toolBlockToToolCall(item.block)}
                   streaming={streaming}
                   onViewFile={onViewFile}
+                  childToolCalls={childrenByParent?.get(item.block.toolCallId)?.map(toolBlockToToolCall)}
                 />
               );
             })}

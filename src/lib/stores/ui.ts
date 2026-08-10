@@ -211,6 +211,12 @@ interface UiState {
   /** Per-session outgoing message queue. Keyed by sessionId. */
   queue: Record<string, QueuedMessage[]>;
 
+  /** Per-session prompt history for arrow-key navigation in the composer.
+   *  Most-recent-first (index 0 = last sent). Capped at 50 entries. */
+  promptHistory: Record<string, string[]>;
+  /** Push a sent prompt to the session's history (deduped, most-recent-first). */
+  pushPromptHistory: (sessionId: string, text: string) => void;
+
   /** Per-session terminal tabs. Keyed by sessionId. Empty = panel collapsed. */
   terminals: Record<string, TerminalInstance[]>;
   activeTerminal: Record<string, string | undefined>;
@@ -382,6 +388,7 @@ export const useUi = create<UiState>()(
   pendingOptions: {},
   streams: {},
   queue: {},
+  promptHistory: {},
   terminals: {},
   activeTerminal: {},
   terminalPorts: {},
@@ -664,6 +671,20 @@ export const useUi = create<UiState>()(
     }),
   clearQueuedMessages: (sessionId) =>
     set((s) => ({ queue: { ...s.queue, [sessionId]: [] } })),
+
+  // Per-session prompt history for arrow-key navigation in the composer.
+  // Most-recent-first; deduped against the last entry; capped at 50.
+  pushPromptHistory: (sessionId, text) =>
+    set((s) => {
+      const trimmed = text.trim();
+      if (!trimmed) return s;
+      const existing = s.promptHistory[sessionId] ?? [];
+      // Dedupe against the most recent entry — avoids consecutive duplicates
+      // when the user re-sends the same prompt (e.g. after a retry).
+      if (existing[0] === trimmed) return s;
+      const next = [trimmed, ...existing].slice(0, 50);
+      return { promptHistory: { ...s.promptHistory, [sessionId]: next } };
+    }),
 
   // ─── Per-session terminal tabs ───────────────────────────────────────────
   addTerminal: (sessionId, name, pendingCommand) =>

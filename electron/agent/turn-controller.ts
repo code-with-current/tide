@@ -48,6 +48,9 @@ export interface TurnController {
   compactionConfig?: import('./context/auto-compact.js').AutoCompactConfig;
   /** True when a stop hook forced this continuation (prevents infinite loops). */
   stopHookActive: boolean;
+  /** Step number of the last todo_write this turn (0 = none yet). Drives the
+   *  staleness nudge when work steps accumulate without a plan update. */
+  lastTodoWriteStep: number;
 }
 
 /** Create a fresh controller for a new turn. */
@@ -69,6 +72,7 @@ export function createTurnController(maxSteps: number): TurnController {
     shouldStop: false,
     consecutiveCompactionFailures: 0,
     stopHookActive: false,
+    lastTodoWriteStep: 0,
   };
 }
 

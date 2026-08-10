@@ -1,10 +1,7 @@
-import { useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { useRef, useEffect, useCallback, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
-import { Terminal } from '@xterm/xterm';
-import type { ILink } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import '@xterm/xterm/css/xterm.css';
+import { init, Terminal, FitAddon } from 'ghostty-web';
+import type { ILink } from 'ghostty-web';
 import { useUi } from '@/lib/stores/ui';
 import { getTerminalTheme } from '@/components/screens/settings/AppearanceSection';
 import { Button } from '@/components/ui/button';
@@ -20,6 +17,11 @@ const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 interface LiveTerminal {
   term: Terminal;
   fit: FitAddon;
+  /** The wrapper div we created and passed to term.open(). Stored explicitly
+   *  because ghostty-web sets `term.element` TO this wrapper (unlike xterm,
+   *  which nested its own element inside it) — so term.element.parentElement
+   *  would be the shared mount, not this terminal's wrapper. */
+  wrapper: HTMLDivElement;
   inputDisposable: { dispose: () => void };
   resizeObserver: ResizeObserver;
 }
@@ -81,12 +83,53 @@ class FilePathLinkProvider {
           end: { x: x2 + 1, y: bufferLineNumber },
         },
         text: path,
-        decorations: { underline: true, pointerCursor: true },
         activate: (event: MouseEvent) => {
           // VS Code-style: only open on modifier+click (Cmd on macOS, Ctrl
           // elsewhere) — a plain click just positions the cursor.
           const mod = isMac ? event.metaKey : event.ctrlKey;
           if (mod) window.tideIpc?.showItemInFolder(path);
+        },
+      });
+    }
+    callback(links.length > 0 ? links : undefined);
+  }
+}
+
+// ── URL link provider ─────────────────────────────────────────────
+// Detects http(s) URLs and www. links in terminal output and opens them in
+// the OS browser on modifier+click (replaces @xterm/addon-web-links, which
+// isn't compatible with ghostty-web). Same VS Code-style modifier gate as
+// the file-path provider above.
+const URL_PATTERN = /(https?:\/\/[^\s<>"']+|www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"']*)/gi;
+
+class UrlLinkProvider {
+  private term: Terminal;
+  constructor(term: Terminal) {
+    this.term = term;
+  }
+  provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
+    const line = this.term.buffer.active.getLine(bufferLineNumber);
+    if (!line) { callback(undefined); return; }
+    const text = line.translateToString(true);
+    const links: ILink[] = [];
+    let m: RegExpExecArray | null;
+    URL_PATTERN.lastIndex = 0;
+    while ((m = URL_PATTERN.exec(text)) !== null) {
+      const url = m[0];
+      const x1 = m.index;
+      const x2 = m.index + url.length - 1;
+      links.push({
+        range: {
+          start: { x: x1 + 1, y: bufferLineNumber },
+          end: { x: x2 + 1, y: bufferLineNumber },
+        },
+        text: url,
+        activate: (event: MouseEvent) => {
+          const mod = isMac ? event.metaKey : event.ctrlKey;
+          if (mod) {
+            const href = url.startsWith('http') ? url : `https://${url}`;
+            window.tideIpc?.openExternal(href);
+          }
         },
       });
     }
@@ -111,7 +154,18 @@ export const TerminalPanel = memo(function TerminalPanel() {
   const addTerminal = useUi((s) => s.addTerminal);
   const closeTerminal = useUi((s) => s.closeTerminal);
   const setActiveTerminal = useUi((s) => s.setActiveTerminal);
+  const renameTerminal = useUi((s) => s.renameTerminal);
   const mountRef = useRef<HTMLDivElement>(null);
+  // Inline-rename state: the id of the tab whose title is being edited, plus
+  // the working text. Entered by double-clicking a tab title; committed on
+  // Enter/blur, cancelled on Escape.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+  const commitRename = (id: string) => {
+    const trimmed = draftName.trim();
+    if (trimmed) renameTerminal(sessionId, id, trimmed);
+    setEditingId(null);
+  };
 
   const active = activeId && terminals.some((t) => t.id === activeId) ? activeId : terminals[0]?.id;
 
@@ -138,6 +192,12 @@ export const TerminalPanel = memo(function TerminalPanel() {
     document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
   }, [setHeight]);
+
+  // ghostty-web loads its WASM (embedded base64 fallback) once before any
+  // Terminal can be constructed. Gate terminal creation on this so the first
+  // open doesn't race the WASM init.
+  const [wasmReady, setWasmReady] = useState(false);
+  useEffect(() => { let alive = true; init().then(() => { if (alive) setWasmReady(true); }).catch(() => {}); return () => { alive = false; }; }, []);
 
   // The ACTIVE session's terminals — only these get xterm instances created
   // and shown. Switching sessions must NOT destroy the previous session's
@@ -206,7 +266,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   // updates existing terminals in place via term.options — see below.)
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || !ipc) return;
+    if (!mount || !ipc || !wasmReady) return;
 
     let createdActive = false;
 
@@ -221,43 +281,31 @@ export const TerminalPanel = memo(function TerminalPanel() {
         fontSize: terminalFontSize,
         fontFamily: "'MesloLGS NF', 'MesloLGS Nerd Font', 'JetBrains Mono', Menlo, monospace",
         theme: themeColors as any,
-        allowProposedApi: true,
       });
 
       const fit = new FitAddon();
       term.loadAddon(fit);
-      // Web links — open in the system browser via the openExternal bridge.
-      // VS Code-style: only open on modifier+click (Cmd on macOS, Ctrl
-      // elsewhere) — a plain click just positions the cursor.
-      term.loadAddon(new WebLinksAddon((event, uri) => {
-        const mod = isMac ? event.metaKey : event.ctrlKey;
-        if (mod) ipc?.openExternal(uri);
-      }));
 
-      // Create a wrapper div INSIDE the mount. xterm renders into this.
-      // We manage this div imperatively — React never touches it.
+      // Create a wrapper div INSIDE the mount. ghostty-web renders a canvas
+      // into this. We manage this div imperatively — React never touches it.
       const wrapper = document.createElement('div');
-      wrapper.style.cssText = 'position:absolute;inset:0;padding:4px 4px 0 4px;';
+      // caret-color:transparent — ghostty-web sets contenteditable="true" on
+      // this element so it can receive IME/composition input, which makes the
+      // browser paint a native DOM caret. ghostty ALSO draws its own VT block
+      // cursor on the canvas (renderCursor) → two cursors. Hiding the caret
+      // here keeps only the canvas one without disabling the editable input.
+      wrapper.style.cssText = 'position:absolute;inset:0;padding:4px 4px 0 4px;caret-color:transparent;';
       wrapper.dataset.terminalId = tid;
       mount.appendChild(wrapper);
       term.open(wrapper);
       fit.fit();
 
-      // Hardware-accelerated WebGL renderer — a major perf win for dense output (build logs, cat-ing large files) over the default DOM/canvas renderer. Must load AFTER term.open(). Throws if WebGL isn't available (headless, old GPU, context limit) → falls back to canvas. Loaded dynamically so the CJS addon isn't in the initial bundle (its UMD wrapper trips rolldown's require-resolution in dev otherwise).
-      import('@xterm/addon-webgl')
-        .then(({ WebglAddon }) => {
-          try {
-            const webgl = new WebglAddon();
-            webgl.onContextLoss(() => webgl.dispose());
-            term.loadAddon(webgl);
-          } catch { /* canvas renderer is the automatic fallback */ }
-        })
-        .catch(() => { /* addon unavailable — canvas fallback */ });
-
-      // File-path link provider — detects absolute paths (and path:line:col)
-      // in terminal output and reveals them in the OS file manager on click.
-      // Complements WebLinksAddon (URLs). Registered per-terminal; xterm
-      // calls provideLinks per visible line as the user hovers.
+      // Link providers — ghostty-web has no WebLinksAddon equivalent, so we
+      // register two providers: URLs (open in OS browser on modifier+click,
+      // replacing @xterm/addon-web-links) and file paths (path:line:col →
+      // reveal in OS file manager). Registered per-terminal; called per line
+      // as the user hovers.
+      term.registerLinkProvider(new UrlLinkProvider(term));
       term.registerLinkProvider(new FilePathLinkProvider(term));
 
       // Start PTY. Await so any pendingCommand is flushed to a real PTY
@@ -300,7 +348,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       });
       resizeObserver.observe(wrapper);
 
-      registry.set(tid, { term, fit, inputDisposable, resizeObserver });
+      registry.set(tid, { term, fit, wrapper, inputDisposable, resizeObserver });
       if (tid === active) createdActive = true;
     }
 
@@ -315,9 +363,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
       live.inputDisposable.dispose();
       live.resizeObserver.disconnect();
       ipc.terminalKill(tid);
+      // ghostty-web's dispose() clears `term.element` (=== wrapper) to void 0,
+      // so capture the wrapper div BEFORE dispose to remove it from the mount.
+      const wrapper = live.wrapper;
       live.term.dispose();
-      const wrapper = live.term.element?.parentElement;
-      wrapper?.remove();
+      wrapper.remove();
       registry.delete(tid);
     }
 
@@ -325,18 +375,31 @@ export const TerminalPanel = memo(function TerminalPanel() {
     // Terminals in the ACTIVE session are candidates to show; everything else (other sessions' terminals still alive in the registry) is hidden. Only refocus / refit when the active id actually changed, or when the active terminal was just created — calling focus() on every effect run is what caused the "can't type" + flicker symptoms.
     const activeChanged = active !== prevActiveRef.current;
     for (const [tid, live] of registry) {
-      const wrapper = live.term.element?.parentElement;
-      if (!wrapper) continue;
+      const wrapper = live.wrapper;
       // Belongs to the active session AND is the active terminal → visible.
       // (activeSessionIds = the active session's terminal IDs.)
       const isVisible = activeSessionIds.has(tid) && tid === active;
-      wrapper.style.display = isVisible ? 'block' : 'none';
+      // IMPORTANT: toggle visibility, NOT display. ghostty-web renders to a
+      // <canvas>; hiding via display:none zero-sizes the wrapper, the
+      // ResizeObserver fires fit() against a 0×0 box, the canvas is resized
+      // (which CLEARS its bitmap), and on re-show the dirty state doesn't
+      // force a full redraw → blank terminal + a cursor glitching at (0,0).
+      // visibility:hidden keeps the wrapper laid out (non-zero) so the canvas
+      // bitmap + cursor state survive tab switches; pointer-events:none makes
+      // sure the inactive terminal can't capture the keyboard/mouse.
+      wrapper.style.visibility = isVisible ? 'visible' : 'hidden';
+      wrapper.style.pointerEvents = isVisible ? '' : 'none';
       if (isVisible && (activeChanged || createdActive)) {
-        try { live.fit.fit(); live.term.focus(); } catch { /* */ }
+        // forceRedraw (not bare fit()): fit() early-returns when the size
+        // hasn't changed, so on session switchback — where the panel is the
+        // same size as before it was hidden — no redraw fires and the canvas
+        // shows whatever was last composited (blank). forceRedraw re-asserts
+        // the current size, pushing ghostty-web through a full re-render.
+        forceRedraw(live);
       }
     }
     prevActiveRef.current = active;
-  }, [allEntries, activeSessionIds, survivingIds, active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allEntries, activeSessionIds, survivingIds, active, wasmReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Theme / font-size updates: apply to EXISTING terminals in place via
   // term.options rather than recreating them. Keeps scrollback + PTY state.
@@ -351,7 +414,27 @@ export const TerminalPanel = memo(function TerminalPanel() {
     }
   }, [terminalTheme, terminalFontSize]);
 
-  // Refit on expand OR on screen return. The panel is always mounted (so xterm state survives collapse + Settings visits), but its outer div has display:none while collapsed/hidden — the ResizeObserver can't measure a zero-size box, so the active terminal's last fit() ran against the pre-hide dimensions. When the user re-opens the panel or returns from Settings, refit + refocus so the canvas matches the new visible size.
+  // Refit on expand OR on screen return. The panel is always mounted (so
+  // terminal state survives collapse + Settings visits), but its outer div has
+  // display:none while collapsed/hidden — the ResizeObserver can't measure a
+  // zero-size box, so the active terminal's last fit() ran against the
+  // pre-hide dimensions. When the user re-opens the panel or returns from
+  // Settings, refit + refocus + force a redraw so the canvas matches the new
+  // visible size. The redraw matters: fit() early-returns when the size hasn't
+  // changed (open/switch-back to an identical-sized panel), so without it the
+  // bitmap is blank until the next PTY data arrives.
+  const forceRedraw = (live: LiveTerminal | undefined) => {
+    if (!live) return;
+    try {
+      // Re-asserting the current size forces ghostty-web's renderer to do a
+      // FULL re-render (it clears the dirty rows + redraws). A real fit() is
+      // attempted first so layout-driven resizes still propagate.
+      live.fit.fit();
+      const t = live.term;
+      t.resize(t.cols, t.rows);
+      t.focus();
+    } catch { /* */ }
+  };
   useEffect(() => {
     if (!terminalOpen) return;
     if (!screenActive) return;
@@ -360,11 +443,30 @@ export const TerminalPanel = memo(function TerminalPanel() {
     if (!entry) return;
     // Defer one tick so the browser has laid out the un-hidden panel and
     // the wrapper has real dimensions again.
-    const raf = requestAnimationFrame(() => {
-      try { entry.fit.fit(); entry.term.focus(); } catch { /* */ }
-    });
+    const raf = requestAnimationFrame(() => forceRedraw(entry));
     return () => cancelAnimationFrame(raf);
   }, [terminalOpen, screenActive, active]);
+
+  // Redraw on app focus / window visibility regain. ghostty-web drives its
+  // canvas via a requestAnimationFrame loop, which the browser PAUSES while the
+  // document is hidden (OS app switch, minimize, alt-tab). On return, rAF
+  // resumes but there's no forced full redraw — the canvas shows whatever was
+  // last composited (often blank/stale) until fresh PTY data dirties rows.
+  // visibilitychange fires on minimize/restore + tab-hide; the window 'focus'
+  // event catches alt-tab return on macOS where the document never fully hides.
+  useEffect(() => {
+    if (!active) return;
+    const redraw = () => {
+      if (document.visibilityState === 'hidden') return;
+      forceRedraw(registry.get(active));
+    };
+    document.addEventListener('visibilitychange', redraw);
+    window.addEventListener('focus', redraw);
+    return () => {
+      document.removeEventListener('visibilitychange', redraw);
+      window.removeEventListener('focus', redraw);
+    };
+  }, [active]);
 
   const items = terminals.map((t) => ({
     id: t.id,
@@ -411,6 +513,19 @@ export const TerminalPanel = memo(function TerminalPanel() {
         className="flex-col gap-0"
       >
         <ScrollTabsList
+          onDoubleClick={(e) => {
+            // Double-click EMPTY space on the tab bar → new tab. Only the bare
+            // list background counts: the target must be the list (role=tablist)
+            // itself or the inner scroll wrapper, NOT a tab, chevron, or +/-.
+            // We check ancestors for [role=tab] (a tab trigger) or <button>
+            // (chevrons + trailing actions) AND require the target to not be
+            // inside interactive content. This also avoids the drag-scroll's
+            // pointer-capture path: a genuine double-click on empty space
+            // doesn't move the strip, so handleClickCapture never suppresses it.
+            const target = e.target as HTMLElement;
+            if (target.closest('[role="tab"], button, input, [role="button"]')) return;
+            addTerminal(sessionId);
+          }}
           trailing={
             // New-terminal + close-panel actions. Live in the trailing
             // slot so they stay visible regardless of tab-strip overflow.
@@ -445,7 +560,55 @@ export const TerminalPanel = memo(function TerminalPanel() {
               className="px-2.5 h-[2rem] gap-1.5 text-xs"
             >
               {item.icon}
-              <span className="truncate max-w-[10rem]">{item.label}</span>
+              {editingId === item.id ? (
+                <input
+                  // Inline rename — autofocus + select on mount so the user
+                  // can just start typing. Enter/blur commits, Escape cancels.
+                  // sized to the content via width:ch so the field tracks the
+                  // text being typed. All pointer/keydown events stop
+                  // propagation so they don't bubble to the TabsTrigger
+                  // (selection) or the list (drag-scroll's pointer capture).
+                  autoFocus
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  size={Math.max(draftName.length, 6)}
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') commitRename(item.id);
+                    else if (e.key === 'Escape') setEditingId(null);
+                  }}
+                  onBlur={() => commitRename(item.id)}
+                  className="bg-secondary border border-border rounded px-1 text-xs outline-none focus:border-primary/60 max-w-[10rem]"
+                />
+              ) : (
+                <span
+                  className="truncate max-w-[10rem] cursor-text select-none"
+                  title={item.id === active ? 'Click to rename' : undefined}
+                  // Use onPointerDown (NOT onClick): the list's drag-scroll
+                  // does setPointerCapture at pointerdown and its click
+                  // suppressor (handleClickCapture) can swallow a plain click
+                  // before the span's onClick fires. pointerdown fires BEFORE
+                  // the list's handler (capture target is set there), and
+                  // stopPropagation keeps this from starting a drag-scroll.
+                  onPointerDown={(e) => {
+                    if (item.id !== active) return; // inactive tab → let Radix select
+                    e.stopPropagation();
+                  }}
+                  onClick={() => {
+                    // Single-click on the ACTIVE tab's title → inline rename.
+                    // Inactive tabs just select (Radix handles that via the
+                    // Trigger), so only act when it's already active.
+                    if (item.id === active) {
+                      setDraftName(item.label);
+                      setEditingId(item.id);
+                    }
+                  }}
+                >
+                  {item.label}
+                </span>
+              )}
               {/* Close button — span (not <button>) to avoid nesting in
                   Radix's TabsTrigger. Stop propagation so close ≠ select. */}
               <span

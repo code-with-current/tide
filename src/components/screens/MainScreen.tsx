@@ -12,7 +12,7 @@ import { NoWorkspaceState } from "@/components/chat/NoWorkspaceState";
 import { MissingWorkspaceScreen } from "./MissingWorkspaceScreen";
 import { ChatMessage } from "@/components/chat/ChatMessage";
 import { VirtualizedChatList } from "@/components/chat/VirtualizedChatList";
-import { StickyScroll } from "@/lib/sticky-scroll";
+import { ChatScroll } from "@/lib/chat-scroll";
 import { OptionsPopup } from "@/components/chat/OptionsPopup";
 import { TodoFloatingPanel } from "@/components/chat/TodoFloatingPanel";
 import { TerminalPanel } from "@/components/terminal/TerminalPanel";
@@ -147,6 +147,7 @@ export function MainScreen() {
   const streamingUsage = activeStream?.usage ?? null;
   const permissionRequest = activeStream?.permissionRequest ?? null;
   const error = activeStream?.error ?? null;
+  const retry = activeStream?.retry ?? null;
 
   // Store actions for stream management.
   const clearFinalMessage = useUi((s) => s.clearFinalMessage);
@@ -286,58 +287,138 @@ export function MainScreen() {
     setRightPanelOpen,
   ]);
 
-  // StickyScroll — manages auto-scroll-to-bottom during streaming, unpin
-  // when user scrolls up, and the scroll-to-bottom button visibility.
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const stickyRef = useRef<StickyScroll | null>(null);
+  // ChatScroll — block-aware scroll controller. Owns bottom-pin detection
+  // (sentinel + IntersectionObserver), the `unread` flag that drives the
+  // floating "New Message" button, and the follow / snap-to-result behaviours.
+  const [unread, setUnread] = useState(false);
+  const chatScrollRef = useRef<ChatScroll | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Find the result anchor — the answer section of the most recent turn. Both
+  // the streaming message and persisted turns render it (BlockList → AnswerBlock).
+  const resultAnchor = (): HTMLElement | null => {
+    const roots = scrollRef.current?.querySelectorAll<HTMLElement>('[data-answer-root]');
+    if (!roots || roots.length === 0) return null;
+    return roots[roots.length - 1];
+  };
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
     const contentEl = contentRef.current;
-    if (!scrollEl) return;
-    const sticky = new StickyScroll(scrollEl, { threshold: 80 });
-    sticky.onPinChange = (pinned) => setIsAtBottom(pinned);
-    if (contentEl) sticky.observe(contentEl);
-    stickyRef.current = sticky;
-    return () => { sticky.disconnect(); stickyRef.current = null; };
+    const sentinelEl = sentinelRef.current;
+    if (!scrollEl || !sentinelEl || !contentEl) return;
+    const cs = new ChatScroll(scrollEl, sentinelEl, contentEl, { threshold: 80 });
+    cs.onUnreadChange = setUnread;
+    chatScrollRef.current = cs;
+    return () => { cs.detach(); chatScrollRef.current = null; };
   }, []);
 
-  // When the user sends a message, snap to bottom and re-pin.
+  // User sent a message → force to the bottom so the new message is visible.
+  // Defer one frame: the message was added to chatHistory synchronously, but
+  // the DOM hasn't rendered it yet — forceToBottom before render lands mid-list.
   const prevHistoryLenRef = useRef(0);
   useEffect(() => {
     const newLen = chatHistory.length;
     if (newLen > prevHistoryLenRef.current) {
       const lastMsg = chatHistory[newLen - 1];
       if (lastMsg?.role === "user") {
-        stickyRef.current?.scrollToBottom();
+        requestAnimationFrame(() => chatScrollRef.current?.onUserSend());
       }
     }
     prevHistoryLenRef.current = newLen;
   }, [chatHistory]);
 
-  // When switching sessions, re-pin without scrolling. The messages haven't
-  // loaded yet (async api.getSession below), so scrolling now would pin
-  // against stale heights. The ResizeObserver re-sticks as content renders.
+  // Follow the stream: each update either follows (if at bottom) or marks
+  // unread (if exploring → shows the "New Message" button).
   useEffect(() => {
-    stickyRef.current?.resetPin();
-  }, [activeSessionId]);
+    if (isStreaming) chatScrollRef.current?.onStreamTick();
+  }, [
+    isStreaming,
+    streamingText,
+    streamingTimeline,
+    activeStream?.blocks,
+    activeStream?.turn,
+    streamingReasoning,
+    streamingToolCalls,
+  ]);
 
-  // Snap to bottom once a session's messages finish loading. This runs after
-  // setChatHistory + setSessionLoading(false) have been applied, so the
-  // content is real; the ResizeObserver continues re-sticking as content-
-  // visibility heights settle.
+  // Turn finished → if the user was following, snap the result to the top so
+  // they read it top-down. Two RAFs let BlockList's section-collapse settle
+  // first (it compensates scrollTop on finish) so we don't fight it. If the
+  // user was exploring, leave the "New Message" button (no yank).
+  // GUARD: only treat isStreaming true→false as a finish when the SESSION
+  // hasn't changed — switching away from a streaming session also flips
+  // isStreaming, which would otherwise mis-fire this and scroll the new view.
+  const prevStreamingRef = useRef(false);
+  const prevFinishSessionRef = useRef<string | null | undefined>(activeSessionId);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    const sameSession = prevFinishSessionRef.current === activeSessionId;
+    prevStreamingRef.current = isStreaming;
+    prevFinishSessionRef.current = activeSessionId;
+    if (wasStreaming && !isStreaming && sameSession) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => chatScrollRef.current?.onTurnFinish(resultAnchor())),
+      );
+    }
+  }, [isStreaming, activeSessionId]);
+
+  // Session switch: once the new session's messages have loaded, stick to the
+  // bottom (force-settle handles content-visibility height convergence).
+  // Also handles first-open (app startup with a default session) where
+  // sessionLoading never goes true→false — the chatHistory key catches it.
   const prevLoadingRef = useRef(false);
+  const prevSessionForHistoryRef = useRef<string | null | undefined>(activeSessionId);
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = sessionLoading;
     if (!sessionLoading && wasLoading) {
-      requestAnimationFrame(() => stickyRef.current?.scrollToBottom());
+      // Defer two frames: sessionLoading flips before React commits the loaded
+      // chatHistory to the DOM, so the scroll container is still empty/partial.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => chatScrollRef.current?.onSessionReady()),
+      );
     }
   }, [sessionLoading]);
 
+  // Catch first-open and session switches where sessionLoading didn't fire —
+  // triggers when chatHistory changes for a NEW session id.
+  useEffect(() => {
+    if (activeSessionId !== prevSessionForHistoryRef.current) {
+      prevSessionForHistoryRef.current = activeSessionId;
+      // Session changed — wait for chatHistory to load, then scroll to bottom.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => chatScrollRef.current?.onSessionReady()),
+      );
+    }
+  }, [activeSessionId, chatHistory]);
+
+  // When a `git` tool completes in the active session, refetch git status +
+  // branch so the Source-Control panel and the Inspector's Git section reflect
+  // changes the agent made (new branch, checkout, commit, etc.) immediately.
+  const seenGitToolsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const calls = activeStream?.toolCalls ?? [];
+    let changed = false;
+    for (const c of calls) {
+      const name = (c.toolName || '').replace(/^(server_|mcp_)/, '');
+      if (name !== 'git') continue;
+      const terminal = c.status === 'executed' || c.status === 'failed' || c.status === 'rejected';
+      if (terminal && !seenGitToolsRef.current.has(c.id)) {
+        seenGitToolsRef.current.add(c.id);
+        changed = true;
+      }
+    }
+    if (changed && activeWorkspaceId) {
+      qc.invalidateQueries({ queryKey: ['gitStatus', activeWorkspaceId] });
+      qc.invalidateQueries({ queryKey: ['gitBranch', activeWorkspaceId] });
+    }
+  }, [activeStream?.toolCalls, activeWorkspaceId, qc]);
+
+  // Floating-button click: jump to the result top if there is one, else bottom.
   const scrollToBottom = useCallback(() => {
-    stickyRef.current?.scrollToBottom({ smooth: true });
+    chatScrollRef.current?.jumpToResult(resultAnchor());
   }, []);
 
   // The streaming assistant message — built from the active session's stream.
@@ -627,15 +708,84 @@ export function MainScreen() {
     ],
   );
 
+  // Queue refs — the freeze effect (below) reads these to auto-drain queued
+  // messages and handle "send now" overrides. handleSendRef lets the effect
+  // call the latest handleSend without re-subscribing on every identity change.
+  // forceSendRef holds a message the user explicitly jumped the queue for
+  // (via "Send now" — aborts the current turn, then sends on turn_end).
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
+  const forceSendRef = useRef<string | null>(null);
+
+  // "Send now" override — abort the current turn and force-send this message
+  // when the abort's turn_end arrives. Clears the queue (user chose to jump).
+  const onSendNow = useCallback(
+    (text: string) => {
+      forceSendRef.current = text;
+      if (activeSessionId) abort(activeSessionId);
+    },
+    [activeSessionId, abort],
+  );
+
   // When any session's stream finishes (finalMessage lands), freeze + persist that session's assistant message. Iterates over ALL streams rather than reading a single finalMessage slot — critical for parallel turns where two sessions may finish close together and would otherwise overwrite each other's slot before the effect processes them. Subscribes to `hasAnyFinalMessage` so the effect fires whenever any session's finalMessage becomes set, regardless of which is active.
   useEffect(() => {
     if (!hasAnyFinalMessage) return;
+
+    // Auto-drain queued messages after a turn finishes. Two paths:
+    //  1. Force-send override ("Send now" was clicked) — aborts the current
+    //     turn, then sends this message. Clears the rest of the queue.
+    //  2. Normal drain — send the first queued message in order.
+    // At this point isStreaming is false for the session (the freeze effect
+    // only processes sessions where stream.isStreaming === false), so
+    // handleSend's abort guard won't fire.
+    const drainQueue = (sid: string) => {
+      if (forceSendRef.current && sid === activeSessionId) {
+        const text = forceSendRef.current;
+        forceSendRef.current = null;
+        useUi.getState().clearQueuedMessages(sid);
+        handleSendRef.current({ text, attachments: [] });
+        return;
+      }
+      const q = useUi.getState().queue[sid];
+      if (q && q.length > 0) {
+        const next = q[0];
+        useUi.getState().removeQueuedMessage(sid, next.id);
+        handleSendRef.current({ text: next.text, attachments: [] });
+      }
+    };
+
     const streams = useUi.getState().streams;
     for (const [sid, stream] of Object.entries(streams)) {
       if (stream.isStreaming || !stream.finalMessage) continue;
       const fm = stream.finalMessage;
+      // Skip empty turns — no text, no tool calls, no blocks. The model
+      // produced nothing usable (empty response, pre-output error, etc.).
+      // Persisting a bare { content: "" } leaves a blank bubble in the chat
+      // and corrupts forks (the next turn's context includes an empty
+      // assistant message the model can't interpret). Still clear streaming
+      // state so the composer unblocks. An error turn (stopReason refusal /
+      // max_tokens / iteration_limit) is kept even when text is empty so the
+      // user sees something happened.
+      const isEmpty =
+        !fm.content?.trim() &&
+        !(fm.toolCalls ?? []).length &&
+        !(fm.blocks ?? []).length;
+      const isErrorStop =
+        stream.stopReason === 'refusal' ||
+        stream.stopReason === 'max_tokens' ||
+        stream.stopReason === 'iteration_limit' ||
+        stream.stopReason === 'content_filter';
+      if (isEmpty && !isErrorStop) {
+        setSessionRunning(sid, false);
+        if (sid === activeSessionId) markSessionRead(sid);
+        clearFinalMessage(sid);
+        // Auto-drain: send the next queued message (or a force-send override).
+        drainQueue(sid);
+        continue;
+      }
+      const messageId = fm.messageId ?? `m_${Date.now().toString(36)}`;
       const assistantMsg: Message = {
-        id: `m_${Date.now().toString(36)}`,
+        id: messageId,
         role: "assistant",
         content: fm.content,
         blocks: fm.blocks,
@@ -653,7 +803,7 @@ export function MainScreen() {
       if (sid === activeSessionId) {
         setChatHistory((h) => [...h, assistantMsg]);
       }
-      api.addAssistantMessage(sid, assistantMsg);
+      api.finalizeAssistantMessage(sid, messageId, assistantMsg);
       if (fm.usage) api.addSessionUsage(sid, fm.usage, fm.lastStepUsage ?? fm.usage);
       setSessionRunning(sid, false);
       if (sid === activeSessionId) markSessionRead(sid);
@@ -664,6 +814,8 @@ export function MainScreen() {
       qc.invalidateQueries({ queryKey: ["sessions", "detail", sid] });
       // Clear just this session's finalMessage so we don't reprocess it.
       clearFinalMessage(sid);
+      // Auto-drain: send the next queued message (or a force-send override).
+      drainQueue(sid);
     }
   }, [
     hasAnyFinalMessage,
@@ -793,7 +945,7 @@ export function MainScreen() {
                         ref={scrollRef}
                         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scroll px-6 py-5"
                       >
-                        <div ref={contentRef} className="max-w-3xl mx-auto flex flex-col min-w-0 overflow-hidden">
+                        <div ref={contentRef} className="max-w-4xl mx-auto flex flex-col min-w-0 overflow-hidden">
                           {sessionLoading && chatHistory.length === 0 ? (
                             // Session messages are loading on switch — show a
                             // skeleton instead of flashing an empty chat.
@@ -908,32 +1060,49 @@ export function MainScreen() {
                               </div>
                             </div>
                           )}
+                          {/* Bottom sentinel — drives ChatScroll's bottom-pin
+                            detection via IntersectionObserver. Must be the last
+                            child of the scrolling content and must NOT use
+                            content-visibility (so it always reports its real
+                            position). Zero-size; never paints. */}
+                          <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
                         </div>
                       </div>
                     </div>
 
                     {/* Composer — pinned to the bottom of the chat column. */}
                     <div className="flex-shrink-0 px-6 pb-4 pt-2 bg-gradient-to-b from-transparent to-bg relative">
-                      {/* Floating scroll-to-bottom button — appears above the
-                        composer when the user has scrolled up. Shows a "new"
-                        badge while streaming to indicate unseen content. */}
-                      {!isAtBottom && (
+                      {/* Retry indicator — floating above the composer while
+                          the orchestrator auto-retries a failed request. */}
+                      {retry && (
+                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary border border-border shadow-lg text-xs">
+                          <svg className="size-3.5 -rotate-90" viewBox="0 0 36 36">
+                            <circle cx="18" cy="18" r="15" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted/30" />
+                            <circle
+                              cx="18" cy="18" r="15" fill="none" stroke="currentColor" strokeWidth="3"
+                              strokeLinecap="round"
+                              strokeDasharray={`${(retry.attempt / retry.maxAttempts) * 94.25} 94.25`}
+                              className="text-primary transition-all duration-300"
+                            />
+                          </svg>
+                          <span className="text-muted-foreground font-mono tabular-nums">
+                            Retrying {retry.attempt}/{retry.maxAttempts}
+                          </span>
+                        </div>
+                      )}
+                      {unread && (
                         <Button
                           onClick={scrollToBottom}
                           className="absolute -top-9 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary border border-border shadow-lg text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                         >
                           <ChevronDown className="size-3.5" />
-                          {isStreaming ? (
-                            <span className="flex items-center gap-1.5">
-                              New activity
-                              <span className="size-1.5 rounded-full bg-primary animate-pulse" />
-                            </span>
-                          ) : (
-                            "Scroll to bottom"
-                          )}
+                          <span className="flex items-center gap-1.5">
+                            New Message
+                            {isStreaming && <span className="size-1.5 rounded-full bg-primary animate-pulse" />}
+                          </span>
                         </Button>
                       )}
-                      <div className="max-w-4xl mx-auto relative">
+                      <div className="max-w-5xl mx-auto relative">
                         {/* Options popover — anchored above the composer, matches
                           its width via the relative parent. No backdrop; floats
                           over the chat scroll without blocking interaction. */}
@@ -950,6 +1119,7 @@ export function MainScreen() {
                           }
                           inProgress={isStreaming || !!pendingOptions || submitting}
                           onSubmit={handleSend}
+                          onSendNow={onSendNow}
                           onStop={() => {
                             // abort() requires an explicit sessionId — without binding here, the composer's onStop() would pass no arg and ipc.abortTurn(undefined) would silently no-op (orchestrator can't match a session). Always abort the active session: the stop button represents "stop what I'm looking at".
                             if (activeSessionId) abort(activeSessionId);
@@ -957,10 +1127,6 @@ export function MainScreen() {
                         />
                       </div>
                     </div>
-                    {/* Terminal — always mounted so xterm state survives
-                          collapse/expand. TerminalPanel hides itself via
-                          display:none when !terminalOpen. */}
-                    <TerminalPanel />
                   </>
                 ) : (
                   <EmptyChatState
@@ -968,6 +1134,17 @@ export function MainScreen() {
                     isStreaming={isStreaming}
                   />
                 )}
+                {/* Terminal — ALWAYS MOUNTED, outside the mainView ternary.
+                    Previously this sat inside the `mainView === 'chat'` branch,
+                    so visiting the new-session screen (mainView === 'new')
+                    UNMOUNTED it — the registry cleanup disposed every ghostty
+                    instance, and switching back rebuilt blank canvases against
+                    stale PTY state. Hoisting it here keeps the instances alive
+                    across chat ↔ new-session transitions; TerminalPanel hides
+                    itself via display:none when !terminalOpen or when the
+                    active session has no terminals, so it never leaks into the
+                    new-session view. */}
+                <TerminalPanel />
               </div>
             </main>
           </Panel>

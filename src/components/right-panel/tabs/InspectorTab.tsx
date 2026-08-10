@@ -24,6 +24,7 @@ import {
   useModels,
   useWorkspaces,
   useGitStatus,
+  useGitBranchInfo,
   useRagStatus,
   useReindexWorkspace,
   useRagInitProgress,
@@ -49,6 +50,10 @@ export function InspectorTab({ session }: { session: Session }) {
     [workspaces, session.workspaceId],
   );
   const { data: gitChanges } = useGitStatus(session.workspaceId, session.worktree ? session.id : undefined);
+  // Live branch + HEAD for the session's working directory — reflects branch
+  // changes made by tools mid-session (e.g. a new branch via the git tool),
+  // instead of the stale persisted value. Falls back to the persisted branch.
+  const { data: gitBranch } = useGitBranchInfo(session.workspaceId, session.worktree ? session.id : undefined);
 
   // Any core async dep still loading → show a skeleton for the Configuration section (avoids fabricated values like a hardcoded 100 maxSteps). Uses isLoading flags (not value === undefined) so a legitimately-missing model doesn't keep the skeleton up forever.
   const loading =
@@ -134,7 +139,7 @@ export function InspectorTab({ session }: { session: Session }) {
               <div className="flex items-center gap-2">
                 <GitBranch className="size-3" />
                 <span className="font-mono text-xs flex-1 truncate">
-                  {session.worktree?.branch ?? workspace?.branch}
+                  {gitBranch?.branch ?? session.worktree?.branch ?? workspace?.branch}
                 </span>
               </div>
               {session.worktree && (

@@ -13,9 +13,24 @@ import { SlashPicker, filterMentions, detectSlashQueryAt, detectAtQueryAt } from
 import { ProjectFilePicker } from './composer/ProjectFilePicker';
 import { SendStopButton } from './composer/SendStopButton';
 import { QueuedMessages } from './composer/QueuedMessages';
-import { ForkSessionDialog } from '@/components/modals/ForkSessionDialog';
+import { initiateFork } from '@/lib/queries';
 import type { MessageAttachment } from '@/types';
 import * as api from '@/lib/api/client';
+
+/** Module-level stable empty array — never re-create the fallback, or Zustand's
+ *  selector sees a "new" snapshot every render and triggers an infinite loop. */
+const EMPTY_HISTORY: string[] = [];
+
+/** Place the caret at the end of a contentEditable element's text content. */
+function placeCaretAtEnd(el: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false); // collapse to end
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
 
 export interface ChatComposerPayload {
   /** Display text — user's typed words with `/{name}` references where chips
@@ -46,6 +61,9 @@ export interface ChatComposerProps {
   /** Whether a turn is currently running. Drives Send/Stop + queue routing. */
   inProgress?: boolean;
   onSubmit?: (payload: ChatComposerPayload) => void;
+  /** "Send now" override — aborts the current turn and force-sends a queued
+   *  message. Routed to QueuedMessages' per-item "Send now" button. */
+  onSendNow?: (text: string) => void;
   onStop?: () => void;
   /** Live text callback — used by EmptyChatState to auto-suggest a
    *  worktree branch name as the user types. Optional; not needed for
@@ -80,6 +98,7 @@ export function ChatComposer({
   compact = false,
   inProgress = false,
   onSubmit,
+  onSendNow,
   onStop,
   onChange,
 }: ChatComposerProps) {
@@ -88,9 +107,6 @@ export function ChatComposer({
   // changes to trigger re-renders for the chars counter + send-button state.
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // Fork-session dialog state. The model is locked on existing sessions;
-  // clicking the locked ModelSelector opens this dialog.
-  const [forkOpen, setForkOpen] = useState(false);
   const { data: sessions } = useSessions(useUi((s) => s.activeWorkspaceId) ?? '');
   const activeSession = sessionId ? sessions?.find((s) => s.id === sessionId) : undefined;
   // Locked when an existing session has messages (model is immutable post-creation).
@@ -122,6 +138,10 @@ export function ChatComposer({
   const bumpPendingReads = useUi((s) => s.bumpComposerPendingReads);
   const setMainView = useUi((s) => s.setMainView);
   const enqueue = useUi((s) => s.enqueueMessage);
+  const pushPromptHistory = useUi((s) => s.pushPromptHistory);
+  const promptHistory = useUi((s) =>
+    sessionId ? (s.promptHistory[sessionId] ?? EMPTY_HISTORY) : EMPTY_HISTORY,
+  );
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const catalog = useMentionCatalog(activeWorkspaceId);
 
@@ -136,6 +156,13 @@ export function ChatComposer({
   const [atQuery, setAtQuery] = useState<string | null>(null);
   const [atHighlight, setAtHighlight] = useState(0);
   const [projectFiles, setProjectFiles] = useState<{ path: string; kind: 'file' | 'dir' }[]>([]);
+
+  // ── Prompt history navigation ──
+  // -1 = not navigating (editing fresh text); 0+ = index into promptHistory.
+  // The draft the user was typing before navigating up is saved so ArrowDown
+  // past the end restores it.
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const savedDraftRef = useRef<string>('');
 
   // Load project file list once when workspace changes.
   useEffect(() => {
@@ -352,10 +379,13 @@ export function ChatComposer({
     insertMention(m);
   }, [insertMention]);
 
-  /** Intercept paste: force text-only (no rich HTML) and turn long pastes (>10 lines) into virtual attachments. */
+  /** Intercept paste: force text-only (no rich HTML) and turn long pastes
+   *  (>10 lines) into virtual attachments. Pasted FILES become file attachments.
+   *  The attachment content is inlined into the model's message by the
+   *  orchestrator's toCoreMessage, so the model always sees pasted text. */
   const PASTE_LINE_THRESHOLD = 10;
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
-    // Pasted FILES (e.g. from Finder) take precedence over text — they arrive as a FileList on clipboardData and are attached like browsed files. The File's content is read directly via the File API; webUtils.getPathForFile is used opportunistically for a real on-disk path.
+    // Pasted FILES (e.g. from Finder) take precedence over text.
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
@@ -364,20 +394,15 @@ export function ChatComposer({
         | undefined;
       for (const f of Array.from(files)) {
         const name = f.name || 'pasted-file';
-        // Prefer the real on-disk path so the chip matches a browsed file's
-        // 2-segment shortName; fall back to the bare filename.
         const realPath = wu?.getPathForFile?.(f) || name;
         const kind = kindForPath(name);
         if (kind === 'image') {
-          // Images attach by path only (no inline content), matching the
-          // browsed-file behavior in AttachButton.
           addAttachment({ path: shortName(realPath), kind, absPath: realPath });
           continue;
         }
-        // Read the File's content directly (async); bump pendingReads so send() stays disabled until content lands in `attachments`, otherwise send() could snapshot state and drop the attachment.
         bumpPendingReads(1);
         f.text().then((content) => {
-          const MAX = 200_000; // matches the IPC read cap in readExternalFile
+          const MAX = 200_000;
           const truncated = content.length > MAX;
           addAttachment({
             path: shortName(realPath),
@@ -398,14 +423,14 @@ export function ChatComposer({
     if (!text) return;
     const lineCount = text.split('\n').length;
     if (lineCount <= PASTE_LINE_THRESHOLD) {
-      // Insert as plain text — no formatting, no nested chips from external
-      // sources. execCommand is deprecated but still the cleanest way to
-      // insert text at the cursor in a contentEditable.
+      // Short paste → insert as plain text at the cursor.
       e.preventDefault();
       document.execCommand('insertText', false, text);
       return;
     }
-    // Long paste → virtual attachment (unchanged behavior).
+    // Long paste → virtual attachment. The content is inlined into the model's
+    // message by the orchestrator (toCoreMessage), so the model sees the full
+    // text. The chip lets the user see/edit/remove it before sending.
     e.preventDefault();
     const name = `Pasted - ${lineCount} lines.txt`;
     addAttachment({ path: name, kind: 'paste', content: text });
@@ -559,6 +584,59 @@ export function ChatComposer({
       return;
     }
 
+    // ── Prompt history navigation (ArrowUp/Down) ──
+    // Only when no picker is open. ArrowUp at the start of the editor goes
+    // back in history; ArrowDown at the end goes forward. Multi-line text
+    // (with Shift+Enter line breaks) still allows free cursor movement —
+    // history nav only triggers when the caret is at the very top/bottom.
+    if (slashQuery === null && atQuery === null && sessionId && promptHistory.length > 0) {
+      const editor = editorRef.current;
+      if (editor) {
+        const sel = window.getSelection();
+        const atStart = sel?.anchorOffset === 0 && editor.innerText.indexOf('\n') === -1
+          || (sel?.anchorNode === editor && sel?.anchorOffset === 0 && !editor.innerText.includes('\n'));
+        // Simpler check: if the whole editor is on a single line and caret is at position 0
+        const singleLine = !editor.innerText.includes('\n');
+        if (e.key === 'ArrowUp' && singleLine && sel && sel.anchorOffset === 0) {
+          e.preventDefault();
+          if (historyIndex === -1) {
+            // Save the current draft before navigating
+            savedDraftRef.current = editor.innerText;
+            setHistoryIndex(0);
+            editor.innerText = promptHistory[0];
+          } else if (historyIndex < promptHistory.length - 1) {
+            const next = historyIndex + 1;
+            setHistoryIndex(next);
+            editor.innerText = promptHistory[next];
+          }
+          // Move caret to end
+          placeCaretAtEnd(editor);
+          bumpVersion();
+          return;
+        }
+        if (e.key === 'ArrowDown' && historyIndex !== -1) {
+          // Only intercept if caret is at the end of the text
+          const text = editor.innerText;
+          const atEnd = sel && sel.anchorOffset === text.length;
+          if (atEnd || singleLine) {
+            e.preventDefault();
+            if (historyIndex > 0) {
+              const next = historyIndex - 1;
+              setHistoryIndex(next);
+              editor.innerText = promptHistory[next];
+            } else {
+              // Past the end — restore the saved draft
+              setHistoryIndex(-1);
+              editor.innerText = savedDraftRef.current;
+            }
+            placeCaretAtEnd(editor);
+            bumpVersion();
+            return;
+          }
+        }
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -700,6 +778,14 @@ export function ChatComposer({
       })),
     };
 
+    // Record the prompt in the session's history for arrow-key navigation.
+    // Use the display text (without attachment links) so history shows what
+    // the user actually typed.
+    if (sessionId) {
+      pushPromptHistory(sessionId, displayText);
+      setHistoryIndex(-1); // reset navigation state
+    }
+
     if (inProgress && sessionId) {
       const queueText = payload.attachments.length
         ? `${payload.text}\n\n[Attached: ${payload.attachments.map((a) => a.path).join(', ')} — re-attach after queue flush]`
@@ -719,6 +805,8 @@ export function ChatComposer({
     if (editor) editor.innerHTML = '';
     mentionsRef.current.clear();
     clearAttachments();
+    setHistoryIndex(-1);
+    savedDraftRef.current = '';
     bumpVersion();
   };
 
@@ -736,6 +824,7 @@ export function ChatComposer({
           sessionId={sessionId}
           inProgress={inProgress}
           onSendItem={(text) => onSubmit?.({ text, attachments: [] })}
+          onSendNow={onSendNow}
         />
       )}
 
@@ -851,7 +940,7 @@ export function ChatComposer({
           {/* Bottom row — selectors, counters, send/stop */}
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
             <PermissionModeSelector />
-            <ModelSelector locked={modelLocked} onLockedClick={() => setForkOpen(true)} />
+            <ModelSelector locked={modelLocked} onLockedClick={() => { if (sessionId) initiateFork(sessionId); }} />
             {thinkingSupported && <ThinkingLevelSelector />}
 
             {!compact && attachments.length > 0 && (
@@ -885,16 +974,6 @@ export function ChatComposer({
           </div>
         </div>
       </div>
-      {modelLocked && sessionId && (
-        <ForkSessionDialog
-          open={forkOpen}
-          onOpenChange={setForkOpen}
-          sourceSessionId={sessionId}
-          sourceTitle={activeSession?.title ?? 'this session'}
-          sourceModelId={activeSession?.modelId}
-          sourceProviderId={activeSession?.providerId}
-        />
-      )}
     </div>
   );
 }

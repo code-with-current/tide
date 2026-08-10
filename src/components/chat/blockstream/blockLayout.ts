@@ -35,6 +35,15 @@ export function deriveLayout(blocks: Block[] | undefined): TurnLayout {
         if (!layout.thinking) layout.thinking = b;
         break;
       case 'tool':
+        // Children (sub-agent tool calls) count toward totals but don't
+        // render as top-level process rows — they're nested inside their
+        // dispatch_agent parent via the parentToolCallId linkage.
+        if (b.parentToolCallId) {
+          layout.totals[b.category]++;
+          if (isFailedStatus(b.status)) layout.totals.failedCount++;
+          if (b.durationMs != null) layout.totals.totalMs += b.durationMs;
+          break;
+        }
         layout.totals[b.category]++;
         if (isFailedStatus(b.status)) layout.totals.failedCount++;
         if (b.durationMs != null) layout.totals.totalMs += b.durationMs;

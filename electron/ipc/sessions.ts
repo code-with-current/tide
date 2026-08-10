@@ -81,6 +81,13 @@ function store(): SessionStore {
   return _store;
 }
 
+/** Shared singleton session store. Other modules MUST use this instead of
+ *  createSessionStore() — separate instances have separate caches and clobber
+ *  each other's writes on disk. */
+export function getSessionStore(): SessionStore {
+  return store();
+}
+
 // ── Branch + worktree lifecycle ───────────────────────────────────────
 // Backed by electron/ipc/git.ts. Errors propagate to the renderer — the
 // caller (MainScreen.handleSend) catches and falls back to no-worktree
@@ -228,7 +235,10 @@ export function createSession(
   return hydrate(store().createSession(workspaceId, title, modelId, opts));
 }
 
-/** Fork a session into a new session with a different model, generating an LLM summary of the source conversation as the first message. The source session is preserved unchanged. */
+/** Fork a session into a new session with a different model. Copies the
+ *  source's last assistant result message (with blocks/toolCalls/etc.) as
+ *  the fork's first message — no LLM summarization. The source session is
+ *  preserved unchanged. */
 export async function forkWithSummary(
   sourceId: string,
   newModelId: string,
@@ -238,54 +248,31 @@ export async function forkWithSummary(
     providerId?: string;
   },
 ): Promise<HydratedSession> {
-  // 1. Create the fork (empty messages, new model, lineage set).
   const forked = store().forkSession(sourceId, newModelId, opts);
   const source = store().getSession(sourceId);
 
-  // 2. Generate the summary using the DESTINATION model (best-effort).
-  let summary: string;
-  if (source && source.messages.length > 0) {
-    try {
-      // Resolve the destination provider.
-      const { listProviders } = await import('../store.js');
-      const providers = listProviders();
-      let provider = opts?.providerId ? providers.find((p) => p.id === opts.providerId) : undefined;
-      if (!provider) {
-        provider = providers.find((p) => p.enabled && p.models.some((m) => m.modelId === newModelId));
-      }
-      if (provider?.apiKey) {
-        // Convert stored messages → ModelMessage for the summarizer.
-        const modelMessages = source.messages
-          .filter((m) => m.content)
-          .map((m) => ({
-            role: m.role === 'assistant' ? 'assistant' : 'user',
-            content: m.content,
-          })) as any[];
-        const { generateSessionSummary } = await import('../agent/context/summarize.js');
-        summary = await generateSessionSummary(modelMessages, {
-          provider,
-          modelId: newModelId,
-          signal: AbortSignal.timeout(45_000),
-        });
-      } else {
-        throw new Error('destination provider has no API key');
-      }
-    } catch (e: any) {
-      log.warn('fork summary generation failed — using fallback', { err: e?.message });
-      summary = `Forked from "${source?.title ?? 'session'}'. Continue from here.`;
-    }
-  } else {
-    summary = `Forked from "${source?.title ?? 'session'}". No prior messages to summarize.`;
-  }
+  // Find the last assistant message with content — that's the result the user
+  // is forking from. Copy it verbatim (blocks, toolCalls, reasoning, etc.) so
+  // the fork starts with full context of where the conversation left off.
+  const lastResult = source?.messages
+    .slice().reverse()
+    .find((m) => m.role === 'assistant' && m.content?.trim());
 
-  // 3. Store the summary as the first assistant message with a forkSummary marker.
-  store().addAssistantMessage(forked.id, {
-    content: summary,
-    turn: {
-      forkSummary: true,
-      sourceTitle: source?.title ?? 'session',
-    },
-  });
+  if (lastResult) {
+    store().addAssistantMessage(forked.id, {
+      content: lastResult.content,
+      blocks: lastResult.blocks,
+      reasoning: lastResult.reasoning,
+      reasoningTokens: lastResult.reasoningTokens,
+      reasoningMs: lastResult.reasoningMs,
+      toolCalls: lastResult.toolCalls,
+      timeline: lastResult.timeline,
+      turn: {
+        forkedFromResult: true,
+        sourceTitle: source?.title ?? 'session',
+      },
+    });
+  }
 
   return hydrate(store().getSession(forked.id)!);
 }
@@ -351,6 +338,26 @@ export function addAssistantMessage(
   },
 ): void {
   store().addAssistantMessage(sessionId, message);
+}
+
+/** Upsert the final assistant message by messageId — updates the streaming
+ *  partial in place (created by updatePartialAssistantMessage) instead of
+ *  appending a second copy. */
+export function finalizeAssistantMessage(
+  sessionId: string,
+  messageId: string,
+  message: {
+    content: string;
+    blocks?: Block[];
+    reasoning?: string;
+    reasoningTokens?: number;
+    reasoningMs?: number;
+    toolCalls?: any[];
+    timeline?: any[];
+    turn?: any;
+  },
+): void {
+  store().finalizeAssistantMessage(sessionId, messageId, message);
 }
 
 /** Update the last assistant message in-place (used by the streaming flush to persist partial state). If no assistant message exists yet, creates one. */

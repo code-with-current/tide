@@ -110,8 +110,15 @@ contextBridge.exposeInMainWorld('tideIpc', {
     }
   },
   detectGitRepo: (dirPath: string) => ipcRenderer.invoke('tide:detectGitRepo', dirPath),
-  addWorkspace: (input: { path: string; name?: string; repository?: string; template?: import('../src/lib/templates').TemplateId; scripts?: import('../src/types').WorkspaceScript[]; initGit?: boolean }) =>
+  addWorkspace: (input: { path: string; name?: string; repository?: string; template?: import('../src/lib/templates').TemplateId; scripts?: import('../src/types').WorkspaceScript[]; initGit?: boolean; requestId?: string }) =>
     ipcRenderer.invoke('tide:addWorkspace', input),
+  // Workspace-creation milestones (tide:workspace:progress). Correlated by
+  // requestId (see addWorkspace). Used by the AddWorkspace dialog checklist.
+  onWorkspaceProgress: (cb: (e: unknown) => void) => {
+    const listener = (_e: unknown, ev: unknown) => cb(ev);
+    ipcRenderer.on('tide:workspace:progress', listener);
+    return () => ipcRenderer.off('tide:workspace:progress', listener);
+  },
 
   // ── Sessions ──
   listSessions: (workspaceId: string) => ipcRenderer.invoke('tide:listSessions', workspaceId),
@@ -142,6 +149,16 @@ contextBridge.exposeInMainWorld('tideIpc', {
     turn?: any;
   }) =>
     ipcRenderer.invoke('tide:addAssistantMessage', sessionId, message),
+  finalizeAssistantMessage: (sessionId: string, messageId: string, message: {
+    content: string;
+    reasoning?: string;
+    reasoningTokens?: number;
+    reasoningMs?: number;
+    toolCalls?: any[];
+    timeline?: any[];
+    turn?: any;
+  }) =>
+    ipcRenderer.invoke('tide:finalizeAssistantMessage', sessionId, messageId, message),
   addSessionUsage: (
     sessionId: string,
     delta: { inputTokens?: number; outputTokens?: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number; calls?: number; costUsd?: number },
@@ -283,6 +300,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // main checkout. Source Control + Inspector both pass it through.
   gitStatus: (workspaceId: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStatus', workspaceId, sessionId),
+  gitBranchInfo: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitBranchInfo', workspaceId, sessionId),
   gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStage', workspaceId, filePath, stage, sessionId),
   gitCommit: (workspaceId: string, message: string, sessionId?: string) =>

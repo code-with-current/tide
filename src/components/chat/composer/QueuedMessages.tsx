@@ -1,3 +1,15 @@
+/**
+ * QueuedMessages — outgoing message queue rendered above the composer.
+ *
+ * Simple informational layout using base shadcn components:
+ *  • Header: badge with count + status text + clear button
+ *  • List: drag-reorderable items with edit / send-now / remove actions
+ *  • Each item is a compact single-line preview (expandable via edit)
+ *
+ * Auto-drains when a turn finishes (wired in MainScreen's freeze effect).
+ * "Send now" aborts the current turn and force-sends immediately.
+ */
+
 import { useState } from 'react';
 import {
   DndContext,
@@ -18,24 +30,20 @@ import { GripVertical, X, Pencil, Send, Clock, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUi, type QueuedMessage } from '@/lib/stores/ui';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
-/** Outgoing message queue above the composer. Drag-reorderable; per-item edit/send-now/remove actions. */
-
-/** Module-level stable empty array — never re-create the fallback, or
- *  Zustand's useSyncExternalStore sees a "new" snapshot every render and
- *  triggers an infinite re-render loop. */
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
 export function QueuedMessages({
   sessionId,
   inProgress,
   onSendItem,
+  onSendNow,
 }: {
   sessionId: string;
-  /** When false, the queue will auto-drain — parent should call onSendItem for each. */
   inProgress: boolean;
-  /** Send a single queued item now (e.g. user clicked send-now, or drain). */
   onSendItem: (text: string) => void;
+  onSendNow?: (text: string) => void;
 }) {
   const queue = useUi((s) => s.queue[sessionId] ?? EMPTY_QUEUE);
   const remove = useUi((s) => s.removeQueuedMessage);
@@ -55,25 +63,25 @@ export function QueuedMessages({
   };
 
   return (
-    <div className="mb-2 rounded-md border border-border bg-secondary/60 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[11px] text-muted-foreground/60">
-        <Clock className="size-3" />
-        <span className="font-medium text-muted-foreground">Queued</span>
-        <span>· {queue.length === 1 ? '1 message' : `${queue.length} messages`}</span>
-        <span>·</span>
-        <span>
-          {inProgress
-            ? 'will send when the current turn finishes'
-            : 'will send on the next turn'}
+    <div className="mb-2 rounded-lg border border-border bg-secondary/40">
+      {/* Header — badge + status + clear */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+        <Badge variant="secondary" className="gap-1">
+          <Clock className="size-2.5" />
+          {queue.length}
+        </Badge>
+        <span className="text-[11px] text-muted-foreground">
+          {inProgress ? 'Queued — Sends when the current turn finishes' : 'Queued — Sends on next turn'}
         </span>
         <div className="flex-1" />
         <Button
+          variant="ghost"
+          size="xs"
           onClick={() => clear(sessionId)}
-          title="Clear queue"
-          className="flex items-center gap-1 hover:text-destructive text-muted-foreground/60 px-1.5 py-0.5 rounded"
+          className="text-muted-foreground hover:text-destructive"
         >
-          <Trash2 className="size-3" /> Clear
+          <Trash2 className="size-3" />
+          Clear
         </Button>
       </div>
 
@@ -81,16 +89,21 @@ export function QueuedMessages({
       <div className="p-1.5">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={queue.map((m) => m.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-1.5">
-              {queue.map((m) => (
+            <div className="flex flex-col gap-1">
+              {queue.map((m, i) => (
                 <SortableItem
                   key={m.id}
                   item={m}
+                  index={i}
                   onRemove={() => remove(sessionId, m.id)}
                   onEdit={(text) => useUi.getState().editQueuedMessage(sessionId, m.id, text)}
                   onSendNow={() => {
-                    remove(sessionId, m.id);
-                    onSendItem(m.text);
+                    if (inProgress && onSendNow) {
+                      onSendNow(m.text);
+                    } else {
+                      remove(sessionId, m.id);
+                      onSendItem(m.text);
+                    }
                   }}
                 />
               ))}
@@ -104,11 +117,13 @@ export function QueuedMessages({
 
 function SortableItem({
   item,
+  index,
   onRemove,
   onEdit,
   onSendNow,
 }: {
   item: QueuedMessage;
+  index: number;
   onRemove: () => void;
   onEdit: (text: string) => void;
   onSendNow: () => void;
@@ -130,19 +145,25 @@ function SortableItem({
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group flex items-start gap-2 px-2 py-1.5 rounded-md bg-card border border-input',
-        isDragging && 'shadow-lg border-accent/40',
+        'group flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5',
+        isDragging && 'shadow-md border-accent/30',
       )}
     >
-      {/* Grip + position */}
+      {/* Drag handle */}
       <Button
+        variant="ghost"
+        size="icon"
         {...attributes}
         {...listeners}
-        className="mt-0.5 text-muted-foreground/60 hover:text-muted cursor-grab active:cursor-grabbing"
-        title="Drag to reorder"
+        className="size-5 text-muted-foreground/40 hover:text-muted-foreground cursor-grab active:cursor-grabbing"
       >
-        <GripVertical className="size-3.5" />
+        <GripVertical className="size-3" />
       </Button>
+
+      {/* Position number */}
+      <span className="text-[10px] font-mono text-muted-foreground/40 tabular-nums w-3 text-center flex-shrink-0">
+        {index + 1}
+      </span>
 
       {/* Text / editor */}
       <div className="flex-1 min-w-0">
@@ -152,35 +173,33 @@ function SortableItem({
             onChange={(e) => setDraft(e.target.value)}
             autoFocus
             rows={Math.min(5, Math.max(1, Math.ceil(draft.length / 60)))}
-            className="w-full bg-secondary border border-border rounded text-xs px-2 py-1 resize-none focus:border-accent outline-none font-sans"
+            className="w-full rounded border border-border bg-secondary px-2 py-1 text-xs resize-none outline-none focus:border-accent"
           />
         ) : (
-          <div className="text-xs text-muted-foreground leading-relaxed line-clamp-3 whitespace-pre-wrap break-words">
+          <div className="text-xs text-muted-foreground leading-relaxed line-clamp-2 whitespace-pre-wrap break-words">
             {item.text}
           </div>
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Actions — appear on hover */}
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         {editing ? (
           <>
             <Button
-              onClick={() => {
-                onEdit(draft);
-                setEditing(false);
-              }}
-              className="text-primary hover:text-primary-hover p-1 rounded hover:bg-secondary"
+              variant="ghost"
+              size="icon"
+              onClick={() => { onEdit(draft); setEditing(false); }}
+              className="size-6 text-primary hover:text-primary"
               title="Save"
             >
               <Send className="size-3" />
             </Button>
             <Button
-              onClick={() => {
-                setDraft(item.text);
-                setEditing(false);
-              }}
-              className="text-muted-foreground/60 hover:text-foreground p-1 rounded hover:bg-secondary"
+              variant="ghost"
+              size="icon"
+              onClick={() => { setDraft(item.text); setEditing(false); }}
+              className="size-6 text-muted-foreground hover:text-foreground"
               title="Cancel"
             >
               <X className="size-3" />
@@ -189,22 +208,28 @@ function SortableItem({
         ) : (
           <>
             <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setEditing(true)}
-              className="text-muted-foreground/60 hover:text-foreground p-1 rounded hover:bg-secondary"
+              className="size-6 text-muted-foreground hover:text-foreground"
               title="Edit"
             >
               <Pencil className="size-3" />
             </Button>
             <Button
+              variant="ghost"
+              size="icon"
               onClick={onSendNow}
-              className="text-muted-foreground/60 hover:text-primary p-1 rounded hover:bg-secondary"
-              title="Send now (jumps the queue)"
+              className="size-6 text-muted-foreground hover:text-primary"
+              title="Send now — jumps the queue"
             >
               <Send className="size-3" />
             </Button>
             <Button
+              variant="ghost"
+              size="icon"
               onClick={onRemove}
-              className="text-muted-foreground/60 hover:text-destructive p-1 rounded hover:bg-secondary"
+              className="size-6 text-muted-foreground hover:text-destructive"
               title="Remove"
             >
               <X className="size-3" />

@@ -16,5 +16,6 @@ export function toolBlockToToolCall(block: ToolBlock): ToolCall {
     durationMs: block.durationMs,
     meta: block.meta,
     _partialInput: block.partialInput,
+    parentToolCallId: block.parentToolCallId,
   };
 }

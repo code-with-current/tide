@@ -79,7 +79,15 @@ export interface StoredSession {
     sessionId: string;
     title: string;
   };
-  /** Persisted todo groups — survives app restart. */
+  /** Persisted todo list (flat) — survives app restart. Single source of
+   *  truth for the floating panel. The legacy `todoGroups` field below is
+   *  kept only to migrate old sessions on load (flattened into `todos`). */
+  todos?: Array<{
+    content: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+    priority?: 'high' | 'medium' | 'low';
+  }>;
+  /** @deprecated legacy multi-group storage — read-only, flattened into `todos` on load. */
   todoGroups?: Array<{
     id: string;
     title: string;
@@ -212,8 +220,15 @@ export interface SessionStore {
   ): void;
   /** Write a full session object back to disk + cache. Used by the streaming flush to persist partial assistant turns. */
   updateSession(session: StoredSession): void;
-  /** Persist todo groups so they survive app restart. */
-  setTodoGroups(sessionId: string, groups: Array<{ id: string; title: string; items: Array<{ content: string; status: string; priority?: string }>; createdAt: number }>): void;
+  /** Persist the flat todo list so it survives app restart. */
+  setTodos(sessionId: string, todos: Array<{ content: string; status: string; priority?: string }>): void;
+  /** Upsert the final assistant message by messageId (updates the streaming
+   *  partial in place; appends if none). Prevents partial+finalize duplicates. */
+  finalizeAssistantMessage(
+    sessionId: string,
+    messageId: string,
+    message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
+  ): void;
   /** Hook called BEFORE the session JSON is unlinked during delete.
    *  Lets the runtime cascade-remove the worktree directory + branch.
    *  Set via `setDeleteHook` so the store stays decoupled from git. */
@@ -490,6 +505,58 @@ export function createSessionStore(rootDir: string): SessionStore {
     writeSession(s);
   }
 
+  /** Upsert an assistant message by messageId. The streaming flush already
+   *  created this message (with this id) in storage; at turn end we must
+   *  UPDATE it in place rather than append — otherwise the partial + the
+   *  finalize produce two copies. Falls back to append when no partial exists
+   *  (a short turn that never flushed). */
+  function finalizeAssistantMessage(
+    sessionId: string,
+    messageId: string,
+    message: {
+      content: string;
+      blocks?: any[];
+      reasoning?: string;
+      reasoningTokens?: number;
+      reasoningMs?: number;
+      toolCalls?: any[];
+      timeline?: any[];
+      turn?: any;
+    },
+  ): void {
+    ensureLoaded();
+    const s = cache.get(sessionId);
+    if (!s) return;
+    const now = new Date().toISOString();
+    const existing = s.messages.find((m) => m.id === messageId && m.role === 'assistant');
+    if (existing) {
+      existing.content = message.content;
+      if (message.blocks) existing.blocks = message.blocks;
+      if (message.reasoning !== undefined) existing.reasoning = message.reasoning;
+      if (message.reasoningTokens !== undefined) existing.reasoningTokens = message.reasoningTokens;
+      if (message.reasoningMs !== undefined) existing.reasoningMs = message.reasoningMs;
+      if (message.toolCalls) existing.toolCalls = message.toolCalls;
+      if (message.timeline) existing.timeline = message.timeline;
+      if (message.turn !== undefined) existing.turn = message.turn;
+    } else {
+      s.messages.push({
+        id: messageId,
+        role: 'assistant',
+        content: message.content,
+        createdAt: now,
+        blocks: message.blocks,
+        reasoning: message.reasoning,
+        reasoningTokens: message.reasoningTokens,
+        reasoningMs: message.reasoningMs,
+        toolCalls: message.toolCalls,
+        timeline: message.timeline,
+        turn: message.turn,
+      });
+    }
+    s.updatedAt = now;
+    writeSession(s);
+  }
+
   function addUsage(
     sessionId: string,
     delta: {
@@ -639,11 +706,11 @@ export function createSessionStore(rootDir: string): SessionStore {
     writeSession(session);
   }
 
-  function setTodoGroups(sessionId: string, groups: Array<{ id: string; title: string; items: Array<{ content: string; status: string; priority?: string }>; createdAt: number }>): void {
+  function setTodos(sessionId: string, todos: Array<{ content: string; status: string; priority?: string }>): void {
     ensureLoaded();
     const s = cache.get(sessionId);
     if (!s) return;
-    s.todoGroups = groups as any;
+    s.todos = todos as any;
     s.updatedAt = new Date().toISOString();
     writeSession(s);
   }
@@ -759,7 +826,8 @@ export function createSessionStore(rootDir: string): SessionStore {
     setWorktree,
     setActiveSkillRef,
     updateSession,
-    setTodoGroups,
+    setTodos,
+    finalizeAssistantMessage,
     setDeleteHook,
   };
 }

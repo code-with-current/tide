@@ -1,9 +1,9 @@
 /** MissingWorkspaceScreen: shown when the active workspace's folder is gone. Offers Delete or "I've restored it" (re-probe, no silent mkdir). */
 import { useState } from 'react';
-import { FolderX, Trash2, RefreshCw, CheckCircle2, Loader2 } from 'lucide-react';
+import { FolderX, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useUi } from '@/lib/stores/ui';
-import { useDeleteWorkspace } from '@/lib/queries';
+import { useDeleteWorkspace, useArchiveWorkspace } from '@/lib/queries';
 import { toast } from '@/lib/toast';
 import type { Workspace } from '@/types';
 
@@ -17,14 +17,23 @@ export function MissingWorkspaceScreen({
    *  normal chat/new view. */
   onRestored: () => void;
 }) {
+  const archiveWorkspace = useArchiveWorkspace(workspace.id);
   const deleteWorkspace = useDeleteWorkspace(workspace.id);
   const [checking, setChecking] = useState(false);
 
   const handleDelete = () => {
-    deleteWorkspace.mutate(workspace.id, {
+    // The storage layer requires a workspace be archived before it can be
+    // deleted (configStore throws "Workspace must be archived before
+    // deletion" for active workspaces). MissingWorkspaceScreen offers delete
+    // on an active-but-missing workspace, so archive first, then delete.
+    archiveWorkspace.mutate(workspace.id, {
       onSuccess: () => {
-        // Clear the active selection; MainScreen falls back to no-workspace.
-        useUi.setState({ activeWorkspaceId: null, activeSessionId: null, mainView: 'new' });
+        deleteWorkspace.mutate(workspace.id, {
+          onSuccess: () => {
+            // Clear the active selection; MainScreen falls back to no-workspace.
+            useUi.setState({ activeWorkspaceId: null, activeSessionId: null, mainView: 'new' });
+          },
+        });
       },
     });
   };
@@ -53,15 +62,14 @@ export function MissingWorkspaceScreen({
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 text-center">
       {/* Warning icon tile — matches the brand-tile treatment, warning-tinted. */}
-      <div className="size-14 rounded-2xl flex items-center justify-center mb-5 border border-warning/25 bg-warning/10">
-        <FolderX className="size-7 text-warning" />
+      <div className="rounded-2xl flex items-center justify-center mb-5 p-2 border border-warning/25 bg-warning/10">
+        <FolderX className="size-15 text-warning" />
       </div>
 
-      <h2 className="text-[17px] font-semibold tracking-tight">Workspace folder is missing</h2>
+      <h2 className="text-[17px] font-semibold tracking-tight">Workspace folder is Missing</h2>
       <p className="text-[12px] text-muted-foreground/70 mt-1.5 max-w-[380px] leading-relaxed">
         The folder for <span className="font-medium text-foreground">{workspace.name}</span> can't
-        be found. It may have been moved, renamed, or deleted. Tide can't run tools against a
-        missing project.
+        be found. It may have been moved, renamed, or deleted.
       </p>
 
       <code className="mt-3 text-[11px] font-mono text-muted-foreground/55 bg-secondary/60 border border-border rounded-md px-2.5 py-1.5 max-w-[440px] truncate block">
@@ -77,17 +85,15 @@ export function MissingWorkspaceScreen({
           onClick={handleRecheck}
           disabled={checking}
         >
-          {checking ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
           {checking ? 'Checking…' : "I've restored it"}
         </Button>
         <Button
-          variant="outline"
+          variant="destructive"
           size="sm"
-          className="gap-1.5 flex-1 w-full sm:w-auto text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/30"
+          className='flex-1 w-full'
           onClick={handleDelete}
-          disabled={deleteWorkspace.isPending}
+          disabled={archiveWorkspace.isPending || deleteWorkspace.isPending}
         >
-          <Trash2 className="size-3.5" />
           Delete Workspace
         </Button>
       </div>

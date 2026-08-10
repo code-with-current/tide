@@ -28,14 +28,15 @@ import reactLogo from '@/assets/stack/react.svg';
 import t3Logo from '@/assets/stack/t3.svg';
 import tanstackLogo from '@/assets/stack/tanstack.svg';
 import { useUi } from '@/lib/stores/ui';
-import { qk } from '@/lib/queries';
+import { qk, useWorkspaceSteps, useRagInitProgress } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
-import type { Workspace, WorkspaceScript } from '@/types';
+import type { Workspace, WorkspaceScript, WorkspaceProgressStep } from '@/types';
 import { TEMPLATES, type TemplateId } from '@/lib/templates';
 import { cn } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
+import { phaseLabel } from '@/components/rag/RagIndexProgress';
 
 const log = createLogger('add-workspace');
 
@@ -53,15 +54,19 @@ const TEMPLATE_LOGOS: Partial<Record<TemplateId, string>> = {
 /** Dialog phases: choice → form/newProject/template → creating → indexing → done/error. */
 type Phase = 'choice' | 'form' | 'newProject' | 'template' | 'creating' | 'indexing' | 'done' | 'error';
 
-/** The four creation steps shown as a checklist during creating→done. Order
- *  matters — it's the order they execute in (and the order they render). */
-type StepId = 'folder' | 'template' | 'git' | 'rag';
+/** Checklist step ids. Creation steps mirror the backend's
+ *  tide:workspace:progress milestones; 'rag' is driven by the RAG init
+ *  progress stream. Which steps appear depends on the chosen flow. */
+type StepId = WorkspaceProgressStep | 'rag';
 type StepStatus = 'pending' | 'active' | 'done' | 'skipped';
 const STEP_LABELS: Record<StepId, string> = {
+  clone: 'Clone repository',
   folder: 'Create folder',
-  template: 'Init template',
-  git: 'Init git',
-  rag: 'Init RAG index',
+  scaffold: 'Scaffold template',
+  install: 'Install dependencies',
+  git: 'Initialize git',
+  detect: 'Detect repository',
+  rag: 'Index codebase',
 };
 
 type Source = 'local' | 'remote';
@@ -91,15 +96,24 @@ export function AddWorkspaceDialog() {
   const [phase, setPhase] = useState<Phase>('choice');
   const [phaseError, setPhaseError] = useState<string | null>(null);
 
-  // Per-step progress (creating→indexing→done). Tracked separately from `phase` so the checklist can show ✓ on completed steps while a later step is in flight (e.g. folder + template + git all ✓ while RAG spins).
-  const [steps, setSteps] = useState<Record<StepId, StepStatus>>({
-    folder: 'pending', template: 'pending', git: 'pending', rag: 'pending',
-  });
-  /** Which steps apply to the current flow. Existing/clone skips template/git
-   *  (the repo already has both); New/Template runs all four. Set when the
-   *  flow starts so the checklist only shows relevant rows. */
-  const [activeSteps, setActiveSteps] = useState<StepId[]>(['folder', 'template', 'git', 'rag']);
-  const setStep = (id: StepId, status: StepStatus) => setSteps((s) => ({ ...s, [id]: status }));
+  // Real-progress model. `requestId` correlates the backend's per-step
+  // milestone stream (tide:workspace:progress) to this creation run;
+  // `createdWsId` keys the RAG init progress stream once the workspace
+  // exists. `activeSteps` is the flow-specific checklist (what the user
+  // chose); each row's status is derived from the live streams below — not
+  // from timers.
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [activeSteps, setActiveSteps] = useState<StepId[]>([]);
+  const [createdWsId, setCreatedWsId] = useState<string | null>(null);
+  // After addWorkspace resolves, force any creation step still pending/active
+  // to 'done' — the milestone events are sent right before the IPC reply, so
+  // this only guards a rare last-event race (it never lies: they are done).
+  const [creationDone, setCreationDone] = useState(false);
+  // RAG step outcome once indexing settles.
+  const [ragOutcome, setRagOutcome] = useState<'pending' | 'done' | 'skipped'>('pending');
+
+  const wsSteps = useWorkspaceSteps(requestId);
+  const ragProgress = useRagInitProgress(createdWsId);
 
   // New Project flow state — name + parent folder; the project dir is
   // synthesized as <parent>/<name> and created (mkdir + git init) by the
@@ -155,12 +169,13 @@ export function AddWorkspaceDialog() {
   };
 
   const handleOpen = async () => {
-    setPhase('creating');
-    setPhaseError(null);
-
     let path = '';
+    let steps: StepId[] = [];
     if (source === 'local') {
       path = localPath;
+      // Existing local folder: the only creation-side work is an optional
+      // `git init` when the folder isn't a repo and the user opted in.
+      if (initGit && !gitInfo) steps.push('git');
     } else {
       // Remote: extract repo name from URL, clone into cloneDir/<name>.
       // e.g. https://github.com/foo/bar.git → cloneDir/bar
@@ -177,21 +192,23 @@ export function AddWorkspaceDialog() {
         return;
       }
       path = `${cloneDir}/${repoName}`;
+      steps.push('clone');
     }
     if (!path) {
       setPhase('form');
       return;
     }
+    steps.push('detect');
+    if (enableRag) steps.push('rag');
     // Assemble scripts from the Existing Project fields (install → setup,
     // running → run). Only non-empty commands are kept.
     const scripts: WorkspaceScript[] = [];
     if (installCmd.trim()) scripts.push({ kind: 'setup', command: installCmd.trim() });
     if (runCmd.trim()) scripts.push({ kind: 'run', command: runCmd.trim() });
     // init-git only applies to the local-open flow (clone always yields a
-    // repo) — and only matters when the folder isn't already a repo. Pass it
-    // through so the backend can `git init` before detection.
+    // repo) — and only matters when the folder isn't already a repo.
     const shouldInitGit = source === 'local' && initGit;
-    await createWorkspace(path, source === 'remote' ? remoteUrl : undefined, undefined, scripts, shouldInitGit);
+    await createWorkspace(path, steps, source === 'remote' ? remoteUrl : undefined, undefined, scripts, shouldInitGit);
   };
 
   /** New Project flow: synthesize <parent>/<name> and let the backend mkdir +
@@ -199,11 +216,11 @@ export function AddWorkspaceDialog() {
    *  states are shared. */
   const handleOpenNewProject = async () => {
     if (!newName.trim() || !newParent.trim()) return;
-    setPhase('creating');
-    setPhaseError(null);
+    const steps: StepId[] = ['folder', 'git', 'detect'];
+    if (enableRag) steps.push('rag');
     // path.join-equivalent — avoid trailing slashes that confuse basename.
     const synthesized = `${newParent.replace(/\/+$/, '')}/${newName.trim()}`;
-    await createWorkspace(synthesized, undefined);
+    await createWorkspace(synthesized, steps, undefined);
   };
 
   /** From Template flow: same path synthesis as New Project, but passes the
@@ -211,46 +228,55 @@ export function AddWorkspaceDialog() {
    *  optional deps install) after mkdir + git init. */
   const handleOpenFromTemplate = async () => {
     if (!newName.trim() || !newParent.trim()) return;
-    setPhase('creating');
-    setPhaseError(null);
+    const hasScaffold = templateId !== 'empty';
+    const steps: StepId[] = hasScaffold
+      ? ['folder', 'scaffold', 'install', 'git', 'detect']
+      : ['folder', 'git', 'detect'];
+    if (enableRag) steps.push('rag');
     const synthesized = `${newParent.replace(/\/+$/, '')}/${newName.trim()}`;
-    await createWorkspace(synthesized, undefined, templateId);
+    await createWorkspace(synthesized, steps, undefined, templateId);
   };
 
-  /** Shared workspace-creation path for all three flows: handles template scaffold, RAG indexing, and step-checklist tracking. */
+  /** Shared workspace-creation path for all three flows. Creation-side step
+   *  statuses come from the live tide:workspace:progress stream (keyed by
+   *  requestId); the RAG step comes from the rag init progress stream. No
+   *  fake timers — the checklist reflects what the backend is actually doing. */
   const createWorkspace = async (
     path: string,
+    steps: StepId[],
     repository: string | undefined,
     template?: TemplateId,
     scripts?: WorkspaceScript[],
     initGit?: boolean,
   ) => {
-    // Determine which steps apply to this flow so the checklist only shows
-    // relevant rows. Existing/clone: the repo already has files + git, so
-    // template/git are skipped. New/Template: all four run.
-    const isExisting = !!repository;
-    const hasTemplate = !!template && template !== 'empty';
-    const applicable: StepId[] = isExisting
-      ? ['folder', 'rag']
-      : hasTemplate
-        ? ['folder', 'template', 'git', 'rag']
-        : ['folder', 'git', 'rag'];
-    setActiveSteps(applicable);
-    setSteps({ folder: 'pending', template: 'pending', git: 'pending', rag: 'pending' });
-    setStep('folder', 'active');
+    // requestId correlates the backend milestone stream to this run (the
+    // workspace id doesn't exist yet, so it can't key the events).
+    const rid = Math.random().toString(36).slice(2);
+    setRequestId(rid);
+    setActiveSteps(steps);
+    setCreatedWsId(null);
+    setCreationDone(false);
+    setRagOutcome('pending');
+    setPhase('creating');
+    setPhaseError(null);
 
     let ws: Workspace | undefined;
     try {
       // Build the input conditionally — only include `template` when set and
       // not 'empty' (Empty == no scaffold, equivalent to the New Project flow).
       // The Existing Project flow (clone OR local) carries optional scripts;
-      // the local-open flow additionally carries initGit.
+      // the local-open flow additionally carries initGit. requestId wires up
+      // the per-step milestone stream.
       const input: Parameters<typeof api.addWorkspace>[0] = repository
-        ? { path, repository, ...(scripts?.length ? { scripts } : {}) }
+        ? { path, repository, requestId: rid, ...(scripts?.length ? { scripts } : {}) }
         : template && template !== 'empty'
-          ? { path, template }
-          : { path, ...(scripts?.length ? { scripts } : {}), ...(initGit ? { initGit } : {}) };
+          ? { path, template, requestId: rid }
+          : { path, requestId: rid, ...(scripts?.length ? { scripts } : {}), ...(initGit ? { initGit } : {}) };
       ws = await api.addWorkspace(input);
+      // Force-finalize creation steps: the backend emits their 'done' events
+      // right before returning, but guard against a last-event race so no row
+      // is left spinning. (Honest — by now they really are done.)
+      setCreationDone(true);
       // Instantly place the returned workspace into the list cache so it
       // appears in the sidebar the moment creation resolves — not a refetch
       // round-trip later. invalidateQueries then reconciles with server truth.
@@ -259,12 +285,6 @@ export function AddWorkspaceDialog() {
         old ? [...old, created] : [created],
       );
       qc.invalidateQueries({ queryKey: qk.workspaces });
-      // addWorkspace did mkdir (+ scaffold + git init) server-side. Mark the
-      // file/template/git steps done in sequence — they're already complete,
-      // the staggered flip just reads as natural progress in the checklist.
-      setStep('folder', 'done');
-      if (hasTemplate) setStep('template', 'done');
-      if (!isExisting) setStep('git', 'done');
     } catch (e: unknown) {
       setPhase('error');
       setPhaseError(e instanceof Error ? e.message : 'Failed to create workspace');
@@ -276,11 +296,13 @@ export function AddWorkspaceDialog() {
     }
 
     if (!ws?.id) return;
+    // Now that the workspace exists, the RAG init progress stream (keyed by
+    // workspace id) starts feeding the rag row's live detail.
+    setCreatedWsId(ws.id);
 
     // Enable RAG first (adds to list + ensures model is available)
     if (enableRag) {
       setPhase('indexing');
-      setStep('rag', 'active');
       try {
         await api.enableRagWorkspace(ws.id);
         qc.invalidateQueries({ queryKey: qk.ragStatus(ws.id) });
@@ -291,27 +313,30 @@ export function AddWorkspaceDialog() {
 
         // Poll status until ingestion finishes (the IPC returns
         // immediately; the real work happens in a background promise).
-        // Timeout after 5 minutes.
+        // Timeout after 5 minutes. The per-chunk detail shown in the
+        // checklist comes from ragProgress (the init stream), not this poll.
         const deadline = Date.now() + 300_000;
+        let outcome: 'done' | 'skipped' = 'skipped';
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 1000));
           const status = await api.ragStatus(ws.id);
-          if ('error' in status) break;
+          if ('error' in status) { outcome = 'skipped'; break; }
           const s = status as { initState?: string };
-          if (s.initState === 'done' || s.initState === 'failed') break;
+          if (s.initState === 'done') { outcome = 'done'; break; }
+          if (s.initState === 'failed') { outcome = 'skipped'; break; }
         }
         qc.invalidateQueries({ queryKey: qk.ragStatus(ws.id) });
-        setStep('rag', 'done');
+        setRagOutcome(outcome);
       } catch (e: unknown) {
         log.error('RAG init failed', e);
         // Don't block workspace entry on RAG failure — mark the step skipped
         // (not done) so the checklist is honest, and the user can retry from
         // Settings → Workspaces → Re-index.
-        setStep('rag', 'skipped');
+        setRagOutcome('skipped');
       }
     } else {
       // RAG was opted off — mark skipped so the checklist completes.
-      setStep('rag', 'skipped');
+      setRagOutcome('skipped');
     }
 
     // Enter the workspace + flip to the 'done' phase. The dialog stays open
@@ -345,7 +370,11 @@ export function AddWorkspaceDialog() {
     setSource('local');
     setPhase('choice');
     setPhaseError(null);
-    setSteps({ folder: 'pending', template: 'pending', git: 'pending', rag: 'pending' });
+    setRequestId(null);
+    setActiveSteps([]);
+    setCreatedWsId(null);
+    setCreationDone(false);
+    setRagOutcome('pending');
   };
 
   /** Close handler for the "Open Workspace" button on the done screen.
@@ -358,6 +387,41 @@ export function AddWorkspaceDialog() {
 
   const canOpen = source === 'local' ? !!localPath : !!cloneDir;
   const canOpenNew = !!newName.trim() && !!newParent.trim();
+
+  /** Resolve a checklist row's status from the live streams (not timers).
+   *  Creation steps come from the tide:workspace:progress milestones; the
+   *  rag row from the indexing phase + its settled outcome. */
+  const resolveStatus = (id: StepId): StepStatus => {
+    if (id === 'rag') {
+      if (phase === 'done') return ragOutcome === 'done' ? 'done' : 'skipped';
+      if (phase === 'indexing') return 'active';
+      return 'pending';
+    }
+    const ev = wsSteps[id];
+    if (ev) return ev.status === 'failed' ? 'skipped' : ev.status;
+    // No milestone yet — if creation already resolved, force done (safety net
+    // against a last-event race). Otherwise pending.
+    return creationDone ? 'done' : 'pending';
+  };
+
+  // Live headline + RAG detail, driven by the real streams.
+  const activeCreationLabel = activeSteps.find(
+    (id) => id !== 'rag' && resolveStatus(id) === 'active',
+  );
+  const ragActive = phase === 'indexing' && !!ragProgress && ragProgress.phase !== 'done' && ragProgress.phase !== 'failed';
+  const ragDeterminate = ragActive && ragProgress!.phase === 'embedding' && ragProgress!.chunksTotal > 0;
+  const ragPct = ragDeterminate
+    ? Math.min(100, Math.round((ragProgress!.chunksEmbedded / ragProgress!.chunksTotal) * 100))
+    : 0;
+  const ragCounts = !ragActive || !ragProgress
+    ? ''
+    : ragProgress.phase === 'walking'
+      ? `${ragProgress.filesSeen} files`
+      : ragProgress.phase === 'chunking'
+        ? `${ragProgress.chunksTotal} chunks · ${ragProgress.filesSeen} files`
+        : ragProgress.phase === 'embedding'
+          ? `${ragProgress.chunksEmbedded} / ${ragProgress.chunksTotal} chunks`
+          : '';
 
   return (
     <Dialog
@@ -420,15 +484,15 @@ export function AddWorkspaceDialog() {
           </div>
         </DialogHeader>
 
-        {/* Progress checklist — shown during creating/indexing/done. Replaces
-            the old single-spinner view with a per-step list so the user can
-            see exactly what's done and what's pending. Each applicable step
-            renders a row: ✓ done, spinner active, hollow pending, – skipped.
-            In the 'done' phase all rows are settled + a manual "Open
-            workspace" button replaces the old auto-dismiss. */}
+        {/* Progress checklist — shown during creating/indexing/done. Each
+            row's status is driven by the live backend streams
+            (tide:workspace:progress + rag init progress), so it reflects what
+            is actually happening, not a cosmetic timer. The set of rows
+            depends on the flow the user chose. */}
         {(phase === 'creating' || phase === 'indexing' || phase === 'done') && (
           <div className="px-5 py-5">
-            {/* Summary line */}
+            {/* Summary line — names the currently-active step, or the RAG
+                indexing phase when embedding. */}
             <div className="flex items-center gap-2.5 mb-4">
               {phase === 'done' ? (
                 <div className="size-7 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
@@ -437,17 +501,33 @@ export function AddWorkspaceDialog() {
               ) : (
                 <Loader2 className="size-4 animate-spin text-muted-foreground/60" />
               )}
-              <div className="text-[13px] font-medium">
-                {phase === 'creating' && 'Setting up workspace…'}
-                {phase === 'indexing' && 'Indexing codebase…'}
+              <div className="text-[13px] font-medium min-w-0 truncate">
+                {phase === 'creating' && (activeCreationLabel ? STEP_LABELS[activeCreationLabel] + '…' : 'Setting up workspace…')}
+                {phase === 'indexing' && (ragProgress && ragProgress.phase !== 'done' && ragProgress.phase !== 'failed'
+                  ? phaseLabel(ragProgress.phase) + '…'
+                  : 'Indexing codebase…')}
                 {phase === 'done' && 'Workspace ready'}
               </div>
+              {ragDeterminate && (
+                <span className="ml-auto text-[11px] font-mono text-muted-foreground tabular-nums">{ragPct}%</span>
+              )}
             </div>
+
+            {/* RAG determinate progress bar — only while embedding with a
+                known chunk total. Mirrors the Inspector/Settings RAG card. */}
+            {ragDeterminate && (
+              <div className="h-1.5 rounded-full bg-secondary overflow-hidden mb-3">
+                <div
+                  className="h-full rounded-full bg-emerald-400 transition-all duration-300"
+                  style={{ width: `${ragPct}%` }}
+                />
+              </div>
+            )}
 
             {/* Step list */}
             <div className="flex flex-col gap-1.5 mb-4">
               {activeSteps.map((id) => (
-                <StepRow key={id} label={STEP_LABELS[id]} status={steps[id]} />
+                <StepRow key={id} label={STEP_LABELS[id]} status={resolveStatus(id)} detail={id === 'rag' ? ragCounts : wsSteps[id]?.detail} />
               ))}
             </div>
 
@@ -868,8 +948,10 @@ export function AddWorkspaceDialog() {
 
 /** One row of the progress checklist. Renders a status glyph (✓ / spinner /
  *  hollow / –) + the step label, color-coded so done reads green at a glance.
- *  Kept as a pure presentational component — the parent owns the status. */
-function StepRow({ label, status }: { label: string; status: StepStatus }) {
+ *  `detail` is an optional live sub-label (e.g. "42 / 120 chunks", or the
+ *  template label) shown muted beside the label while the step is active.
+ *  Purely presentational — the parent owns status + detail. */
+function StepRow({ label, status, detail }: { label: string; status: StepStatus; detail?: string }) {
   return (
     <div className="flex items-center gap-2.5 py-1">
       <span className="size-4 flex items-center justify-center shrink-0">
@@ -889,6 +971,9 @@ function StepRow({ label, status }: { label: string; status: StepStatus }) {
       >
         {label}
       </span>
+      {detail && status === 'active' && (
+        <span className="text-[10.5px] text-muted-foreground/60 font-mono tabular-nums truncate">{detail}</span>
+      )}
     </div>
   );
 }

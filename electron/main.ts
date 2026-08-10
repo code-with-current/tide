@@ -32,11 +32,9 @@ import { fileURLToPath } from 'url';
 import { initLogger, createLogger } from './logger.js';
 import { registerIpcHandlers, bootstrapCatalog } from './ipc/handlers.js';
 import { registerChatHandlers } from './ipc/chat.js';
-import { registerAgentHandlers } from './agent/orchestrator.js';
-import { registerAgentSdkHandlers } from './agent/orchestrator-sdk.js';
+import { registerAgentSdkHandlers, abortAllTurns } from './agent/orchestrator.js';
 import { registerScriptHandlers, killAllScripts } from './ipc/scripts.js';
 import { killAllBackgroundShells } from './agent/tools/background-shell.js';
-import { abortAllTurns } from './agent/orchestrator-sdk.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
 import { registerSettingsHandlers } from './ipc/settings.js';
 import { registerExtensionsHandlers } from './ipc/extensions.js';
@@ -46,9 +44,6 @@ import { initUserServers, initBuiltinServers } from './agent/mcp/pool.js';
 import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
 import { setUserDataPath, appDataDir } from './appPaths.js';
-
-/** Cutover flag for the Vercel AI SDK orchestrator (Phase 3): true → registerAgentSdkHandlers (streamText + stopWhen step cap, full 20-tool SDK factory); false → registerAgentHandlers (legacy hand-rolled SSE). Both register on AGENT_COMMANDS, so exactly one may be active — flip back here if a live run surfaces a regression. */
-const USE_SDK_ORCHESTRATOR = true;
 
 // ESM doesn't provide __dirname — derive it from import.meta.url.
 const __filename = fileURLToPath(import.meta.url);
@@ -210,11 +205,7 @@ if (!gotLock) {
       // them from this catalog. Fire-and-forget; cached to disk, refreshed weekly.
       void bootstrapCatalog();
       registerChatHandlers();
-      if (USE_SDK_ORCHESTRATOR) {
-        registerAgentSdkHandlers(ipcMain);
-      } else {
-        registerAgentHandlers(ipcMain);
-      }
+      registerAgentSdkHandlers(ipcMain);
       registerScriptHandlers();
       registerOpenInAppHandlers();
       registerExtensionsHandlers();

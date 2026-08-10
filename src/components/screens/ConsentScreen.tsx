@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { TideBrandMark } from '@/components/primitives/TideBrandMark';
 import {
   Accessibility, HardDrive, FolderLock, CheckCircle2, AlertTriangle,
@@ -17,27 +17,30 @@ export function ConsentScreen() {
   const [status, setStatus] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermissionType | null>(null);
 
-  // Load the live status once on mount.
-  const refresh = useCallback(() => {
-    api.getPermissionStatus().then(setStatus).catch(() => {});
-  }, []);
-
+  // Detect grants. macOS posts NO notification when a TCC toggle changes, and
+  // node-mac-permissions has no subscription API — so the only signal is
+  // re-reading getAuthStatus. A focus-only re-check misses grants made without
+  // the window losing/regaining focus (side-by-side with System Settings, or a
+  // flaky renderer focus event). So: re-check on focus (instant when the user
+  // returns to the window) AND poll every 1.5s while the screen is open. The
+  // native call is cheap; auto-advance to main once both are authorized.
   useEffect(() => {
-    refresh();
-    // Re-check when the window regains focus — the user just came back from
-    // System Settings, so their toggles are now reflected. If everything is
-    // authorized, auto-advance to main (no need to make them click Continue).
-    const onFocus = () => {
+    const check = () => {
       api.getPermissionStatus().then((s) => {
         setStatus(s);
         if (s.accessibility === 'authorized' && s.fullDiskAccess === 'authorized') {
           setScreen('main');
         }
-      });
+      }).catch(() => {});
     };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [refresh, setScreen]);
+    check();
+    window.addEventListener('focus', check);
+    const interval = window.setInterval(check, 1500);
+    return () => {
+      window.removeEventListener('focus', check);
+      window.clearInterval(interval);
+    };
+  }, [setScreen]);
 
   const handleRequest = async (type: PermissionType) => {
     setBusy(type);

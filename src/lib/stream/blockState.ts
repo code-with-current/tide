@@ -19,6 +19,28 @@ export function categorizeTool(name: ToolName): ToolCategory {
   return 'other';
 }
 
+/** Bookkeeping/planning tools that do NOT do work toward the deliverable and
+ *  therefore must NOT reset the answer boundary. Without this, a trailing
+ *  `todo_write` (e.g. marking the plan complete right after writing the final
+ *  report) becomes the "last tool call" and demotes the preceding report text
+ *  to narration — so the real deliverable isn't flagged as the answer. The
+ *  answer phase begins after the last *work* tool (commands/edits/exploration
+ *  + read-type others like directory_tree/memory). */
+const BOOKKEEPING_TOOLS = new Set<string>([
+  'todo_write',
+  'ask_followup_question',
+  'exit_plan_mode',
+  'compact',
+  'slash_command',
+  'load_skill',
+]);
+
+/** True for tools that are planning/control-flow, not deliverable work. Such
+ *  tools are ignored when finding the last-tool boundary for answer flagging. */
+export function isBookkeepingTool(name: string | undefined | null): boolean {
+  return !!name && BOOKKEEPING_TOOLS.has(name);
+}
+
 // ─── Followup mode derivation ───────────────────────────────────────────
 
 /** Normalize a single option value to a display string. Handles plain
@@ -83,4 +105,52 @@ export function formatMs(ms?: number): string {
   const m = Math.floor(ms / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
   return `${m}m${s}s`;
+}
+
+// ─── File-change summary ────────────────────────────────────────────────
+
+/** One file touched by a turn's edit tool calls. Coalesces multiple edits to
+ *  the same path (created wins; +/- sums). Deletions aren't detected. */
+export interface FileChangeEntry {
+  path: string;
+  status: 'created' | 'edited';
+  additions?: number;
+  deletions?: number;
+  toolName: ToolName;
+}
+
+/** Derive the per-file change list from a turn's blocks. Excludes failed edit
+ *  calls. First-seen order. Empty when no edits → renderer shows nothing. */
+export function summarizeFileChanges(blocks: import('@/types/block').Block[]): FileChangeEntry[] {
+  const byPath = new Map<string, FileChangeEntry>();
+  for (const b of blocks) {
+    if (b.kind !== 'tool' || b.category !== 'edits' || isFailedStatus(b.status)) continue;
+    const args = b.arguments as Record<string, unknown>;
+    const path = typeof args.path === 'string' ? args.path
+      : typeof args.file_path === 'string' ? args.file_path
+      : undefined;
+    if (!path) continue;
+
+    // write_file's Created-vs-Overwrote is only in its output string.
+    const created = b.toolName === 'write_file' &&
+      typeof b.output === 'string' && b.output.startsWith('Created');
+
+    let additions: number | undefined;
+    let deletions: number | undefined;
+    if (b.display?.kind === 'diff') {
+      additions = b.display.additions;
+      deletions = b.display.deletions;
+    }
+
+    const existing = byPath.get(path);
+    if (!existing) {
+      byPath.set(path, { path, status: created ? 'created' : 'edited', additions, deletions, toolName: b.toolName });
+    } else {
+      if (created) existing.status = 'created';
+      existing.additions = (existing.additions ?? 0) + (additions ?? 0);
+      existing.deletions = (existing.deletions ?? 0) + (deletions ?? 0);
+      existing.toolName = b.toolName;
+    }
+  }
+  return Array.from(byPath.values());
 }

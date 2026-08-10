@@ -1,4 +1,4 @@
-import { FolderGit2, Plus, ArrowLeft } from 'lucide-react';
+import { FolderGit2, Plus, ArrowLeft, ArrowLeftRight, FolderCode } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { useWorkspaces } from '@/lib/queries';
 import { Tag } from '@/components/primitives';
@@ -15,14 +15,14 @@ export function NoWorkspaceState() {
     <div className="flex-1 overflow-y-auto scroll">
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 gap-6 min-h-full">
         <div className="flex items-center gap-2 text-muted-foreground/60">
-          <Tag className="inline-flex items-center gap-1">
-            <FolderGit2 className="size-3" /> No workspace
+          <Tag className="inline-flex items-center gap-2">
+            <FolderCode className="size-4" /> No workspace
           </Tag>
         </div>
 
         <div className="flex flex-col items-center gap-3">
-          <div className="size-12 rounded-2xl bg-secondary border border-input flex items-center justify-center">
-            <FolderGit2 className="size-5 text-muted-foreground/60" />
+          <div className="p-2 rounded-2xl bg-secondary border border-input flex items-center justify-center">
+            <FolderCode className="size-15 text-muted-foreground/60" />
           </div>
           <div className="text-center">
             <h2 className="text-xl font-semibold tracking-tight">
@@ -37,29 +37,29 @@ export function NoWorkspaceState() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => openDialog('addWorkspace')}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary text-white text-sm font-medium px-4 py-2 hover:bg-accent/90 transition-colors"
-          >
-            <Plus className="size-4" /> Add Workspace
-          </Button>
           {hasWorkspaces && (
             <Button
+              variant="secondary"
               onClick={() => {
                 // Select the first workspace — user has them but none active.
                 const first = workspaces?.[0];
                 if (first) setActive(first.id);
               }}
-              className="inline-flex items-center gap-2 rounded-lg border border-border text-muted-foreground text-sm px-3 py-2 hover:bg-secondary hover:text-foreground transition-colors"
             >
-              <ArrowLeft className="size-4" /> Use first workspace
+              Switch Workspace
             </Button>
           )}
+          <Button
+            onClick={() => openDialog('addWorkspace')}
+          >
+            Add Workspace
+          </Button>
+
         </div>
 
         <div className="text-[11px] text-muted-foreground/60 max-w-md text-center">
-          Tide never edits your working tree directly. Each session gets an
-          isolated worktree under <Tag>.agent/worktrees/&lt;session&gt;</Tag>.
+          You can work on multiple worktrees simultaneously.
+          Each session can have an isolated worktree under <Tag>.agent/worktrees/&lt;session&gt;</Tag>.
         </div>
       </div>
     </div>
