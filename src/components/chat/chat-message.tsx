@@ -114,6 +114,52 @@ function ChatMessageImpl({
   const openFile = useUi((s) => s.openFile);
   const activeSessionId = useUi((s) => s.activeSessionId);
 
+  // ===== Hooks — must run unconditionally (rules of hooks) =====
+  const isUser = message.role === 'user';
+  const { chips, body } = useMemo(
+    () => (isUser ? parseRefLinks(message.content) : { chips: [] as RefLink[], body: '' }),
+    [message.content, isUser],
+  );
+  const handleChipOpen = useCallback(
+    (chip: RefLink) => {
+      if (!activeSessionId) return;
+      const attachment = message.attachments?.find(
+        (a) => a.path === chip.target || a.absPath === chip.target || a.path === chip.label,
+      );
+      const isAbsolute = /^(?:\/|~\/|[A-Za-z]:[\\/])/.test(chip.target);
+      const isImageByExt = IMAGE_EXTS.has(chip.target.split('.').pop()?.toLowerCase() ?? '');
+      const absPath = attachment?.absPath ?? (isAbsolute ? chip.target : undefined);
+      const file: OpenFile = attachment
+        ? {
+            id: chip.target,
+            path: attachment.path,
+            language: attachment.kind === 'image' ? 'image' : langFromPath(attachment.path),
+            inlineContent: attachment.content,
+            bytes: attachment.bytes,
+            isImage: attachment.kind === 'image' || isImageByExt,
+            external: true,
+            absPath,
+          }
+        : isAbsolute
+          ? {
+              id: chip.target,
+              path: chip.label.replace(/^\/|\/$/g, ''),
+              language: langFromPath(chip.target),
+              isImage: isImageByExt,
+              external: true,
+              absPath: chip.target,
+            }
+          : {
+              id: chip.target,
+              path: chip.target,
+              language: isImageByExt ? 'image' : langFromPath(chip.target),
+              isImage: isImageByExt,
+            };
+      openFile(activeSessionId, file);
+    },
+    [activeSessionId, message.attachments, openFile],
+  );
+
   // ===== USER — right-aligned bubble =====
   if (message.role === 'user') {
     const handleCopy = () => {
@@ -122,59 +168,6 @@ function ChatMessageImpl({
         setTimeout(() => setCopied(false), 1500);
       });
     };
-    // Lift attachment + @file links out of content into chips above the
-    // text. The remaining body keeps /skill mentions inline.
-    const { chips, body } = useMemo(() => parseRefLinks(message.content), [message.content]);
-
-    /** Open a chip's file in the side viewer. Discriminator: absolute path target (starts with /, ~, or a drive letter) → external attachment (viewer reads via readExternalFile/readImageFile, no workspace sandbox); relative path target → workspace @file mention (readFileInWorkspace, or readImageFile for images). Image-ness is inferred from the EXTENSION when no attachment matches, so images open correctly even for old sessions whose attachments[] wasn't persisted. */
-    const handleChipOpen = useCallback(
-      (chip: RefLink) => {
-        if (!activeSessionId) return;
-        const attachment = message.attachments?.find(
-          (a) => a.path === chip.target || a.absPath === chip.target || a.path === chip.label,
-        );
-        const isAbsolute = /^(?:\/|~\/|[A-Za-z]:[\\/])/.test(chip.target);
-        // Infer image-ness from the extension as a fallback, so images route
-        // to ImageBody (readImageFile) even when attachments[] is absent.
-        const isImageByExt = IMAGE_EXTS.has(chip.target.split('.').pop()?.toLowerCase() ?? '');
-        // Prefer the attachment's absPath; fall back to the link target for
-        // reloaded sessions where attachments[] isn't present.
-        const absPath = attachment?.absPath ?? (isAbsolute ? chip.target : undefined);
-        const file: OpenFile = attachment
-          ? {
-              id: chip.target,
-              path: attachment.path,
-              language: attachment.kind === 'image' ? 'image' : langFromPath(attachment.path),
-              inlineContent: attachment.content,
-              bytes: attachment.bytes,
-              isImage: attachment.kind === 'image' || isImageByExt,
-              external: true,
-              absPath,
-            }
-          : isAbsolute
-            ? {
-                // Reloaded external attachment (no attachments[] in memory).
-                // Use the link target as the absPath so the viewer can
-                // readExternalFile / readImageFile it.
-                id: chip.target,
-                path: chip.label.replace(/^\/|\/$/g, ''),
-                language: langFromPath(chip.target),
-                isImage: isImageByExt,
-                external: true,
-                absPath: chip.target,
-              }
-            : {
-                // Workspace @file mention — relative path, read from disk.
-                // Images go through readImageFile via ImageBody.
-                id: chip.target,
-                path: chip.target,
-                language: isImageByExt ? 'image' : langFromPath(chip.target),
-                isImage: isImageByExt,
-              };
-        openFile(activeSessionId, file);
-      },
-      [activeSessionId, message.attachments, openFile],
-    );
     return (
       <div className="group flex justify-end">
         <div className="max-w-[85%] flex flex-col items-end gap-1">
