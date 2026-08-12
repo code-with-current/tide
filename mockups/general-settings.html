@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="tide">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tide — General Settings Mockup</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --card: #141416;
+    --border: #1e1e22;
+    --input: #2a2a30;
+    --fg: #e4e4e7;
+    --muted: #71717a;
+    --muted-60: #52525b;
+    --primary: #e4e4e7;
+    --success: #22c55e;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, system-ui, sans-serif; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 16px; padding: 10px 16px; }
+  .row + .row { border-top: 1px solid var(--border); }
+  .row-title { font-size: 13px; font-weight: 500; }
+  .row-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .group-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px; }
+  .switch { width: 36px; height: 20px; border-radius: 9999px; background: var(--input); position: relative; cursor: pointer; transition: background .2s; }
+  .switch.on { background: var(--primary); }
+  .switch::after { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 9999px; background: #fff; top: 2px; left: 2px; transition: transform .2s; }
+  .switch.on::after { transform: translateX(16px); }
+  .select { background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px; font-size: 12px; height: 32px; min-width: 160px; cursor: pointer; color: var(--fg); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .select:hover { border-color: var(--muted); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 500; }
+  .pill-active { background: rgba(228,228,231,0.15); color: var(--primary); }
+  .pill-inactive { background: var(--input); color: var(--muted); cursor: pointer; }
+  .pill-inactive:hover { background: rgba(228,228,231,0.08); }
+  .saved-dot { font-size: 9px; color: var(--success); display: inline-flex; align-items: center; gap: 2px; }
+  .swatch { width: 12px; height: 12px; border-radius: 9999px; border: 1px solid var(--border); }
+  .swatch-sm { width: 8px; height: 8px; border-radius: 9999px; }
+  .h-page { font-size: 20px; font-weight: 600; }
+  .h-page-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .icon-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; color: var(--muted); }
+  .icon-btn:hover { background: var(--input); color: var(--fg); }
+  .chevron { transition: transform .2s; }
+  .chevron.open { transform: rotate(90deg); }
+  .input-box { background: var(--input); border: 1px solid var(--border); border-radius: 6px; height: 32px; padding: 0 8px; font-size: 12px; color: var(--fg); display: flex; align-items: center; gap: 6px; }
+  .input-box:focus-within { border-color: var(--muted); }
+  .input-box input { background: transparent; border: 0; outline: 0; color: var(--fg); font-size: 12px; width: 100%; }
+  .expand-content { border-top: 1px solid var(--border); }
+  .section-gap { margin-bottom: 20px; }
+  .theme-preview { display: flex; gap: 8px; }
+  .theme-card { width: 48px; height: 48px; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 2px solid transparent; transition: border-color .2s; }
+  .theme-card:hover { border-color: var(--muted); }
+  .theme-card.active { border-color: var(--primary); }
+</style>
+</head>
+<body class="p-8">
+
+<!-- ═══ Page Header ═══ -->
+<div class="flex items-start justify-between mb-6">
+  <div>
+    <h1 class="h-page">General</h1>
+    <p class="h-page-desc">Startup, notifications, appearance, and sidebar preferences.</p>
+  </div>
+</div>
+
+<!-- ═══ Two-column layout ═══ -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-4xl">
+
+  <!-- ═══ LEFT COLUMN ═══ -->
+  <div>
+
+    <!-- Startup -->
+    <div class="section-gap">
+      <div class="group-title">Startup</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Start at login</div>
+            <div class="row-desc">Launch Tide automatically when you log in.</div>
+          </div>
+          <div class="switch on"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="section-gap">
+      <div class="group-title">Notifications</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Enable notifications</div>
+            <div class="row-desc">OS notifications for turn completion and errors.</div>
+          </div>
+          <div class="switch on"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Git Attribution -->
+    <div class="section-gap">
+      <div class="group-title">Git Attribution</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Co-author commits</div>
+            <div class="row-desc">Install a git hook that appends Co-authored-by to every commit.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="switch on"></div>
+            <div class="icon-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chevron open"><path d="m9 18 6-6-6-6"/></svg>
+            </div>
+          </div>
+        </div>
+        <!-- Expanded -->
+        <div class="expand-content">
+          <div class="row">
+            <div class="flex-1">
+              <div class="row-title">Name</div>
+              <div class="row-desc">Display name in the commit trailer.</div>
+            </div>
+            <div class="input-box" style="width:140px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.6;"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+              <input value="Tide" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="flex-1">
+              <div class="row-title">Email</div>
+              <div class="row-desc">GitHub no-reply email for attribution.</div>
+            </div>
+            <div class="input-box" style="width:240px;">
+              <input value="314188112+tide-code@users.noreply.github.com" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ RIGHT COLUMN ═══ -->
+  <div>
+
+    <!-- Theme — visual swatches -->
+    <div class="section-gap">
+      <div class="group-title">Theme</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Base theme</div>
+            <div class="row-desc">Color palette for the entire app.</div>
+          </div>
+          <div class="theme-preview">
+            <div class="theme-card active" style="background:#0a0a0b;">
+              <div class="swatch-sm" style="background:#e4e4e7;"></div>
+            </div>
+            <div class="theme-card" style="background:#1a1715;">
+              <div class="swatch-sm" style="background:#d97757;"></div>
+            </div>
+            <div class="theme-card" style="background:#0d1410;">
+              <div class="swatch-sm" style="background:#4ade80;"></div>
+            </div>
+            <div class="theme-card" style="background:#0b0d1a;">
+              <div class="swatch-sm" style="background:#7c8aff;"></div>
+            </div>
+            <div class="theme-card" style="background:#08141a;">
+              <div class="swatch-sm" style="background:#22d3ee;"></div>
+            </div>
+            <div class="theme-card" style="background:#f8f9fa;border:1px solid var(--border);">
+              <div class="swatch-sm" style="background:#d97757;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layout -->
+    <div class="section-gap">
+      <div class="group-title">Layout</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Sidebar</div>
+            <div class="row-desc">Choose how the sidebar displays.</div>
+          </div>
+          <div style="display:flex;gap:4px;">
+            <span class="pill pill-inactive">Dual Panel</span>
+            <span class="pill pill-active">Integrated</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Typography -->
+    <div class="section-gap">
+      <div class="group-title">Typography</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Base font size</div>
+            <div class="row-desc">Scales all rem-based sizes in the app.</div>
+          </div>
+          <div class="select">
+            Default · 14px
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="section-gap">
+      <div class="group-title">Terminal</div>
+      <div class="card">
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Color theme</div>
+            <div class="row-desc">Terminal color scheme.</div>
+          </div>
+          <div class="select">
+            Tide Dark
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="row">
+          <div class="flex-1">
+            <div class="row-title">Font size</div>
+            <div class="row-desc">Terminal text size in pixels.</div>
+          </div>
+          <div class="select">
+            13px
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

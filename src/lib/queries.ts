@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import * as api from './api/client';
 import { useUi } from './stores/ui';
 import { toast } from './toast';
-import type { RagDownloadProgressEvent, RagInitProgressEvent } from '@/types';
+import type { RagDownloadProgressEvent, RagInitProgressEvent, WorkspaceProgressEvent } from '@/types';
 
 /** Module-level QueryClient singleton. Exported so non-React code (e.g. shortcutActions.ts) can read cached query data without a hook context. */
 export const queryClient = new QueryClient({
@@ -195,9 +195,23 @@ export function useArchiveSession(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.archiveSession(id),
-    onSuccess: () => {
+    onSuccess: (_data, sessionId) => {
       qc.invalidateQueries({ queryKey: qk.sessions(workspaceId) });
       qc.invalidateQueries({ queryKey: qk.archivedSessions(workspaceId) });
+      // If the archived session was active, switch to the next available one
+      // (most recently updated), or fall back to the new-session view.
+      const ui = useUi.getState();
+      if (ui.activeSessionId === sessionId) {
+        const sessions = (qc.getQueryData(qk.sessions(workspaceId)) as any[] | undefined) ?? [];
+        const remaining = sessions
+          .filter((s) => s.id !== sessionId)
+          .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+        if (remaining[0]) {
+          ui.setActiveSession(remaining[0].id);
+        } else {
+          useUi.setState({ activeSessionId: null, mainView: 'new' });
+        }
+      }
     },
   });
 }
@@ -228,19 +242,30 @@ export function useDeleteSession(workspaceId: string) {
   });
 }
 
-export function useForkSession(workspaceId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: { sourceId: string; newModelId: string; opts?: { providerId?: string; autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' } }) =>
-      api.forkSession(args.sourceId, args.newModelId, args.opts),
-    onSuccess: (newSession: any) => {
-      qc.invalidateQueries({ queryKey: qk.sessions(workspaceId) });
-      // Auto-switch to the forked session.
-      if (newSession?.id) {
-        useUi.getState().setActiveSession(newSession.id);
-      }
-    },
+/** Initiate a fork: grab the source session's last answer text, add it as a
+ *  composer attachment, and redirect to the new-session screen. No session is
+ *  created until the user sends — the attachment rides along on the first
+ *  message. `resultText` is used directly when the caller already has it
+ *  (AnswerBlock); otherwise fetched from the session. Text only — no blocks. */
+export async function initiateFork(sourceSessionId: string, resultText?: string): Promise<void> {
+  let text = resultText?.trim();
+  if (!text) {
+    const session = await api.getSession(sourceSessionId);
+    const lastAnswer = session?.messages
+      ?.slice().reverse()
+      .find((m: { role: string; content?: string }) => m.role === 'assistant' && m.content?.trim());
+    text = lastAnswer?.content?.trim();
+  }
+  if (!text) return;
+
+  const ui = useUi.getState();
+  ui.clearComposerAttachments();
+  ui.addComposerAttachment({
+    path: 'fork-result.md',
+    kind: 'paste',
+    content: text,
   });
+  useUi.setState({ activeSessionId: null, mainView: 'new', sessionsPanelOpen: false });
 }
 
 // ===== Workspace lifecycle: archive/unarchive/delete + rename (uses api.updateWorkspace; invalidates session queries too because cascades move/remove sessions).
@@ -319,6 +344,17 @@ export function useGitStatus(workspaceId: string | null, sessionId?: string | nu
   return useQuery({
     queryKey: key,
     queryFn: () => (workspaceId ? api.gitStatus(workspaceId, sessionId ?? undefined) : Promise.resolve([])),
+    enabled: !!workspaceId,
+  });
+}
+
+/** Live branch + HEAD for the session's working directory (worktree-aware).
+ *  Refetch after a git tool runs via MainScreen's git-tool invalidation. */
+export function useGitBranchInfo(workspaceId: string | null, sessionId?: string | null) {
+  const key = ['gitBranch', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitBranchInfo(workspaceId, sessionId ?? undefined) : Promise.resolve({ branch: null, headCommit: null })),
     enabled: !!workspaceId,
   });
 }
@@ -457,6 +493,23 @@ export function useRagInitProgress(workspaceId: string | null): RagInitProgressE
     return unsubscribe;
   }, [workspaceId]);
   return event;
+}
+
+/** Live workspace-creation milestones for a given requestId. Returns a map
+ *  keyed by step id → latest event, so the dialog can render each checklist
+ *  row from its real status (active/done/failed) instead of fake timers. */
+export function useWorkspaceSteps(requestId: string | null): Record<string, WorkspaceProgressEvent> {
+  const [steps, setSteps] = useState<Record<string, WorkspaceProgressEvent>>({});
+  useEffect(() => {
+    if (!requestId) { setSteps({}); return; }
+    setSteps({});
+    const unsubscribe = api.subscribeWorkspaceProgress((e) => {
+      if (e.requestId !== requestId) return;
+      setSteps((prev) => ({ ...prev, [e.step]: e }));
+    });
+    return unsubscribe;
+  }, [requestId]);
+  return steps;
 }
 
 /** Live model-download progress (global — one model, not per-workspace).

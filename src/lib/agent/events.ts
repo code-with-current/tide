@@ -50,6 +50,10 @@ export interface ToolCallStartEvent extends AgentEventBase {
    *  asserts it on creation. Repeated here (not derived) so the wire
    *  format is self-describing. */
   blockId: string;
+  /** When set, this tool call originated inside a sub-agent dispatched by
+   *  the named parent tool call (a dispatch_agent). The renderer nests
+   *  these under the parent block instead of rendering them as siblings. */
+  parentToolCallId?: string;
 }
 
 /** Partial tool args — for live preview / early cancel. */
@@ -58,6 +62,8 @@ export interface ToolCallDeltaEvent extends AgentEventBase {
   toolCallId: string;
   /** Partial JSON string fragment of the tool's input. */
   delta: string;
+  /** Sub-agent origin marker — see ToolCallStartEvent.parentToolCallId. */
+  parentToolCallId?: string;
 }
 
 /** Tool call fully assembled, ready for execution. */
@@ -71,12 +77,16 @@ export interface ToolCallEvent extends AgentEventBase {
   /** Human-readable preview for the UI. */
   argPreview: string;
   riskTier: RiskTier;
+  /** Sub-agent origin marker — see ToolCallStartEvent.parentToolCallId. */
+  parentToolCallId?: string;
 }
 
 /** Tool call moved into `running` state — execution started. */
 export interface ToolExecutingEvent extends AgentEventBase {
   type: 'tool_executing';
   toolCallId: string;
+  /** Sub-agent origin marker — see ToolCallStartEvent.parentToolCallId. */
+  parentToolCallId?: string;
 }
 
 /** Tool finished — renderer shows the result/diff/output. */
@@ -90,6 +100,8 @@ export interface ToolResultEvent extends AgentEventBase {
   display?: ToolDisplay;
   durationMs?: number;
   meta?: string;
+  /** Sub-agent origin marker — see ToolCallStartEvent.parentToolCallId. */
+  parentToolCallId?: string;
 }
 
 /** Tool is asking the user to pick between options (ask_followup_question).
@@ -160,6 +172,9 @@ export interface TurnEndEvent extends AgentEventBase {
   reasoning?: string;
   reasoningTokens?: number;
   reasoningMs?: number;
+  /** Wall-clock duration of the turn (ms), from turn start to turn end.
+   *  Persisted on the message so the send→result timer survives reload. */
+  totalMs?: number;
   toolCalls?: ToolCall[];
   /** Canonical block list for this turn, in emission order. The renderer
    *  uses this as the source of truth for the persisted message and the

@@ -212,9 +212,11 @@ export function registerMcpHandlers(
   ipcMain.handle(
     'tide:mcp:reauthorize',
     async (_e, name: string, scope: 'user' | 'project' | 'builtin', workspaceId?: string) => {
-      clearOAuthTokens(name);
-      log.info('oauth tokens cleared for re-auth', { name });
       const ws = resolveWorkspace(getActiveWorkspace);
+      // Clear tokens from the correct scope: project servers store OAuth in
+      // the workspace's .mcp.json, user servers in the global ~/.tide/mcp.json.
+      clearOAuthTokens(name, { scope, workspaceRoot: ws?.root });
+      log.info('oauth tokens cleared for re-auth', { name, scope });
       retryServer(name, scope, ws?.root, workspaceId).catch((e) =>
         log.warn('re-auth retry failed', { name, error: String(e) }),
       );

@@ -11,8 +11,9 @@ import { resolveSecrets, resolveArgsSecrets } from './secrets';
 // Approval system removed — all servers auto-connect when enabled.
 // The approvals.ts module is kept for back-compat (existing data in
 // extensions.json) but no longer gates connections.
-import { createAuthProvider, consumePendingAuthUrl, hasPendingAuthUrl, registerOAuthCompleter } from './oauth';
+import { createAuthProvider, consumePendingAuthUrl, hasPendingAuthUrl, registerOAuthCompleter, handleOAuthCallback } from './oauth';
 import { createExtensionsStore } from '../../extensionsStore';
+import * as store from '../../store';
 import type {
   McpConnection,
   McpTool,
@@ -115,7 +116,7 @@ export async function activateWorkspace(
   }
 
   for (const [name, serverConfig] of Object.entries(config)) {
-    await connectServer(name, serverConfig, 'project', workspaceId);
+    await connectServer(name, serverConfig, 'project', workspaceId, workspaceRoot);
   }
   notifyStatusChange();
 }
@@ -125,6 +126,7 @@ async function connectServer(
   config: McpServerConfig,
   scope: 'user' | 'project' | 'builtin',
   workspaceId?: string,
+  workspaceRoot?: string,
 ): Promise<void> {
   log.info('connecting', { name, scope, transport: config.type });
   const pool =
@@ -142,6 +144,7 @@ async function connectServer(
     config,
     scope,
     workspaceId,
+    workspaceRoot,
     status: 'connecting',
     tools: [],
     restartCount: 0,
@@ -221,14 +224,14 @@ async function connectServer(
       });
     } else if (transportType === 'sse') {
       transport = new SSEClientTransport(new URL(config.url!), {
-        authProvider: createAuthProvider(name) as any,
+        authProvider: createAuthProvider(name, { scope, workspaceId }) as any,
         requestInit: config.headers
           ? { headers: config.headers as Record<string, string> }
           : undefined,
       });
     } else {
       transport = new StreamableHTTPClientTransport(new URL(config.url!), {
-        authProvider: createAuthProvider(name) as any,
+        authProvider: createAuthProvider(name, { scope, workspaceId }) as any,
         requestInit: config.headers
           ? { headers: config.headers as Record<string, string> }
           : undefined,
@@ -305,7 +308,7 @@ async function connectServer(
       log.info('MCP crash recovery', { name, attempt: c.restartCount, delayMs: delay });
       notifyStatusChange();
       setTimeout(() => {
-        connectServer(name, config, scope, workspaceId).catch((e) =>
+        connectServer(name, config, scope, workspaceId, workspaceRoot).catch((e) =>
           log.warn('MCP restart failed', { name, err: e?.message ?? String(e) }),
         );
       }, delay);
@@ -568,7 +571,7 @@ export async function retryServer(
     if (diskConfig[name]) config = diskConfig[name];
   }
 
-  await connectServer(name, config, scope, workspaceId);
+  await connectServer(name, config, scope, workspaceId, workspaceRoot);
 }
 
 /** Re-fetch the tool list from a connected MCP server (some servers add/remove tools at runtime). Returns the updated tool count, or -1 if not connected. */
@@ -625,16 +628,16 @@ export async function authenticateServer(
   if (url) {
     const { shell } = await import('electron');
     log.info('opening browser for oauth (user-initiated)', { server: name, url: url.origin });
+    // Always use the system browser. The tide:// redirect is caught by:
+    //   - Production: the registered protocol handler (open-url / second-instance)
+    //   - Dev: the early open-url handler + protocol.handle + will-navigate
     await shell.openExternal(url.toString());
-    // Mark connecting while the user completes sign-in. Do NOT re-run connectServer — the original transport is still alive waiting for the OAuth callback (finishAuth via completeOAuthCallback); a fresh transport would orphan the in-flight PKCE verifier.
     conn.status = 'connecting';
     conn.error = undefined;
     notifyStatusChange();
   } else {
-    // No stashed URL (e.g. tokens expired after a prior success) — re-run the
-    // full connect, which will re-trigger discovery + a new auth flow.
     log.info('authenticate: no pending URL, re-running connect', { server: name });
-    await connectServer(name, conn.config, scope, workspaceId);
+    await connectServer(name, conn.config, scope, workspaceId, conn.workspaceRoot);
   }
 }
 
@@ -678,7 +681,7 @@ export async function completeOAuthCallback(code: string, _state?: string): Prom
     await transport.finishAuth(code);
     // finishAuth exchanged the code for tokens (now persisted). Reconnect with
     // a fresh transport — it will read the stored tokens and connect cleanly.
-    await connectServer(conn.name, conn.config, scope, workspaceId);
+    await connectServer(conn.name, conn.config, scope, workspaceId, conn.workspaceRoot);
   } catch (e: any) {
     log.warn('oauth callback: finishAuth failed', { server: conn.name, error: e?.message ?? String(e) });
     conn.status = 'error';
@@ -700,7 +703,7 @@ export async function approveAndConnect(
         ? builtinConnections
         : (workspaceConnections.get(workspaceId!) ?? new Map());
   const conn = pool.get(name);
-  if (conn) await connectServer(name, conn.config, scope, workspaceId);
+  if (conn) await connectServer(name, conn.config, scope, workspaceId, conn.workspaceRoot);
 }
 
 /** Load a newly-added (or updated) server into the pool. Called by IPC add/update handlers after the config write; all servers auto-connect (no approval gate). */
@@ -726,7 +729,12 @@ export async function loadServer(
   }
 
   // All servers auto-connect when loaded — no approval gate.
-  await connectServer(name, config, scope, workspaceId);
+  // Resolve workspaceRoot for project scope so OAuth credentials go to the
+  // workspace's .mcp.json, not the global config.
+  const wsRoot = scope === 'project' && workspaceId
+    ? store.listWorkspaces().find(w => w.id === workspaceId)?.path
+    : undefined;
+  await connectServer(name, config, scope, workspaceId, wsRoot);
 }
 
 /**

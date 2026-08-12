@@ -1,9 +1,10 @@
 /** Git source-control IPC handlers. Each function runs git via spawn with shell:false (args passed directly — no shell quoting, platform-independent) in the workspace root. No remote operations (push/fetch/pull) are exposed. */
 
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { resolveInsideWorkspace } from '../agent/path-safety';
-import { parseUnifiedDiff } from '../../src/lib/stream/parseDiff';
+import { parseUnifiedDiff } from '../../src/lib/stream/parse-diff';
 import { toolEnv } from '../agent/tools/tool-env';
 import type { DiffHunk } from '../../src/types';
 
@@ -70,7 +71,9 @@ export async function getGitStatus(rootDir: string): Promise<GitFileChange[]> {
     if (!line.trim()) continue;
     const x = line[0];
     const y = line[1];
-    const filePath = line.slice(3);
+    const rawPath = line.slice(3);
+    // For renames, porcelain shows "old -> new" — extract just the new path.
+    const filePath = rawPath.includes(' -> ') ? rawPath.split(' -> ')[1] : rawPath;
 
     let status: GitFileChange['status'];
     let staged: boolean;
@@ -114,12 +117,50 @@ export async function gitCommit(rootDir: string, message: string): Promise<strin
   return stdout.trim();
 }
 
-/** Get the diff for a specific file as parsed hunks. */
-export async function gitDiff(rootDir: string, filePath: string, staged: boolean): Promise<DiffHunk[]> {
+/** Get the diff for a specific file as parsed hunks. `contextLines` controls
+ *  the number of unchanged context lines around each change (default 3).
+ *  Pass a large number (e.g. 100000) for a full-file diff view. */
+export async function gitDiff(rootDir: string, filePath: string, staged: boolean, contextLines?: number): Promise<DiffHunk[]> {
   resolveInsideWorkspace(rootDir, filePath);
-  const args = staged ? ['diff', '--cached', '--', filePath] : ['diff', '--', filePath];
+  const contextArgs = contextLines != null ? ['-U', String(contextLines)] : [];
+  const args = staged
+    ? ['diff', ...contextArgs, '--cached', '--', filePath]
+    : ['diff', ...contextArgs, '--', filePath];
   const { stdout: raw } = await runGit(args, rootDir, 10000);
   return parseUnifiedDiff(raw);
+}
+
+/** Get the current HEAD commit SHA (full). Used to capture pre-turn state
+ *  so individual files can be reverted to exactly where they were before a
+ *  turn's edits. Returns null if not a git repo. */
+export async function gitHeadSha(rootDir: string): Promise<string | null> {
+  try {
+    const { stdout } = await runGit(['rev-parse', 'HEAD'], rootDir);
+    return stdout.trim() || null;
+  } catch { return null; }
+}
+
+/** Restore a single file to its state at the given commit SHA. If the file
+ *  didn't exist at that commit (was created after), delete it from the
+ *  working tree. This is the per-file "undo this turn's changes" operation. */
+export async function gitRestoreFile(rootDir: string, filePath: string, sha: string): Promise<{ ok: boolean; error?: string }> {
+  resolveInsideWorkspace(rootDir, filePath);
+  try {
+    // Check if the file existed at the target commit.
+    const { stdout } = await runGit(['cat-file', '-e', `${sha}:${filePath}`], rootDir, 5000);
+    // Existed → restore it from the commit.
+    await runGit(['checkout', sha, '--', filePath], rootDir, 10000);
+    return { ok: true };
+  } catch {
+    // File didn't exist at that commit → it was created during the turn. Delete it.
+    try {
+      const abs = resolveInsideWorkspace(rootDir, filePath);
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  }
 }
 
 // ─── Worktree primitives: per-session isolation via <workspace>/<worktreeLocation>/<branchName>; no remote operations.
@@ -141,6 +182,18 @@ export async function currentBranch(rootDir: string): Promise<string | undefined
     const { stdout } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], rootDir);
     return stdout.trim() || undefined;
   } catch { return undefined; }
+}
+
+/** Live branch + short HEAD commit for the session's working directory
+ *  (workspace root or a session worktree). Used by the Inspector so the Git
+ *  section reflects branch changes made by tools mid-session (e.g. a new
+ *  branch created via the git tool), instead of the stale persisted value. */
+export async function branchInfo(rootDir: string): Promise<{ branch: string | null; headCommit: string | null }> {
+  try {
+    const branch = await currentBranch(rootDir);
+    const { stdout: head } = await runGit(['rev-parse', '--short', 'HEAD'], rootDir);
+    return { branch: branch ?? null, headCommit: head.trim() || null };
+  } catch { return { branch: null, headCommit: null }; }
 }
 
 /** Create a worktree at <rootDir>/<worktreeLocation>/<branchName>

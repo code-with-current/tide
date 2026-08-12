@@ -124,6 +124,14 @@ export interface Workspace {
    *  before this feature existed get sensible defaults. See hydrateRagConfig
    *  in electron/configStore.ts. */
   ragConfig?: RagConfig;
+  /** Per-workspace MCP OAuth credentials (tokens/clients/verifiers) for
+   *  project-scoped OAuth servers. Stored in config.json, not .mcp.json, so
+   *  credentials don't leak to the filesystem or git. */
+  mcpOAuth?: {
+    tokens?: Record<string, string>;
+    clients?: Record<string, string>;
+    verifiers?: Record<string, string>;
+  };
 }
 
 export type AutonomyMode = 'plan' | 'ask' | 'edit' | 'full';
@@ -270,6 +278,9 @@ export interface Message {
   reasoningTokens?: number;
   /** Thinking duration in ms, if known. */
   reasoningMs?: number;
+  /** Wall-clock duration of the turn (ms), from send to result. Persisted so
+   *  the answer-block timer survives reload. */
+  totalMs?: number;
   createdAt: string;
   /** Tool calls made during this message (assistant only). */
   toolCalls?: ToolCall[];
@@ -403,6 +414,10 @@ export interface ToolCall {
    *  preview while the tool call is forming (before the complete tool_call
    *  event arrives with parsed arguments). Renderer-only; not persisted. */
   _partialInput?: string;
+  /** When set, this tool call ran inside a sub-agent dispatched by the
+   *  named parent dispatch_agent tool call. The renderer nests these
+   *  under the parent block. Undefined for top-level tool calls. */
+  parentToolCallId?: string;
 }
 
 export type ToolDisplay =
@@ -410,7 +425,7 @@ export type ToolDisplay =
   | { kind: 'command'; command: string }
   | { kind: 'file_list'; paths: string[] }
   | { kind: 'text'; text: string }
-  | { kind: 'agent'; agentName: string; task: string; report: string; usage?: Usage; reasoning?: string }
+  | { kind: 'agent'; agentName: string; title?: string; task: string; report: string; usage?: Usage; reasoning?: string }
   | { kind: 'file_loaded'; path: string; lines: number; bytes: number; description?: string; body: string };
 
 /** Per-session streaming state, keyed by sessionId so sessions stream independently without overwriting each other. */
@@ -461,11 +476,16 @@ export interface SessionStream {
    *  Consumed + cleared by MainScreen's freeze effect. */
   finalMessage: {
     content: string;
+    /** The orchestrator's message id — the streaming partial flush already
+     *  persisted a message with this id; the freeze effect finalizes it
+     *  in place by this id rather than appending a duplicate. */
+    messageId?: string;
     timeline?: Array<{ type: 'text'; text: string } | { type: 'tool'; toolIndex: number }>;
     blocks?: Block[];
     turn?: Turn;
     reasoning?: string;
     reasoningTokens?: number;
+    totalMs?: number;
     toolCalls?: ToolCall[];
     usage?: Usage;
     /** The last step's usage only — for the context meter. */
@@ -590,6 +610,22 @@ export interface RagDownloadProgressEvent {
   received: number;
   total: number;
   phase: 'downloading' | 'done' | 'failed';
+  error?: string;
+}
+
+/** Per-step milestone emitted during workspace creation (tide:workspace:progress).
+ *  Correlated by requestId (generated client-side, passed in the addWorkspace
+ *  input and echoed back) — the workspace id isn't known until creation
+ *  finishes, so it can't key the events. The dialog subscribes by requestId. */
+export type WorkspaceProgressStep = 'clone' | 'folder' | 'scaffold' | 'install' | 'git' | 'detect';
+export interface WorkspaceProgressEvent {
+  requestId: string;
+  step: WorkspaceProgressStep;
+  status: 'active' | 'done' | 'failed';
+  /** Human label, e.g. "Cloning repository…". */
+  label: string;
+  /** Optional detail, e.g. the template label or repo URL. */
+  detail?: string;
   error?: string;
 }
 

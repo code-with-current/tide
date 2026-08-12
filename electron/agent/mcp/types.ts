@@ -52,6 +52,9 @@ export interface McpConnection {
   config: McpServerConfig;
   scope: McpScope;
   workspaceId?: string;
+  /** Filesystem root for project-scoped servers. Used by the OAuth auth
+   *  provider to store credentials in the workspace's .mcp.json. */
+  workspaceRoot?: string;
   status: McpConnectionStatus;
   tools: McpTool[];
   error?: string;

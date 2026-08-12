@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en" data-style="macos">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tide — Native shadcn UI Styles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   Base reset + shadcn-style token system.
+   Each [data-style] block below re-defines the same tokens,
+   so the exact same markup re-skins across 5 native directions.
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  letter-spacing:-0.01em;
+  background:#0a0a0a;
+  color:#e7e7e7;
+  overflow:hidden;
+}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+svg{display:block}
+
+/* ---- the desktop stage (neutral backdrop so the window reads as a window) ---- */
+#stage{
+  height:100vh;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:14px;
+  padding:22px;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #1d1d1f22, transparent 60%),
+    repeating-linear-gradient(45deg,#10101100 0 2px,#0c0c0d00 2px 4px),
+    #0a0a0b;
+}
+
+/* ---- style switcher ---- */
+#switcher{
+  display:flex;gap:6px;align-items:center;
+  padding:6px;border-radius:12px;
+  background:#161617;border:1px solid #ffffff14;
+  box-shadow:0 1px 0 #ffffff08 inset,0 12px 30px -12px #000a;
+}
+#switcher .lbl{font-size:11px;color:#8a8a8f;margin:0 10px 0 8px;font-weight:500;letter-spacing:.04em;text-transform:uppercase}
+#switcher button{
+  padding:7px 13px;border-radius:8px;font-size:12.5px;font-weight:500;color:#9a9aa0;
+  transition:.15s;display:flex;align-items:center;gap:7px;
+}
+#switcher button:hover{background:#ffffff0d;color:#e7e7e9}
+#switcher button[aria-pressed="true"]{background:#ffffff1a;color:#fff;box-shadow:0 0 0 1px #ffffff2e}
+#switcher .dot{width:9px;height:9px;border-radius:50%}
+
+/* ---- the app window (chrome changes per-style via body[data-style]) ---- */
+#win{
+  width:min(1240px,96vw);height:min(820px,86vh);
+  display:flex;flex-direction:column;overflow:hidden;position:relative;
+  background:var(--bg);color:var(--fg);
+  border:1px solid var(--win-border);
+  border-radius:var(--win-radius);
+  box-shadow:var(--win-shadow);
+  font-size:var(--base);
+}
+
+/* ============================ LAYOUT ============================ */
+.row{display:flex;min-height:0;flex:1}
+.col{display:flex;flex-direction:column;min-height:0;min-width:0}
+
+/* sidebar */
+.side{
+  width:264px;flex:none;background:var(--sidebar);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;min-height:0;
+}
+.side .traffic{display:flex;align-items:center;gap:8px;height:var(--topbar-h);padding:0 14px;flex:none}
+.side .traffic .tl{width:12px;height:12px;border-radius:50%}
+.side .traffic .tl.c{background:#febc2e}.side .traffic .tl.m{background:#28c840}.side .traffic .tl.r{background:#ff5f57}
+.side .traffic .tt{font-size:12px;font-weight:600;color:var(--muted);margin-left:6px}
+.side-scroll{overflow:auto;flex:1;padding:6px 8px 14px}
+
+.ws{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;padding:10px 10px 6px;display:flex;justify-content:space-between;align-items:center}
+.ws .add{color:var(--muted);width:16px;height:16px}
+.tree-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:12.5px;color:var(--fg);cursor:default}
+.tree-item:hover{background:var(--accent-soft)}
+.tree-item.active{background:var(--accent-soft);color:var(--fg);font-weight:500}
+.tree-item .ic{width:15px;height:15px;color:var(--muted);flex:none}
+.tree-item .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-item.sub{padding-left:26px;font-size:12px;color:var(--muted)}
+.tree-item.sub.active{color:var(--fg)}
+.dot-status{width:7px;height:7px;border-radius:50%;flex:none}
+.dot-status.run{background:#3fb950}.dot-status.idle{background:var(--muted)}
+
+/* main area */
+.main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.topbar{
+  height:var(--topbar-h);flex:none;display:flex;align-items:center;gap:10px;
+  padding:0 12px;border-bottom:1px solid var(--border);background:var(--topbar-bg);
+  -webkit-app-region:drag;
+}
+.topbar .crumb{display:flex;align-items:center;gap:6px;font-size:12.5px;min-width:0}
+.topbar .crumb .sep{color:var(--muted)}
+.topbar .crumb .b{color:var(--fg);font-weight:500;white-space:nowrap}
+.topbar .crumb .branch{font-size:11px;color:var(--muted);display:inline-flex;gap:4px;align-items:center;
+  padding:2px 7px;border-radius:6px;border:1px solid var(--border);background:var(--card)}
+.topbar .spacer{flex:1;-webkit-app-region:no-drag}
+.btngrp{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;-webkit-app-region:no-drag}
+.btngrp button{height:28px;padding:0 11px;font-size:12px;color:var(--fg);display:flex;align-items:center;gap:6px;border-right:1px solid var(--border)}
+.btngrp button:last-child{border-right:0}
+.btngrp button:hover{background:var(--accent-soft)}
+.btngrp button.primary{background:var(--primary);color:var(--primary-fg);font-weight:500}
+.btngrp button.primary:hover{filter:brightness(1.06)}
+.iconbtn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--muted);-webkit-app-region:no-drag}
+.iconbtn:hover{background:var(--accent-soft);color:var(--fg)}
+.iconbtn.on{background:var(--accent-soft);color:var(--fg)}
+.portchip{font-size:11px;color:#3fb950;display:inline-flex;gap:4px;align-items:center;padding:3px 7px;border-radius:6px;border:1px solid #3fb95033;background:#3fb95014}
+
+/* chat */
+.chat{flex:1;overflow:auto;padding:20px 0 8px;min-height:0}
+.chat-inner{max-width:760px;margin:0 auto;padding:0 22px 120px;display:flex;flex-direction:column;gap:18px}
+.msg{display:flex;gap:12px}
+.avatar{width:26px;height:26px;border-radius:7px;flex:none;display:grid;place-items:center;font-size:12px;font-weight:600;color:#fff}
+.avatar.user{background:linear-gradient(135deg,#6366f1,#8b5cf6)}
+.avatar.ai{background:linear-gradient(135deg,#f97316,#ef4444)}
+.msg .body{min-width:0;flex:1}
+.msg .who{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}
+.bubble{font-size:13.5px;line-height:1.62;color:var(--fg)}
+.bubble strong{font-weight:600}
+.bubble code{font-family:"JetBrains Mono",monospace;font-size:.86em;background:var(--code-bg);padding:1px 5px;border-radius:5px;border:1px solid var(--border)}
+
+/* reasoning block */
+.reason{border:1px solid var(--border);border-radius:10px;background:var(--reason-bg);overflow:hidden}
+.reason summary{list-style:none;cursor:pointer;padding:9px 12px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--reason-fg)}
+.reason summary::-webkit-details-marker{display:none}
+.reason .ic{width:14px;height:14px}
+.reason .lab{font-weight:500}
+.reason .dur{margin-left:auto;color:var(--muted);font-size:11px}
+.reason .inner{padding:0 12px 12px 34px;font-size:12.5px;line-height:1.6;color:var(--reason-fg);opacity:.85}
+
+/* tool row */
+.toolrow{border:1px solid var(--border);border-radius:9px;background:var(--card);overflow:hidden}
+.toolrow .th{display:flex;align-items:center;gap:8px;padding:8px 11px;font-size:12px}
+.toolrow .th .ic{width:14px;height:14px;color:var(--muted)}
+.toolrow .th .fn{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--fg)}
+.toolrow .th .tag{margin-left:auto;font-size:10px;padding:2px 6px;border-radius:5px;background:var(--accent-soft);color:var(--muted);font-weight:500}
+.toolrow .diff{font-family:"JetBrains Mono",monospace;font-size:11.5px;line-height:1.55;border-top:1px solid var(--border)}
+.toolrow .diff .l{display:flex;white-space:pre;padding:0 11px}
+.toolrow .diff .ln{width:26px;text-align:right;color:var(--muted);user-select:none;opacity:.6;padding-right:10px}
+.toolrow .diff .add{background:#28c8401a;color:#56d364}
+.toolrow .diff .del{background:#f851491a;color:#f85149}
+.toolrow .diff .ctx{color:var(--muted)}
+
+/* code block */
+.codeblk{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--code-bg);margin-top:4px}
+.codeblk .ch{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--border);font-size:11.5px}
+.codeblk .ch .fn{font-family:"JetBrains Mono",monospace;color:var(--fg)}
+.codeblk .ch .copy{margin-left:auto;color:var(--muted)}
+.codeblk pre{margin:0;padding:11px 13px;font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.6;overflow:auto;color:var(--fg)}
+.codeblk .k{color:#ff7b72}.codeblk .s{color:#a5d6ff}.codeblk .f{color:#d2a8ff}.codeblk .c{color:#8b949e}.codeblk .n{color:#79c0ff}
+
+/* todo floating */
+.todo{border:1px solid var(--border);border-radius:10px;background:var(--card);overflow:hidden}
+.todo .th{display:flex;align-items:center;gap:8px;padding:8px 11px;font-size:12px;font-weight:600;border-bottom:1px solid var(--border)}
+.todo .th .ct{margin-left:auto;font-size:10px;color:var(--muted);font-weight:500}
+.todo .ti{display:flex;align-items:center;gap:8px;padding:6px 11px;font-size:12px}
+.todo .chk{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--muted);flex:none;display:grid;place-items:center}
+.todo .chk.done{background:#3fb950;border-color:#3fb950}
+.todo .chk.done svg{color:#0a0a0a;width:9px;height:9px}
+.todo .ti.done .tx{text-decoration:line-through;color:var(--muted)}
+
+/* composer */
+.composer-wrap{position:absolute;left:0;right:0;bottom:0;padding:0 22px 18px;pointer-events:none;background:linear-gradient(to top,var(--bg) 55%,transparent)}
+.composer{max-width:760px;margin:0 auto;pointer-events:auto;background:var(--composer-bg);border:1px solid var(--composer-border);border-radius:14px;box-shadow:var(--composer-shadow);padding:8px}
+.composer .ta{width:100%;resize:none;border:0;background:transparent;color:var(--fg);font:inherit;font-size:13.5px;line-height:1.5;padding:8px 10px;outline:none;min-height:40px}
+.composer .ta::placeholder{color:var(--muted)}
+.composer .bar{display:flex;align-items:center;gap:6px;padding:2px 6px 2px 8px}
+.composer .mini{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--muted)}
+.composer .mini:hover{background:var(--accent-soft);color:var(--fg)}
+.composer .send{margin-left:auto;height:30px;padding:0 12px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:6px}
+.composer .kbd{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--muted);padding:1px 5px;border:1px solid var(--border);border-radius:5px}
+
+/* right panel */
+.right{width:300px;flex:none;border-left:1px solid var(--border);background:var(--card);display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;border-bottom:1px solid var(--border);height:var(--topbar-h);flex:none}
+.tabs .t{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--muted);border-bottom:2px solid transparent}
+.tabs .t.on{color:var(--fg);border-bottom-color:var(--primary)}
+.right-scroll{overflow:auto;flex:1;padding:10px}
+.file{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:12px;cursor:default}
+.file:hover{background:var(--accent-soft)}
+.file .ic{width:15px;height:15px;flex:none}
+.file .nm{flex:1}
+.file .mt{font-size:10px;color:var(--muted);font-family:"JetBrains Mono",monospace}
+
+/* statusbar (some styles) */
+.statusbar{height:24px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;font-size:11px;background:var(--statusbar-bg);color:var(--muted);border-top:1px solid var(--border)}
+.statusbar .it{display:flex;align-items:center;gap:5px}
+.statusbar .it.r{margin-left:auto}
+
+/* ============================================================
+   STYLE 1 — macOS Sequoia (true native mac)
+   translucency, unified toolbar, traffic lights, system grays
+   ============================================================ */
+html[data-style="macos"]{
+  --base:13px; --topbar-h:38px;
+  --win-radius:12px; --win-border:#00000040;
+  --win-shadow:0 0 0 .5px #ffffff20, 0 30px 70px -18px #000c, 0 10px 30px -10px #0008;
+  --bg:#1e1e1e80;            /* translucent so vibrancy shows */
+  --fg:#e8e8ea;
+  --card:#ffffff0d;
+  --sidebar:#1b1b1d99;       /* vibrancy */
+  --topbar-bg:#ffffff08;
+  --border:#ffffff14;
+  --accent-soft:#ffffff14;
+  --primary:#0a84ff; --primary-fg:#fff;
+  --muted:#9a9aa2;
+  --code-bg:#0d0d0e;
+  --reason-bg:#8b5cf612; --reason-fg:#c4b5fd;
+  --composer-bg:#2a2a2cee; --composer-border:#ffffff1f; --composer-shadow:0 20px 40px -16px #000c;
+  --statusbar-bg:#00000040;
+}
+html[data-style="macos"] #win{ backdrop-filter:blur(30px) saturate(180%); -webkit-backdrop-filter:blur(30px) saturate(180%); }
+html[data-style="macos"] .side,html[data-style="macos"] .topbar,html[data-style="macos"] .right{ background:transparent; }
+html[data-style="macos"] .statusbar{display:flex}
+html[data-style="macos"] .segmented{display:inline-flex}
+
+/* macOS-native segmented control (used in topbar) */
+.segmented{display:none;background:#00000033;border:1px solid #ffffff1f;border-radius:8px;padding:2px;gap:2px}
+.segmented button{height:24px;padding:0 10px;border-radius:6px;font-size:11.5px;color:#c7c7cc;display:flex;align-items:center;gap:5px}
+.segmented button.on{background:#ffffff26;color:#fff}
+html[data-style="macos"] .btngrp.run{display:none}      /* mac uses segmented run */
+html[data-style="macos"] .segmented{display:inline-flex}
+
+/* ============================================================
+   STYLE 2 — Linear Pro (sophisticated muted web-native)
+   tight, low-contrast, subtle elevation, refined neutrals
+   ============================================================ */
+html[data-style="linear"]{
+  --base:13px; --topbar-h:40px;
+  --win-radius:10px; --win-border:#2a2a2e;
+  --win-shadow:0 0 0 1px #00000080, 0 40px 80px -20px #000;
+  --bg:#0e0e10;
+  --fg:#f7f8f8;
+  --card:#161618;
+  --sidebar:#0b0b0d;
+  --topbar-bg:#0b0b0d;
+  --border:#232327;
+  --accent-soft:#1d1d20;
+  --primary:#5e6ad2; --primary-fg:#fff;     /* Linear indigo */
+  --muted:#7a7a85;
+  --code-bg:#08080a;
+  --reason-bg:#1a1a22; --reason-fg:#9b9bc4;
+  --composer-bg:#131316; --composer-border:#2a2a30; --composer-shadow:0 -1px 0 #000, 0 20px 50px -20px #000;
+  --statusbar-bg:#0b0b0d;
+}
+html[data-style="linear"] .side{box-shadow:inset -1px 0 0 #1c1c20}
+html[data-style="linear"] .iconbtn:hover,html[data-style="linear"] .tree-item:hover{background:#141417}
+html[data-style="linear"] .statusbar{display:flex}
+html[data-style="linear"] .msg .avatar.ai{background:linear-gradient(135deg,#5e6ad2,#8b5cf6)}
+html[data-style="linear"] .segmented{display:none}
+
+/* ============================================================
+   STYLE 3 — Cursor IDE (deep dark, activity rail, high-contrast)
+   closest to the 21st-dev/1code reference direction
+   ============================================================ */
+html[data-style="cursor"]{
+  --base:13px; --topbar-h:36px;
+  --win-radius:8px; --win-border:#000000;
+  --win-shadow:0 0 0 1px #1a1a1a, 0 40px 90px -20px #000;
+  --bg:#1e1e1e;
+  --fg:#d4d4d4;
+  --card:#252526;
+  --sidebar:#181818;
+  --topbar-bg:#181818;
+  --border:#2a2a2d;
+  --accent-soft:#2a2d2e;
+  --primary:#007acc; --primary-fg:#fff;   /* VS Code blue */
+  --muted:#858585;
+  --code-bg:#1e1e1e;
+  --reason-bg:#252526; --reason-fg:#9cdcfe;
+  --composer-bg:#2a2a2b; --composer-border:#3c3c3c; --composer-shadow:none;
+  --statusbar-bg:#007acc;                 /* VS Code blue status bar */
+}
+html[data-style="cursor"] .statusbar{display:flex;color:#fff}
+html[data-style="cursor"] .statusbar .it{color:#ffffffcc}
+html[data-style="cursor"] .side .traffic .tl{display:none}
+html[data-style="cursor"] .activity{display:flex}      /* show activity rail */
+html[data-style="cursor"] .segmented{display:none}
+html[data-style="cursor"] .topbar .crumb .branch{background:#252526}
+html[data-style="cursor"] .right{background:#252526}
+
+/* activity rail (only cursor) */
+.activity{display:none;width:48px;flex:none;background:#181818;border-right:1px solid #2a2a2d;flex-direction:column;align-items:center;padding-top:8px;gap:4px}
+.activity .ai{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;color:#858585}
+.activity .ai.on{color:#fff;background:#2a2d2e}
+.activity .ai:hover{color:#d4d4d4}
+
+/* ============================================================
+   STYLE 4 — Vercel Geist (pure monochrome, crisp B/W/gray)
+   hyper-minimal, black on near-white OR inverted
+   ============================================================ */
+html[data-style="geist"]{
+  --base:13px; --topbar-h:40px;
+  --win-radius:10px; --win-border:#2a2a2a;
+  --win-shadow:0 0 0 1px #ffffff08, 0 40px 80px -24px #000;
+  --bg:#000000;
+  --fg:#ededed;
+  --card:#0a0a0a;
+  --sidebar:#0a0a0a;
+  --topbar-bg:#000000;
+  --border:#1f1f1f;
+  --accent-soft:#1a1a1a;
+  --primary:#ffffff; --primary-fg:#000000;  /* inverted primary = very Geist */
+  --muted:#6a6a6a;
+  --code-bg:#0a0a0a;
+  --reason-bg:#0f0f0f; --reason-fg:#a1a1a1;
+  --composer-bg:#0a0a0a; --composer-border:#2a2a2a; --composer-shadow:0 0 0 1px #2a2a2a;
+  --statusbar-bg:#000000;
+}
+html[data-style="geist"] .side .traffic .tl{display:none}
+html[data-style="geist"] .border-geist{display:block}   /* 1px hairlines everywhere */
+html[data-style="geist"] .statusbar{display:flex}
+html[data-style="geist"] .segmented{display:none}
+html[data-style="geist"] .composer .send{background:#fff;color:#000}
+html[data-style="geist"] .msg .avatar.ai{background:#fff;color:#000}
+html[data-style="geist"] .btngrp button.primary{background:#fff;color:#000}
+html[data-style="geist"] .topbar .crumb .branch{background:#0a0a0a}
+
+/* ============================================================
+   STYLE 5 — GNOME/Adwaita Light (flat native Linux, light mode)
+   bold window label, classic light, content cards
+   ============================================================ */
+html[data-style="adwaita"]{
+  --base:14px; --topbar-h:42px;
+  --win-radius:12px; --win-border:#d8d8d8;
+  --win-shadow:0 0 0 1px #0000000d, 0 30px 60px -20px #00000040;
+  --bg:#fafafa;
+  --fg:#1e1e1e;
+  --card:#ffffff;
+  --sidebar:#ebebeb;
+  --topbar-bg:#fafafa;
+  --border:#e0e0e0;
+  --accent-soft:#e9e9e9;
+  --primary:#3584e4; --primary-fg:#fff;    /* Adwaita blue */
+  --muted:#777777;
+  --code-bg:#f6f6f6;
+  --reason-bg:#f0f0f8; --reason-fg:#5b5ba0;
+  --composer-bg:#ffffff; --composer-border:#dcdcdc; --composer-shadow:0 1px 0 #0000000d,0 16px 30px -16px #00000030;
+  --statusbar-bg:#eeeeee;
+}
+html[data-style="adwaita"] .side .traffic .tl{display:none}
+html[data-style="adwaita"] .statusbar{display:flex}
+html[data-style="adwaita"] .segmented{display:none}
+html[data-style="adwaita"] #stage{background:radial-gradient(1200px 600px at 50% -10%,#ffffff80,transparent 60%),#cfcfcf}
+html[data-style="adwaita"] .codeblk .k{color:#a626a4}.codeblk .s{color:#50a14f}.codeblk .f{color:#4078f2}.codeblk .c{color:#a0a0a0}.codeblk .n{color:#986801}
+html[data-style="adwaita"] .toolrow .diff .add{background:#1a8b341a;color:#1a8b34}
+html[data-style="adwaita"] .toolrow .diff .del{background:#c83b3b1a;color:#c83b3b}
+html[data-style="adwaita"] .dot-status.run{background:#1a8b34}
+html[data-style="adwaita"] .portchip{color:#1a8b34;background:#1a8b3414;border-color:#1a8b3433}
+
+/* tiny scrollbar */
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#ffffff22;border-radius:6px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#ffffff33;background-clip:content-box}
+html[data-style="adwaita"] ::-webkit-scrollbar-thumb{background:#00000022;background-clip:content-box}
+
+.note{position:fixed;left:16px;bottom:14px;font-size:11px;color:#6a6a72;max-width:320px;line-height:1.5;
+  background:#161617cc;border:1px solid #ffffff14;padding:9px 12px;border-radius:9px;backdrop-filter:blur(10px)}
+.note b{color:#b8b8c0}
+</style>
+</head>
+<body>
+
+<!-- ===================== STAGE ===================== -->
+<div id="stage">
+
+  <!-- style switcher -->
+  <div id="switcher" role="tablist" aria-label="UI style">
+    <span class="lbl">Native style</span>
+    <button data-s="macos" aria-pressed="true"><span class="dot" style="background:#0a84ff"></span>macOS Sequoia</button>
+    <button data-s="linear" aria-pressed="false"><span class="dot" style="background:#5e6ad2"></span>Linear Pro</button>
+    <button data-s="cursor" aria-pressed="false"><span class="dot" style="background:#007acc"></span>Cursor IDE</button>
+    <button data-s="geist" aria-pressed="false"><span class="dot" style="background:#fff;outline:1px solid #555"></span>Vercel Geist</button>
+    <button data-s="adwaita" aria-pressed="false"><span class="dot" style="background:#3584e4"></span>GNOME Light</button>
+  </div>
+
+  <!-- ===================== APP WINDOW ===================== -->
+  <div id="win">
+    <div class="row">
+
+      <!-- activity rail (cursor only) -->
+      <div class="activity">
+        <div class="ai on" title="Chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <div class="ai" title="Files"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+        <div class="ai" title="Search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></div>
+        <div class="ai" title="Git"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M6 9v12"/></svg></div>
+      </div>
+
+      <!-- sidebar -->
+      <aside class="side">
+        <div class="traffic">
+          <span class="tl r"></span><span class="tl c"></span><span class="tl m"></span>
+          <span class="tt">Tide</span>
+        </div>
+        <div class="side-scroll">
+          <div class="ws">Workspaces <svg class="add" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+          <div class="tree-item active"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">tide</span><span class="dot-status run"></span></div>
+          <div class="tree-item sub active"><span class="nm">orchestrator-rewrite</span></div>
+          <div class="tree-item sub"><span class="nm">mcp-oauth-fix</span></div>
+          <div class="tree-item sub"><span class="nm">scroll-follow</span></div>
+          <div class="tree-item"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">northwind-api</span><span class="dot-status idle"></span></div>
+          <div class="tree-item"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">portfolio-2026</span><span class="dot-status idle"></span></div>
+
+          <div class="ws" style="margin-top:8px">Recent</div>
+          <div class="tree-item"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="nm">fix login redirect loop</span></div>
+          <div class="tree-item"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="nm">add dark mode toggle</span></div>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <section class="main col">
+        <!-- topbar -->
+        <div class="topbar">
+          <div class="crumb">
+            <span class="b">tide</span><span class="sep">›</span><span class="b">orchestrator-rewrite</span>
+            <span class="branch"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/></svg>feat/orchestrator-rewrite</span>
+          </div>
+          <div class="spacer"></div>
+          <span class="portchip"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>5173</span>
+
+          <!-- mac segmented (shown only for macos) -->
+          <div class="segmented run">
+            <button class="on"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Run</button>
+            <button>Stop</button>
+          </div>
+
+          <!-- standard run/stop group (non-mac) -->
+          <div class="btngrp run">
+            <button class="primary"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Run</button>
+            <button>Scripts ▾</button>
+          </div>
+
+          <button class="iconbtn" title="Open app"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></button>
+          <button class="iconbtn on" title="Terminal"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+          <button class="iconbtn" title="Panel"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
+        </div>
+
+        <!-- chat -->
+        <div class="chat">
+          <div class="chat-inner">
+
+            <!-- user msg -->
+            <div class="msg">
+              <div class="avatar user">Y</div>
+              <div class="body">
+                <div class="who">You</div>
+                <div class="bubble">The sidebar feels like a web page, not a native mac app. Make the chrome feel more native and tighten the composer — it floats too high.</div>
+              </div>
+            </div>
+
+            <!-- assistant -->
+            <div class="msg">
+              <div class="avatar ai">T</div>
+              <div class="body">
+                <div class="who">Tide · GLM-5.2</div>
+
+                <div class="bubble" style="margin-bottom:12px">
+                  I'll tighten the window chrome: add traffic-light spacing, a unified translucent toolbar, and anchor the composer with a proper gradient mask. Here's the plan:
+                </div>
+
+                <!-- reasoning -->
+                <details class="reason" open style="margin-bottom:10px">
+                  <summary>
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.66 4A2 2 0 0 1 11.74 2h.52A2 2 0 0 1 14.34 4l.34 2h2a2 2 0 0 1 2 2v1"/><path d="M5 8h14l-1.5 11a2 2 0 0 1-2 1.8H8.5a2 2 0 0 1-2-1.8z"/></svg>
+                    <span class="lab">Reasoning</span>
+                    <span class="dur">3.2s · 412 tokens</span>
+                  </summary>
+                  <div class="inner">The composer needs a fade mask so content scrolls under it cleanly. macOS native toolbars center the title — I'll mimic that with the breadcrumb while keeping drag regions intact. Vibrancy via backdrop-filter on the sidebar panel…</div>
+                </details>
+
+                <!-- tool row with diff -->
+                <div class="toolrow" style="margin-bottom:10px">
+                  <div class="th">
+                    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                    <span class="fn">edit</span>
+                    <span class="tag">src/components/layout/window-top-bar.tsx</span>
+                  </div>
+                  <div class="diff">
+                    <div class="l del"><span class="ln">12</span><span>  &lt;div className="topbar" style={{ height: 48 }}&gt;</span></div>
+                    <div class="l add"><span class="ln">12</span><span>  &lt;div className="topbar drag-region"&gt; {/* unified 38px */}</span></div>
+                    <div class="l add"><span class="ln">13</span><span>    &lt;TrafficLights /&gt;</span></div>
+                    <div class="l ctx"><span class="ln">14</span><span>    &lt;Breadcrumb /&gt;</span></div>
+                  </div>
+                </div>
+
+                <!-- code block -->
+                <div class="bubble" style="margin-bottom:6px">For the composer anchor:</div>
+                <div class="codeblk">
+                  <div class="ch"><span class="fn">chat-composer.tsx</span><span class="copy"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span></div>
+                  <pre><code><span class="c">// gradient mask lets content fade under the composer</span>
+<span class="k">const</span> <span class="f">ComposerWrap</span> = () =&gt; (
+  &lt;<span class="f">div</span> <span class="n">className</span>=<span class="s">"composer-wrap"</span>&gt;
+    &lt;<span class="f">Composer</span> /&gt;<span class="c"> {/* anchored, pointer-events handled */}</span>
+  &lt;/<span class="f">div</span>&gt;
+);</code></pre>
+                </div>
+              </div>
+            </div>
+
+            <!-- todo floating -->
+            <div class="todo">
+              <div class="th"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Plan<span class="ct">2 of 4</span></div>
+              <div class="ti done"><span class="chk done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span><span class="tx">Unified translucent toolbar with traffic lights</span></div>
+              <div class="ti done"><span class="chk done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span><span class="tx">Anchor composer with gradient mask</span></div>
+              <div class="ti"><span class="chk"></span><span class="tx">Apply vibrancy to sidebar panel</span></div>
+              <div class="ti"><span class="chk"></span><span class="tx">Verify drag regions remain intact</span></div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- composer -->
+        <div class="composer-wrap">
+          <div class="composer">
+            <textarea class="ta" placeholder="Ask, build, or @mention a file…  (⌘↵ to send)" rows="2"></textarea>
+            <div class="bar">
+              <button class="mini" title="Attach"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+              <button class="mini" title="Mention"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg></button>
+              <button class="mini" title="Mode"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+              <button class="send">Send <span class="kbd">⌘↵</span></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- right panel -->
+      <aside class="right">
+        <div class="tabs">
+          <div class="t on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Files</div>
+          <div class="t"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Terminal</div>
+          <div class="t"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6"/></svg>Inspect</div>
+        </div>
+        <div class="right-scroll">
+          <div class="file"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">layout/</span></div>
+          <div class="file"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="nm">window-top-bar.tsx</span><span class="mt">M</span></div>
+          <div class="file"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="nm">chat-composer.tsx</span><span class="mt">M</span></div>
+          <div class="file"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="nm">sidebar.tsx</span><span class="mt">A</span></div>
+          <div class="file" style="margin-top:8px;opacity:.6"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="nm">main-screen.tsx</span></div>
+        </div>
+      </aside>
+
+    </div><!-- /row -->
+
+    <!-- statusbar (hidden for mac; shown for linear/cursor/geist/adwaita) -->
+    <div class="statusbar">
+      <span class="it"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/></svg>main</span>
+      <span class="it">GLM-5.2</span>
+      <span class="it">2.4k / 200k</span>
+      <span class="it r"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>UTF-8 · LF</span>
+    </div>
+  </div><!-- /win -->
+</div><!-- /stage -->
+
+<div class="note">
+  <b>How to use:</b> click a style above to re-skin the same Tide chrome. All five run on identical markup — only the shadcn CSS tokens (<code style="color:#9b9bc4">--bg, --card, --primary, --border…</code>) change, plus style-specific structural bits (traffic lights, activity rail, segmented control, status bar).
+</div>
+
+<script>
+  const btns = document.querySelectorAll('#switcher button');
+  btns.forEach(b => b.addEventListener('click', () => {
+    btns.forEach(x => x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    document.documentElement.setAttribute('data-style', b.dataset.s);
+  }));
+</script>
+</body>
+</html>

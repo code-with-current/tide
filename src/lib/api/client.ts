@@ -18,6 +18,7 @@ import type {
   RagInitProgressEvent,
   RagInitResult,
   RagStatus,
+  WorkspaceProgressEvent,
   RagWorkspaceOpResult,
   Workspace,
   WorkspaceScript,
@@ -80,6 +81,7 @@ export async function addWorkspace(input: {
   template?: import('@/lib/templates').TemplateId;
   scripts?: WorkspaceScript[];
   initGit?: boolean;
+  requestId?: string;
 }): Promise<Workspace> {
   if (ipc) return ipc.addWorkspace(input);
   await delay(300);
@@ -173,10 +175,10 @@ export async function listProjectEntries(workspaceId: string): Promise<{
   return { contextFiles: [], skills: [], agents: [] };
 }
 
-/** Todos for a session — model-maintained via the todo_write tool. */
+/** Todos for a session — model-maintained via the todo_write tool. Flat list. */
 export async function listTodos(sessionId: string): Promise<{
   content: string;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority?: 'high' | 'medium' | 'low';
 }[]> {
   if (ipc && (ipc as any).listTodos) return (ipc as any).listTodos(sessionId);
@@ -246,6 +248,7 @@ export async function addAssistantMessage(
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
@@ -253,6 +256,28 @@ export async function addAssistantMessage(
 ): Promise<void> {
   if (ipc && (ipc as any).addAssistantMessage) {
     return (ipc as any).addAssistantMessage(sessionId, message);
+  }
+  await addMessage(sessionId, 'assistant', message.content);
+}
+
+/** Upsert the final assistant message by messageId — updates the streaming
+ *  partial in place (avoids partial + finalize duplicates). */
+export async function finalizeAssistantMessage(
+  sessionId: string,
+  messageId: string,
+  message: {
+    content: string;
+    reasoning?: string;
+    reasoningTokens?: number;
+    reasoningMs?: number;
+    totalMs?: number;
+    toolCalls?: any[];
+    timeline?: any[];
+    turn?: any;
+  },
+): Promise<void> {
+  if (ipc && (ipc as any).finalizeAssistantMessage) {
+    return (ipc as any).finalizeAssistantMessage(sessionId, messageId, message);
   }
   await addMessage(sessionId, 'assistant', message.content);
 }
@@ -529,6 +554,10 @@ export async function gitStatus(workspaceId: string, sessionId?: string): Promis
   if (ipc) return ipc.gitStatus(workspaceId, sessionId);
   return [];
 }
+export async function gitBranchInfo(workspaceId: string, sessionId?: string): Promise<{ branch: string | null; headCommit: string | null }> {
+  if (ipc) return ipc.gitBranchInfo(workspaceId, sessionId);
+  return { branch: null, headCommit: null };
+}
 export async function gitStage(workspaceId: string, filePath: string, stage: boolean, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
   if (ipc) return ipc.gitStage(workspaceId, filePath, stage, sessionId);
   return { ok: false };
@@ -537,9 +566,19 @@ export async function gitCommit(workspaceId: string, message: string, sessionId?
   if (ipc) return ipc.gitCommit(workspaceId, message, sessionId);
   return { ok: false };
 }
-export async function gitDiff(workspaceId: string, filePath: string, staged: boolean, sessionId?: string): Promise<DiffHunk[]> {
-  if (ipc) return ipc.gitDiff(workspaceId, filePath, staged, sessionId);
+export async function gitDiff(workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number): Promise<DiffHunk[]> {
+  if (ipc) return ipc.gitDiff(workspaceId, filePath, staged, sessionId, contextLines);
   return [];
+}
+
+export async function gitHeadSha(workspaceId: string, sessionId?: string): Promise<string | null> {
+  if (ipc) return ipc.gitHeadSha(workspaceId, sessionId);
+  return null;
+}
+
+export async function gitRestoreFile(workspaceId: string, filePath: string, sha: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitRestoreFile(workspaceId, filePath, sha, sessionId);
+  return { ok: false, error: 'IPC unavailable' };
 }
 
 // ============================================================
@@ -583,6 +622,10 @@ export function subscribeRagInitProgress(cb: (e: RagInitProgressEvent) => void):
 }
 export function subscribeRagDownloadProgress(cb: (e: RagDownloadProgressEvent) => void): () => void {
   if (ipc && ipc.onRagDownloadProgress) return ipc.onRagDownloadProgress(cb as (e: unknown) => void);
+  return () => {};
+}
+export function subscribeWorkspaceProgress(cb: (e: WorkspaceProgressEvent) => void): () => void {
+  if (ipc && ipc.onWorkspaceProgress) return ipc.onWorkspaceProgress(cb as (e: unknown) => void);
   return () => {};
 }
 

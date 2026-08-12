@@ -9,9 +9,9 @@ import { workspaces as mockWorkspaces, sessionsByWorkspace, allSessions, fileTre
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry';
-import { getSessionTodos, getSessionGroups, todoEvents } from '../agent/tools/todo-write';
+import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, gitStage, gitCommit, gitDiff } from './git.js';
+import { getGitStatus, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile } from './git.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
@@ -317,12 +317,22 @@ export function registerIpcHandlers() {
   ipcMain.handle(
     'tide:addWorkspace',
     async (
-      _e,
-      input: { path: string; name?: string; repository?: string; template?: import('../../src/lib/templates').TemplateId; scripts?: import('../../src/types').WorkspaceScript[]; initGit?: boolean },
+      e,
+      input: { path: string; name?: string; repository?: string; template?: import('../../src/lib/templates').TemplateId; scripts?: import('../../src/types').WorkspaceScript[]; initGit?: boolean; requestId?: string },
     ) => {
       const { TEMPLATES_BY_ID } = await import('../../src/lib/templates');
       const template = input.template ? TEMPLATES_BY_ID[input.template] : undefined;
       let dirPath = input.path;
+
+      // Stream per-step milestones to the renderer so the AddWorkspace dialog
+      // can show real progress (which step is running / done) instead of a
+      // single spinner for the whole blocking call. requestId correlates the
+      // events to the originating request (workspace id doesn't exist yet).
+      const rid = input.requestId;
+      const send = (step: 'clone' | 'folder' | 'scaffold' | 'install' | 'git' | 'detect', status: 'active' | 'done' | 'failed', label: string, detail?: string) => {
+        if (!rid) return;
+        e.sender.send('tide:workspace:progress', { requestId: rid, step, status, label, detail });
+      };
 
     // If a repository URL is provided and the path doesn't exist yet,
     // clone it first. This is the "Clone from URL" flow.
@@ -331,28 +341,36 @@ export function registerIpcHandlers() {
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
+      send('clone', 'active', 'Cloning repository…', input.repository);
       try {
         execSync(`git clone --depth 1 "${input.repository}" "${dirPath}"`, {
           stdio: 'pipe',
           timeout: 120_000,
         });
       } catch (e) {
+        send('clone', 'failed', 'Clone failed');
         throw new Error(
           `Git clone failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
+      send('clone', 'done', 'Repository cloned');
     }
 
     // New Project / Template flow: create the directory. We intentionally do NOT `git init` here when a template will scaffold — most scaffolders abort if .git exists, so git init is deferred to after the scaffold step.
     if (!input.repository && !fs.existsSync(dirPath)) {
+      send('folder', 'active', 'Creating project folder…');
       try {
         fs.mkdirSync(dirPath, { recursive: true });
+        send('folder', 'done', 'Project folder created');
         // Empty/new-project case (no template): init git now since there's no
         // scaffold step coming. Templated projects init after scaffolding.
         if (!template || template.scaffold.length === 0) {
+          send('git', 'active', 'Initializing git…');
           execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
+          send('git', 'done', 'Git initialized');
         }
       } catch (e) {
+        send('folder', 'failed', 'Folder creation failed');
         throw new Error(
           `Failed to create project directory: ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -382,8 +400,14 @@ export function registerIpcHandlers() {
       };
 
       try {
+        send('scaffold', 'active', `Scaffolding ${template.label}…`, template.label);
         runStep('Scaffold', template.scaffold);
-        if (template.install) runStep('Install', template.install);
+        send('scaffold', 'done', `${template.label} scaffolded`, template.label);
+        if (template.install) {
+          send('install', 'active', 'Installing dependencies…');
+          runStep('Install', template.install);
+          send('install', 'done', 'Dependencies installed');
+        }
       } catch (e) {
         // Best-effort cleanup: a half-scaffolded dir is worse than none.
         // Leave it (don't rm a user-chosen path they may want to inspect).
@@ -397,9 +421,12 @@ export function registerIpcHandlers() {
       // --no-gitInit) don't. Init only if .git is absent so we don't disturb
       // an existing repo's config/branches.
       if (!fs.existsSync(path.join(dirPath, '.git'))) {
+        send('git', 'active', 'Initializing git…');
         try {
           execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
+          send('git', 'done', 'Git initialized');
         } catch {
+          send('git', 'failed', 'Git init skipped');
           /* non-fatal — the workspace is usable without git */
         }
       }
@@ -407,14 +434,19 @@ export function registerIpcHandlers() {
 
     // Existing local folder flow: if the user opted into git init and the folder isn't already a repo, run `git init` before detection. (Clone/scaffold flows handle their own git.)
     if (input.initGit && !input.repository && fs.existsSync(dirPath) && !fs.existsSync(path.join(dirPath, '.git'))) {
+      send('git', 'active', 'Initializing git…');
       try {
         execSync('git init --quiet', { cwd: dirPath, stdio: 'pipe', timeout: 10_000 });
+        send('git', 'done', 'Git initialized');
       } catch {
+        send('git', 'failed', 'Git init skipped');
         /* non-fatal — the workspace is usable without git */
       }
     }
 
+    send('detect', 'active', 'Detecting repository…');
     const gitInfo = await detectGit(dirPath);
+    send('detect', 'done', 'Repository ready');
     const name = input.name || path.basename(dirPath);
 
     const workspace: Workspace = {
@@ -651,17 +683,17 @@ export function registerIpcHandlers() {
   });
 
   // ── Todos (model-maintained via todo_write tool) ───────────────
-  // The list lives in main-process memory keyed by sessionId. Push events
+  // A single flat list per session lives in main-process memory. Push it
   // to the renderer whenever a tool call updates it so the floating panel
-  // reflects progress live.
+  // (the single source of truth) reflects progress live.
   ipcMain.handle('tide:listTodos', async (_e, sessionId: string) => {
-    return getSessionGroups(sessionId);
+    return getSessionTodos(sessionId);
   });
 
   ipcMain.handle('tide:subscribeTodos', (event) => {
     const wc = event.sender;
-    const onUpdate = ({ sessionId, groups }: { sessionId: string; groups: any[] }) => {
-      if (!wc.isDestroyed()) wc.send('todos:updated', { sessionId, groups });
+    const onUpdate = ({ sessionId, todos }: { sessionId: string; todos: any[] }) => {
+      if (!wc.isDestroyed()) wc.send('todos:updated', { sessionId, todos });
     };
     todoEvents.on(onUpdate);
     // Only register the 'closed' cleanup listener ONCE per WebContents —
@@ -703,12 +735,33 @@ export function registerIpcHandlers() {
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
+      totalMs?: number;
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
     },
   ) => {
     sessions.addAssistantMessage(sessionId, message);
+  });
+
+  // Upsert the final assistant message by messageId (updates the streaming
+  // partial in place rather than appending a duplicate). See sessionStore.
+  handle('tide:finalizeAssistantMessage', async (
+    _e,
+    sessionId: string,
+    messageId: string,
+    message: {
+      content: string;
+      reasoning?: string;
+      reasoningTokens?: number;
+      reasoningMs?: number;
+      totalMs?: number;
+      toolCalls?: any[];
+      timeline?: any[];
+      turn?: any;
+    },
+  ) => {
+    sessions.finalizeAssistantMessage(sessionId, messageId, message);
   });
 
   // Accumulate a turn's usage into the session's cumulative totals.
@@ -1128,6 +1181,14 @@ export function registerIpcHandlers() {
     try { return await getGitStatus(root); } catch { return []; }
   });
 
+  // Live branch + HEAD for the session's working directory (worktree-aware).
+  // Drives the Inspector Git section so it updates when a tool changes branches.
+  ipcMain.handle('tide:gitBranchInfo', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { branch: null, headCommit: null };
+    try { return await branchInfo(root); } catch { return { branch: null, headCommit: null }; }
+  });
+
   handle('tide:gitStage', async (_e, workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { ok: false };
@@ -1144,10 +1205,25 @@ export function registerIpcHandlers() {
     } catch (e: any) { return { ok: false, error: e?.message }; }
   });
 
-  ipcMain.handle('tide:gitDiff', async (_e, workspaceId: string, filePath: string, staged: boolean, sessionId?: string) => {
+  ipcMain.handle('tide:gitDiff', async (_e, workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) => {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return [];
-    try { return await gitDiff(root, filePath, staged); } catch { return []; }
+    try { return await gitDiff(root, filePath, staged, contextLines); } catch { return []; }
+  });
+
+  // Pre-turn HEAD sha — captured at turn start so individual files can be
+  // reverted to exactly where they were before the turn's edits.
+  ipcMain.handle('tide:gitHeadSha', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return null;
+    try { return await gitHeadSha(root); } catch { return null; }
+  });
+
+  // Restore a single file to its state at the given sha (per-file undo).
+  handle('tide:gitRestoreFile', async (_e, workspaceId: string, filePath: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitRestoreFile(root, filePath, sha);
   });
 
   // ── RAG (Memory & RAG panel) ────────────────────────────────────

@@ -1,118 +1,567 @@
-/** The agent loop: orchestrates multi-step model calls with tool execution until end_turn or the iteration cap. */
+/** Orchestrator — the agent loop. Own while-loop, one streamText call per turn. */
 
+import { streamText } from 'ai';
+import type { LanguageModelUsage, ModelMessage } from 'ai';
 import type { WebContents } from 'electron';
+import { BrowserWindow, Notification } from 'electron';
+import { execFile } from 'node:child_process';
+import * as fs from 'fs';
 import * as store from '../store.js';
 import * as sessions from '../ipc/sessions.js';
 import { createLogger } from '../logger.js';
-import { getAnthropicTools, getRegistration, executeTool, formatArgPreview } from './tools/registry';
-import { streamAnthropicOnce } from './stream-anthropic';
-import { checkPermission } from './permission';
-import type { AnthropicContent, AnthropicMessage } from './stream-anthropic';
+import { resolveModel } from './provider-factory.js';
+import { buildToolset, formatArgPreview, resolveToolName } from './tools/registry.js';
+import { mcpToolsetForWorkspace } from './mcp/toolset.js';
+import { getToolMeta } from './tools/tool-meta.js';
+import { runLoadSkill } from './tools/load-skill.js';
+import { getSessionTodos } from './tools/todo-write.js';
+import { scanProjectEntries } from './project-context.js';
+import { createExtensionsStore } from '../extensionsStore.js';
+import { createConfigStore } from '../configStore.js';
+import { createTurnController, type TurnController } from './turn-controller.js';
+import { loadHookConfig, type HookConfig } from './hooks/hook-config.js';
+import { shouldCompact, compactConversation } from './context/auto-compact.js';
+import { supportsThinking, contextWindowSize, resolveMaxOutputTokens } from './model-capabilities.js';
+import type { ToolResult } from './tools/types.js';
+import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
+import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
+import { resolveFollowup, abortFollowup, clearFollowupSession } from './followup-resolver.js';
+import { resolveProtocolOptions } from './protocols/index.js';
+import { DEFAULT_COMPACTION_SETTINGS } from '../../src/types/compaction.js';
+import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events.js';
+import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agent/events.js';
+import type { AutonomyMode, Provider, ToolCall, ToolName, Usage } from '../../src/types/index.js';
+import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
+import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
+import type { ToolContext } from './tools/tool-context.js';
+import { appDataDir } from '../appPaths.js';
 
-const log = createLogger('agent');
-import type {
-  AgentEvent,
-  RunTurnPayload,
-  TurnMessage,
-} from '../../src/lib/agent/events';
-import type { AutonomyMode, Provider, ToolCall, Usage } from '../../src/types/index';
-import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events';
-import type { Block, FollowupBlock, TextBlock, ReasoningBlock, ToolBlock } from '../../src/types/block';
-import { categorizeTool, deriveFollowupMode } from '../../src/lib/stream/blockState';
+const log = createLogger('agent-sdk');
 
-const MAX_ITERATIONS = 100;
-const PERMISSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
-
-/** Tide thinking level → Anthropic `thinking.budget_tokens`; `off` disables thinking. max_tokens must exceed budget_tokens (enforced in stream-anthropic.ts). */
+const MAX_STEPS = 100;
+const TURN_MAX_RETRIES = 10;
+const TURN_RETRY_TIMEOUT_MS = 120_000;
+const ESCALATED_MAX_TOKENS = 65_535;
+const MAX_RESUME_ATTEMPTS = 3;
+const RESUME_MESSAGE =
+  'Output token limit hit. Resume directly — no apology, no recap of what you ' +
+  'were doing. Pick up mid-thought if that is where the cut happened. Break ' +
+  'remaining work into smaller pieces.';
 const THINKING_BUDGET: Record<string, number> = {
-  low: 1_024,
-  medium: 8_000,
-  high: 24_000,
-  extra: 48_000,
-  max: 64_000,
+  low: 1_024, medium: 8_000, high: 24_000, extra: 48_000, max: 64_000,
 };
 
-/** Resolve a Tide thinking level into the Anthropic-native `thinking` payload; null → disabled. */
-function thinkingPayload(level: string): { type: 'enabled'; budget_tokens: number } | null {
-  if (level === 'off') return null;
-  const budget = THINKING_BUDGET[level] ?? THINKING_BUDGET.medium;
-  return { type: 'enabled', budget_tokens: budget };
-}
+type TimelineEntry = { type: 'text'; text: string } | { type: 'tool'; toolIndex: number };
+type StopReason = 'end_turn' | 'max_tokens' | 'content_filter' | 'iteration_limit' | 'aborted' | 'refusal';
 
-interface ActiveTurn {
+interface Turn {
   sessionId: string;
-  abort: AbortController;
-  /** Mutable — updated mid-turn when the user approves a mode switch
-   *  (e.g. plan → edit) so subsequent tools in the same turn see the
-   *  new mode without restarting the turn. */
+  messageId: string;
+  controller: AbortController;
   autonomyMode: AutonomyMode;
-  /** Resolves a pending permission request with the user's decision. */
-  permissionResolver: ((decision: { approved: boolean; reason?: string }) => void) | null;
-  /** Pending tool calls awaiting approval. */
-  pendingToolCallIds: string[];
-  /** Resolves a pending ask_followup_question with the user's pick.
-   *  Null means no followup is currently awaiting input. The pick is a
-   *  string (the chosen option label, or the user's free-form answer for
-   *  Mode 2). Null pick = user dismissed/aborted. */
-  followupResolver: ((pick: { answer: string | null }) => void) | null;
-  /** The tool call id that's currently awaiting a followup answer.
-   *  Renderer reads this to know which tool block to update on submit. */
-  pendingFollowupId: string | null;
-  /** Canonical block list — same data as `timeline + toolCalls`, but in
-   *  block form. Built incrementally as events fire. Mirrors the
-   *  streamReducer exactly. Shipped on turn_end as the persisted truth. */
   blocks: Block[];
-  /** Block id of the currently-open text block, or null if none.
-   *  Set by onDelta when opening a new text block; cleared by
-   *  onToolCallStart so the next delta opens a fresh one. */
   currentTextBlockId: string | null;
-  /** Block id of the reasoning block, or null until first reasoning delta. */
   reasoningBlockId: string | null;
-  /** Index by toolCallId → position in `blocks`. */
   toolBlockIndex: Record<string, number>;
+  finalText: string;
+  finalReasoning: string;
+  toolCalls: ToolCall[];
+  timeline: TimelineEntry[];
+  usage: Usage;
+  lastStepUsage: Usage | null;
+  stepsCompleted: number;
+  maxSteps: number;
+  permissionTimeoutMs: number;
+  errored: string | null;
+  finishReason: string | null;
+  currentTextEntry: { type: 'text'; text: string } | null;
+  responseMessages: ModelMessage[];
+  stepHadToolCalls: boolean;
+  /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
+   *  the turn_end time to compute the persisted `totalMs` (send → result). */
+  startedAt: number;
 }
 
-/** Ordered timeline entry — text segment or tool-call reference.
- *  Lives at module scope because Rolldown's parser doesn't handle inline
- *  interface declarations inside function bodies. */
-type TimelineEntry =
-  | { type: 'text'; text: string }
-  | { type: 'tool'; toolIndex: number };
+const activeTurns = new Map<string, Turn>();
+const activeCtxs = new Map<string, ToolContext>();
+const seqCounters = new Map<string, number>();
 
-/** Finalize the block list at turn_end: mark trailing text as the answer, abort running tools if aborted, spawn followup blocks. Mirrors streamReducer.applyTurnEnd + applyToolArgs. */
-function finalizeBlocks(active: ActiveTurn, stopReason: string): Block[] {
-  const stopped = stopReason === 'aborted';
-  const blocks: Block[] = active.blocks.map(b => {
-    if (stopped && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')) {
-      return { ...b, status: 'aborted' as const };
+export function abortAllTurns(): void {
+  for (const [sessionId, turn] of activeTurns) {
+    try {
+      turn.controller.abort();
+      const blocks = finalizeBlocks(turn, 'aborted');
+      const { finalizeAssistantMessage, addUsage } =
+        require('../ipc/sessions.js') as typeof import('../ipc/sessions.js');
+      finalizeAssistantMessage(sessionId, turn.messageId, {
+        content: turn.finalText || '', blocks,
+        reasoning: turn.finalReasoning || undefined,
+        reasoningTokens: turn.usage.reasoningTokens || undefined,
+        toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+        timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
+        turn: { stopReason: 'aborted' },
+      });
+      if (turn.usage.inputTokens > 0 || turn.usage.outputTokens > 0) {
+        addUsage(sessionId, turn.usage, turn.lastStepUsage ?? turn.usage);
+      }
+    } catch (e) {
+      log.warn('abortAllTurns: failed to persist', { sessionId, err: e instanceof Error ? e.message : String(e) });
     }
-    if (b.kind === 'text') return { ...b };
-    return b;
+  }
+  activeTurns.clear();
+}
+
+export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
+  ipcMain.handle(AGENT_COMMANDS.runTurn, async (e, payload: RunTurnPayload) => {
+    try { await runTurn(e.sender, payload); }
+    catch (err: any) {
+      send(e.sender, payload.sessionId, {
+        type: 'error', sessionId: payload.sessionId, seq: nextSeq(payload.sessionId),
+        message: err?.message || 'Turn failed',
+      });
+    }
   });
 
-  // Spawn followup blocks for ask_followup_question calls — mirrors applyToolArgs so the popup fires on session reload.
-  for (const b of blocks) {
-    if (b.kind !== 'tool') continue;
-    if (b.toolName !== 'ask_followup_question') continue;
-    const mode = deriveFollowupMode(b.arguments);
-    if (!mode) continue;
-    const fbId = `${b.toolCallId}#followup`;
-    const existing = blocks.find(x => x.id === fbId);
-    if (existing) continue;
-    blocks.push({
-      id: fbId,
-      kind: 'followup',
-      mode,
-      toolCallId: b.toolCallId,
-      createdAtSeq: 0,
-      modifiedAtSeq: 0,
-    } as FollowupBlock);
+  ipcMain.handle(AGENT_COMMANDS.abort, (_e, sessionId: string) => {
+    activeTurns.get(sessionId)?.controller.abort();
+    abortPermission(sessionId, 'aborted');
+    abortFollowup(sessionId);
+  });
+
+  ipcMain.handle(AGENT_COMMANDS.approve,
+    (_e, sessionId: string, toolCallIds: string[], newMode?: AutonomyMode, remember?: boolean) => {
+      if (remember && toolCallIds[0]) {
+        const ask = getPendingAsk(sessionId, toolCallIds[0]);
+        if (ask) addPermissionRule(sessionId, ask.workspaceRoot, ask.toolName, ask.args);
+      }
+      if (newMode) { try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch {} }
+      resolvePermission(sessionId, toolCallIds, newMode ? { approved: true, newMode } : { approved: true });
+    },
+  );
+
+  ipcMain.handle(AGENT_COMMANDS.reject,
+    (_e, sessionId: string, toolCallIds: string[], reason?: string) => {
+      resolvePermission(sessionId, toolCallIds, { approved: false, reason: reason || 'rejected by user' });
+    },
+  );
+
+  ipcMain.handle(AGENT_COMMANDS.submitFollowup,
+    (_e, sessionId: string, toolCallId: string, answer: string) => {
+      resolveFollowup(sessionId, toolCallId, answer);
+    },
+  );
+
+  ipcMain.handle('agent:updateMode', (_e, sessionId: string, mode: AutonomyMode) => {
+    const ctx = activeCtxs.get(sessionId);
+    if (ctx) (ctx.autonomyMode as AutonomyMode) = mode;
+  });
+}
+
+export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
+  const { sessionId, messages, modelId, providerId, autonomyMode, thinkingLevel } = payload;
+
+  const providers = store.listProviders();
+  let provider = providers.find((p) => p.id === providerId);
+  if (!provider && modelId) {
+    provider = providers.find((p) => p.enabled && p.models.some((m) => m.modelId === modelId));
+  }
+  if (!provider) throw new Error(`Provider ${providerId} not found`);
+  if (!provider.apiKey) throw new Error(`No API key for ${provider.name}`);
+  log.info('turn', { session: sessionId, model: modelId, provider: provider.name, apiStyle: provider.apiStyle });
+
+  const workspaces = store.listWorkspaces();
+  let workspaceRoot: string | undefined;
+  let workspaceId = '';
+  let worktreeMeta: { branch: string; baseBranch: string } | undefined;
+  let priorSkillRef: { name: string; path: string; loadedAt: string } | undefined;
+  try {
+    const session = sessions.getSession(sessionId);
+    workspaceId = session?.workspaceId ?? '';
+    if (session?.worktree) {
+      workspaceRoot = session.worktree.path;
+      worktreeMeta = { branch: session.worktree.branch, baseBranch: session.worktree.baseBranch };
+    } else if (session?.workspaceId) {
+      workspaceRoot = workspaces.find((w) => w.id === session.workspaceId)?.path;
+    }
+    priorSkillRef = session?.activeSkillRef;
+  } catch {}
+  workspaceRoot ??= workspaces.find((w) => w.isDefault)?.path ?? workspaces[0]?.path ?? process.cwd();
+  const root: string = workspaceRoot ?? process.cwd();
+
+  if (!fs.existsSync(root)) {
+    const where = worktreeMeta ? `worktree (${worktreeMeta.branch})` : 'workspace';
+    throw new Error(`The ${where} folder no longer exists:\n${root}`);
   }
 
-  // Answer phase = text after the last tool call (treat every kind==='tool' as the bound so trailing followups pass through). Mirrors streamReducer.applyTurnEnd.
+  // Build conversation from payload messages.
+  let systemPrompt = '';
+  const convo: ModelMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'system') { systemPrompt = m.content; continue; }
+    const core = toCoreMessage(m);
+    if (core) convo.push(core);
+  }
+
+  const controller = new AbortController();
+  const messageId = `m_${Date.now().toString(36)}`;
+  const agentSettings = store.getAgentSettings();
+  const effectiveMaxSteps = agentSettings.maxSteps || MAX_STEPS;
+  const effectivePermissionTimeout = (agentSettings.permissionTimeoutMin || 10) * 60 * 1000;
+
+  const turn: Turn = {
+    sessionId, messageId, controller, autonomyMode,
+    blocks: [], currentTextBlockId: null, reasoningBlockId: null,
+    toolBlockIndex: {}, finalText: '', finalReasoning: '',
+    toolCalls: [], timeline: [],
+    usage: emptyUsage(), lastStepUsage: null,
+    stepsCompleted: 0, maxSteps: effectiveMaxSteps,
+    permissionTimeoutMs: effectivePermissionTimeout,
+    errored: null, finishReason: null, currentTextEntry: null,
+    responseMessages: [], stepHadToolCalls: false,
+    startedAt: Date.now(),
+  };
+  activeTurns.set(sessionId, turn);
+
+  const turnController = createTurnController(effectiveMaxSteps);
+  const modelEntry = provider.models.find((m) => m.modelId === modelId);
+  const knownCtxWindow = contextWindowSize(modelId, modelEntry);
+  const compactionEnabled = agentSettings.compactionEnabled ?? true;
+  const compactionThreshold = Math.min(0.95, Math.max(0.5, agentSettings.compactionThreshold ?? 0.75));
+  const compactionKeepTurns = Math.max(1, Math.floor(agentSettings.compactionKeepTurns ?? 3));
+  if (knownCtxWindow && compactionEnabled) {
+    turnController.compactionConfig = { contextWindow: knownCtxWindow, threshold: compactionThreshold, keepRecentTurns: compactionKeepTurns };
+  } else if (knownCtxWindow) {
+    turnController.compactionConfig = { contextWindow: knownCtxWindow, threshold: 0.99, keepRecentTurns: 3 };
+  }
+
+  const skillResult = await processSkillPipeline(wc, turn, convo, root, priorSkillRef, turnController);
+  systemPrompt = injectSkillBodies(systemPrompt, skillResult.skillBodies);
+  systemPrompt = injectSkillDiscoveryIndex(systemPrompt, root, skillResult.activeSkillRef?.path, skillResult.disabledSkills);
+  systemPrompt = injectTodoPlan(systemPrompt, sessionId);
+  systemPrompt = injectRagDirective(systemPrompt, workspaceId);
+
+  const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
+  const modelSupportsThinking = supportsThinking(modelId, modelEntry);
+  const reasoningMandatory = modelEntry?.reasoningMandatory === true;
+  let thinking = modelSupportsThinking ? thinkingPayload(thinkingLevel) : null;
+  if (reasoningMandatory && !thinking) thinking = thinkingPayload('medium');
+
+  const ctx: ToolContext = {
+    sessionId, workspaceRoot: root, workspaceId, autonomyMode,
+    permissionRules: loadPermissionRules(root), modelId, provider,
+    compactionSettings: DEFAULT_COMPACTION_SETTINGS,
+    onUsage: (u) => accumulateUsage(turn, u),
+    abortSignal: controller.signal,
+    emit: (raw) => bridgeToolEmit(wc, turn, raw),
+    emitToolEvent: (e) => send(wc, sessionId, { ...e, sessionId, seq: nextSeq(sessionId), messageId: turn.messageId } as any),
+  };
+  activeCtxs.set(sessionId, ctx);
+
+  const tools = { ...buildToolset(ctx, loadHookConfig(root)), ...mcpToolsetForWorkspace(workspaceId) };
+
+  const baseProtocol = resolveProtocolOptions(
+    provider.apiStyle, thinking,
+    { hasTools: true, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry), providerBaseUrl: provider.baseUrl },
+  );
+
+  log.info('runTurn', { session: sessionId, model: modelId, mode: autonomyMode, thinking: thinkingLevel, tools: Object.keys(tools).length });
+
+  const flushTimer = setInterval(() => {
+    if (turn.finalText || turn.blocks.length > 0) flushPartial(wc, turn);
+  }, 5_000);
+
+  let retryCount = 0;
+  let resumeCount = 0;
+  let escalated = false;
+  let currentConvo = convo;
+
+  try {
+    while (true) {
+      if (controller.signal.aborted) break;
+
+      // Compact between steps if near the context window.
+      const lastStepTokens = turn.lastStepUsage?.inputTokens;
+      if (turnController.compactionConfig && shouldCompact(currentConvo, turnController.compactionConfig, 0, lastStepTokens)) {
+        try {
+          send(wc, sessionId, { type: 'compacting', sessionId, seq: nextSeq(sessionId), messageId, tokensBefore: lastStepTokens ?? 0, forced: false });
+          const compacted = await compactConversation(currentConvo, turnController.compactionConfig, { provider, modelId, signal: controller.signal });
+          currentConvo = compacted.postCompactMessages as ModelMessage[];
+        } catch (e: any) { log.warn('autocompact failed', { err: e?.message ?? e }); }
+      }
+
+      const isLastStep = turn.stepsCompleted >= turn.maxSteps - 1;
+      const maxOutputTokens = escalated ? ESCALATED_MAX_TOKENS : baseProtocol.maxOutputTokens;
+      const resolved = resolveProtocolOptions(provider.apiStyle, thinking,
+        { hasTools: !isLastStep, modelId, maxOutputTokens, providerBaseUrl: provider.baseUrl });
+
+      try {
+        const result = streamText({
+          model,
+          system: systemPrompt || undefined,
+          messages: currentConvo,
+          tools: isLastStep ? undefined : (tools as any),
+          toolChoice: isLastStep ? 'none' : undefined,
+          maxRetries: 0,
+          maxOutputTokens,
+          abortSignal: controller.signal,
+          providerOptions: resolved.providerOptions,
+
+          repairToolCall: async ({ toolCall }) => {
+            const input = toolCall.input;
+            if (typeof input !== 'string') return toolCall;
+            const cleaned = input.replace(/<\/?tool_call>/g, '').replace(/<\/?tool_use>/g, '').replace(/<\/?function_call>/g, '').trim();
+            try { JSON.parse(cleaned); return { ...toolCall, input: cleaned }; } catch {
+              const match = cleaned.match(/\{[\s\S]*\}/);
+              if (match) { try { JSON.parse(match[0]); return { ...toolCall, input: match[0] }; } catch {} }
+            }
+            return null;
+          },
+
+          onError: ({ error }) => { turn.errored = errMessage(error); },
+        });
+
+        turn.stepHadToolCalls = false;
+        try {
+          for await (const part of result.stream) {
+            translatePart(wc, turn, part, modelEntry);
+            if (part.type === 'tool-call' || part.type === 'tool-input-start') turn.stepHadToolCalls = true;
+          }
+        } catch (streamErr: any) {
+          if (!(streamErr?.name === 'AbortError' && controller.signal.aborted)) {
+            log.warn('stream interrupted', { err: streamErr?.message ?? streamErr });
+            turn.errored = turn.errored ?? errMessage(streamErr);
+          }
+        }
+
+        let responseMsgs: ModelMessage[] = [];
+        try { responseMsgs = await result.responseMessages; } catch {}
+        if (responseMsgs.length > 0) {
+          currentConvo = [...currentConvo, ...responseMsgs];
+          turn.responseMessages.push(...responseMsgs);
+        }
+
+        const finishReason = turn.finishReason || '';
+
+        if (controller.signal.aborted) { emitTurnEnd(wc, turn, 'aborted'); break; }
+
+        if (finishReason === 'length') {
+          if (!escalated) { escalated = true; continue; }
+          if (resumeCount < MAX_RESUME_ATTEMPTS) {
+            resumeCount++;
+            currentConvo = [...currentConvo, { role: 'user' as const, content: RESUME_MESSAGE }];
+            continue;
+          }
+          emitTurnEnd(wc, turn, 'max_tokens'); break;
+        }
+
+        if (turn.errored) {
+          if (retryCount < TURN_MAX_RETRIES && !controller.signal.aborted && isTransientError(turn.errored)) {
+            retryCount++;
+            send(wc, sessionId, { type: 'retry', sessionId, seq: nextSeq(sessionId), attempt: retryCount, maxAttempts: TURN_MAX_RETRIES, reason: turn.errored });
+            turn.errored = null; turn.finishReason = null;
+            continue;
+          }
+          emitTurnEnd(wc, turn, 'refusal'); break;
+        }
+
+        if (turn.stepsCompleted >= turn.maxSteps) { emitTurnEnd(wc, turn, 'iteration_limit'); break; }
+        if (turn.stepHadToolCalls) continue;
+        emitTurnEnd(wc, turn, 'end_turn'); break;
+
+      } catch (err: any) {
+        if (err?.name === 'AbortError' && controller.signal.aborted) { emitTurnEnd(wc, turn, 'aborted'); break; }
+        if (retryCount < TURN_MAX_RETRIES && !controller.signal.aborted) {
+          retryCount++;
+          const reason = isTimeoutError(err) ? `Request timed out after ${TURN_RETRY_TIMEOUT_MS / 1000}s` : (err?.message || String(err));
+          send(wc, sessionId, { type: 'retry', sessionId, seq: nextSeq(sessionId), attempt: retryCount, maxAttempts: TURN_MAX_RETRIES, reason });
+          turn.errored = null;
+          continue;
+        }
+        turn.errored = err?.message || String(err);
+        emitTurnEnd(wc, turn, 'refusal'); break;
+      }
+    }
+  } finally {
+    clearInterval(flushTimer);
+    activeTurns.delete(sessionId);
+    activeCtxs.delete(sessionId);
+    clearSession(sessionId);
+    clearFollowupSession(sessionId);
+  }
+}
+
+function translatePart(
+  wc: WebContents, turn: Turn, part: Readonly<{ type: string }>,
+  modelEntry: { inputCostPerToken?: number; outputCostPerToken?: number; cacheReadCostPerToken?: number; cacheWriteCostPerToken?: number } | undefined,
+): void {
+  const { sessionId } = turn;
+  const p = part as any;
+
+  switch (part.type) {
+    case 'text-delta': {
+      const text: string = p.text;
+      if (!text) break;
+      const last = turn.blocks[turn.blocks.length - 1];
+      if (last && last.kind === 'text' && last.id === turn.currentTextBlockId) {
+        (last as TextBlock).text += text;
+      } else {
+        const id = crypto.randomUUID();
+        turn.currentTextBlockId = id;
+        turn.blocks.push({ id, kind: 'text', text, createdAtSeq: 0, modifiedAtSeq: 0, isAnswer: false });
+      }
+      if (!turn.currentTextEntry) {
+        turn.currentTextEntry = { type: 'text', text: '' };
+        turn.timeline.push(turn.currentTextEntry);
+      }
+      turn.currentTextEntry.text += text;
+      turn.finalText += text;
+      send(wc, sessionId, { type: 'delta', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, text, blockId: turn.currentTextBlockId! });
+      break;
+    }
+
+    case 'reasoning-delta': {
+      const text: string = p.text;
+      if (!text) break;
+      turn.finalReasoning += text;
+      if (!turn.reasoningBlockId) {
+        turn.reasoningBlockId = crypto.randomUUID();
+        turn.blocks.push({ id: turn.reasoningBlockId, kind: 'reasoning', text: '', createdAtSeq: 0, modifiedAtSeq: 0 });
+      }
+      const rb = turn.blocks.find((b) => b.id === turn.reasoningBlockId) as ReasoningBlock | undefined;
+      if (rb) rb.text += text;
+      send(wc, sessionId, { type: 'reasoning', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, delta: text, blockId: turn.reasoningBlockId });
+      break;
+    }
+
+    case 'tool-input-start': {
+      const toolCallId: string = p.id;
+      const toolName = resolveToolName(p.toolName) as ToolName;
+      turn.currentTextBlockId = null;
+      // Close the current thinking segment so the next reasoning delta (next
+      // model step) opens a NEW reasoning block. This lets the block stream
+      // interleave one thinking block per step between tool calls, instead of
+      // every step appending to a single top block for the whole turn.
+      // (Compact view folds the multiple blocks back into one card via
+      // deriveLayout; stream view renders each inline.)
+      turn.reasoningBlockId = null;
+      turn.currentTextEntry = null;
+      turn.toolBlockIndex[toolCallId] = turn.blocks.length;
+      const meta = safeMeta(toolName);
+      turn.blocks.push({ id: toolCallId, kind: 'tool', toolCallId, toolName, category: categorizeTool(toolName), status: 'pending', arguments: {}, argPreview: '', riskTier: meta?.riskTier ?? 'read_only', createdAtSeq: 0, modifiedAtSeq: 0 });
+      send(wc, sessionId, { type: 'tool_call_start', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, toolCallId, toolName, blockId: toolCallId });
+      break;
+    }
+
+    case 'tool-input-delta': {
+      send(wc, sessionId, { type: 'tool_call_delta', sessionId, seq: nextSeq(sessionId), toolCallId: p.id, delta: p.delta ?? '' });
+      break;
+    }
+
+    case 'tool-call': {
+      const toolCallId: string = p.toolCallId;
+      const toolName = resolveToolName(p.toolName) as ToolName;
+      const input = (p.input ?? {}) as Record<string, unknown>;
+      const meta = safeMeta(toolName);
+      const argPreview = formatArgPreview(toolName, input);
+      patchToolBlock(turn, toolCallId, { arguments: input, argPreview, riskTier: meta?.riskTier ?? 'read_only', status: 'running' });
+      send(wc, sessionId, { type: 'tool_call', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, toolCallId, toolName, arguments: input, argPreview, riskTier: meta?.riskTier ?? 'read_only' });
+      send(wc, sessionId, { type: 'tool_executing', sessionId, seq: nextSeq(sessionId), toolCallId });
+      break;
+    }
+
+    case 'tool-result':
+    case 'tool-error': {
+      const toolCallId: string = p.toolCallId;
+      const toolName = resolveToolName(p.toolName) as ToolName;
+      const input = (p.input ?? {}) as Record<string, unknown>;
+      const meta = safeMeta(toolName);
+      const argPreview = formatArgPreview(toolName, input);
+      const tr: ToolResult = part.type === 'tool-result' && p.output && typeof p.output === 'object'
+        ? ({ ...(p.output as object) } as ToolResult)
+        : { status: 'failed', output: part.type === 'tool-error' ? errMessage(p.error) || 'Tool error' : '(no output)' };
+      const status = normalizeStatus(tr.status);
+      const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: input, argPreview, status, riskTier: meta?.riskTier ?? 'read_only', output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta };
+      turn.toolCalls.push(tc);
+      turn.timeline.push({ type: 'tool', toolIndex: turn.toolCalls.length - 1 });
+      turn.currentTextEntry = null;
+      patchToolBlock(turn, toolCallId, { status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
+      send(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId, status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
+      break;
+    }
+
+    case 'finish-step': {
+      turn.stepsCompleted += 1;
+      if (p.usage) {
+        const stepUsage = sdkUsageToTide(p.usage as LanguageModelUsage, modelEntry, 1);
+        accumulateUsage(turn, stepUsage);
+        turn.lastStepUsage = stepUsage;
+        send(wc, sessionId, { type: 'usage', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, tokens: stepUsage, costUsd: stepUsage.costUsd, runningTotalUsd: turn.usage.costUsd, iteration: turn.stepsCompleted });
+      }
+      if (p.finishReason) turn.finishReason = p.finishReason;
+      break;
+    }
+
+    case 'finish': {
+      if (p.finishReason) turn.finishReason = p.finishReason;
+      if (p.totalUsage) {
+        const finishUsage = sdkUsageToTide(p.totalUsage as LanguageModelUsage, modelEntry, turn.usage.calls || 1);
+        turn.usage = finishUsage;
+        if (!turn.lastStepUsage) turn.lastStepUsage = finishUsage;
+      }
+      break;
+    }
+
+    case 'abort': turn.controller.abort(); break;
+
+    case 'error': {
+      let msg = errMessage(p.error) || 'Stream error';
+      if (/no output generated/i.test(msg)) msg += ' (provider returned an empty stream — usually a rejected option like `thinking` or an unknown model id.)';
+      turn.errored = msg;
+      send(wc, sessionId, { type: 'error', sessionId, seq: nextSeq(sessionId), message: msg });
+      break;
+    }
+
+    default: break;
+  }
+}
+
+function stopReasonFor(turn: Turn): StopReason {
+  if (turn.controller.signal.aborted) return 'aborted';
+  if (turn.stepsCompleted >= turn.maxSteps) return 'iteration_limit';
+  switch (turn.finishReason) {
+    case 'stop': return 'end_turn';
+    case 'length': return 'max_tokens';
+    case 'content-filter': return 'content_filter';
+    case 'tool-calls': return 'end_turn';
+    case 'error': return turn.errored ? 'refusal' : 'end_turn';
+    default: return 'end_turn';
+  }
+}
+
+function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
+  const blocks = finalizeBlocks(turn, stopReason);
+  send(wc, turn.sessionId, {
+    type: 'turn_end', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId),
+    messageId: turn.messageId, stopReason, content: turn.finalText,
+    timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
+    blocks, reasoning: turn.finalReasoning || undefined,
+    reasoningTokens: turn.usage.reasoningTokens || undefined,
+    totalMs: Date.now() - turn.startedAt,
+    toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+    usage: turn.usage, lastStepUsage: turn.lastStepUsage ?? undefined,
+  });
+  fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+function finalizeBlocks(turn: Turn, stopReason: StopReason): Block[] {
+  const stopped = stopReason === 'aborted';
+  const blocks: Block[] = turn.blocks.map((b) =>
+    stopped && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')
+      ? { ...b, status: 'aborted' as const } : b
+  );
   let lastToolIdx = -1;
   for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === 'tool') { lastToolIdx = i; break; }
+    if (blocks[i].kind === 'tool' && !isBookkeepingTool((blocks[i] as ToolBlock).toolName)) { lastToolIdx = i; break; }
   }
   for (let i = lastToolIdx + 1; i < blocks.length; i++) {
     if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
@@ -120,867 +569,194 @@ function finalizeBlocks(active: ActiveTurn, stopReason: string): Block[] {
   return blocks;
 }
 
-/** Patch a tool block in `active.blocks` in place to mirror tool_executing/result events (mirrors streamReducer.applyToolStatus/applyToolResult). */
-function updateToolBlock(
-  active: ActiveTurn,
-  toolCallId: string,
-  patch: Partial<ToolBlock>,
-): void {
-  const idx = active.toolBlockIndex[toolCallId];
-  if (idx == null) return;
-  const cur = active.blocks[idx];
-  if (!cur || cur.kind !== 'tool') return;
-  Object.assign(cur, patch);
+function patchToolBlock(turn: Turn, toolCallId: string, patch: Partial<ToolBlock>): void {
+  const cur = turn.blocks[turn.toolBlockIndex[toolCallId] ?? -1];
+  if (cur?.kind === 'tool') Object.assign(cur, patch);
 }
 
-const activeTurns = new Map<string, ActiveTurn>();
+function flushPartial(wc: WebContents, turn: Turn) {
+  try {
+    sessions.updatePartialAssistantMessage(turn.sessionId, turn.messageId, {
+      content: turn.finalText, blocks: turn.blocks,
+      reasoning: turn.finalReasoning || undefined,
+      toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+      timeline: turn.timeline,
+    });
+  } catch {}
+}
 
-/** Main-process singleton — registers the IPC commands. */
-export function registerAgentHandlers(ipcMain: Electron.IpcMain) {
-  ipcMain.handle(AGENT_COMMANDS.runTurn, async (e, payload: RunTurnPayload) => {
-    const wc = e.sender;
+function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return;
+  const e = raw as { type?: string; [k: string]: unknown };
+  const { sessionId } = turn;
+
+  if (e.type === 'permission') {
+    const toolName = resolveToolName((e.toolName as string) ?? 'unknown') as ToolName;
+    const args = (e.args ?? {}) as Record<string, unknown>;
+    const meta = safeMeta(toolName);
+    const toolCallId = (typeof e.toolCallId === 'string' && e.toolCallId) || `perm_${toolName}_${nextSeq(sessionId)}`;
+    const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask' };
+    send(wc, sessionId, { type: 'permission_required', sessionId, seq: nextSeq(sessionId), toolCalls: [tc], timeoutAt: Date.now() + turn.permissionTimeoutMs });
+    return;
+  }
+
+  if (e.type === 'followup') {
+    send(wc, sessionId, { type: 'followup_required', sessionId, seq: nextSeq(sessionId), toolCallId: (e.toolCallId as string) ?? '', question: (e.question as string) ?? '', options: (e.options as string[]) ?? [], multiple: (e.multiple as boolean) ?? false });
+  }
+}
+
+function fireTurnEndNotification(wc: WebContents, sessionId: string, stopReason: StopReason) {
+  const win = BrowserWindow.fromWebContents(wc);
+  if (stopReason === 'aborted' || win?.isFocused() || !Notification.isSupported()) return;
+  try {
+    if (!createConfigStore(appDataDir()).getGeneralSettings().notifications) return;
+    const title = stopReason === 'refusal' ? 'Tide — turn failed' : stopReason === 'max_tokens' ? 'Tide — context limit reached' : stopReason === 'iteration_limit' ? 'Tide — step limit reached' : 'Tide — done';
+    const body = stopReason === 'refusal' ? 'The turn ended with an error.' : stopReason === 'max_tokens' ? 'The model hit the token limit.' : stopReason === 'iteration_limit' ? 'The agent reached the step cap.' : 'Your request has completed.';
+    const notif = new Notification({ title, body, silent: false });
+    notif.on('click', () => { win?.show(); win?.focus(); if (!wc.isDestroyed()) wc.send('tide:navigateToSession', sessionId); });
+    notif.on('failed', () => {
+      if (process.platform === 'darwin') execFile('osascript', ['-e', `display notification "${body.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"`], () => {});
+    });
+    notif.show();
+  } catch {}
+}
+
+async function processSkillPipeline(
+  wc: WebContents, turn: Turn, convo: ModelMessage[], root: string,
+  priorSkillRef: { name: string; path: string; loadedAt: string } | undefined,
+  _ctrl: TurnController,
+): Promise<{ skillBodies: string; activeSkillRef: { path: string } | undefined; disabledSkills: string[] }> {
+  let skillBodies = '';
+  let activeSkillRef: { path: string } | undefined;
+  let disabledSkills: string[] = [];
+
+  try {
+    const markers = convo.flatMap(m => {
+      const content = typeof m.content === 'string' ? m.content : '';
+      return [...content.matchAll(/\[\[LOAD_SKILL:([^\]|]+)(?:\|([^\]]+))?\]\]/g)];
+    });
+    for (const match of markers) {
+      const path = match[1].trim();
+      const name = match[2]?.trim();
+      try {
+        const body = await runLoadSkill(path, root);
+        if (body) {
+          skillBodies += body + '\n\n';
+          if (name) { activeSkillRef = { path }; sessions.setActiveSkillRef(turn.sessionId, { name, path, loadedAt: new Date().toISOString() }); }
+          const skillId = `skill_${Date.now()}`;
+          send(wc, turn.sessionId, { type: 'tool_call_start', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), messageId: turn.messageId, toolCallId: skillId, toolName: 'load_skill', blockId: skillId });
+          send(wc, turn.sessionId, { type: 'tool_result', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), toolCallId: skillId, status: 'executed', output: `Skill "${name ?? path}" loaded.`, meta: name ?? path });
+        }
+      } catch {}
+    }
+  } catch {}
+
+  if (priorSkillRef && !activeSkillRef) {
     try {
-      await runTurn(wc, payload);
-    } catch (err: any) {
-      // Unexpected error — emit as an agent event.
-      emit(wc, payload.sessionId, {
-        type: 'error',
-        sessionId: payload.sessionId,
-        seq: nextSeq(payload.sessionId),
-        message: err?.message || 'Turn failed',
-      });
-    }
-  });
+      const body = await runLoadSkill(priorSkillRef.path, root);
+      if (body) { skillBodies += body + '\n\n'; activeSkillRef = { path: priorSkillRef.path }; }
+    } catch {}
+  }
 
-  ipcMain.handle(AGENT_COMMANDS.abort, (_e, sessionId: string) => {
-    const active = activeTurns.get(sessionId);
-    if (active) {
-      active.abort.abort();
-      // Resolve any pending permission request as rejected so the loop unblocks.
-      if (active.permissionResolver) {
-        active.permissionResolver({ approved: false, reason: 'aborted' });
-      }
-      // Resolve any pending followup as null so the tool unblocks and
-      // the loop tears down cleanly.
-      if (active.followupResolver) {
-        active.followupResolver({ answer: null });
-      }
-    }
-  });
+  try { disabledSkills = createExtensionsStore(appDataDir()).getDisabled().skills; } catch {}
 
-  ipcMain.handle(
-    AGENT_COMMANDS.approve,
-    (_e, sessionId: string, toolCallIds: string[]) => {
-      const active = activeTurns.get(sessionId);
-      if (active && active.permissionResolver) {
-        active.permissionResolver({ approved: true });
-      }
-    },
-  );
-
-  ipcMain.handle(
-    AGENT_COMMANDS.reject,
-    (_e, sessionId: string, _toolCallIds: string[], reason?: string) => {
-      const active = activeTurns.get(sessionId);
-      if (active && active.permissionResolver) {
-        active.permissionResolver({ approved: false, reason: reason || 'rejected by user' });
-      }
-    },
-  );
-
-  // User picked an option (or typed a free-form answer) for a pending
-  // ask_followup_question. Resolves the tool's await; the orchestrator
-  // loop then continues with the pick as the tool_result.
-  ipcMain.handle(
-    AGENT_COMMANDS.submitFollowup,
-    (_e, sessionId: string, _toolCallId: string, answer: string) => {
-      const active = activeTurns.get(sessionId);
-      if (active && active.followupResolver) {
-        active.followupResolver({ answer });
-      }
-    },
-  );
+  return { skillBodies, activeSkillRef, disabledSkills };
 }
 
-// ─── Per-session sequence counter ──────────────────────────────
-const seqCounters = new Map<string, number>();
+function injectSkillBodies(sp: string, bodies: string): string {
+  return bodies.trim() ? sp + '\n\n# Active Skills\n\n' + bodies.trim() : sp;
+}
+
+function injectSkillDiscoveryIndex(sp: string, root: string, activePath: string | undefined, disabled: string[]): string {
+  try {
+    const entries = scanProjectEntries(root).filter(e => !disabled.includes(e.name) && e.path !== activePath);
+    if (!entries.length) return sp;
+    return sp + '\n\n# Available Skills\n' + entries.slice(0, 20).map(e => `- **${e.name}**: ${e.description}`).join('\n');
+  } catch { return sp; }
+}
+
+function injectTodoPlan(sp: string, sessionId: string): string {
+  try {
+    const todos = getSessionTodos(sessionId);
+    if (!todos?.length) return sp;
+    return sp + '\n\n# Current Plan\n' + todos.map((t, i) => `${i + 1}. [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n');
+  } catch { return sp; }
+}
+
+function injectRagDirective(sp: string, workspaceId: string): string {
+  if (!store.listRagEnabledWorkspaces().includes(workspaceId)) return sp;
+  return sp + '\n\n# Codebase recall — ALWAYS START HERE\nThe `memory` tool searches the workspace semantic index (RAG). Before exploring with directory_tree/list_dir/read_file/grep, call `memory` first.';
+}
+
+function send(wc: WebContents, _sid: string, event: AgentEvent) {
+  if (!wc.isDestroyed()) wc.send(AGENT_EVENT_CHANNEL, event);
+}
+
 function nextSeq(sessionId: string): number {
   const n = (seqCounters.get(sessionId) ?? 0) + 1;
   seqCounters.set(sessionId, n);
   return n;
 }
 
-function emit(wc: WebContents, sessionId: string, event: AgentEvent) {
-  wc.send(AGENT_EVENT_CHANNEL, event);
+function toCoreMessage(m: TurnMessage): ModelMessage | null {
+  if (m.role !== 'user' && m.role !== 'assistant') return null;
+  let content = m.content;
+  if (m.attachments?.length) {
+    const blocks = m.attachments.filter(a => a.content).map(a => `<file path="${a.path}">\n${a.content}\n</file>`);
+    if (blocks.length) content += '\n\n' + blocks.join('\n\n');
+  }
+  return { role: m.role, content } as ModelMessage;
 }
 
-// ─── The loop ──────────────────────────────────────────────────
-
-async function runTurn(wc: WebContents, payload: RunTurnPayload) {
-  const { sessionId, messages, modelId, providerId, autonomyMode, thinkingLevel } = payload;
-
-  // Resolve provider + workspace root.
-  const providers = store.listProviders();
-  let provider = providers.find((p) => p.id === providerId);
-  // Graceful recovery for orphaned sessions: if the session's provider was
-  // deleted, fall back to any enabled provider serving this modelId (mirrors
-  // the renderer's useModelOption resolution). Lets the turn run instead of
-  // hard-crashing; user can re-bind in the model picker.
-  if (!provider && modelId) {
-    provider = providers.find((p) => p.enabled && p.models.some((m) => m.modelId === modelId));
-  }
-  if (!provider) throw new Error(`Provider ${providerId} not found`);
-  if (!provider.apiKey) throw new Error(`No API key for ${provider.name}`);
-
-  const workspaces = store.listWorkspaces();
-  // Resolve workspace root from the session (worktree path if isolated, else workspaceId lookup) — NOT workspaces[0], which silently ran tools against the wrong project.
-  let workspaceRoot: string | undefined;
-  let worktreeMeta: { branch: string; baseBranch: string } | undefined;
-  try {
-    const session = sessions.getSession(sessionId);
-    if (session?.worktree) {
-      workspaceRoot = session.worktree.path;
-      worktreeMeta = { branch: session.worktree.branch, baseBranch: session.worktree.baseBranch };
-    } else if (session?.workspaceId) {
-      workspaceRoot = workspaces.find((w) => w.id === session.workspaceId)?.path;
-    }
-  } catch {
-    // Sessions module may not be loaded in some contexts — fall through.
-  }
-  // Last-resort fallbacks: an explicit workspace marked default, then the
-  // first workspace, then cwd. Each is worse than the one above.
-  workspaceRoot ??= workspaces.find((w) => w.isDefault)?.path ?? workspaces[0]?.path ?? process.cwd();
-  log.info('runTurn', {
-    session: sessionId,
-    provider: provider.name,
-    model: modelId,
-    mode: autonomyMode,
-    thinking: thinkingLevel,
-    tools: autonomyMode === 'plan' ? 'read-only' : 'all',
-    root: workspaceRoot,
-    worktree: worktreeMeta ? { branch: worktreeMeta.branch, baseBranch: worktreeMeta.baseBranch } : undefined,
-  });
-
-  // Setup abort + active-turn tracking.
-  const controller = new AbortController();
-  const active: ActiveTurn = {
-    sessionId,
-    abort: controller,
-    autonomyMode,
-    permissionResolver: null,
-    pendingToolCallIds: [],
-    followupResolver: null,
-    pendingFollowupId: null,
-    blocks: [],
-    currentTextBlockId: null,
-    reasoningBlockId: null,
-    toolBlockIndex: {},
-  };
-  activeTurns.set(sessionId, active);
-
-  // Build the Anthropic-shape conversation from the renderer-supplied messages.
-  // The first system message becomes the top-level `system` field; the rest
-  // become user/assistant turns.
-  let systemPrompt = '';
-  const convo: AnthropicMessage[] = [];
-  for (const m of messages) {
-    if (m.role === 'system') {
-      systemPrompt = m.content;
-      continue;
-    }
-    if (m.role === 'user') {
-      convo.push({ role: 'user', content: userContent(m) });
-    } else {
-      convo.push({ role: 'assistant', content: m.content });
-    }
-  }
-
-  // Send ALL tools regardless of mode; plan-mode writes are blocked at the permission gate, which pauses and asks for a mode switch rather than hard-rejecting.
-  const tools = getAnthropicTools();
-  // Resolve the Anthropic-native thinking payload. `null` = disabled
-  // (streamer sends thinking.type:'disabled'); an object = enabled with a
-  // token budget. Unknown / missing level falls back to 'medium'.
-  const thinking = thinkingPayload(thinkingLevel) ?? thinkingPayload('medium');
-  // When thinking is enabled, max_tokens must exceed budget_tokens. Pick a
-  // generous output cap so the model always has room to answer after thinking.
-  const maxTokens = thinking ? thinking.budget_tokens + 8192 : 8192;
-
-  // Accumulators for the final persisted message.
-  let finalContent = '';
-  let finalReasoning = '';
-  /** Whether the current iteration has emitted any text yet. Reset per
-   * iteration; used to insert a paragraph break when a new iteration's
-   * first text delta follows a prior iteration's text — otherwise the two
-   * iterations' narrations glue together ("patch.Let me locate..."). */
-  let iterationEmittedText = false;
-  /** Whether ANY prior iteration emitted text. When true and a new iteration
-   *  emits its first delta, prepend \n\n so iterations don't run together. */
-  let anyPriorIterationText = false;
-  const allToolCalls: ToolCall[] = [];
-
-  /** Ordered timeline — the single source of truth for rendering order; entries interleave text and tool refs in emission order. */
-  const timeline: TimelineEntry[] = [];
-  /** Points at the current text entry being accumulated, or null if no
-   *  text entry has been started in the current "segment." */
-  let currentTextEntry: { type: 'text'; text: string } | null = null;
-
-  let totalReasoningTokens = 0;
-  // Usage accumulators — summed across all LLM calls in this turn so the
-  // renderer can persist session-level totals for the context-window meter.
-  let aggInput = 0;
-  let aggOutput = 0;
-  let aggCacheRead = 0;
-  let aggCacheWrite = 0;
-  let aggCalls = 0;
-  let iteration = 0;
-
-  try {
-    while (iteration < MAX_ITERATIONS) {
-      iteration++;
-      const messageId = `m_${Date.now().toString(36)}_${iteration}`;
-
-      // Per-call accumulators.
-      let callText = '';
-      let callReasoning = '';
-      iterationEmittedText = false; // reset for this iteration
-      const callTools: StreamedToolSummary[] = [];
-      let callUsage: Usage | null = null;
-
-      await streamAnthropicOnce(
-        { apiKey: provider.apiKey, baseUrl: provider.baseUrl },
-        {
-          modelId,
-          system: systemPrompt,
-          messages: convo,
-          tools,
-          thinking,
-          maxTokens,
-        },
-        controller.signal,
-        {
-          onDelta: (text) => {
-            // When this iteration emits its first text delta AND a prior
-            // iteration already produced text, prepend a paragraph break so
-            // the two narrations don't glue together ("patch.Let me").
-            // Only do this once per iteration (gated by iterationEmittedText).
-            if (!iterationEmittedText && anyPriorIterationText) {
-              const sep = '\n\n';
-              callText += sep;
-              finalContent += sep;
-              emit(wc, sessionId, { type: 'delta', sessionId, seq: nextSeq(sessionId), messageId, text: sep });
-            }
-            // Start a new timeline text entry when this is the first delta
-            // after tools landed (or the very first delta of the turn).
-            // This preserves interleaving: text₁ → tools → text₂.
-            if (!currentTextEntry) {
-              currentTextEntry = { type: 'text', text: '' };
-              timeline.push(currentTextEntry);
-            }
-            iterationEmittedText = true;
-            anyPriorIterationText = true;
-            callText += text;
-            finalContent += text;
-            currentTextEntry.text += text;
-            // Block maintenance — mirrors streamReducer.applyDelta.
-            const lastBlock = active.blocks[active.blocks.length - 1];
-            if (lastBlock && lastBlock.kind === 'text' && lastBlock.id === active.currentTextBlockId) {
-              (lastBlock as TextBlock).text += text;
-            } else {
-              const newId = crypto.randomUUID();
-              active.currentTextBlockId = newId;
-              active.blocks.push({
-                id: newId, kind: 'text', text,
-                createdAtSeq: 0, modifiedAtSeq: 0, isAnswer: false,
-              });
-            }
-            emit(wc, sessionId, {
-              type: 'delta', sessionId, seq: nextSeq(sessionId), messageId,
-              text,
-              blockId: active.currentTextBlockId!,   // just set above
-            });
-          },
-          onReasoning: (delta) => {
-            callReasoning += delta;
-            finalReasoning += delta;
-            // Block maintenance — mirrors streamReducer.applyReasoning.
-            if (!active.reasoningBlockId) {
-              active.reasoningBlockId = crypto.randomUUID();
-              active.blocks.push({
-                id: active.reasoningBlockId, kind: 'reasoning', text: '',
-                createdAtSeq: 0, modifiedAtSeq: 0,
-              });
-            }
-            const rb = active.blocks.find(b => b.id === active.reasoningBlockId) as ReasoningBlock | undefined;
-            if (rb) rb.text += delta;
-            emit(wc, sessionId, {
-              type: 'reasoning', sessionId, seq: nextSeq(sessionId), messageId,
-              delta,
-              blockId: active.reasoningBlockId,
-            });
-          },
-          onToolCallStart: (id, toolName) => {
-            // Block maintenance — mirrors streamReducer.applyToolStart.
-            // Tool landing finalizes the open text block.
-            active.currentTextBlockId = null;
-            active.toolBlockIndex[id] = active.blocks.length;
-            const toolBlock: ToolBlock = {
-              id, kind: 'tool',
-              toolCallId: id, toolName,
-              category: categorizeTool(toolName),
-              status: 'pending', arguments: {}, argPreview: '', riskTier: 'read_only',
-              createdAtSeq: 0, modifiedAtSeq: 0,
-            };
-            active.blocks.push(toolBlock);
-            callTools.push({ id, toolName, args: {} });
-            emit(wc, sessionId, {
-              type: 'tool_call_start', sessionId, seq: nextSeq(sessionId), messageId,
-              toolCallId: id, toolName: toolName as any,
-              blockId: id,
-            });
-          },
-          onToolCallDelta: (id, delta) => {
-            emit(wc, sessionId, { type: 'tool_call_delta', sessionId, seq: nextSeq(sessionId), toolCallId: id, delta });
-          },
-          onToolCallEnd: (id, toolName, args) => {
-            const existing = callTools.find((t) => t.id === id);
-            if (existing) existing.args = args;
-            // Block maintenance — mirror applyToolArgs (without followup;
-            // we'll spawn followups in finalizeBlocks at turn_end).
-            const tidx = active.toolBlockIndex[id];
-            if (tidx != null) {
-              const tb = active.blocks[tidx];
-              if (tb && tb.kind === 'tool') {
-                tb.arguments = args;
-                tb.argPreview = formatArgPreview(toolName as any, args);
-                tb.riskTier = riskOf(toolName);
-              }
-            }
-            emit(wc, sessionId, {
-              type: 'tool_call', sessionId, seq: nextSeq(sessionId), messageId, toolCallId: id, toolName: toolName as any,
-              arguments: args, argPreview: formatArgPreview(toolName as any, args), riskTier: riskOf(toolName),
-            });
-          },
-          onUsage: (u) => {
-            callUsage = u;
-            // Aggregate into turn totals. Each Anthropic call reports its own
-            // input/output/cache numbers, so we sum them across iterations.
-            aggInput += u.inputTokens;
-            aggOutput += u.outputTokens;
-            aggCacheRead += u.cacheRead;
-            aggCacheWrite += u.cacheWrite;
-            aggCalls += u.calls;
-            if (u.reasoningTokens) totalReasoningTokens += u.reasoningTokens;
-            emit(wc, sessionId, {
-              type: 'usage', sessionId, seq: nextSeq(sessionId), messageId,
-              tokens: u, costUsd: 0, runningTotalUsd: 0, iteration,
-            });
-          },
-        },
-      );
-
-      // Append the assistant turn to the conversation so the next call sees it.
-      const assistantBlocks: AnthropicContent[] = [];
-      if (callText) assistantBlocks.push({ type: 'text', text: callText });
-      for (const t of callTools) {
-        assistantBlocks.push({ type: 'tool_use', id: t.id, name: t.toolName, input: t.args });
-      }
-      if (assistantBlocks.length > 0) {
-        convo.push({ role: 'assistant', content: assistantBlocks });
-      }
-
-      // No tool calls → end of turn.
-      if (callTools.length === 0) {
-        emit(wc, sessionId, {
-          type: 'turn_end', sessionId, seq: nextSeq(sessionId), messageId,
-          stopReason: 'end_turn',
-          content: finalContent,
-          timeline: timeline.filter(e => e.type === 'tool' || e.text.trim()),
-          blocks: finalizeBlocks(active, 'end_turn'),
-          reasoning: finalReasoning || undefined,
-          reasoningTokens: totalReasoningTokens || undefined,
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-          usage: {
-            inputTokens: aggInput, outputTokens: aggOutput,
-            cacheRead: aggCacheRead, cacheWrite: aggCacheWrite,
-            reasoningTokens: totalReasoningTokens, calls: aggCalls, costUsd: 0,
-          },
-        });
-        return;
-      }
-
-      // Tool calls — dispatch each, append tool_result blocks.
-      // Before dispatching, null out the current text entry so the next
-      // text delta (in a later iteration) starts a fresh timeline entry —
-      // this is what preserves the interleaving (text₁ → tools → text₂).
-      currentTextEntry = null;
-      const toolResults: AnthropicContent = [];
-      // ─── Parallel dispatch for read-only, always-auto-approved tools ────
-      // Read-only auto-approved tools run concurrently (collapse N round-trips); permission-gated tools stay sequential to avoid concurrent asks.
-      const ALL_MODES: AutonomyMode[] = ['plan', 'ask', 'edit', 'full'];
-      const isParallelSafe = (t: StreamedToolSummary): boolean => {
-        const reg = getRegistration(t.toolName);
-        return !!reg && reg.riskTier === 'read_only' && reg.autoApproveIn.length === 4 &&
-          ALL_MODES.every((m) => reg.autoApproveIn.includes(m));
-      };
-
-      // Shared usage accumulator across both parallel and sequential batches.
-      const usageCb = (u: Usage) => {
-        aggInput += u.inputTokens;
-        aggOutput += u.outputTokens;
-        aggCacheRead += u.cacheRead;
-        aggCacheWrite += u.cacheWrite;
-        aggCalls += u.calls;
-        if (u.reasoningTokens) totalReasoningTokens += u.reasoningTokens;
-      };
-
-      const parallelBatch = callTools.filter(isParallelSafe);
-      const sequentialBatch = callTools.filter((t) => !isParallelSafe(t));
-
-      // Parallel batch — Promise.all, but preserve callTools order in the
-      // result arrays (timeline + toolResults must match the model's emission
-      // order so Anthropic gets tool_results in the same order as tool_use).
-      const parallelResults =
-        parallelBatch.length > 0
-          ? await Promise.all(
-              parallelBatch.map((t) =>
-                dispatchTool(
-                  wc, sessionId, messageId, t, autonomyMode, workspaceRoot, controller.signal, active,
-                  provider, modelId, usageCb,
-                ),
-              ),
-            )
-          : [];
-      // Sequential batch — permission-gated tools, must run in order.
-      const sequentialResults: Awaited<ReturnType<typeof dispatchTool>>[] = [];
-      for (const t of sequentialBatch) {
-        sequentialResults.push(
-          await dispatchTool(
-            wc, sessionId, messageId, t, autonomyMode, workspaceRoot, controller.signal, active,
-            provider, modelId, usageCb,
-          ),
-        );
-      }
-
-      // Re-interleave results in the model's original emission order so the
-      // timeline and toolResults arrays match callTools 1:1. Build a lookup
-      // map since parallelResults may be in completion order, not emission.
-      const byId = new Map<string, Awaited<ReturnType<typeof dispatchTool>>>();
-      for (const r of [...parallelResults, ...sequentialResults]) {
-        byId.set(r.toolCall.id, r);
-      }
-      for (const t of callTools) {
-        const result = byId.get(t.id);
-        if (!result) continue;
-        allToolCalls.push(result.toolCall);
-        // Push a timeline entry pointing at this tool call's index. This
-        // records WHERE in the narrative the tool landed.
-        timeline.push({ type: 'tool', toolIndex: allToolCalls.length - 1 });
-        // After a tool, the next text delta must start a new entry.
-        currentTextEntry = null;
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: t.id,
-          content: result.toolCall.output ?? '(no output)',
-          is_error: result.toolCall.status === 'failed' || result.toolCall.status === 'rejected',
-        });
-      }
-      convo.push({ role: 'user', content: toolResults });
-      // Loop continues — next model call.
-    }
-
-    // Iteration cap hit — force a wrap-up turn with no tools.
-    log.warn('iteration cap hit; forcing final text-only call', { cap: MAX_ITERATIONS });
-    systemPrompt += '\n\nYou have reached the step limit. Wrap up and report status.';
-    const messageId = `m_${Date.now().toString(36)}_final`;
-    let finalCallText = '';
-    await streamAnthropicOnce(
-      { apiKey: provider.apiKey, baseUrl: provider.baseUrl },
-      { modelId, system: systemPrompt, messages: convo, thinking: null, maxTokens },
-      controller.signal,
-      {
-        onDelta: (t) => {
-          if (!iterationEmittedText && anyPriorIterationText) {
-            const sep = '\n\n';
-            finalCallText += sep;
-            finalContent += sep;
-            const sepLast = active.blocks[active.blocks.length - 1];
-            if (sepLast && sepLast.kind === 'text' && sepLast.id === active.currentTextBlockId) {
-              (sepLast as TextBlock).text += sep;
-            } else {
-              const sepId = crypto.randomUUID();
-              active.currentTextBlockId = sepId;
-              active.blocks.push({
-                id: sepId, kind: 'text', text: sep,
-                createdAtSeq: 0, modifiedAtSeq: 0, isAnswer: false,
-              });
-            }
-            emit(wc, sessionId, {
-              type: 'delta', sessionId, seq: nextSeq(sessionId), messageId,
-              text: sep, blockId: active.currentTextBlockId!,
-            });
-          }
-          iterationEmittedText = true;
-          anyPriorIterationText = true;
-          finalCallText += t;
-          finalContent += t;
-          const lastBlock = active.blocks[active.blocks.length - 1];
-          if (lastBlock && lastBlock.kind === 'text' && lastBlock.id === active.currentTextBlockId) {
-            (lastBlock as TextBlock).text += t;
-          } else {
-            const newId = crypto.randomUUID();
-            active.currentTextBlockId = newId;
-            active.blocks.push({
-              id: newId, kind: 'text', text: t,
-              createdAtSeq: 0, modifiedAtSeq: 0, isAnswer: false,
-            });
-          }
-          emit(wc, sessionId, {
-            type: 'delta', sessionId, seq: nextSeq(sessionId), messageId,
-            text: t, blockId: active.currentTextBlockId!,
-          });
-        },
-        onReasoning: (d) => {
-          finalReasoning += d;
-          if (!active.reasoningBlockId) {
-            active.reasoningBlockId = crypto.randomUUID();
-            active.blocks.push({
-              id: active.reasoningBlockId, kind: 'reasoning', text: '',
-              createdAtSeq: 0, modifiedAtSeq: 0,
-            });
-          }
-          const rb = active.blocks.find(b => b.id === active.reasoningBlockId) as ReasoningBlock | undefined;
-          if (rb) rb.text += d;
-          emit(wc, sessionId, {
-            type: 'reasoning', sessionId, seq: nextSeq(sessionId), messageId,
-            delta: d, blockId: active.reasoningBlockId,
-          });
-        },
-        onToolCallStart: () => {}, onToolCallDelta: () => {}, onToolCallEnd: () => {},
-        onUsage: (u) => {
-          aggInput += u.inputTokens; aggOutput += u.outputTokens;
-          aggCacheRead += u.cacheRead; aggCacheWrite += u.cacheWrite;
-          aggCalls += u.calls;
-          if (u.reasoningTokens) totalReasoningTokens += u.reasoningTokens;
-          emit(wc, sessionId, { type: 'usage', sessionId, seq: nextSeq(sessionId), messageId, tokens: u, costUsd: 0, runningTotalUsd: 0, iteration });
-        },
-      },
-    );
-    emit(wc, sessionId, {
-      type: 'turn_end', sessionId, seq: nextSeq(sessionId), messageId,
-      stopReason: 'iteration_limit',
-      content: finalContent,
-      timeline: timeline.filter(e => e.type === 'tool' || e.text.trim()),
-      blocks: finalizeBlocks(active, 'iteration_limit'),
-      reasoning: finalReasoning || undefined,
-      reasoningTokens: totalReasoningTokens || undefined,
-      toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-      usage: {
-        inputTokens: aggInput, outputTokens: aggOutput,
-        cacheRead: aggCacheRead, cacheWrite: aggCacheWrite,
-        reasoningTokens: totalReasoningTokens, calls: aggCalls, costUsd: 0,
-      },
-    });
-  } catch (err: any) {
-    // Abort throws AbortError out of streamAnthropicOnce; without this catch, the partial work would be discarded. Emit a partial turn_end so the renderer can freeze/persist; other errors surface as error events.
-    const isAbort = err?.name === 'AbortError' || controller.signal.aborted;
-    if (isAbort) {
-      const abortMessageId = `m_${Date.now().toString(36)}_abort`;
-      emit(wc, sessionId, {
-        type: 'turn_end', sessionId, seq: nextSeq(sessionId), messageId: abortMessageId,
-        stopReason: 'aborted',
-        // Whatever the model produced before the abort — may be partial text,
-        // may be empty if the abort fired before the first delta.
-        content: finalContent,
-        timeline: timeline.filter(e => e.type === 'tool' || e.text.trim()),
-        blocks: finalizeBlocks(active, 'aborted'),
-        reasoning: finalReasoning || undefined,
-        reasoningTokens: totalReasoningTokens || undefined,
-        // Include tool calls that already executed — the user should see
-        // what work was done before they hit stop.
-        toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-        usage: {
-          inputTokens: aggInput, outputTokens: aggOutput,
-          cacheRead: aggCacheRead, cacheWrite: aggCacheWrite,
-          reasoningTokens: totalReasoningTokens, calls: aggCalls, costUsd: 0,
-        },
-      });
-    } else {
-      // Genuine error — surface to the renderer so it can display the message.
-      emit(wc, sessionId, {
-        type: 'error', sessionId, seq: nextSeq(sessionId),
-        message: err?.message || String(err),
-      });
-    }
-  } finally {
-    activeTurns.delete(sessionId);
-  }
+function thinkingPayload(level: string): { type: 'enabled'; budgetTokens: number } | null {
+  if (level === 'off') return null;
+  return { type: 'enabled', budgetTokens: THINKING_BUDGET[level] ?? THINKING_BUDGET.medium };
 }
 
-interface StreamedToolSummary {
-  id: string;
-  toolName: string;
-  args: Record<string, unknown>;
+function normalizeStatus(s: string | undefined): ToolCall['status'] {
+  switch (s) { case 'executed': case 'failed': case 'rejected': case 'timeout': return s; case 'aborted': return 'aborted'; default: return s ? 'executed' : 'pending'; }
 }
 
-/** Pause the turn on ask_followup_question until the user picks an option.
- *  Mirrors the permission-pause pattern: emit an event, await a resolver
- *  that's fulfilled by the submitFollowup IPC handler (or by abort). */
-async function dispatchFollowup(
-  wc: WebContents,
-  sessionId: string,
-  toolCallId: string,
-  args: Record<string, unknown>,
-  baseToolCall: ToolCall,
-  active: ActiveTurn,
-): Promise<{ toolCall: ToolCall }> {
-  // Normalize args (same logic as deriveFollowupMode in blockState).
-  // The model may have sent plain strings or {label, description} objects.
-  const rawQuestion = typeof args.question === 'string' ? args.question : '';
-  const rawOptions = Array.isArray(args.options) ? args.options : [];
-  const options: string[] = rawOptions.map((o: unknown) => {
-    if (typeof o === 'string') return o;
-    if (o && typeof o === 'object') {
-      const obj = o as Record<string, unknown>;
-      if (typeof obj.label === 'string') return obj.label;
-      if (typeof obj.value === 'string') return obj.value;
-    }
-    return String(o);
-  });
-  const multiple = Boolean(args.multiple);
+function safeMeta(name: string) { try { return getToolMeta(name as ToolName); } catch { return undefined; } }
 
-  // Emit the followup_required event — renderer fires the OptionsPopup.
-  emit(wc, sessionId, {
-    type: 'followup_required', sessionId, seq: nextSeq(sessionId),
-    toolCallId, question: rawQuestion, options, multiple,
-  });
-  updateToolBlock(active, toolCallId, { status: 'awaiting_input', arguments: args });
-
-  // Await the user's pick. Resolved by submitFollowup IPC handler, or by
-  // abort (with null answer). 10-minute timeout matches permission gates.
-  const FOLLOWUP_TIMEOUT_MS = 10 * 60 * 1000;
-  const pick = await new Promise<{ answer: string | null }>((resolve) => {
-    active.followupResolver = resolve;
-    active.pendingFollowupId = toolCallId;
-    setTimeout(() => {
-      if (active.followupResolver === resolve) {
-        resolve({ answer: null });
-      }
-    }, FOLLOWUP_TIMEOUT_MS);
-  });
-  active.followupResolver = null;
-  active.pendingFollowupId = null;
-
-  // Build the tool result. Null answer = user dismissed/aborted/timed out.
-  if (pick.answer == null) {
-    const tc: ToolCall = {
-      ...baseToolCall,
-      status: 'rejected',
-      output: 'User did not answer the question.',
-    };
-    emit(wc, sessionId, {
-      type: 'tool_result', sessionId, seq: nextSeq(sessionId),
-      toolCallId, status: 'rejected', output: tc.output,
-    });
-    updateToolBlock(active, toolCallId, { status: 'rejected', output: tc.output });
-    return { toolCall: tc };
-  }
-
-  // User picked — the answer becomes the tool_result the model sees next.
-  const summary = options.length > 0
-    ? `User picked: ${pick.answer}`
-    : `User answered: ${pick.answer}`;
-  const tc: ToolCall = {
-    ...baseToolCall,
-    status: 'executed',
-    output: summary,
-  };
-  emit(wc, sessionId, {
-    type: 'tool_result', sessionId, seq: nextSeq(sessionId),
-    toolCallId, status: 'executed', output: summary,
-  });
-  updateToolBlock(active, toolCallId, { status: 'executed', output: summary });
-  return { toolCall: tc };
+function emptyUsage(): Usage {
+  return { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, calls: 0, costUsd: 0 };
 }
 
-async function dispatchTool(
-  wc: WebContents,
-  sessionId: string,
-  messageId: string,
-  streamed: StreamedToolSummary,
-  autonomyMode: RunTurnPayload['autonomyMode'],
-  workspaceRoot: string,
-  signal: AbortSignal,
-  active: ActiveTurn,
-  // Parent turn state — passed through so `dispatch_agent` can spawn a
-  // sub-agent against the same provider/model and fold its usage into the
-  // parent turn's aggregate. See runTurn() for the source of these values.
-  provider: Provider,
-  modelId: string,
-  onUsage: (u: Usage) => void,
-): Promise<{ toolCall: ToolCall }> {
-  const { id, toolName, args } = streamed;
-  const riskTier = riskOf(toolName);
-  const argPreview = formatArgPreview(toolName as any, args);
-  const baseToolCall: ToolCall = {
-    id, messageId, toolName: toolName as any,
-    arguments: args, argPreview, status: 'pending', riskTier,
-  };
-
-  // ask_followup_question — pause the turn and wait for the user's pick.
-  // The tool result becomes the user's answer; the orchestrator loop then
-  // continues with the pick visible to the model in the next iteration.
-  // This is the only tool that can pause a turn (besides permission gates).
-  if (toolName === 'ask_followup_question') {
-    return await dispatchFollowup(wc, sessionId, id, args, baseToolCall, active);
-  }
-
-  // Permission gate — read from active.autonomyMode (mutable so the mode
-  // can switch mid-turn when the user approves a plan→edit escalation).
-  let decision = checkPermission(riskTier, active.autonomyMode);
-
-  // Mode-switch escalation: in plan mode, a write/destructive tool is
-  // blocked. Instead of hard-rejecting, pause the turn and ask the user
-  // to switch to Edit mode. On approve, update the mode so subsequent
-  // writes in the same turn auto-approve — no repeated prompts.
-  if (decision === 'blocked' && active.autonomyMode === 'plan') {
-    emit(wc, sessionId, {
-      type: 'permission_required', sessionId, seq: nextSeq(sessionId),
-      toolCalls: [{ ...baseToolCall }], timeoutAt: Date.now() + PERMISSION_TIMEOUT_MS,
-    });
-    const modeSwitchDecision = await new Promise<{ approved: boolean; reason?: string }>((resolve) => {
-      active.permissionResolver = resolve;
-      active.pendingToolCallIds = [id];
-      setTimeout(() => {
-        if (active.permissionResolver === resolve) {
-          resolve({ approved: false, reason: 'timeout' });
-        }
-      }, PERMISSION_TIMEOUT_MS);
-    });
-    active.permissionResolver = null;
-    active.pendingToolCallIds = [];
-
-    if (!modeSwitchDecision.approved) {
-      const tc = { ...baseToolCall, status: 'rejected' as const, output: `Rejected: ${modeSwitchDecision.reason ?? 'user rejected mode switch'}` };
-      emit(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId: id, status: 'rejected', output: tc.output });
-      updateToolBlock(active, id, { status: 'rejected', output: tc.output });
-      return { toolCall: tc };
-    }
-
-    // User approved — switch to edit mode. active.autonomyMode is mutable
-    // so every subsequent dispatchTool call in this turn sees the new mode.
-    active.autonomyMode = 'edit';
-    try { sessions.updateSessionSettings(sessionId, { autonomyMode: 'edit' }); } catch { /* best-effort persist */ }
-
-    // Re-evaluate the gate with the new mode. For edit + write tier,
-    // this returns 'auto' → falls through to execution without a second
-    // prompt. For edit + destructive, returns 'ask' → normal prompt.
-    decision = checkPermission(riskTier, active.autonomyMode);
-  }
-
-  if (decision === 'blocked') {
-    const tc = { ...baseToolCall, status: 'rejected' as const, output: `Blocked by autonomy mode: ${active.autonomyMode}` };
-    emit(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId: id, status: 'rejected', output: tc.output });
-    updateToolBlock(active, id, { status: 'rejected', output: tc.output });
-    return { toolCall: tc };
-  }
-  if (decision === 'ask') {
-    emit(wc, sessionId, {
-      type: 'permission_required', sessionId, seq: nextSeq(sessionId),
-      toolCalls: [{ ...baseToolCall }], timeoutAt: Date.now() + PERMISSION_TIMEOUT_MS,
-    });
-    const userDecision = await new Promise<{ approved: boolean; reason?: string }>((resolve) => {
-      active.permissionResolver = resolve;
-      active.pendingToolCallIds = [id];
-      // Timeout.
-      setTimeout(() => {
-        if (active.permissionResolver === resolve) {
-          resolve({ approved: false, reason: 'timeout' });
-        }
-      }, PERMISSION_TIMEOUT_MS);
-    });
-    active.permissionResolver = null;
-    active.pendingToolCallIds = [];
-    if (!userDecision.approved) {
-      const tc = { ...baseToolCall, status: 'rejected' as const, output: `Rejected: ${userDecision.reason ?? 'user rejected'}` };
-      emit(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId: id, status: 'rejected', output: tc.output });
-      updateToolBlock(active, id, { status: 'rejected', output: tc.output });
-      return { toolCall: tc };
-    }
-  }
-
-  // Execute.
-  emit(wc, sessionId, { type: 'tool_executing', sessionId, seq: nextSeq(sessionId), toolCallId: id });
-  updateToolBlock(active, id, { status: 'running' });
-  const start = Date.now();
-  // Inject provider/modelId/usage so dispatch_agent can spawn a sub-agent and fold its usage into the turn aggregate; onDelta streams live sub-agent tokens via tool_call_delta events.
-  const result = await executeTool(toolName, args, {
-    workspaceRoot,
-    signal,
-    timeoutMs: 30_000,
-    provider,
-    modelId,
-    onUsage,
-    onDelta: (delta) => {
-      emit(wc, sessionId, {
-        type: 'tool_call_delta', sessionId, seq: nextSeq(sessionId),
-        toolCallId: id, delta,
-      });
-    },
-    sessionId,
-  });
-  const durationMs = result.durationMs ?? Date.now() - start;
-
-  const tc: ToolCall = {
-    ...baseToolCall,
-    status: result.status === 'executed' ? 'executed' : result.status === 'failed' ? 'failed' : result.status,
-    output: result.output,
-    display: result.display,
-    durationMs,
-    meta: result.meta,
-  };
-  emit(wc, sessionId, {
-    type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId: id,
-    status: tc.status, output: tc.output, display: tc.display, durationMs, meta: tc.meta,
-  });
-  updateToolBlock(active, id, {
-    status: tc.status, output: tc.output, display: tc.display, durationMs, meta: tc.meta,
-  });
-  return { toolCall: tc };
+function accumulateUsage(turn: Turn, d: Usage): void {
+  turn.usage.inputTokens += d.inputTokens || 0;
+  turn.usage.outputTokens += d.outputTokens || 0;
+  turn.usage.cacheRead += d.cacheRead || 0;
+  turn.usage.cacheWrite += d.cacheWrite || 0;
+  turn.usage.reasoningTokens += d.reasoningTokens || 0;
+  turn.usage.calls += d.calls || 1;
+  turn.usage.costUsd += d.costUsd || 0;
 }
 
-/** Build the user-side content blocks: text + per-attachment text blocks. */
-function userContent(m: TurnMessage): AnthropicContent {
-  if (!m.attachments || m.attachments.length === 0) return m.content;
-  const blocks: AnthropicContent = [{ type: 'text', text: m.content }];
-  for (const a of m.attachments) {
-    if (a.kind === 'image') {
-      // Placeholder for now — real image blocks need base64 + media_type.
-      blocks.push({ type: 'text', text: `[Attached image: ${a.path}]` });
-      continue;
-    }
-    const header = `--- ${a.path}${a.truncated ? ' (truncated)' : ''} ---`;
-    blocks.push({ type: 'text', text: `${header}\n${a.content ?? '(empty)'}` });
-  }
-  return blocks;
+function computeCost(u: Pick<Usage, 'inputTokens' | 'outputTokens' | 'cacheRead' | 'cacheWrite'>, r: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
+  return Math.max(0, (u.inputTokens || 0) - (u.cacheRead || 0)) * r.input + (u.outputTokens || 0) * r.output + (u.cacheRead || 0) * r.cacheRead + (u.cacheWrite || 0) * r.cacheWrite;
 }
 
-/** Look up a tool's risk tier without going through the registry (avoids circular). */
-function riskOf(toolName: string): 'read_only' | 'write' | 'destructive' {
-  // Source of truth is the tool registry; the switch is a conservative fallback for not-yet-registered (e.g. future MCP) tools.
-  const reg = getRegistration(toolName);
-  if (reg) return reg.riskTier;
-  switch (toolName) {
-    case 'read_file':
-    case 'list_dir':
-    case 'grep':
-      return 'read_only';
-    case 'edit_file':
-    case 'write_file':
-      return 'write';
-    case 'bash':
-    case 'git':
-      return 'destructive';
-    default:
-      return 'destructive'; // conservative default for unknown tools
-  }
+function sdkUsageToTide(u: LanguageModelUsage, me: { inputCostPerToken?: number; outputCostPerToken?: number; cacheReadCostPerToken?: number; cacheWriteCostPerToken?: number } | undefined, calls = 1): Usage {
+  const usage = { inputTokens: u.inputTokens ?? 0, outputTokens: u.outputTokens ?? 0, cacheRead: u.inputTokenDetails?.cacheReadTokens ?? 0, cacheWrite: u.inputTokenDetails?.cacheWriteTokens ?? 0, reasoningTokens: u.outputTokenDetails?.reasoningTokens ?? 0, calls };
+  return { ...usage, costUsd: computeCost(usage, { input: me?.inputCostPerToken ?? 0, output: me?.outputCostPerToken ?? 0, cacheRead: me?.cacheReadCostPerToken ?? 0, cacheWrite: me?.cacheWriteCostPerToken ?? 0 }) };
 }
+
+function errMessage(err: unknown): string {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message;
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
+function isTransientError(msg: string): boolean {
+  if (/no output generated/i.test(msg)) return false;
+  if (/api key|unauthorized|forbidden|401|403/i.test(msg)) return false;
+  return true;
+}
+
+export { runTurn as runSdkTurn };

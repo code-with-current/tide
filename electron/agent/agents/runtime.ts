@@ -3,15 +3,24 @@ import { generateText, streamText, isStepCount } from 'ai';
 import type { LanguageModelUsage } from 'ai';
 import { resolveModel } from '../provider-factory.js';
 import { resolveProtocolOptions } from '../protocols/index.js';
-import { resolveMaxOutputTokens } from '../model-capabilities.js';
-import { buildToolsetSubset } from '../tools/registry.js';
+import { resolveMaxOutputTokens, contextWindowSize } from '../model-capabilities.js';
+import { buildToolsetSubset, formatArgPreview, resolveToolName } from '../tools/registry.js';
+import { getToolMeta } from '../tools/tool-meta.js';
+import { currentToolCallId } from '../tools/tool-call-context.js';
+import { categorizeTool } from '../../../src/lib/stream/block-state.js';
 import { createLogger } from '../../logger.js';
-import type { Provider, Usage, AutonomyMode } from '../../../src/types/index.js';
+import type { Provider, Usage, AutonomyMode, ToolName } from '../../../src/types/index.js';
 import type { CompactionSettings } from '../../../src/types/compaction.js';
 import type { RuleSet } from '../permissions/rules.js';
 import type { ToolResult } from '../tools/types.js';
-import type { ToolContext } from '../tools/tool-context.js';
+import type { ToolContext, EmitToolEvent } from '../tools/tool-context.js';
 import type { AgentDef } from './types.js';
+import {
+  shouldCompact,
+  compactConversation,
+  DEFAULT_AUTO_COMPACT_CONFIG,
+  type AutoCompactConfig,
+} from '../context/auto-compact.js';
 
 const log = createLogger('agent/runtime');
 
@@ -33,6 +42,14 @@ export interface RunAgentOptions {
   ctx?: ToolContext;
   /** Recursion depth (0 = dispatched from main orchestrator). */
   depth?: number;
+  /** The parent dispatch_agent's toolCallId — used as parentToolCallId on
+   *  child tool events so the renderer nests them under the dispatch block.
+   *  Captured automatically from AsyncLocalStorage if omitted. */
+  parentToolCallId?: string;
+  /** Short human-readable label for this dispatch — distinguishes parallel
+   *  dispatches of the same agent type in the UI. Surfaces in the ToolDisplay
+   *  agent payload and the row's target slot. */
+  title?: string;
 }
 
 /** Default thinking budget for sub-agents. Sub-agents are focused
@@ -109,7 +126,7 @@ async function runSingleShotAgent(
       onUsage(mapUsage(result.usage as LanguageModelUsage));
     }
 
-    return buildResult(agent, task, result.text, result.finishReason, result.reasoning, start, proto.label);
+    return buildResult(agent, task, result.text, result.finishReason, result.reasoning, start, proto.label, opts.title);
   } catch (e: any) {
     return handleError(agent.name, e, signal, start);
   }
@@ -122,7 +139,7 @@ async function runMultiStepAgent(
   thinkingBudget: number,
   start: number,
 ): Promise<ToolResult> {
-  const { agent, task, provider, modelId, signal, onUsage, ctx, depth } = opts;
+  const { agent, task, provider, modelId, signal, onUsage, ctx, depth, title } = opts;
 
   if (!ctx) {
     return { status: 'failed', output: `Agent ${agent.name}: no context for multi-step.`, durationMs: 0 };
@@ -137,6 +154,12 @@ async function runMultiStepAgent(
 
   const maxSteps = agent.maxSteps ?? 10;
 
+  // The parent dispatch_agent's toolCallId — used as the parentToolCallId
+  // linkage on child tool events so the renderer nests them under the
+  // dispatch block. Prefer the explicit arg; fall back to AsyncLocalStorage
+  // (set by buildToolset's execute wrapper at registry.ts:251).
+  const parentToolCallId = opts.parentToolCallId ?? currentToolCallId();
+
   // Build a child ToolContext for the sub-agent's toolset.
   const childCtx: ToolContext = {
     ...ctx,
@@ -145,18 +168,51 @@ async function runMultiStepAgent(
     onUsage: (u: Usage) => {
       onUsage?.(u);
     },
-    // Sub-agent emit is a no-op — tool call cards don't surface in the main UI.
-    // The report is returned as the dispatch_agent tool result instead.
-    emit: () => {},
+    // Forward permission/followup emits to the parent's bridge so a sub-agent
+    // tool that needs approval surfaces its card instead of deadlocking. The
+    // bridge keys everything off sessionId/messageId from the parent turn
+    // closure, so the card reaches the right surface. (Previously this was a
+    // no-op, which caused a silent hang on ask-level permission in ask/edit
+    // mode — the emit was swallowed and waitForPermissionResolve awaited
+    // forever.)
+    emit: (raw) => ctx.emit(raw),
   };
 
   const tools = buildToolsetSubset(childCtx, agent.allowedTools!);
 
+  const modelEntry = provider.models.find((m) => m.modelId === modelId);
   const proto = resolveProtocolOptions(
     provider.apiStyle,
     { budgetTokens: thinkingBudget },
     { hasTools: true, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry) },
   );
+
+  // ── CONTEXT MANAGEMENT (mirrors main loop, orchestrator-sdk.ts:408-432) ──
+  // Multi-step sub-agents accumulate large tool outputs (file reads, grep
+  // results) and will stall against the context window — the model then stops
+  // mid-task and suggests a new session. Wire the same autocompact loop the
+  // main turn uses, driven by the user's CompactionSettings (on ctx) so the
+  // sub-agent respects the same threshold / keep-turns / enable toggle.
+  const knownCtxWindow = contextWindowSize(modelId, modelEntry);
+  const cs = ctx.compactionSettings;
+  const compactionConfig: AutoCompactConfig = knownCtxWindow && cs.enabled
+    ? {
+        ...DEFAULT_AUTO_COMPACT_CONFIG,
+        contextWindow: knownCtxWindow,
+        threshold: cs.threshold,
+        // Sub-agents run shorter loops than the main turn — keep one fewer
+        // turn pair so there is more room to compact into.
+        keepRecentTurns: Math.max(1, cs.keepRecentTurns - 1),
+      }
+    : {
+        // Compaction disabled or context window unknown — set a very high
+        // threshold so shouldCompact never fires (main-loop parity, :425-432).
+        ...DEFAULT_AUTO_COMPACT_CONFIG,
+        contextWindow: knownCtxWindow ?? DEFAULT_AUTO_COMPACT_CONFIG.contextWindow,
+        threshold: 0.99,
+      };
+  let lastInputTokens = 0;
+  let consecutiveCompactionFailures = 0;
 
   log.info('multi-step agent', { name: agent.name, depth: depth ?? 0, tools: agent.allowedTools, maxSteps });
 
@@ -172,6 +228,53 @@ async function runMultiStepAgent(
       maxOutputTokens: proto.maxOutputTokens,
       abortSignal: signal,
       providerOptions: proto.providerOptions,
+
+      // ── BETWEEN-STEP AUTOCOMPACT (mirrors orchestrator-sdk.ts:907-961) ──
+      // When the running message list crosses the threshold (driven by the
+      // user's CompactionSettings via compactionConfig), fork a summarizer
+      // over old messages and keep recent turns verbatim. Prevents the model
+      // from hitting the wall and abandoning the task.
+      async prepareStep({ messages }) {
+        if (
+          shouldCompact(
+            messages,
+            compactionConfig,
+            consecutiveCompactionFailures,
+            lastInputTokens || undefined,
+          )
+        ) {
+          try {
+            const result = await compactConversation(messages, compactionConfig, {
+              provider,
+              modelId,
+              signal,
+            });
+            consecutiveCompactionFailures = 0;
+            log.info('sub-agent autocompact', {
+              agent: agent.name,
+              before: messages.length,
+              after: result.postCompactMessages.length,
+            });
+            return { messages: result.postCompactMessages };
+          } catch (e: any) {
+            consecutiveCompactionFailures++;
+            log.warn('sub-agent autocompact failed', {
+              agent: agent.name,
+              failures: consecutiveCompactionFailures,
+              err: e?.message ?? e,
+            });
+          }
+        }
+        return undefined;
+      },
+
+      // Track the last step's real input-token count — shouldCompact prefers
+      // this over the char heuristic (orchestrator-sdk.ts:920-921 parity).
+      onStepFinish({ usage }) {
+        if (usage?.inputTokens && usage.inputTokens > 0) {
+          lastInputTokens = usage.inputTokens;
+        }
+      },
 
       // ── TOOL CALL REPAIR ──
       // Strip XML artifacts that GLM/Gemini leak into JSON tool args.
@@ -203,8 +306,25 @@ async function runMultiStepAgent(
       },
     });
 
-    // Consume the stream to completion.
-    const finalResult = await result;
+    // Iterate the stream to surface the sub-agent's tool calls as nested
+    // AgentEvents (mirrors orchestrator-sdk.ts:1104). Each tool lifecycle
+    // part is forwarded via ctx.emitToolEvent with parentToolCallId so the
+    // renderer streams them live under the dispatch_agent block. Falls back
+    // to bare await when emitToolEvent is unavailable (legacy ctx) so the
+    // sub-agent still completes — just without visible child tool calls.
+    let finalResult: Awaited<typeof result>;
+    if (ctx.emitToolEvent && parentToolCallId) {
+      try {
+        for await (const part of result.stream) {
+          translateSubagentPart(part, ctx.emitToolEvent, parentToolCallId);
+        }
+      } catch (streamErr: any) {
+        log.warn('sub-agent stream interrupted', { agent: agent.name, err: streamErr?.message ?? streamErr });
+      }
+      finalResult = await result;
+    } else {
+      finalResult = await result;
+    }
 
     // streamText's result fields are ALL PromiseLike in AI SDK 7.x — awaiting
     // the stream result does NOT resolve them. Each must be awaited individually.
@@ -246,6 +366,7 @@ async function runMultiStepAgent(
       display: {
         kind: 'agent',
         agentName: agent.name,
+        ...(title ? { title } : {}),
         task,
         report,
         reasoning,
@@ -256,7 +377,101 @@ async function runMultiStepAgent(
   }
 }
 
-// ─── Shared helpers ────────────────────────────────────────────────────
+// ─── Sub-agent stream → nested tool events ──────────────────────────────
+
+/** Translate an AI SDK stream part from a sub-agent's tool loop into a nested
+ *  AgentEvent forwarded via ctx.emitToolEvent. Mirrors the orchestrator's
+ *  translatePart (orchestrator-sdk.ts:1124) but tags every event with
+ *  parentToolCallId so the renderer nests the tool block under the
+ *  dispatch_agent row. Only tool lifecycle parts are forwarded — text and
+ *  reasoning stay in the sub-agent's own context (the report carries them). */
+function translateSubagentPart(
+  part: Readonly<{ type: string }>,
+  emit: EmitToolEvent,
+  parentToolCallId: string,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p = part as any;
+  switch (part.type) {
+    case 'tool-input-start': {
+      const toolCallId: string = p.id;
+      const toolName = resolveToolName(p.toolName ?? 'unknown') as ToolName;
+      emit({
+        type: 'tool_call_start',
+        parentToolCallId,
+        toolCallId,
+        toolName,
+      });
+      return;
+    }
+    case 'tool-input-delta': {
+      const toolCallId: string = p.id;
+      const delta: string = p.delta ?? '';
+      if (!delta) return;
+      emit({
+        type: 'tool_call_delta',
+        parentToolCallId,
+        toolCallId,
+        delta,
+      });
+      return;
+    }
+    case 'tool-call': {
+      const toolCallId: string = p.toolCallId;
+      const toolName = resolveToolName(p.toolName ?? 'unknown') as ToolName;
+      const input = (p.input ?? {}) as Record<string, unknown>;
+      const meta = getToolMeta(toolName);
+      emit({
+        type: 'tool_call',
+        parentToolCallId,
+        toolCallId,
+        toolName,
+        arguments: input,
+        argPreview: formatArgPreview(toolName, input),
+        riskTier: meta?.riskTier ?? 'read_only',
+      });
+      emit({
+        type: 'tool_executing',
+        parentToolCallId,
+        toolCallId,
+      });
+      return;
+    }
+    case 'tool-result':
+    case 'tool-error': {
+      const toolCallId: string = p.toolCallId;
+      const toolName = resolveToolName(p.toolName ?? 'unknown') as ToolName;
+      const input = (p.input ?? {}) as Record<string, unknown>;
+      // The SDK's tool-result carries the Tide ToolResult shape on p.output;
+      // tool-error synthesizes a failed result.
+      const tr: ToolResult =
+        part.type === 'tool-result' && p.output && typeof p.output === 'object'
+          ? ({ ...(p.output as object) } as ToolResult)
+          : {
+              status: 'failed',
+              output: part.type === 'tool-error' ? (p.error?.message ?? 'Tool error') : '(no output)',
+            };
+      emit({
+        type: 'tool_result',
+        parentToolCallId,
+        toolCallId,
+        toolName,
+        status: tr.status === 'executed' ? 'executed' : tr.status,
+        output: tr.output,
+        display: tr.display,
+        durationMs: tr.durationMs,
+        meta: tr.meta,
+      });
+      return;
+    }
+    default:
+      // text-delta, reasoning-delta, finish-step, etc. stay in the sub-agent's
+      // own context — only tool lifecycle is surfaced to the parent UI.
+      return;
+  }
+}
+
+
 
 function buildResult(
   agent: AgentDef,
@@ -266,6 +481,7 @@ function buildResult(
   reasoning: unknown,
   start: number,
   label: string,
+  title?: string,
 ): ToolResult {
   const trimmed = (text ?? '').trim();
   if (!trimmed) {
@@ -290,6 +506,7 @@ function buildResult(
     display: {
       kind: 'agent',
       agentName: agent.name,
+      ...(title ? { title } : {}),
       task,
       report: trimmed,
       reasoning: reasoningText,

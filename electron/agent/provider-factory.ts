@@ -41,6 +41,63 @@ export function resolveModel(provider: Provider, model: Model): LanguageModel {
   }
 }
 
+/** Chunk-idle timeout for SSE response streams (ms). If no bytes arrive
+ *  within this window, abort the stream — catches silent provider stalls
+ *  (TCP half-open, hung connections, mid-stream truncation) that would
+ *  otherwise hang forever. Only applies to event-stream responses; tool
+ *  execution happens AFTER the response stream ends, so this never fires
+ *  during a long bash command or file write. Mirrors OpenCode's wrapSSE. */
+const SSE_CHUNK_IDLE_MS = 120_000; // 2 min
+
+/** Wrap an SSE response body so each chunk read is raced against an idle
+ *  timeout. On timeout, abort the reader with a clean error. This is the
+ *  per-chunk watchdog OpenCode uses — it protects against silent stalls on
+ *  the model's streaming response without interfering with tool execution. */
+function wrapSSE(resp: Response, ms: number): Response {
+  if (ms <= 0) return resp;
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('event-stream')) return resp;
+  if (!resp.body) return resp;
+
+  // Acquire the reader ONCE — a ReadableStream can only have one active
+  // reader. Calling getReader() inside pull() (which runs per-chunk) throws
+  // "ReadableStream is locked" on the second call.
+  const reader = resp.body.getReader();
+  let timedOut = false;
+
+  const wrapped = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (timedOut) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`SSE chunk idle timeout after ${ms}ms — provider stream stalled`));
+          }, ms);
+          reader.read().then(resolve, reject);
+        });
+        if (timer) clearTimeout(timer);
+        if (result.done) { controller.close(); return; }
+        controller.enqueue(result.value);
+      } catch (err) {
+        if (timer) clearTimeout(timer);
+        timedOut = true;
+        reader.cancel().catch(() => {});
+        controller.error(err);
+      }
+    },
+    cancel() {
+      reader.cancel().catch(() => {});
+    },
+  });
+
+  return new Response(wrapped, {
+    status: resp.status,
+    statusText: resp.statusText,
+    headers: resp.headers,
+  });
+}
+
 /** Wrap fetch with a one-line-per-request log (model, max_tokens, tool count — never prompt content or the key) plus the response status + first ~1KB of a clone, so empty-stream / error-JSON failure modes are diagnosable without a packet capture. Set TIDE_DEBUG_SDK=1 to dump bodies on success too. */
 function makeDiagnosticFetch(provider: Provider) {
   const verbose = !!process.env.TIDE_DEBUG_SDK;
@@ -154,7 +211,10 @@ function makeDiagnosticFetch(provider: Provider) {
     } catch (e: any) {
       log.debug('response (body sniff failed)', { status: resp.status, err: e?.message });
     }
-    return resp;
+    // Apply the SSE chunk-idle watchdog — wraps the response body so a stalled
+    // provider stream (no bytes for 120s) aborts cleanly instead of hanging.
+    // Only affects event-stream responses; tool execution is unaffected.
+    return wrapSSE(resp, SSE_CHUNK_IDLE_MS);
   };
 }
 
