@@ -8,7 +8,7 @@
   "main": "dist-electron/main.mjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node build/promptMarkdownUtils.mjs && tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",
