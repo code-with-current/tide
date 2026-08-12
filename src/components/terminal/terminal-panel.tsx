@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo, memo, useState } from 'react';
+import { useRef, useEffect, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
 import { init, Terminal, FitAddon } from 'ghostty-web';
 import type { ILink } from 'ghostty-web';
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
 import { Tip } from '@/components/ui/quick-tooltip';
 import { cn, isMac } from '@/lib/utils';
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
 
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
@@ -146,8 +147,6 @@ export const TerminalPanel = memo(function TerminalPanel() {
   const toggle = useUi((s) => s.toggleTerminal);
   const terminalTheme = useUi((s) => s.terminalTheme);
   const terminalFontSize = useUi((s) => s.terminalFontSize);
-  const height = useUi((s) => s.terminalHeight);
-  const setHeight = useUi((s) => s.setTerminalHeight);
   const allTerminals = useUi((s) => s.terminals);
   const terminals = allTerminals[sessionId] ?? [];
   const activeId = useUi((s) => s.activeTerminal[sessionId]);
@@ -168,30 +167,6 @@ export const TerminalPanel = memo(function TerminalPanel() {
   };
 
   const active = activeId && terminals.some((t) => t.id === activeId) ? activeId : terminals[0]?.id;
-
-  // Drag-to-resize from the top edge. We attach mousemove + mouseup to the window so the drag keeps working after the cursor leaves the handle (otherwise a fast upward drag detaches from the listener and stalls). Height is clamped to [120, 720] — keeps the terminal useful without swallowing the chat area on giant displays.
-  const startResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = useUi.getState().terminalHeight;
-    const onMove = (ev: MouseEvent) => {
-      // Terminal grows when the cursor moves UP (toward the chat), shrinks
-      // when it moves DOWN — so the delta is inverted vs. cursor Y.
-      const delta = startY - ev.clientY;
-      const next = Math.max(120, Math.min(720, startHeight + delta));
-      setHeight(next);
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-  }, [setHeight]);
 
   // ghostty-web loads its WASM (embedded base64 fallback) once before any
   // Terminal can be constructed. Gate terminal creation on this so the first
@@ -475,29 +450,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   }));
 
   return (
-    <div
-      className={cn(
-        'flex-shrink-0 flex flex-col overflow-hidden border-border border-t',
-        (!terminalOpen || terminals.length === 0) && 'hidden',
-      )}
-      style={{ height }}
-    >
-      {/* Drag handle — invisible until hover. Sits at the very top edge so
-          the user grabs the terminal by its top border to resize. */}
-      <div
-        role="separator"
-        aria-orientation="horizontal"
-        onMouseDown={startResize}
-        onDoubleClick={() => setHeight(220)}
-        className="group relative flex-shrink-0 h-1 cursor-row-resize bg-transparent hover:bg-accent/40 transition-colors"
-        title="Drag to resize · double-click to reset"
-      >
-        <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <span className="block w-1 h-1 rounded-full bg-muted-foreground/50" />
-          <span className="block w-1 h-1 rounded-full bg-muted-foreground/50" />
-          <span className="block w-1 h-1 rounded-full bg-muted-foreground/50" />
-        </span>
-      </div>
+    <div className="flex h-full w-full flex-col overflow-hidden border-t border-border">
       <ScrollTabs
         value={active ?? ''}
         onValueChange={(id) => setActiveTerminal(sessionId, id)}
@@ -546,82 +499,101 @@ export const TerminalPanel = memo(function TerminalPanel() {
           }
         >
           {items.map((item) => (
-            <ScrollTabsTrigger
-              key={item.id}
-              value={item.id}
-              className="px-2.5 h-[2rem] gap-1.5 text-xs"
-            >
-              {item.icon}
-              {editingId === item.id ? (
-                <input
-                  // Inline rename — autofocus + select on mount so the user
-                  autoFocus
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  size={Math.max(draftName.length, 6)}
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') commitRename(item.id);
-                    else if (e.key === 'Escape') setEditingId(null);
-                  }}
-                  onBlur={() => commitRename(item.id)}
-                  className="bg-input border border-input rounded px-1 text-xs outline-none focus:border-primary/60 max-w-[10rem]"
-                />
-              ) : (
-                <span
-                  className="truncate max-w-[10rem] cursor-text select-none"
-                  title={item.id === active ? 'Click to rename' : undefined}
-                  // Use onPointerDown (NOT onClick): the list's drag-scroll
-                  // does setPointerCapture at pointerdown and its click
-                  // suppressor (handleClickCapture) can swallow a plain click
-                  // before the span's onClick fires. pointerdown fires BEFORE
-                  // the list's handler (capture target is set there), and
-                  // stopPropagation keeps this from starting a drag-scroll.
-                  onPointerDown={(e) => {
-                    if (item.id !== active) return; // inactive tab → let Radix select
-                    e.stopPropagation();
-                  }}
-                  onClick={() => {
-                    // Single-click on the ACTIVE tab's title → inline rename.
-                    // Inactive tabs just select (Radix handles that via the
-                    // Trigger), so only act when it's already active.
-                    if (item.id === active) {
-                      setDraftName(item.label);
-                      setEditingId(item.id);
-                    }
-                  }}
+            <ContextMenu key={item.id}>
+              <ContextMenuTrigger>
+                <ScrollTabsTrigger
+                  value={item.id}
+                  className="px-2.5 h-[2rem] gap-1.5 text-xs"
                 >
-                  {item.label}
-                </span>
-              )}
-              {/* Close button — span (not <button>) to avoid nesting in
-                  Radix's TabsTrigger. Stop propagation so close ≠ select. */}
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTerminal(sessionId, item.id);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.stopPropagation();
+                  {item.icon}
+                  {editingId === item.id ? (
+                    <input
+                      autoFocus
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      size={Math.max(draftName.length, 6)}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') commitRename(item.id);
+                        else if (e.key === 'Escape') setEditingId(null);
+                      }}
+                      onBlur={() => commitRename(item.id)}
+                      className="bg-input border border-input rounded px-1 text-xs outline-none focus:border-primary/60 max-w-[10rem]"
+                    />
+                  ) : (
+                    <span
+                      className="truncate max-w-[10rem] cursor-text select-none"
+                      title={item.id === active ? 'Click to rename' : undefined}
+                      onPointerDown={(e) => {
+                        if (item.id !== active) return;
+                        e.stopPropagation();
+                      }}
+                      onClick={() => {
+                        if (item.id === active) {
+                          setDraftName(item.label);
+                          setEditingId(item.id);
+                        }
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                  )}
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTerminal(sessionId, item.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        closeTerminal(sessionId, item.id);
+                      }
+                    }}
+                    className={cn(
+                      'ml-0.5 inline-flex items-center justify-center rounded size-3.5 flex-none transition-colors',
+                      'text-muted-foreground/60 hover:bg-accent hover:text-foreground',
+                    )}
+                    title="Close terminal"
+                    aria-label={`Close ${item.label}`}
+                  >
+                    <X className="size-2.5 pointer-events-none" />
+                  </span>
+                </ScrollTabsTrigger>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onClick={() => closeTerminal(sessionId, item.id)} className="text-xs">
+                  Close
+                </ContextMenuItem>
+                <ContextMenuItem
+                  disabled={terminals.length <= 1}
+                  onSelect={(e) => {
                     e.preventDefault();
-                    closeTerminal(sessionId, item.id);
-                  }
-                }}
-                className={cn(
-                  'ml-0.5 inline-flex items-center justify-center rounded size-3.5 flex-none transition-colors',
-                  'text-muted-foreground/60 hover:bg-accent hover:text-foreground',
-                )}
-                title="Close terminal"
-                aria-label={`Close ${item.label}`}
-              >
-                <X className="size-2.5 pointer-events-none" />
-              </span>
-            </ScrollTabsTrigger>
+                    const all = [...(useUi.getState().terminals[sessionId] ?? [])];
+                    for (const t of all) {
+                      if (t.id !== item.id) useUi.getState().closeTerminal(sessionId, t.id);
+                    }
+                    useUi.getState().setActiveTerminal(sessionId, item.id);
+                  }}
+                  className="text-xs">
+                  Close Others
+                </ContextMenuItem>
+                <ContextMenuItem
+                  disabled={terminals.length <= 1}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    const all = [...(useUi.getState().terminals[sessionId] ?? [])];
+                    for (const t of all) useUi.getState().closeTerminal(sessionId, t.id);
+                  }}
+                  className="text-xs">
+                  Close All
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </ScrollTabsList>
       </ScrollTabs>

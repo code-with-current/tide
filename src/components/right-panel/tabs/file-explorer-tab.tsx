@@ -91,12 +91,12 @@ export function FileExplorerTab() {
     return filterNodes(data);
   }, [data, query]);
 
-  const fileCount = useMemo(() => {
-    if (!data) return 0;
-    const count = (nodes: FileNode[]): number =>
-      nodes.reduce((sum, n) => sum + (n.kind === 'dir' ? count(n.children ?? []) : 1), 0);
-    return count(data);
-  }, [data]);
+  // const fileCount = useMemo(() => {
+  //   if (!data) return 0;
+  //   const count = (nodes: FileNode[]): number =>
+  //     nodes.reduce((sum, n) => sum + (n.kind === 'dir' ? count(n.children ?? []) : 1), 0);
+  //   return count(data);
+  // }, [data]);
 
   const isFiltering = !!query.trim();
 
@@ -104,12 +104,24 @@ export function FileExplorerTab() {
     <div className="flex flex-col h-full min-w-0 overflow-hidden">
       {/* Search / filter bar — matches the VSCode section header style */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border flex-shrink-0">
-        <ChevronRight className="size-3 text-muted-foreground rotate-90" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
+        {/*<span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
         {fileCount > 0 && (
           <span className="text-[10px] text-muted-foreground font-mono">{fileCount}</span>
         )}
-        <div className="flex-1" />
+        */}
+        <div className="flex-1">
+
+        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-input">
+          <Filter className="size-3 text-muted-foreground flex-shrink-0" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter…"
+            className="bg-transparent w-full border-0 outline-none text-[0.75rem] placeholder:text-muted-foreground text-foreground"
+          />
+        </div>
+        </div>
         <button
           type="button"
           onClick={() => refetch()}
@@ -119,16 +131,6 @@ export function FileExplorerTab() {
         >
           <RefreshCw className={cn('size-3', isFetching && 'animate-spin')} />
         </button>
-        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-secondary">
-          <Filter className="size-3 text-muted-foreground flex-shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter…"
-            className="bg-transparent border-0 outline-none text-[11px] w-24 placeholder:text-muted-foreground text-foreground"
-          />
-        </div>
       </div>
 
       {/* Tree */}

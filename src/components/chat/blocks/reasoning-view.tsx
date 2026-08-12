@@ -12,7 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
-import { derivePhases, phaseChips, type Phase, type PhaseLabel } from './reasoning-phases';
+import { derivePhases, type Phase, type PhaseLabel } from './reasoning-phases';
 
 const PHASE_ICON: Record<PhaseLabel, typeof Brain> = {
   Planning: Compass,
@@ -95,7 +95,7 @@ function FlatReasoning({ text, tokens, ms, streaming }: { text: string; tokens?:
 /** Phase-grouped view: outer card with summary chips, each phase independently collapsible. */
 function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens?: number; ms?: number; streaming: boolean }) {
   const phases = useMemo(() => derivePhases(text), [text]);
-  const chips = useMemo(() => phaseChips(phases), [phases]);
+  // const chips = useMemo(() => phaseChips(phases), [phases]);
 
   const [outerOpen, setOuterOpen] = useState(streaming);
   const [openSet, setOpenSet] = useState<Set<string>>(() => new Set());
@@ -133,7 +133,8 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
         <ChevronRight className={cn('size-3 transition-transform', outerOpen && 'rotate-90')} />
         <Brain className="size-[0.8rem]" />
         <span>Thinking</span>
-        {chips.length > 0 && (
+        {/* Too much information */}
+        {/* {chips.length > 0 && (
           <span className="flex items-center gap-1.5 ml-0.5">
             {chips.map((c) => (
               <span key={c} className={cn('flex items-center gap-0.5', PHASE_COLOR[c])}>
@@ -142,18 +143,18 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
               </span>
             ))}
           </span>
-        )}
+        )}*/}
         {ms != null && <span className="text-muted-foreground/60">· {(ms / 1000).toFixed(1)}s</span>}
         {tokens != null && <span className="text-muted-foreground/60">· {tokens.toLocaleString()} tok</span>}
       </span>
 
       {outerOpen && (
-        <div className="mt-1.5 ml-5 border-l border-input animate-slide-up">
+        <div className="mt-1.5 ml-5 space-y-0.5 pt-3 border-input animate-slide-up text-card-foreground/80 bg-card rounded-lg">
           {phases.map((p, i) => {
             const Icon = PHASE_ICON[p.label];
             const open = isPhaseOpen(p);
             return (
-              <div key={p.id} className={cn(i > 0 && 'mt-0.5')}>
+              <div key={p.id} className={cn(i > 0 && 'mt-1')}>
                 <span
                   role="button"
                   onClick={() => togglePhase(p.id)}
@@ -165,7 +166,7 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
                   <span className="text-muted-foreground/50">· ~{p.estTokens.toLocaleString()} tok</span>
                 </span>
                 {open && (
-                  <pre className="text-[0.82rem] px-3 pb-2 pl-7 text-card-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll">
+                  <pre className="text-[0.82rem] px-3 pb-2 pl-7 text-card-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px] [&_table]:text-[11px] [&_th]:text-[10px] [&_td]:text-[11px]">
                     {p.text}
                   </pre>
                 )}
@@ -176,7 +177,7 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
             variant="outline"
             size="xs"
             onClick={() => setOuterOpen(false)}
-            className="w-full rounded-none uppercase tracking-wider gap-2"
+            className="w-full rounded-t-none rounded-b-lg uppercase tracking-wider mt-3 gap-2"
           >
             <ChevronUp className="size-3" />
             Collapse

@@ -160,10 +160,7 @@ export function WorkspacesPanel() {
   };
 
   return (
-    <aside
-      className="flex flex-col h-full overflow-hidden flex-shrink-0 p-2"
-      style={{ width: 220 }}
-    >
+    <aside className="flex flex-col h-full w-full overflow-hidden p-2">
       {/* Top spacer — clears the native macOS traffic lights, which render at
           the top-LEFT (over this sidebar) at (12, 12). On Windows/Linux the
           caption buttons sit at the top-RIGHT, so this sidebar needs no

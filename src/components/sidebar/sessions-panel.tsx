@@ -107,7 +107,7 @@ export function SessionsPanel() {
   const buckets = !filtered && sessions ? bucketByRecency(sessions) : [];
 
   return (
-    <aside className="bg-background flex flex-col h-full overflow-hidden">
+    <aside className="bg-background flex flex-col h-full w-full overflow-hidden">
       {/* Workspace context removed — the ChatSubBar now shows workspace name,
           git branch, and file info. This panel is just the sessions list. */}
 

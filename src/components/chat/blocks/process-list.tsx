@@ -82,13 +82,13 @@ export function ProcessList({
         )}
       </span>
       {open && (
-        <div className="mt-1.5 ml-5 border-l border-input animate-slide-up">
+        <div className="mt-1.5 ml-5 border-l border-input animate-slide-up rounded-lg">
           {/* Emission-order view — always. Same narrative during streaming
               and after completion: narration paragraphs interleave with
               tool rows in the exact order the model emitted them. The
               summary line above shows the category counts for at-a-glance
               indexing; the expanded view shows the story. */}
-          <div className="space-y-0.5 pl-3 py-3 text-card-foreground/80 bg-card">
+          <div className="space-y-0.5 pl-3 py-3 text-card-foreground/80 bg-card rounded-t-lg">
             {items.map((item, i) => {
               if (item.kind === 'text') {
                 if (!item.block.text.trim()) return null;
@@ -129,7 +129,7 @@ export function ProcessList({
             variant="outline"
             size="xs"
             onClick={() => setOpen(false)}
-            className="w-full rounded-none uppercase tracking-wider gap-2"
+            className="w-full rounded-b-lg rounded-t-none uppercase tracking-wider gap-2"
           >
             <ChevronUp className='size-3'/>
             Collapse

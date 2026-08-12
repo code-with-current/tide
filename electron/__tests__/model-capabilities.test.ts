@@ -30,11 +30,12 @@ describe('model-capabilities delegation', () => {
   // Reset to the no-catalog state before each test so ordering doesn't leak.
   beforeEach(() => setCatalog(null));
 
-  it('uses heuristic when no catalog is set', () => {
-    // claude-sonnet is a known reasoning prefix in the fallback table.
-    expect(supportsThinking('claude-sonnet-4-5')).toBe(true);
+  it('returns defaults when no catalog is set (no heuristic prefix tables)', () => {
+    // Heuristics were removed — without a catalog, reasoning defaults false
+    // and context window is undefined.
+    expect(supportsThinking('claude-sonnet-4-5')).toBe(false);
     expect(supportsThinking('some-unknown-model')).toBe(false);
-    expect(contextWindowSize('claude-opus-4-1')).toBe(1_000_000);
+    expect(contextWindowSize('claude-opus-4-1')).toBeUndefined();
     expect(contextWindowSize('some-unknown-model')).toBeUndefined();
   });
 
@@ -52,12 +53,12 @@ describe('model-capabilities delegation', () => {
     expect(contextWindowSize('future-model-x')).toBe(500000);
   });
 
-  it('falls back to heuristic when catalog is set but model is not in it', () => {
+  it('returns defaults for model not in catalog (no heuristic fallback)', () => {
     const catalog: CatalogMap = new Map([['anthropic/claude-sonnet-4-5', entry('anthropic/claude-sonnet-4-5')]]);
     setCatalog(catalog);
-    // glm-5 is not in this catalog, but it IS a heuristic reasoning prefix.
-    expect(supportsThinking('glm-5-air')).toBe(true);
-    expect(contextWindowSize('glm-5-air')).toBe(200000);
+    // glm-5 is not in this catalog, and there are no heuristic prefixes.
+    expect(supportsThinking('glm-5-air')).toBe(false);
+    expect(contextWindowSize('glm-5-air')).toBeUndefined();
   });
 
   it('does not return catalog conservative-defaults for an unmatched model', () => {

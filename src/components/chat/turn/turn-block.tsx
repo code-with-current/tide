@@ -100,7 +100,7 @@ export const TurnBlock = memo(function TurnBlock({
 
   return (
     <PermissionSurfaceContext.Provider value={permissionSurface}>
-      <div className="flex flex-col gap-0 mb-15">
+      <div className="flex flex-col gap-0 mb-6">
         <BlockList
           blocks={message.blocks}
           streaming={streaming}

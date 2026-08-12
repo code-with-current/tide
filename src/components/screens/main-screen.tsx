@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AlertCircle, RotateCw } from "lucide-react";
-import { Panel, Group, Separator } from "react-resizable-panels";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 import { WorkspacesPanel } from "@/components/sidebar/workspaces-panel";
 import { SessionsPanel } from "@/components/sidebar/sessions-panel";
 import { IntegratedSidebar } from "@/components/sidebar/integrated-sidebar";
@@ -16,6 +17,8 @@ import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { TerminalPanel } from "@/components/terminal/terminal-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
+import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
 import { useUi } from "@/lib/stores/ui";
 import { useModelOption, useWorkspaces, useSessions } from "@/lib/queries";
@@ -30,62 +33,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createLogger } from "@/lib/logger";
 import { toast } from "@/lib/toast";
 import { cn, isMac } from "@/lib/utils";
+import { Button } from "../ui/button";
 
 const log = createLogger("main-screen");
-
-function SidebarResizeHandle() {
-  const setSidebarWidth = useUi((s) => s.setSidebarWidth);
-  const dragging = useRef(false);
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      const w = Math.max(300, Math.min(500, e.clientX));
-      setSidebarWidth(w);
-    };
-    const onUp = () => { dragging.current = false; document.body.style.cursor = ''; };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [setSidebarWidth]);
-
-  return (
-    <div
-      onPointerDown={(e) => { e.preventDefault(); dragging.current = true; document.body.style.cursor = 'col-resize'; }}
-      className="group relative flex-shrink-0 w-px bg-transparent hover:bg-accent/60 cursor-col-resize transition-colors"
-    >
-      <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="block w-1 h-1 rounded-full bg-muted-foreground/40 group-hover:bg-accent" />
-        <span className="block w-1 h-1 rounded-full bg-muted-foreground/40 group-hover:bg-accent" />
-        <span className="block w-1 h-1 rounded-full bg-muted-foreground/40 group-hover:bg-accent" />
-      </span>
-    </div>
-  );
-}
-
-function ResizeHandle() {
-  return (
-    <Separator
-      className={
-        "group relative flex-shrink-0 w-px bg-input hover:bg-accent/60 " +
-        "data-[separator-state=drag]:bg-card transition-colors"
-      }
-    >
-      <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="block w-1 h-1 rounded-full bg-muted-foreground/40 group-hover:bg-accent" />
-        <span className="block w-1 h-1 rounded-full bg-muted-foreground/40 group-hover:bg-accent" />
-        <span className="block w-1 h-1 rounded-full bg-muted-foreground/40 group-hover:bg-accent" />
-      </span>
-    </Separator>
-  );
-}
 
 export function MainScreen() {
   const leftPanelOpen = useUi((s) => s.leftPanelOpen);
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
   const sidebarMode = useUi((s) => s.sidebarMode);
+  const sidebarWidth = useUi((s) => s.sidebarWidth);
+  const setSidebarWidth = useUi((s) => s.setSidebarWidth);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   const fileViewerOpen = useUi((s) => s.fileViewerOpen);
+  const commitDetail = useUi((s) => s.commitDetail);
+  const setCommitDetail = useUi((s) => s.setCommitDetail);
+  // Only one overlay Sheet at a time — if both are open the later-rendered
+  // Sheet's overlay (z-50 fixed inset-0) blocks clicks on the other's content.
+  useEffect(() => { if (fileViewerOpen && commitDetail) setCommitDetail(null); }, [fileViewerOpen]);
+  useEffect(() => { if (commitDetail && fileViewerOpen) useUi.setState({ fileViewerOpen: false }); }, [commitDetail]);
   // Whether this screen is the active top-level view. App.tsx keeps MainScreen
   // always-mounted (so TerminalPanel + xterm state survive Settings visits);
   // this flag lets effects no-op while hidden to avoid wasted work (auto-
@@ -95,31 +60,19 @@ export function MainScreen() {
   const mainView = useUi((s) => s.mainView);
   // The right panel is hidden on the new-session screen — it shows session-specific data (Inspector, files, terminal) that doesn't exist before the first message creates a session. Derived locally (NOT written to the store) so the user's rightPanelOpen preference is preserved when they return to chat.
   const showRightPanel = rightPanelOpen && mainView !== "new";
-  const [fileViewerWidth, setFileViewerWidth] = useState(50); // percent
-  const cardRef = useRef<HTMLDivElement>(null);
+  const terminalOpen = useUi((s) => s.terminalOpen);
+  const terminalHeight = useUi((s) => s.terminalHeight);
+  const setTerminalHeight = useUi((s) => s.setTerminalHeight);
+  // Imperative ref on the terminal ResizablePanel — collapse/expand it from
+  // the terminal toggle (which still just flips the persisted `terminalOpen`).
+  const terminalPanelRef = useRef<PanelImperativeHandle>(null);
+  useEffect(() => {
+    const ref = terminalPanelRef.current;
+    if (!ref) return;
+    if (terminalOpen) ref.expand();
+    else ref.collapse();
+  }, [terminalOpen]);
 
-  // Drag-to-resize the File Viewer overlay. Tracks pointer from the left
-  // edge handle and adjusts the panel's width as a percentage of the card.
-  const handleResizeStart = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    const card = cardRef.current;
-    if (!card) return;
-    const cardRect = card.getBoundingClientRect();
-    const onMove = (ev: PointerEvent) => {
-      const pct = ((cardRect.right - ev.clientX) / cardRect.width) * 100;
-      setFileViewerWidth(Math.max(25, Math.min(70, pct)));
-    };
-    const onUp = () => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-  }, []);
   const activeSessionId = useUi((s) => s.activeSessionId);
   const selectedModelId = useUi((s) => s.selectedModelId);
   const selectedProviderId = useUi((s) => s.selectedProviderId);
@@ -314,7 +267,7 @@ export function MainScreen() {
   ]);
 
   // When a `git` tool completes in the active session, refetch git status +
-  // branch so the Source-Control panel and the Inspector's Git section reflect
+  // branch so the Git Panel and the Inspector's Git section reflect
   // changes the agent made (new branch, checkout, commit, etc.) immediately.
   const seenGitToolsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -794,60 +747,72 @@ export function MainScreen() {
   );
 
   return (
-    <div className="bg-sidebar flex-1 flex min-h-0">
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 bg-sidebar">
       {/* Sidebar — integrated (resizable) or dual (fixed workspace panel).
           Integrated panel uses leftPanelOpen (workspace toggle), not
           sessionsPanelOpen — it replaces the workspace panel, not the sessions panel. */}
       {leftPanelOpen && sidebarMode === 'integrated' ? (
         <>
-          <IntegratedSidebar />
-          <SidebarResizeHandle />
+          <ResizablePanel
+            id="sidebar"
+            defaultSize={sidebarWidth}
+            minSize={300}
+            maxSize={300}
+            className="min-h-0"
+            onResize={(size) => setSidebarWidth(size.inPixels)}
+          >
+            <IntegratedSidebar />
+          </ResizablePanel>
+          <ResizableHandle className="!bg-transparent" />
         </>
       ) : leftPanelOpen && sidebarMode === 'dual' ? (
-        <WorkspacesPanel />
+        <>
+          <ResizablePanel id="workspaces" defaultSize="20" minSize="15" maxSize="30" className="min-h-0">
+            <WorkspacesPanel />
+          </ResizablePanel>
+          <ResizableHandle className="!bg-transparent" />
+        </>
       ) : null}
 
       {/* Content card — top bar + sessions + chat + right panel grouped
           into one floating surface. Opaque bg, rounded corners, margin
           from the window edges, shadow to lift it off the wallpaper.
           The transparent window shows the desktop around this card. */}
-      <div
-        ref={cardRef}
-        className={cn("flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden rounded-xl bg-card border relative",
-          isMac ? "my-2 mr-2" : ""
-        )}
-      >
+      <ResizablePanel id="card" minSize={600} className={cn("min-h-0", isMac && "py-0 pr-0")}>
+        <div
+          className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden bg-background border relative"
+        >
         <WindowTopBar />
-        <Group
+        <ResizablePanelGroup
           orientation="horizontal"
-          className="flex-1 min-h-0 overflow-hidden"
+          className="flex-1 min-h-0"
         >
           {/* Dual-mode sessions panel */}
           {sessionsPanelOpen && sidebarMode === 'dual' && !workspaceMissing && (
-            <Panel
+            <ResizablePanel
               id="sessions"
               defaultSize="15"
               minSize="12"
               maxSize="25"
-              className="h-full"
+              className="min-h-0"
             >
               <SessionsPanel />
-            </Panel>
+            </ResizablePanel>
           )}
-          {sessionsPanelOpen && sidebarMode === 'dual' && !workspaceMissing && <ResizeHandle />}
+          {sessionsPanelOpen && sidebarMode === 'dual' && !workspaceMissing && <ResizableHandle />}
 
-          <Panel
+          <ResizablePanel
             id="chat"
             minSize="30"
             className="h-full min-h-0"
-            // The library sets inline `overflow:auto` on the inner wrapper;
-            // override via the style prop (spread *after* the default) so the
-            // chat column never scrolls as a whole — children own their scroll.
-            style={{ overflow: "hidden", height: "100%" }}
           >
             <main className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden">
-              {/* Body column — holds chat scroll + optional terminal + composer. */}
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              {/* Body — vertical ResizablePanelGroup: chat body + collapsible
+                  terminal. The terminal panel stays mounted when collapsed so
+                  xterm/PTY state survives hide/show + chat↔new-session switches. */}
+              <ResizablePanelGroup orientation="vertical" className="flex-1 min-h-0">
+                <ResizablePanel id="chat-body" minSize="40" className="min-h-0">
+                  <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
                 {!activeWorkspaceId ? (
                   <NoWorkspaceState />
                 ) : workspaceMissing && activeWorkspace ? (
@@ -890,21 +855,33 @@ export function MainScreen() {
                         loadingFallback={<LoadingRows count={4} className="px-1" rowClassName="h-12" />}
                         retryActive={!!retry}
                         errorBlock={error && !isStreaming ? (
-                          <div className="flex flex-col gap-2 px-3.5 py-3 rounded-lg border border-destructive/20 bg-destructive/[0.06]">
+                          <div className="flex flex-col gap-2 px-3.5 py-3 rounded-lg border border-primary/20 bg-primary/[0.06] max-w-[75%]">
                             <div className="flex items-start gap-2.5">
                               <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
                               <div className="flex-1 min-w-0">
                                 <div className="text-[12px] font-medium text-destructive">
-                                  Turn failed
+                                  Turn Failed
                                 </div>
                                 <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
                                   {error}
                                 </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                className="text-[11px] font-medium text-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary/70 hover:bg-secondary"
+                            <div className="flex items-center justify-end gap-2">
+
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                onClick={() => {
+                                  if (activeSessionId) {
+                                    useUi.getState().patchStream(activeSessionId, { error: null });
+                                  }
+                                }}
+                              >
+                                Dismiss
+                              </Button>
+                              <Button
+                                size="xs"
                                 onClick={() => {
                                   if (!activeSessionId || !modelOption) return;
                                   setChatHistory((h) => {
@@ -934,17 +911,7 @@ export function MainScreen() {
                               >
                                 <RotateCw className="size-3" />
                                 Retry
-                              </button>
-                              <button
-                                className="text-[11px] font-medium text-muted-foreground/60 hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-secondary/50"
-                                onClick={() => {
-                                  if (activeSessionId) {
-                                    useUi.getState().patchStream(activeSessionId, { error: null });
-                                  }
-                                }}
-                              >
-                                Dismiss
-                              </button>
+                              </Button>
                             </div>
                           </div>
                         ) : undefined}
@@ -1003,27 +970,36 @@ export function MainScreen() {
                     isStreaming={isStreaming}
                   />
                 )}
-                {/* Terminal — ALWAYS MOUNTED, outside the mainView ternary.
-                    Previously this sat inside the `mainView === 'chat'` branch,
-                    so visiting the new-session screen (mainView === 'new')
-                    UNMOUNTED it — the registry cleanup disposed every ghostty
-                    instance, and switching back rebuilt blank canvases against
-                    stale PTY state. Hoisting it here keeps the instances alive
-                    across chat ↔ new-session transitions; TerminalPanel hides
-                    itself via display:none when !terminalOpen or when the
-                    active session has no terminals, so it never leaks into the
-                    new-session view. */}
-                <TerminalPanel />
-              </div>
-            </main>
-          </Panel>
+                  </div>
+                </ResizablePanel>
 
-          {showRightPanel && !workspaceMissing && <ResizeHandle />}
+                {/* Terminal — collapsible panel (stays mounted → PTY preserved).
+                    toggleTerminal flips the persisted terminalOpen; the effect
+                    near the top collapse/expand()s this panel via panelRef. */}
+                <ResizableHandle />
+                <ResizablePanel
+                  id="terminal"
+                  collapsible
+                  collapsedSize={0}
+                  defaultSize={terminalHeight}
+                  minSize={120}
+                  maxSize={720}
+                  panelRef={terminalPanelRef}
+                  onResize={(size) => setTerminalHeight(size.inPixels)}
+                  className="min-h-0"
+                >
+                  <TerminalPanel />
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </main>
+          </ResizablePanel>
+
+          {showRightPanel && !workspaceMissing && <ResizableHandle />}
           {showRightPanel && !workspaceMissing && (
-            <Panel
+            <ResizablePanel
               id="right"
-              defaultSize="22"
-              minSize="20"
+              defaultSize="25"
+              minSize="25"
               maxSize="35"
               className="h-full relative"
             >
@@ -1032,35 +1008,25 @@ export function MainScreen() {
                 it inherits the panel's width. Sits above the panel content,
                 pinned to the bottom, only visible when there are pending prompts. */}
               <FloatingPermissionCard sessionId={activeSessionId} />
-            </Panel>
+            </ResizablePanel>
           )}
-        </Group>
+        </ResizablePanelGroup>
 
-        {/* File viewer — floating overlay (z-index: 2). Starts BELOW the
-            window-top-bar (top-10) so the toggle icons stay clickable.
-            Left edge is a drag handle to resize the panel width. */}
-        {fileViewerOpen && (
-          <div
-            className="absolute top-10 right-0 bottom-0 z-[2] shadow-2xl bg-card flex"
-            style={{ width: `${fileViewerWidth}%`, minWidth: 320 }}
-          >
-            {/* Drag handle */}
-            <div
-              onPointerDown={handleResizeStart}
-              className="w-1 flex-shrink-0 cursor-col-resize bg-border hover:bg-primary/50 transition-colors flex items-center justify-center group"
-            >
-              <div className="absolute flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="block w-1 h-1 rounded-full bg-muted-foreground/40" />
-                <span className="block w-1 h-1 rounded-full bg-muted-foreground/40" />
-                <span className="block w-1 h-1 rounded-full bg-muted-foreground/40" />
-              </div>
-            </div>
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <FileViewerPanel />
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+        {/* File viewer — Sheet positioned below the topbar (top:40px). */}
+        <Sheet open={fileViewerOpen} onOpenChange={(o) => { if (!o) useUi.setState({ fileViewerOpen: false }); }}>
+          <SheetContent side="right" showCloseButton={false} className="w-[40%] sm:max-w-[70%] gap-0 p-0" style={{ top: '40px', height: 'auto' }}>
+            <FileViewerPanel />
+          </SheetContent>
+        </Sheet>
+
+        {/* Commit details — Sheet positioned below the topbar. */}
+        <Sheet open={!!commitDetail} onOpenChange={(o) => { if (!o) setCommitDetail(null); }}>
+          <SheetContent side="right" showCloseButton={false} className="w-[40%] sm:max-w-[70%] gap-0 p-0" style={{ top: '40px', height: 'auto' }}>
+            {commitDetail && <CommitDetailsPanel commit={commitDetail} />}
+          </SheetContent>
+        </Sheet>
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

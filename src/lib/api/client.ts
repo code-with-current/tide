@@ -539,7 +539,7 @@ export async function deleteWorkspace(id: string): Promise<{ ok: boolean; error?
 }
 
 // ============================================================
-// Git source control
+// Git
 // ============================================================
 
 export interface GitFileChange {
@@ -552,6 +552,42 @@ export interface GitFileChange {
 
 export async function gitStatus(workspaceId: string, sessionId?: string): Promise<GitFileChange[]> {
   if (ipc) return ipc.gitStatus(workspaceId, sessionId);
+  return [];
+}
+
+export interface GitCommit {
+  sha: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export async function gitLog(workspaceId: string, sessionId?: string, limit?: number): Promise<GitCommit[]> {
+  if (ipc) return ipc.gitLog(workspaceId, sessionId, limit);
+  return [];
+}
+
+export async function gitCommitFiles(workspaceId: string, sha: string, sessionId?: string): Promise<GitFileChange[]> {
+  if (ipc) return ipc.gitCommitFiles(workspaceId, sha, sessionId);
+  return [];
+}
+
+export async function gitCommitFileDiff(workspaceId: string, sha: string, filePath: string, sessionId?: string): Promise<DiffHunk[]> {
+  if (ipc) return ipc.gitCommitFileDiff(workspaceId, sha, filePath, sessionId);
+  return [];
+}
+
+export type GitBulkOp = 'stage-all' | 'unstage-all' | 'restore-all' | 'stash' | 'stash-pop';
+
+export async function gitBulk(workspaceId: string, op: GitBulkOp, sessionId?: string, opts?: { message?: string }): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitBulk(workspaceId, op, sessionId, opts);
+  return { ok: false };
+}
+
+export interface GitStash { ref: string; message: string; }
+
+export async function gitStashList(workspaceId: string, sessionId?: string): Promise<GitStash[]> {
+  if (ipc) return ipc.gitStashList(workspaceId, sessionId);
   return [];
 }
 export async function gitBranchInfo(workspaceId: string, sessionId?: string): Promise<{ branch: string | null; headCommit: string | null }> {

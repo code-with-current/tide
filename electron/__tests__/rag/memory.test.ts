@@ -10,6 +10,10 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => userDataDir.current) },
 }));
 
+vi.mock('../../appPaths.js', () => ({
+  appDataDir: () => userDataDir.current,
+}));
+
 const { listWorkspacesMock, listRagEnabledWorkspacesMock } = vi.hoisted(() => ({
   listWorkspacesMock: vi.fn(() => [] as Array<{ id: string; ragConfig?: unknown }>),
   listRagEnabledWorkspacesMock: vi.fn((): string[] => []),

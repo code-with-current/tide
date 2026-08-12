@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile } from './git.js';
+import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList } from './git.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
@@ -1161,9 +1161,9 @@ export function registerIpcHandlers() {
     return isProcessAlive(pid);
   });
 
-  // ── Git source control ─────────────────────────────────────────
+  // ── Git ─────────────────────────────────────────
   // Resolve the git cwd for an operation: prefer the active session's
-  // worktree path (so Source Control shows worktree changes when one is
+  // worktree path (so the Git Panel shows worktree changes when one is
   // isolated), fall back to the workspace's main checkout.
   const resolveGitCwd = async (workspaceId: string, sessionId?: string): Promise<string | undefined> => {
     if (sessionId) {
@@ -1179,6 +1179,51 @@ export function registerIpcHandlers() {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return [];
     try { return await getGitStatus(root); } catch { return []; }
+  });
+
+  // Commit history (newest first) for the Git Panel → History tab.
+  ipcMain.handle('tide:gitLog', async (_e, workspaceId: string, sessionId?: string, limit?: number) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await getGitLog(root, limit); } catch { return []; }
+  });
+
+  // Files changed in a commit (Git Panel → commit details side panel).
+  ipcMain.handle('tide:gitCommitFiles', async (_e, workspaceId: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await getCommitFiles(root, sha); } catch { return []; }
+  });
+  // Diff of one file at a commit (clicking a file in the commit details panel).
+  ipcMain.handle('tide:gitCommitFileDiff', async (_e, workspaceId: string, sha: string, filePath: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await getCommitFileDiff(root, sha, filePath); } catch { return []; }
+  });
+
+  // Bulk working-tree ops for the Git Panel "Stage All" group. One channel,
+  // op-dispatched, so we don't add six near-identical IPC handlers.
+  handle('tide:gitBulk', async (_e, workspaceId: string, op: string, sessionId?: string, opts?: { message?: string }) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    try {
+      switch (op) {
+        case 'stage-all': await gitStageAll(root); break;
+        case 'unstage-all': await gitUnstageAll(root); break;
+        case 'restore-all': await gitRestoreAll(root); break;
+        case 'stash': await gitStash(root, opts?.message); break;
+        case 'stash-pop': await gitStashPop(root); break;
+        default: return { ok: false, error: `unknown op: ${op}` };
+      }
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
+  });
+
+  // Stash list — drives the "Stash Pop" enabled state and the "View Stash" dialog.
+  ipcMain.handle('tide:gitStashList', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await gitStashList(root); } catch { return []; }
   });
 
   // Live branch + HEAD for the session's working directory (worktree-aware).

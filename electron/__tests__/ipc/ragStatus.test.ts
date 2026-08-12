@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   listWorkspacesMock, listRagEnabledWorkspacesMock, addRagEnabledWorkspaceMock,
   removeRagEnabledWorkspaceMock, isRagCloudConfiguredMock, localProbeMock,
-  LocalMock, localModelExistsMock,
+  LocalMock, localModelExistsMock, downloadModelMock,
 } = vi.hoisted(() => {
   const listWorkspacesMock = vi.fn(() => [] as Array<{ id: string; ragConfig?: unknown }>);
   const listRagEnabledWorkspacesMock = vi.fn((): string[] => []);
@@ -13,7 +13,8 @@ const {
   const localProbeMock = { embed: vi.fn() };
   const LocalMock = vi.fn(function () { return localProbeMock; });
   const localModelExistsMock = vi.fn((): boolean => false);
-  return { listWorkspacesMock, listRagEnabledWorkspacesMock, addRagEnabledWorkspaceMock, removeRagEnabledWorkspaceMock, isRagCloudConfiguredMock, localProbeMock, LocalMock, localModelExistsMock };
+  const downloadModelMock = vi.fn(async () => {});
+  return { listWorkspacesMock, listRagEnabledWorkspacesMock, addRagEnabledWorkspaceMock, removeRagEnabledWorkspaceMock, isRagCloudConfiguredMock, localProbeMock, LocalMock, localModelExistsMock, downloadModelMock };
 });
 
 vi.mock('electron', () => ({
@@ -29,6 +30,7 @@ vi.mock('../../store.js', () => ({
 }));
 vi.mock('../../agent/system-model.js', () => ({ isRagCloudConfigured: isRagCloudConfiguredMock }));
 vi.mock('../../rag/local-onnx-embedder.js', () => ({ LocalOnnxEmbedder: LocalMock, localModelExists: localModelExistsMock }));
+vi.mock('../../rag/model-downloader.js', () => ({ downloadModel: downloadModelMock }));
 
 import { getRagStatus, enableRagWorkspace, disableRagWorkspace, downloadRagModel } from '../../ipc/rag.js';
 import type { RagConfig } from '../../../src/types';
@@ -84,14 +86,14 @@ describe('getRagStatus', () => {
 
 describe('enableRagWorkspace', () => {
   beforeEach(() => {
-    localProbeMock.embed.mockReset();
+    downloadModelMock.mockReset();
     localModelExistsMock.mockReset();
     addRagEnabledWorkspaceMock.mockReset();
   });
 
   it('downloads then adds when model not on disk', async () => {
     localModelExistsMock.mockReturnValue(false);
-    localProbeMock.embed.mockResolvedValueOnce([[0.1]]);
+    downloadModelMock.mockResolvedValueOnce(undefined);
     const r = await enableRagWorkspace('ws-a');
     expect(r).toEqual({ ok: true });
     expect(addRagEnabledWorkspaceMock).toHaveBeenCalledWith('ws-a');
@@ -101,12 +103,12 @@ describe('enableRagWorkspace', () => {
     localModelExistsMock.mockReturnValue(true);
     const r = await enableRagWorkspace('ws-b');
     expect(r).toEqual({ ok: true });
-    expect(localProbeMock.embed).not.toHaveBeenCalled();
+    expect(downloadModelMock).not.toHaveBeenCalled();
   });
 
   it('returns error on failed download, does NOT add workspace', async () => {
     localModelExistsMock.mockReturnValue(false);
-    localProbeMock.embed.mockRejectedValueOnce(new Error('network'));
+    downloadModelMock.mockRejectedValueOnce(new Error('network'));
     const r = await enableRagWorkspace('ws-c');
     expect(r).toEqual({ ok: false, error: 'network' });
     expect(addRagEnabledWorkspaceMock).not.toHaveBeenCalled();
@@ -123,25 +125,25 @@ describe('disableRagWorkspace', () => {
 
 describe('downloadRagModel', () => {
   beforeEach(() => {
-    localProbeMock.embed.mockReset();
+    downloadModelMock.mockReset();
     localModelExistsMock.mockReset();
   });
 
   it('is no-op when model present', async () => {
     localModelExistsMock.mockReturnValue(true);
     expect(await downloadRagModel()).toEqual({ ok: true });
-    expect(localProbeMock.embed).not.toHaveBeenCalled();
+    expect(downloadModelMock).not.toHaveBeenCalled();
   });
 
-  it('embeds when model absent', async () => {
+  it('downloads when model absent', async () => {
     localModelExistsMock.mockReturnValue(false);
-    localProbeMock.embed.mockResolvedValueOnce([[0.1]]);
+    downloadModelMock.mockResolvedValueOnce(undefined);
     expect(await downloadRagModel()).toEqual({ ok: true });
   });
 
   it('does NOT add workspace', async () => {
     localModelExistsMock.mockReturnValue(false);
-    localProbeMock.embed.mockResolvedValueOnce([[0.1]]);
+    downloadModelMock.mockResolvedValueOnce(undefined);
     await downloadRagModel();
     expect(addRagEnabledWorkspaceMock).not.toHaveBeenCalled();
   });

@@ -296,12 +296,22 @@ contextBridge.exposeInMainWorld('tideIpc', {
   deleteWorkspace: (id: string) => ipcRenderer.invoke('tide:deleteWorkspace', id),
   workspacesExist: (paths: string[]) => ipcRenderer.invoke('tide:workspacesExist', paths),
 
-  // ── Git source control ──
+  // ── Git ──
   // sessionId is optional — when the active session has a worktree, the
   // operation runs against the worktree path instead of the workspace's
-  // main checkout. Source Control + Inspector both pass it through.
+  // main checkout. Git Panel + Inspector both pass it through.
   gitStatus: (workspaceId: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStatus', workspaceId, sessionId),
+  gitLog: (workspaceId: string, sessionId?: string, limit?: number) =>
+    ipcRenderer.invoke('tide:gitLog', workspaceId, sessionId, limit),
+  gitCommitFiles: (workspaceId: string, sha: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitCommitFiles', workspaceId, sha, sessionId),
+  gitCommitFileDiff: (workspaceId: string, sha: string, filePath: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitCommitFileDiff', workspaceId, sha, filePath, sessionId),
+  gitBulk: (workspaceId: string, op: string, sessionId?: string, opts?: { message?: string }) =>
+    ipcRenderer.invoke('tide:gitBulk', workspaceId, op, sessionId, opts),
+  gitStashList: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitStashList', workspaceId, sessionId),
   gitBranchInfo: (workspaceId: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitBranchInfo', workspaceId, sessionId),
   gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) =>

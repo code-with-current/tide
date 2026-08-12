@@ -26,7 +26,12 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
     case 'retry':              return state; // retry state is managed by applyLegacyEvent
     case 'turn_end':           return applyTurnEnd(state, event);
     case 'error':
-      return { ...state, error: event.message, isStreaming: false };
+      // Record the error but do NOT end the stream here — the orchestrator may
+      // still retry. Only `turn_end` ends the turn, so the error UI (gated on
+      // !isStreaming) stays hidden during the retry cycle and surfaces once
+      // retries are exhausted. Prevents the error block from flashing on and
+      // off between attempts.
+      return { ...state, error: event.message };
     default:                   return state;
   }
 }

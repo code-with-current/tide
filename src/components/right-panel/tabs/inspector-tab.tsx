@@ -82,7 +82,7 @@ export function InspectorTab({ session }: { session: Session }) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 min-h-0 overflow-y-auto scroll">
+      <div className="flex-1 min-h-0 scroll">
         {/* Hero — status, stats, pinned context meter (replaces the old
             non-collapsible header + the bottom ContextWindowSection). */}
         <PanelSection title="Session" defaultOpen>
@@ -126,7 +126,7 @@ export function InspectorTab({ session }: { session: Session }) {
         {/* Memory & RAG — with Re-Index action in the header */}
         <MemoryRagSection session={session} />
 
-        {/* Git — with Changes (open Source Control) action in the header */}
+        {/* Git — with Changes (open Git Panel) action in the header */}
         <PanelSection
           title="Git"
           defaultOpen={pending.length === 0}
@@ -242,7 +242,7 @@ function autonomyLabel(mode: Session['autonomyMode']) {
 // =============================================================
 
 // =============================================================
-// "Open Changes" header button — switches to the Source Control tab.
+// "Open Changes" header button — switches to the Git Panel tab.
 // addTab is idempotent: creates the tab if absent, then activates it.
 // =============================================================
 
@@ -270,7 +270,7 @@ function OpenChangesButton({ sessionId, changed }: { sessionId: string; changed:
     <button
       type="button"
       onClick={() => addTab(sessionId, 'changes')}
-      title="Open Source Control tab"
+      title="Open Git Panel tab"
       // Mirrors the mockup's .head-action: a compact bordered pill that reads
       // as a distinct action, not part of the header. Ghost Button blended in.
       className="inline-flex items-center gap-1 h-5 px-2 rounded border border-border bg-transparent text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-accent hover:bg-secondary transition-colors cursor-pointer"

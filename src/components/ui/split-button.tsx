@@ -8,6 +8,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
@@ -25,7 +26,9 @@ export interface SplitButtonItem {
   /** Optional leading icon. */
   icon?: ReactNode;
   /** Fired on select. The dropdown closes automatically (Radix). */
-  onSelect: () => void;
+  onSelect?: () => void;
+  /** Disable this item (e.g. "Stash Pop" when there are no stashes). */
+  disabled?: boolean;
 }
 
 export interface SplitButtonProps {
@@ -97,22 +100,22 @@ export function SplitButton({
             <ChevronDown />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align={menuAlign} sideOffset={4} className="min-w-[200px]">
+        <DropdownMenuContent align={menuAlign} sideOffset={4} className="min-w-[150px]">
           {items.map((item, i) => (
-            <DropdownMenuItem
-              key={i}
-              onSelect={(e) => {
-                e.preventDefault(); // stay open-safe; caller decides
-                item.onSelect();
-              }}
-              className="items-start gap-2 py-2"
-            >
-              {item.icon && <span className="mt-0.5 text-muted-foreground [&_svg]:size-3.5">{item.icon}</span>}
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-xs font-semibold leading-tight">{item.label}</span>
-                {item.hint && <span className="text-[10px] leading-tight text-muted-foreground">{item.hint}</span>}
-              </span>
-            </DropdownMenuItem>
+            item.label !== "Separator" ?
+              <DropdownMenuItem
+                key={i}
+                className="text-xs"
+                disabled={item.disabled}
+                onSelect={(e) => {
+                  e.preventDefault(); // stay open-safe; caller decides
+                  if (item.onSelect) item.onSelect();
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </DropdownMenuItem>
+              : <DropdownMenuSeparator />
           ))}
         </DropdownMenuContent>
       </DropdownMenu>

@@ -361,8 +361,13 @@ declare global {
        *  Drives the sidebar's "missing workspace" indicator. */
       workspacesExist: (paths: string[]) => Promise<Record<string, boolean>>;
 
-      // ── Git source control ──
+      // ── Git ──
       gitStatus: (workspaceId: string, sessionId?: string) => Promise<any[]>;
+      gitLog: (workspaceId: string, sessionId?: string, limit?: number) => Promise<any[]>;
+      gitCommitFiles: (workspaceId: string, sha: string, sessionId?: string) => Promise<any[]>;
+      gitCommitFileDiff: (workspaceId: string, sha: string, filePath: string, sessionId?: string) => Promise<any[]>;
+      gitBulk: (workspaceId: string, op: string, sessionId?: string, opts?: { message?: string }) => Promise<{ ok: boolean; error?: string }>;
+      gitStashList: (workspaceId: string, sessionId?: string) => Promise<any[]>;
       gitBranchInfo: (workspaceId: string, sessionId?: string) => Promise<{ branch: string | null; headCommit: string | null }>;
       gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitCommit: (workspaceId: string, message: string, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;

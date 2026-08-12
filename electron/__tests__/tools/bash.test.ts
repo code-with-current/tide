@@ -113,19 +113,23 @@ describe('createBashTool permission gate', () => {
       toolName: 'bash',
     }));
 
-    resolvePermission('s_gate', { approved: true });
+    // Resolve with the actual toolCallId the gate emitted.
+    const permEvent = emit.mock.calls[0][0] as { toolCallId: string };
+    resolvePermission('s_gate', [permEvent.toolCallId], { approved: true });
     const result: any = await pending;
     expect(result.status).toBe('executed');
     expect(result.output).toContain('gate-ask');
   });
 
   it('returns rejected when the user denies', async () => {
-    const ctx = makeCtx({ sessionId: 's_gate', workspaceRoot: '/tmp', autonomyMode: 'ask', emit: vi.fn() });
+    const emit = vi.fn();
+    const ctx = makeCtx({ sessionId: 's_gate', workspaceRoot: '/tmp', autonomyMode: 'ask', emit });
     const tool = createBashTool(ctx);
 
     const pending = tool.execute!({ command: 'echo gate-deny' }, sdkCtx('tc_deny'));
     await flushMicrotasks();
-    resolvePermission('s_gate', { approved: false, reason: 'nope' });
+    const permEvent = emit.mock.calls[0][0] as { toolCallId: string };
+    resolvePermission('s_gate', [permEvent.toolCallId], { approved: false, reason: 'nope' });
 
     const result: any = await pending;
     expect(result.status).toBe('rejected');

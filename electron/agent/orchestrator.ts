@@ -43,6 +43,9 @@ const TURN_MAX_RETRIES = 10;
 const TURN_RETRY_TIMEOUT_MS = 120_000;
 const ESCALATED_MAX_TOKENS = 65_535;
 const MAX_RESUME_ATTEMPTS = 3;
+/** Delay between auto-retries so a transient failure (rate limit, blip) can
+ *  recover and the UI doesn't hammer the provider. Aborted turns cancel it. */
+const RETRY_DELAY_MS = 10_000;
 const RESUME_MESSAGE =
   'Output token limit hit. Resume directly — no apology, no recap of what you ' +
   'were doing. Pick up mid-thought if that is where the cut happened. Break ' +
@@ -359,6 +362,8 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
             retryCount++;
             send(wc, sessionId, { type: 'retry', sessionId, seq: nextSeq(sessionId), attempt: retryCount, maxAttempts: TURN_MAX_RETRIES, reason: turn.errored });
             turn.errored = null; turn.finishReason = null;
+            await retryDelay(RETRY_DELAY_MS, controller.signal);
+            if (controller.signal.aborted) { emitTurnEnd(wc, turn, 'aborted'); break; }
             continue;
           }
           emitTurnEnd(wc, turn, 'refusal'); break;
@@ -375,6 +380,8 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
           const reason = isTimeoutError(err) ? `Request timed out after ${TURN_RETRY_TIMEOUT_MS / 1000}s` : (err?.message || String(err));
           send(wc, sessionId, { type: 'retry', sessionId, seq: nextSeq(sessionId), attempt: retryCount, maxAttempts: TURN_MAX_RETRIES, reason });
           turn.errored = null;
+          await retryDelay(RETRY_DELAY_MS, controller.signal);
+          if (controller.signal.aborted) { emitTurnEnd(wc, turn, 'aborted'); break; }
           continue;
         }
         turn.errored = err?.message || String(err);
@@ -540,6 +547,13 @@ function stopReasonFor(turn: Turn): StopReason {
 
 function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
   const blocks = finalizeBlocks(turn, stopReason);
+  // Surface the error to the UI on failure (retries exhausted or non-retryable).
+  // Sent BEFORE turn_end so the reducer records the error, then turn_end flips
+  // isStreaming — the error UI (gated on !isStreaming) appears exactly once, at
+  // the end. Covers stream-throw errors that never emitted an `error` part.
+  if (stopReason === 'refusal' && turn.errored) {
+    send(wc, turn.sessionId, { type: 'error', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), message: turn.errored });
+  }
   send(wc, turn.sessionId, {
     type: 'turn_end', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId),
     messageId: turn.messageId, stopReason, content: turn.finalText,
@@ -751,6 +765,18 @@ function errMessage(err: unknown): string {
 
 function isTimeoutError(err: unknown): boolean {
   return err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
+/** Abortable delay used between auto-retries. Resolves immediately if the
+ *  signal is already aborted, and no-ops if it fires during the wait — so a
+ *  user stop cancels the retry delay without a dangling timer. */
+function retryDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => resolve();
+    const t = setTimeout(done, ms);
+    signal.addEventListener('abort', () => { clearTimeout(t); done(); }, { once: true });
+  });
 }
 
 function isTransientError(msg: string): boolean {

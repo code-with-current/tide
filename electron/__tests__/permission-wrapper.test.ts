@@ -9,7 +9,7 @@ import {
 } from '../agent/permission-resolver.js';
 import {
   addSessionRule,
-  addProjectRule,
+  addPermissionRule,
   clearSessionRules,
   deriveRuleSpec,
   evaluateRules,
@@ -177,7 +177,6 @@ describe('permission-card persistence (regression)', () => {
     // The same call, in a "next turn", must auto-approve instead of prompting.
     const decision = evaluateRules(
       getSessionRules(SID),
-      { allow: [], deny: [] },
       'bash',
       { command: 'pnpm install --filter pkg' },
     );
@@ -196,12 +195,11 @@ describe('permission-card persistence (regression)', () => {
     // Before: no project rules.
     expect(loadPermissionRules(tmpRoot).allow).toHaveLength(0);
 
-    // Simulate "always · project": addProjectRule writes .agent/settings.json.
-    const spec = deriveRuleSpec('bash', { command: 'pnpm test' });
-    addProjectRule(tmpRoot, 'allow', spec);
+    // Simulate "always · project": addPermissionRule writes .agents/settings.json.
+    addPermissionRule(SID, tmpRoot, 'bash', { command: 'pnpm test' });
 
     // The file exists on disk now.
-    const file = path.join(tmpRoot, '.agent', 'settings.json');
+    const file = path.join(tmpRoot, '.agents', 'settings.json');
     expect(fs.existsSync(file)).toBe(true);
 
     // A fresh load picks it up — this is what withPermission now does at gate
@@ -209,13 +207,13 @@ describe('permission-card persistence (regression)', () => {
     // added this turn would be invisible until the next turn.
     const fresh = loadPermissionRules(tmpRoot);
     expect(fresh.allow).toHaveLength(1);
-    expect(evaluateRules({ allow: [], deny: [] }, fresh, 'bash', { command: 'pnpm test' }))
+    expect(evaluateRules(fresh, 'bash', { command: 'pnpm test' }))
       .toBe('allow');
   });
 
   it('withPermission auto-runs when a project rule matches (no prompt)', async () => {
     // Write a project rule to the tmp workspace BEFORE the gate runs.
-    addProjectRule(tmpRoot, 'allow', deriveRuleSpec('bash', { command: 'pnpm test' }));
+    addPermissionRule(SID, tmpRoot, 'bash', { command: 'pnpm test' });
 
     const ctx = makeCtx({ autonomyMode: 'ask', workspaceRoot: tmpRoot });
     const emit = vi.fn();

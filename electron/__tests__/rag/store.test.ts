@@ -13,7 +13,12 @@ const userDataDir = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => userDataDir.current),
+    isPackaged: false,
   },
+}));
+
+vi.mock('../../appPaths.js', () => ({
+  appDataDir: () => userDataDir.current,
 }));
 
 import { openRagStore, type ChunkRow } from '../../rag/store.js';

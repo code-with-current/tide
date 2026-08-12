@@ -7,8 +7,9 @@
   "type": "module",
   "main": "dist-electron/main.mjs",
   "scripts": {
+    "postinstall": "node build/copy-tree-sitter-grammars.mjs",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "node build/promptMarkdownUtils.mjs && tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",

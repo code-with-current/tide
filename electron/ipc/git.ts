@@ -1,4 +1,4 @@
-/** Git source-control IPC handlers. Each function runs git via spawn with shell:false (args passed directly — no shell quoting, platform-independent) in the workspace root. No remote operations (push/fetch/pull) are exposed. */
+/** Git IPC handlers. Each function runs git via spawn with shell:false (args passed directly — no shell quoting, platform-independent) in the workspace root. No remote operations (push/fetch/pull) are exposed. */
 
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -99,6 +99,71 @@ export async function getGitStatus(rootDir: string): Promise<GitFileChange[]> {
   return result;
 }
 
+export interface GitCommit {
+  /** Short SHA. */
+  sha: string;
+  /** Author name. */
+  author: string;
+  /** ISO 8601 commit date. */
+  date: string;
+  /** First line of the commit message. */
+  subject: string;
+}
+
+/** Recent commit history (newest first), limited to `limit` (default 100). */
+export async function getGitLog(rootDir: string, limit = 100): Promise<GitCommit[]> {
+  try {
+    // \x1f (unit separator) delimits fields; %s is single-line so records split cleanly on \n.
+    const SEP = '\x1f';
+    const fmt = ['%h', '%an', '%aI', '%s'].join(SEP);
+    const { stdout } = await runGit(['log', `--pretty=format:${fmt}`, '-n', String(limit)], rootDir, 10000);
+    return stdout.split('\n').filter((l) => l.trim()).map((l) => {
+      const [sha, author, date, subject] = l.split(SEP);
+      return { sha, author, date, subject };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Files changed in a commit vs its first parent (root-aware via --root). */
+export async function getCommitFiles(rootDir: string, sha: string): Promise<GitFileChange[]> {
+  let statLines = '';
+  try {
+    const { stdout } = await runGit(['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', sha], rootDir);
+    statLines = stdout;
+  } catch { return []; }
+  // numstat for +/- (best-effort — separate call; binary files show '-').
+  const statMap = new Map<string, { additions: number; deletions: number }>();
+  try {
+    const { stdout } = await runGit(['diff-tree', '--root', '--no-commit-id', '--numstat', '-r', sha], rootDir);
+    for (const line of stdout.split('\n')) {
+      if (!line.trim()) continue;
+      const [a, d, ...rest] = line.split('\t');
+      statMap.set(rest.join('\t'), { additions: a === '-' ? 0 : parseInt(a, 10), deletions: d === '-' ? 0 : parseInt(d, 10) });
+    }
+  } catch { /* numstat unavailable — show 0/0 */ }
+
+  const out: GitFileChange[] = [];
+  for (const line of statLines.split('\n')) {
+    if (!line.trim()) continue;
+    const [code, ...rest] = line.split('\t');
+    const path = rest.join('\t');
+    const x = code[0];
+    const status: GitFileChange['status'] = x === 'A' ? 'added' : x === 'D' ? 'deleted' : x === 'R' ? 'renamed' : 'modified';
+    const s = statMap.get(path) ?? { additions: 0, deletions: 0 };
+    out.push({ path, status, staged: true, ...s });
+  }
+  return out;
+}
+
+/** Unified diff of a single file at a commit (root-aware). */
+export async function getCommitFileDiff(rootDir: string, sha: string, filePath: string): Promise<DiffHunk[]> {
+  resolveInsideWorkspace(rootDir, filePath);
+  const { stdout } = await runGit(['diff-tree', '--root', '-p', '--no-commit-id', sha, '--', filePath], rootDir, 10000);
+  return parseUnifiedDiff(stdout);
+}
+
 /** Stage or unstage a single file. */
 export async function gitStage(rootDir: string, filePath: string, stage: boolean): Promise<void> {
   resolveInsideWorkspace(rootDir, filePath);
@@ -141,8 +206,52 @@ export async function gitHeadSha(rootDir: string): Promise<string | null> {
 }
 
 /** Restore a single file to its state at the given commit SHA. If the file
- *  didn't exist at that commit (was created after), delete it from the
- *  working tree. This is the per-file "undo this turn's changes" operation. */
+ * didn't exist at that commit (was created after), delete it from the
+ * working tree. This is the per-file "undo this turn's changes" operation. */
+
+// ─── Bulk working-tree ops (Git Panel "Stage All" group) ───────────────
+
+/** Stage every change (tracked modifications + untracked files). */
+export async function gitStageAll(rootDir: string): Promise<void> {
+  await runGit(['add', '-A'], rootDir);
+}
+
+/** Unstage everything (keep working-tree edits). */
+export async function gitUnstageAll(rootDir: string): Promise<void> {
+  await runGit(['restore', '--staged', '.'], rootDir);
+}
+
+/** Discard ALL uncommitted changes: reset tracked files to HEAD and remove
+ *  untracked files/dirs. Destructive — caller must confirm first. */
+export async function gitRestoreAll(rootDir: string): Promise<void> {
+  await runGit(['restore', '--staged', '--worktree', '.'], rootDir);
+  await runGit(['clean', '-fd'], rootDir);
+}
+
+export interface GitStash { ref: string; message: string; }
+
+/** Stash all changes (including untracked). Optional message. */
+export async function gitStash(rootDir: string, message?: string): Promise<void> {
+  const args = message ? ['stash', 'push', '-u', '-m', message] : ['stash', 'push', '-u'];
+  await runGit(args, rootDir, 10000);
+}
+
+/** Pop the most recent stash (apply + drop). */
+export async function gitStashPop(rootDir: string): Promise<void> {
+  await runGit(['stash', 'pop'], rootDir, 15000);
+}
+
+/** List stashes, newest first. Empty array if none (or not a repo). */
+export async function gitStashList(rootDir: string): Promise<GitStash[]> {
+  try {
+    const { stdout } = await runGit(['stash', 'list'], rootDir);
+    return stdout.split('\n').filter((l) => l.trim()).map((l) => {
+      const idx = l.indexOf(':');
+      return idx === -1 ? { ref: l, message: '' } : { ref: l.slice(0, idx).trim(), message: l.slice(idx + 1).trim() };
+    });
+  } catch { return []; }
+}
+
 export async function gitRestoreFile(rootDir: string, filePath: string, sha: string): Promise<{ ok: boolean; error?: string }> {
   resolveInsideWorkspace(rootDir, filePath);
   try {

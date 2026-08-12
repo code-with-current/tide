@@ -22,7 +22,7 @@ export function CommitBar({
   };
 
   return (
-    <div className="space-y-2 min-w-0 pb-1">
+    <div className="space-y-2 min-w-0 my-2">
       <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}

@@ -450,10 +450,14 @@ body {
 /* ============================================================ */
 /* Scrollbars                                                   */
 /* ============================================================ */
-/* Reserve scrollbar gutter so the layout doesn't shift when the
-   vertical scrollbar appears/disappears during scroll. */
+/* NOTE: we intentionally do NOT use `scrollbar-gutter: stable` here. Reserving
+   a permanent gutter leaves an ~8px strip on the right where any header/section
+   background (bg-card) stops short of the panel edge — visible as a mismatched
+   gap next to the full-width tab bar/toolbar. With `auto` (the default), the
+   scrollbar only takes inline space when the content actually overflows, so
+   headers reach the edge at rest. */
 .scroll {
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
 }
 .scroll::-webkit-scrollbar,
 *::-webkit-scrollbar {

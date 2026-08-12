@@ -174,6 +174,13 @@ export function MentionButton({
    *  button inserts `/` into the editor and the same inline picker opens. */
   onClickTrigger?: () => void;
 }) {
+  // Hooks must run unconditionally (rules of hooks).
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<MentionKind>('agent');
+  const [query, setQuery] = useState('');
+  const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
+  const catalog = useMentionCatalog(activeWorkspaceId);
+
   // ── Trigger-only mode: delegate to the parent's handler ──
   if (onClickTrigger) {
     return (
@@ -190,13 +197,6 @@ export function MentionButton({
       </Tip>
     );
   }
-
-  // ── Legacy mode: full Popover picker (tabbed) ──
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<MentionKind>('agent');
-  const [query, setQuery] = useState('');
-  const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
-  const catalog = useMentionCatalog(activeWorkspaceId);
 
   const filtered = catalog.filter(
     (m) => m.kind === tab && (m.name.includes(query.toLowerCase()) || m.description.toLowerCase().includes(query.toLowerCase())),
