@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useUi } from "@/lib/stores/ui";
 import { useTabs } from "@/lib/stores/tabs";
-import { useWorkspaces, useSession } from "@/lib/queries";
+import { useWorkspaces, useSession, useGitBranchInfo } from "@/lib/queries";
 import * as api from "@/lib/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn, isMac } from "@/lib/utils";
@@ -68,6 +68,10 @@ export function WindowTopBar() {
 
   const { data: workspaces } = useWorkspaces();
   const { data: session } = useSession(activeSessionId);
+  // Live branch (reflects mid-session checkouts) — worktree-aware. Falls back
+  // to the persisted workspace branch until the first fetch resolves.
+  const gitSessionId = session?.worktree ? (activeSessionId ?? undefined) : undefined;
+  const { data: gitBranchInfo } = useGitBranchInfo(activeWorkspaceId, gitSessionId);
   const qc = useQueryClient();
   const activeWorkspace = workspaces?.find((w) => w.id === activeWorkspaceId);
   const scripts = activeWorkspace?.scripts ?? [];
@@ -79,7 +83,7 @@ export function WindowTopBar() {
     qc.invalidateQueries({ queryKey: ['workspaces'] });
   }, [activeWorkspaceId, scripts, qc]);
   const sessionTitle = session?.title ?? 'New session';
-  const gitBranch = activeWorkspace?.branch;
+  const gitBranch = gitBranchInfo?.branch ?? activeWorkspace?.branch;
   const showSessionContent = mainView === 'chat' && !!activeWorkspace;
 
   // ── Scripts logic (from ChatSubBar) ──

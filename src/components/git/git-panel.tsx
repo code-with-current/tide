@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
-import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff } from 'lucide-react';
+import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff, GitBranch } from 'lucide-react';
 import { FolderIcon } from 'react-material-icon-theme';
-import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession } from '@/lib/queries';
+import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { cn } from '@/lib/utils';
@@ -35,6 +35,10 @@ export function GitPanel() {
   const { data: activeSession } = useSession(sessionId);
   const gitSessionId = activeSession?.worktree ? sessionId : undefined;
   const { data: changes, isLoading, isFetching, refetch } = useGitStatus(workspaceId, gitSessionId);
+  // Live branch (reflects mid-session checkouts). Falls back to the persisted
+  // worktree branch until the first fetch resolves.
+  const { data: gitBranchInfo } = useGitBranchInfo(workspaceId, gitSessionId);
+  const branch = gitBranchInfo?.branch ?? activeSession?.worktree?.branch;
   const stageMutation = useGitStage(workspaceId ?? '', gitSessionId);
   const commitMutation = useGitCommit(workspaceId ?? '', gitSessionId);
   const { data: history, isLoading: historyLoading, isFetching: historyFetching, refetch: refetchHistory } = useGitLog(workspaceId, gitSessionId);
@@ -161,6 +165,18 @@ export function GitPanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0 min-w-0 bg-background">
+      {/* Branch strip — the live checked-out branch for this session's
+          working directory. Updates instantly when the agent checks out a
+          branch (via the git-tool/bash invalidation in MainScreen). */}
+      {branch && (
+        <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0 border-b border-border text-muted-foreground">
+          <GitBranch className="size-3 flex-shrink-0" />
+          <span className="font-mono text-[11px] truncate">{branch}</span>
+          {activeSession?.worktree && (
+            <span className="ml-auto text-[9px] uppercase tracking-wide opacity-70">worktree</span>
+          )}
+        </div>
+      )}
       {/* Square, full-width tab bar */}
       <div className="flex flex-shrink-0 border-border">
         <TabButton active={tab === 'changes'} onClick={() => setTab('changes')}>
