@@ -1,6 +1,8 @@
-/** Extensions config store (~/.tide/extensions.json) for the Extensions UI: holds a `disabled` allowlist so items NOT listed are enabled by default (new skills/agents → ON). Mirrors the settingsStore pattern (factory, lazy cache, best-effort write). */
-import * as fs from 'fs';
-import * as path from 'path';
+/** Extensions config — now stored in config.json (migrated from extensions.json).
+ *  Holds a `disabled` allowlist: items NOT listed are enabled by default.
+ *  Wraps the store's getExtensions/setExtensions with the same interface
+ *  callers expect (getDisabled, setEnabled). */
+import * as store from './store.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('extensions');
@@ -13,72 +15,34 @@ export interface ExtensionsConfig {
   mcp: string[];
 }
 
-export interface ExtensionsFile {
-  disabled?: Partial<Record<ExtensionDomain, string[]>>;
-}
-
-const EMPTY: ExtensionsConfig = { agents: [], skills: [], mcp: [] };
-
-/** Built-in MCP servers disabled by default; seeded into the disabled list ONLY on first run, after which the user's choices are respected across restarts. */
 const DEFAULT_DISABLED_MCP = ['tide-filesystem'];
 
-/** Build the initial config for first run — seeds default-disabled builtins. */
-function firstRunConfig(): ExtensionsConfig {
-  return { agents: [], skills: [], mcp: [...DEFAULT_DISABLED_MCP] };
-}
-
-export function createExtensionsStore(rootDir: string) {
-  const filePath = path.join(rootDir, 'extensions.json');
-  let cache: ExtensionsConfig | null = null;
-
-  function read(): ExtensionsConfig {
-    if (cache) return cache;
-    try {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const parsed = JSON.parse(raw) as ExtensionsFile;
-      cache = {
-        agents: parsed.disabled?.agents ?? [],
-        skills: parsed.disabled?.skills ?? [],
-        mcp: parsed.disabled?.mcp ?? [],
-      };
-      return cache;
-    } catch {
-      // File doesn't exist or is corrupt — first run. Seed defaults.
-      cache = firstRunConfig();
-      return cache;
-    }
-  }
-
-  function write(cfg: ExtensionsConfig): void {
-    cache = cfg;
-    try {
-      fs.mkdirSync(rootDir, { recursive: true });
-      const fileContent: ExtensionsFile = {
-        disabled: { agents: cfg.agents, skills: cfg.skills, mcp: cfg.mcp },
-      };
-      fs.writeFileSync(filePath, JSON.stringify(fileContent, null, 2), 'utf-8');
-    } catch (e: any) {
-      log.warn('failed to write extensions.json', { err: e });
-    }
-  }
-
+/** Factory returns an object with the same interface as before — getDisabled
+ *  and setEnabled — but backed by config.json instead of extensions.json. */
+export function createExtensionsStore(_rootDir: string) {
   function getDisabled(): ExtensionsConfig {
-    return { ...read() };
+    const ext = store.getExtensions();
+    return {
+      agents: ext.disabled.agents ?? [],
+      skills: ext.disabled.skills ?? [],
+      mcp: ext.disabled.mcp ?? [...DEFAULT_DISABLED_MCP],
+    };
   }
 
   function setEnabled(domain: ExtensionDomain, name: string, enabled: boolean): ExtensionsConfig {
-    const cfg = read();
-    const list = cfg[domain];
+    const ext = store.getExtensions();
+    const list = ext.disabled[domain] ?? [];
     if (enabled) {
-      cfg[domain] = list.filter((n) => n !== name);
+      ext.disabled[domain] = list.filter((n) => n !== name);
     } else {
       if (!list.includes(name)) list.push(name);
+      ext.disabled[domain] = list;
     }
-    write(cfg);
-    return { ...cfg };
+    store.setExtensions(ext);
+    return getDisabled();
   }
 
-  return { getDisabled, setEnabled, path: filePath };
+  return { getDisabled, setEnabled, path: '(config.json)' };
 }
 
 export type ExtensionsStore = ReturnType<typeof createExtensionsStore>;

@@ -115,8 +115,12 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Block navigation away from the app.
-  mainWindow.webContents.on('will-navigate', (e) => {
+  // Block navigation away from the app — except tide:// OAuth callbacks.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith('tide://oauth/callback')) {
+      handleOAuthCallback(url);
+      return; // don't preventDefault — let it fail silently
+    }
     e.preventDefault();
   });
 
@@ -134,6 +138,19 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // Register open-url BEFORE whenReady — on macOS, a tide:// callback that
+  // launches the app fires open-url during launch, before ready. If we
+  // register inside whenReady, the event is missed and OAuth fails in dev.
+  // Queue any URLs that arrive before the handler is ready.
+  const earlyOAuthUrls: string[] = [];
+  app.on('open-url', (event, url) => {
+    if (url.startsWith('tide://oauth/callback')) {
+      event.preventDefault();
+      log.info('open-url: tide:// callback received', { url: url.slice(0, 50) + '…' });
+      earlyOAuthUrls.push(url);
+    }
+  });
+
   app.on('second-instance', (_event, argv, _workingDirectory, _additionalData) => {
     // On Windows/Linux the OS relaunches Tide with the `tide://` callback URL
     // as the last argv arg (macOS uses `open-url` instead). Forward OAuth
@@ -165,13 +182,34 @@ if (!gotLock) {
       app.setAppUserModelId('com.tide.app');
     }
 
-    // Claim the `tide://` protocol so the OS routes OAuth callbacks here (macOS via `open-url`; Windows/Linux via second-instance with the URL as the last argv arg — handled above). Safe to call unconditionally; returns false if another app already owns it (rare; PKCE still works via second-instance).
-    app.setAsDefaultProtocolClient('tide');
-    app.on('open-url', (_event, url) => {
+    // Claim the `tide://` protocol for OAuth callbacks.
+    // In dev, DON'T call setAsDefaultProtocolClient — it registers the bare
+    // Electron binary as the handler, so macOS opens a new empty Electron
+    // window on tide:// redirects. Instead, rely on open-url (which fires in
+    // the existing instance if LaunchServices can identify it) and the
+    // will-navigate interceptor on the main window.
+    if (!isDev) {
+      app.setAsDefaultProtocolClient('tide');
+    }
+
+    // Intercept tide:// at the protocol level — catches in-app navigations.
+    protocol.handle('tide', (request) => {
+      log.info('protocol.handle: tide:// intercepted', { url: request.url.slice(0, 50) + '…' });
+      handleOAuthCallback(request.url);
+      return new Response('OK', { status: 200 });
+    });
+    // Drain any OAuth callbacks that arrived before whenReady (macOS launches
+    // a new process → open-url fires during startup → the early handler above
+    // queued them).
+    for (const url of earlyOAuthUrls) {
+      handleOAuthCallback(url);
+    }
+    earlyOAuthUrls.length = 0;
+    // Subsequent open-url events (same-session) go directly to the handler.
+    app.on('open-url', (event, url) => {
       if (url.startsWith('tide://oauth/callback')) {
-        // Prevent the default (opening a window); we handle it ourselves.
-        _event.preventDefault();
-        log.info('open-url: tide:// callback received', { url: url.slice(0, 50) + '…' });
+        event.preventDefault();
+        log.info('open-url: tide:// callback received (post-ready)', { url: url.slice(0, 50) + '…' });
         handleOAuthCallback(url);
       }
     });

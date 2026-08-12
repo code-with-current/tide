@@ -253,7 +253,7 @@ export async function initiateFork(sourceSessionId: string, resultText?: string)
     const session = await api.getSession(sourceSessionId);
     const lastAnswer = session?.messages
       ?.slice().reverse()
-      .find((m) => m.role === 'assistant' && m.content?.trim());
+      .find((m: { role: string; content?: string }) => m.role === 'assistant' && m.content?.trim());
     text = lastAnswer?.content?.trim();
   }
   if (!text) return;

@@ -32,7 +32,7 @@ import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events.
 import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agent/events.js';
 import type { AutonomyMode, Provider, ToolCall, ToolName, Usage } from '../../src/types/index.js';
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
-import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/blockState.js';
+import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
 
@@ -77,6 +77,9 @@ interface Turn {
   currentTextEntry: { type: 'text'; text: string } | null;
   responseMessages: ModelMessage[];
   stepHadToolCalls: boolean;
+  /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
+   *  the turn_end time to compute the persisted `totalMs` (send → result). */
+  startedAt: number;
 }
 
 const activeTurns = new Map<string, Turn>();
@@ -215,6 +218,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
     permissionTimeoutMs: effectivePermissionTimeout,
     errored: null, finishReason: null, currentTextEntry: null,
     responseMessages: [], stepHadToolCalls: false,
+    startedAt: Date.now(),
   };
   activeTurns.set(sessionId, turn);
 
@@ -433,6 +437,13 @@ function translatePart(
       const toolCallId: string = p.id;
       const toolName = resolveToolName(p.toolName) as ToolName;
       turn.currentTextBlockId = null;
+      // Close the current thinking segment so the next reasoning delta (next
+      // model step) opens a NEW reasoning block. This lets the block stream
+      // interleave one thinking block per step between tool calls, instead of
+      // every step appending to a single top block for the whole turn.
+      // (Compact view folds the multiple blocks back into one card via
+      // deriveLayout; stream view renders each inline.)
+      turn.reasoningBlockId = null;
       turn.currentTextEntry = null;
       turn.toolBlockIndex[toolCallId] = turn.blocks.length;
       const meta = safeMeta(toolName);
@@ -535,6 +546,7 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
     timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
     blocks, reasoning: turn.finalReasoning || undefined,
     reasoningTokens: turn.usage.reasoningTokens || undefined,
+    totalMs: Date.now() - turn.startedAt,
     toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
     usage: turn.usage, lastStepUsage: turn.lastStepUsage ?? undefined,
   });

@@ -1,12 +1,22 @@
-/** MCP config read/write/merge. Two sources merged at connection time: user (~/.tide/mcp.json — global servers + OAuth data) and project (<workspace>/.mcp.json — workspace servers). User config wraps servers under `mcpServers` plus an `oauth` section; project config is flat. readMcpConfig handles both shapes and returns just the server map. */
+/** MCP config read/write/merge. Global servers + OAuth now live in config.json
+ *  (migrated from mcp.json). Project server definitions still read from
+ *  <workspace>/.mcp.json on disk; project OAuth credentials live in config.json's
+ *  workspace object. readMcpConfig handles both shapes and returns the server map. */
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
 import type { McpConfigFile, McpServerConfig } from './types';
 import { appDataDir } from '../../appPaths.js';
+import * as store from '../../store.js';
 
-/** Read and parse an MCP config file (returns {} on missing/corrupt). Handles both the Tide flat format and the wrapped `{ "mcpServers": {...} }` format — unwrapping when the top-level `mcpServers` key is present. */
+/** Read MCP server config. For the user config path (~/.tide/mcp.json), reads
+ *  from config.json (where servers were migrated). For project paths (.mcp.json),
+ *  reads from disk. Handles both flat and wrapped formats. */
 export function readMcpConfig(filePath: string): McpConfigFile {
+  // User scope: read from config.json via the store.
+  if (filePath === path.join(appDataDir(), 'mcp.json')) {
+    return store.getMcpServers() as McpConfigFile;
+  }
+  // Project scope: read from disk.
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
@@ -14,13 +24,7 @@ export function readMcpConfig(filePath: string): McpConfigFile {
       return {};
     }
     const obj = parsed as Record<string, unknown>;
-    // Wrapped format: { "mcpServers": { ... } }
-    if (
-      'mcpServers' in obj &&
-      obj.mcpServers &&
-      typeof obj.mcpServers === 'object' &&
-      !Array.isArray(obj.mcpServers)
-    ) {
+    if ('mcpServers' in obj && obj.mcpServers && typeof obj.mcpServers === 'object' && !Array.isArray(obj.mcpServers)) {
       return obj.mcpServers as McpConfigFile;
     }
     return obj as McpConfigFile;
@@ -29,25 +33,34 @@ export function readMcpConfig(filePath: string): McpConfigFile {
   }
 }
 
-/** Read the full user MCP config (mcp.json) including mcpServers and oauth sections (used by oauth.ts to avoid clobbering servers). */
+/** Read the full user MCP config from config.json — returns the shape
+ *  oauth.ts expects: { mcpServers, oauth }. This replaces the old mcp.json read. */
 export function readFullUserMcpConfig(): Record<string, unknown> {
-  const filePath = path.join(appDataDir(), 'mcp.json');
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch {
-    return {};
-  }
+  return {
+    mcpServers: store.getMcpServers(),
+    oauth: store.getMcpOAuth() ?? {},
+  };
 }
 
-/**
- * Write the full user MCP config file atomically. Preserves the oauth section.
- */
+/** Write the full user MCP config into config.json (mcpServers + oauth). */
 export function writeFullUserMcpConfig(data: Record<string, unknown>): void {
-  const filePath = path.join(appDataDir(), 'mcp.json');
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  fs.renameSync(tmp, filePath);
+  store.setMcpServers((data.mcpServers as Record<string, unknown>) ?? {});
+  store.setMcpOAuth((data.oauth as Record<string, string>) as { tokens?: Record<string, string>; clients?: Record<string, string>; verifiers?: Record<string, string> } | undefined);
+}
+
+/** Write an MCP config file. For user scope, writes to config.json's mcpServers.
+ *  For project scope, writes flat to <workspace>/.mcp.json (server definitions only). */
+export function writeMcpConfig(filePath: string, config: McpConfigFile): void {
+  const isUserConfig = filePath === path.join(appDataDir(), 'mcp.json');
+  if (isUserConfig) {
+    store.setMcpServers(config);
+  } else {
+    const dir = path.dirname(filePath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = filePath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf-8');
+    fs.renameSync(tmp, filePath);
+  }
 }
 
 /**
@@ -97,29 +110,6 @@ export function migrateOAuthFiles(): void {
   }
 
   writeFullUserMcpConfig(full);
-}
-
-/** Write an MCP config file atomically (temp + rename). For the user mcp.json, preserves the oauth section by reading-merging first; project configs write flat. */
-export function writeMcpConfig(filePath: string, config: McpConfigFile): void {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-
-  const userData = appDataDir();
-  const isUserConfig = filePath === path.join(userData, 'mcp.json');
-
-  if (isUserConfig) {
-    // Preserve the oauth section — read full, replace mcpServers, write.
-    const full = readFullUserMcpConfig();
-    full.mcpServers = config;
-    const tmp = filePath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(full, null, 2), 'utf-8');
-    fs.renameSync(tmp, filePath);
-  } else {
-    // Project config — flat, no oauth section.
-    const tmp = filePath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf-8');
-    fs.renameSync(tmp, filePath);
-  }
 }
 
 /**

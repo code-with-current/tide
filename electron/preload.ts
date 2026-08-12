@@ -144,6 +144,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
@@ -154,6 +155,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
@@ -306,8 +308,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitStage', workspaceId, filePath, stage, sessionId),
   gitCommit: (workspaceId: string, message: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitCommit', workspaceId, message, sessionId),
-  gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string) =>
-    ipcRenderer.invoke('tide:gitDiff', workspaceId, filePath, staged, sessionId),
+  gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) =>
+    ipcRenderer.invoke('tide:gitDiff', workspaceId, filePath, staged, sessionId, contextLines),
+  gitHeadSha: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitHeadSha', workspaceId, sessionId),
+  gitRestoreFile: (workspaceId: string, filePath: string, sha: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitRestoreFile', workspaceId, filePath, sha, sessionId),
 
   // ── RAG (Memory & RAG panel) ──
   ragStatus: (workspaceId: string) =>

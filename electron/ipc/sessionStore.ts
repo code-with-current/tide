@@ -15,6 +15,7 @@ export interface StoredMessage {
   reasoning?: string;
   reasoningTokens?: number;
   reasoningMs?: number;
+  totalMs?: number;
   toolCalls?: any[];
   timeline?: any[];
   turn?: any;
@@ -163,6 +164,7 @@ export interface SessionStore {
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
+      totalMs?: number;
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
@@ -227,7 +229,7 @@ export interface SessionStore {
   finalizeAssistantMessage(
     sessionId: string,
     messageId: string,
-    message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
+    message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; totalMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
   ): void;
   /** Hook called BEFORE the session JSON is unlinked during delete.
    *  Lets the runtime cascade-remove the worktree directory + branch.
@@ -479,6 +481,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
+      totalMs?: number;
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
@@ -497,6 +500,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       reasoning: message.reasoning,
       reasoningTokens: message.reasoningTokens,
       reasoningMs: message.reasoningMs,
+      totalMs: message.totalMs,
       toolCalls: message.toolCalls,
       timeline: message.timeline,
       turn: message.turn,
@@ -519,6 +523,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
+      totalMs?: number;
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
@@ -535,6 +540,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       if (message.reasoning !== undefined) existing.reasoning = message.reasoning;
       if (message.reasoningTokens !== undefined) existing.reasoningTokens = message.reasoningTokens;
       if (message.reasoningMs !== undefined) existing.reasoningMs = message.reasoningMs;
+      if (message.totalMs !== undefined) existing.totalMs = message.totalMs;
       if (message.toolCalls) existing.toolCalls = message.toolCalls;
       if (message.timeline) existing.timeline = message.timeline;
       if (message.turn !== undefined) existing.turn = message.turn;
@@ -548,6 +554,7 @@ export function createSessionStore(rootDir: string): SessionStore {
         reasoning: message.reasoning,
         reasoningTokens: message.reasoningTokens,
         reasoningMs: message.reasoningMs,
+        totalMs: message.totalMs,
         toolCalls: message.toolCalls,
         timeline: message.timeline,
         turn: message.turn,

@@ -1,4 +1,4 @@
-/** Risk-metadata sidecar keyed by tool name (the SDK has no risk tiers/categories). Read by withPermission, the UI sections, and ToolCallCard's timeout race; categories mirror src/lib/stream/blockState.ts. Keep in sync with the tool factories and the test's expected keys. */
+/** Risk-metadata sidecar keyed by tool name (the SDK has no risk tiers/categories). Read by withPermission, the UI sections, and ToolCallCard's timeout race; categories mirror src/lib/stream/block-state.ts. Keep in sync with the tool factories and the test's expected keys. */
 
 import type { AutonomyMode, RiskTier, ToolName } from '../../../src/types';
 

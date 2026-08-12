@@ -5,12 +5,12 @@ import { useUi } from '@/lib/stores/ui';
 import { queryClient } from '@/lib/queries';
 import { SHORTCUTS, comboMatches, getEffectiveKeys } from '@/lib/shortcuts';
 import { dispatchShortcut } from '@/lib/shortcutActions';
-import { SplashScreen } from '@/components/screens/SplashScreen';
-import { OnboardingScreen } from '@/components/screens/OnboardingScreen';
-import { ConsentScreen } from '@/components/screens/ConsentScreen';
-import { MainScreen } from '@/components/screens/MainScreen';
-import { SettingsScreen } from '@/components/screens/SettingsScreen';
-import { AddWorkspaceDialog } from '@/components/modals/AddWorkspaceDialog';
+import { SplashScreen } from '@/components/screens/splash-screen';
+import { OnboardingScreen } from '@/components/screens/onboarding-screen';
+import { ConsentScreen } from '@/components/screens/consent-screen';
+import { MainScreen } from '@/components/screens/main-screen';
+import { SettingsScreen } from '@/components/screens/settings-screen';
+import { AddWorkspaceDialog } from '@/components/modals/add-workspace-dialog';
 import { Toaster } from '@/components/ui/sonner';
 
 function App() {

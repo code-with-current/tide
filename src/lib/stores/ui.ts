@@ -170,6 +170,13 @@ interface UiState {
   fileViewerOpen: boolean;
   leftPanelOpen: boolean;
   sessionsPanelOpen: boolean;
+  /** Sidebar layout: 'dual' = separate workspace + sessions panels;
+   *  'integrated' = sessions nested inside workspace items (single panel). */
+  sidebarMode: 'dual' | 'integrated';
+  setSidebarMode: (mode: 'dual' | 'integrated') => void;
+  /** Width of the integrated sidebar in px (resizable via drag handle). */
+  sidebarWidth: number;
+  setSidebarWidth: (w: number) => void;
 
   /** Monotonic counter bumped to request that the SessionsPanel focus its
    *  search input. The action runs outside React (shortcutActions), so a nonce
@@ -210,6 +217,12 @@ interface UiState {
 
   /** Per-session outgoing message queue. Keyed by sessionId. */
   queue: Record<string, QueuedMessage[]>;
+
+  /** Pre-turn git HEAD sha keyed by sessionId. Captured when a user sends a
+   *  message so per-file undo can revert files to pre-turn state. */
+  preTurnShas: Record<string, string>;
+  /** Record the git HEAD sha for a session's turn (called before runTurn). */
+  setPreTurnSha: (sessionId: string, sha: string) => void;
 
   /** Per-session prompt history for arrow-key navigation in the composer.
    *  Most-recent-first (index 0 = last sent). Capped at 50 entries. */
@@ -342,6 +355,20 @@ interface UiState {
   appTheme: string;
   setAppearance: (patch: Partial<Pick<UiState, 'fontScale' | 'reduceMotion' | 'terminalTheme' | 'terminalFontSize' | 'appTheme'>>) => void;
 
+  // ─── Chat stream ────────────────────────────────────────────
+  /** How the reasoning/thinking block renders in the chat stream.
+   *  'flat' = one collapsible block (the original behaviour).
+   *  'phased' = grouped into Planning / Search / Coding / Verifying segments. */
+  reasoningView: 'flat' | 'phased';
+  setReasoningView: (mode: 'flat' | 'phased') => void;
+
+  // ─── Chat stream layout ─────────────────────────────────────
+  /** How a turn renders. 'compact' = thinking + process grouped into
+   *  collapsible sections (the default). 'stream' = every block shown
+   *  inline in emission order, nothing hoisted or grouped. */
+  chatView: 'compact' | 'stream';
+  setChatView: (mode: 'compact' | 'stream') => void;
+
   // ─── Keyboard shortcut overrides ────────────────────────────
   /** Per-action key overrides on top of the registry defaults (keyed by ShortcutDef.id). Persisted to settings.json so they survive restart and are shared across windows; hydrated by loadShortcuts() at startup, empty {} until then. */
   shortcutOverrides: Record<string, string[]>;
@@ -373,6 +400,10 @@ export const useUi = create<UiState>()(
   fileViewerOpen: false,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
+  sidebarMode: 'dual',
+  setSidebarMode: (mode) => set({ sidebarMode: mode }),
+  sidebarWidth: 300,
+  setSidebarWidth: (w) => set({ sidebarWidth: w }),
 
   sessionSearchFocus: 0,
   focusSessionSearch: () => set((s) => ({ sessionSearchFocus: s.sessionSearchFocus + 1 })),
@@ -388,6 +419,7 @@ export const useUi = create<UiState>()(
   pendingOptions: {},
   streams: {},
   queue: {},
+  preTurnShas: {},
   promptHistory: {},
   terminals: {},
   activeTerminal: {},
@@ -672,6 +704,9 @@ export const useUi = create<UiState>()(
   clearQueuedMessages: (sessionId) =>
     set((s) => ({ queue: { ...s.queue, [sessionId]: [] } })),
 
+  setPreTurnSha: (messageId, sha) =>
+    set((s) => ({ preTurnShas: { ...s.preTurnShas, [messageId]: sha } })),
+
   // Per-session prompt history for arrow-key navigation in the composer.
   // Most-recent-first; deduped against the last entry; capped at 50.
   pushPromptHistory: (sessionId, text) =>
@@ -833,6 +868,10 @@ export const useUi = create<UiState>()(
   terminalTheme: 'tide-dark',
   terminalFontSize: 11,
   appTheme: 'tide',
+
+  // ─── Chat stream ──────────────────────────────────────────────
+  reasoningView: 'flat',
+  chatView: 'compact',
   setAppearance: (patch) => {
     set(patch);
     const state = get();
@@ -846,6 +885,8 @@ export const useUi = create<UiState>()(
       document.documentElement.classList.toggle('reduce-motion', patch.reduceMotion);
     }
   },
+  setReasoningView: (mode) => set({ reasoningView: mode }),
+  setChatView: (mode) => set({ chatView: mode }),
 
   // ─── Keyboard shortcut overrides ────────────────────────────────────
   // Empty by default until loadShortcuts() hydrates from settings.json at startup. Actions update optimistically AND persist via IPC; the IPC response is authoritative, so we set again on resolve to converge with concurrent writers.
@@ -901,6 +942,8 @@ export const useUi = create<UiState>()(
         starredModels: s.starredModels,
         leftPanelOpen: s.leftPanelOpen,
         sessionsPanelOpen: s.sessionsPanelOpen,
+        sidebarMode: s.sidebarMode,
+        sidebarWidth: s.sidebarWidth,
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         terminalOpen: s.terminalOpen,
@@ -911,6 +954,8 @@ export const useUi = create<UiState>()(
         terminalTheme: s.terminalTheme,
         terminalFontSize: s.terminalFontSize,
         appTheme: s.appTheme,
+        reasoningView: s.reasoningView,
+        chatView: s.chatView,
         activeTerminal: s.activeTerminal,
         // shortcutOverrides is intentionally NOT persisted here — it lives in
         // settings.json (via the tide:settings:* IPC) so it's shared across

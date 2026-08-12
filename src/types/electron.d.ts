@@ -366,7 +366,9 @@ declare global {
       gitBranchInfo: (workspaceId: string, sessionId?: string) => Promise<{ branch: string | null; headCommit: string | null }>;
       gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitCommit: (workspaceId: string, message: string, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;
-      gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string) => Promise<any[]>;
+      gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) => Promise<any[]>;
+      gitHeadSha: (workspaceId: string, sessionId?: string) => Promise<string | null>;
+      gitRestoreFile: (workspaceId: string, filePath: string, sha: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
 
       // ── RAG (Memory & RAG panel) ──
       ragStatus: (workspaceId: string) => Promise<import('./index').RagStatus | { error: string }>;

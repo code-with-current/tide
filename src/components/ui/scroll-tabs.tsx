@@ -129,7 +129,7 @@ export function ScrollTabsList({
   return (
     <div
       className={cn(
-        'scroll-tabs-list flex items-stretch bg-secondary flex-shrink-0',
+        'scroll-tabs-list flex items-stretch bg-background flex-shrink-0',
         className,
       )}
     >

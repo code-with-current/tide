@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, gitStage, gitCommit, gitDiff, branchInfo } from './git.js';
+import { getGitStatus, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile } from './git.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
@@ -735,6 +735,7 @@ export function registerIpcHandlers() {
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
+      totalMs?: number;
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
@@ -754,6 +755,7 @@ export function registerIpcHandlers() {
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
+      totalMs?: number;
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
@@ -1203,10 +1205,25 @@ export function registerIpcHandlers() {
     } catch (e: any) { return { ok: false, error: e?.message }; }
   });
 
-  ipcMain.handle('tide:gitDiff', async (_e, workspaceId: string, filePath: string, staged: boolean, sessionId?: string) => {
+  ipcMain.handle('tide:gitDiff', async (_e, workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) => {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return [];
-    try { return await gitDiff(root, filePath, staged); } catch { return []; }
+    try { return await gitDiff(root, filePath, staged, contextLines); } catch { return []; }
+  });
+
+  // Pre-turn HEAD sha — captured at turn start so individual files can be
+  // reverted to exactly where they were before the turn's edits.
+  ipcMain.handle('tide:gitHeadSha', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return null;
+    try { return await gitHeadSha(root); } catch { return null; }
+  });
+
+  // Restore a single file to its state at the given sha (per-file undo).
+  handle('tide:gitRestoreFile', async (_e, workspaceId: string, filePath: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitRestoreFile(root, filePath, sha);
   });
 
   // ── RAG (Memory & RAG panel) ────────────────────────────────────

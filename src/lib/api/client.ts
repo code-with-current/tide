@@ -248,6 +248,7 @@ export async function addAssistantMessage(
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
@@ -269,6 +270,7 @@ export async function finalizeAssistantMessage(
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
@@ -564,9 +566,19 @@ export async function gitCommit(workspaceId: string, message: string, sessionId?
   if (ipc) return ipc.gitCommit(workspaceId, message, sessionId);
   return { ok: false };
 }
-export async function gitDiff(workspaceId: string, filePath: string, staged: boolean, sessionId?: string): Promise<DiffHunk[]> {
-  if (ipc) return ipc.gitDiff(workspaceId, filePath, staged, sessionId);
+export async function gitDiff(workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number): Promise<DiffHunk[]> {
+  if (ipc) return ipc.gitDiff(workspaceId, filePath, staged, sessionId, contextLines);
   return [];
+}
+
+export async function gitHeadSha(workspaceId: string, sessionId?: string): Promise<string | null> {
+  if (ipc) return ipc.gitHeadSha(workspaceId, sessionId);
+  return null;
+}
+
+export async function gitRestoreFile(workspaceId: string, filePath: string, sha: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitRestoreFile(workspaceId, filePath, sha, sessionId);
+  return { ok: false, error: 'IPC unavailable' };
 }
 
 // ============================================================

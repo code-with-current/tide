@@ -265,6 +265,7 @@ export async function forkWithSummary(
       reasoning: lastResult.reasoning,
       reasoningTokens: lastResult.reasoningTokens,
       reasoningMs: lastResult.reasoningMs,
+      totalMs: lastResult.totalMs,
       toolCalls: lastResult.toolCalls,
       timeline: lastResult.timeline,
       turn: {
@@ -332,6 +333,7 @@ export function addAssistantMessage(
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
@@ -352,6 +354,7 @@ export function finalizeAssistantMessage(
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
+    totalMs?: number;
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;

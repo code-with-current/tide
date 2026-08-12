@@ -86,3 +86,11 @@ export const updateGeneralSettings = (...a: Parameters<ReturnType<typeof createC
 export const listRagEnabledWorkspaces = (...a: Parameters<ReturnType<typeof createConfigStore>['listRagEnabledWorkspaces']>) => getStore().listRagEnabledWorkspaces(...a);
 export const addRagEnabledWorkspace = (...a: Parameters<ReturnType<typeof createConfigStore>['addRagEnabledWorkspace']>) => getStore().addRagEnabledWorkspace(...a);
 export const removeRagEnabledWorkspace = (...a: Parameters<ReturnType<typeof createConfigStore>['removeRagEnabledWorkspace']>) => getStore().removeRagEnabledWorkspace(...a);
+export const getMcpServers = (...a: Parameters<ReturnType<typeof createConfigStore>['getMcpServers']>) => getStore().getMcpServers(...a);
+export const setMcpServers = (...a: Parameters<ReturnType<typeof createConfigStore>['setMcpServers']>) => getStore().setMcpServers(...a);
+export const getMcpOAuth = (...a: Parameters<ReturnType<typeof createConfigStore>['getMcpOAuth']>) => getStore().getMcpOAuth(...a);
+export const setMcpOAuth = (...a: Parameters<ReturnType<typeof createConfigStore>['setMcpOAuth']>) => getStore().setMcpOAuth(...a);
+export const getWorkspaceMcpOAuth = (...a: Parameters<ReturnType<typeof createConfigStore>['getWorkspaceMcpOAuth']>) => getStore().getWorkspaceMcpOAuth(...a);
+export const setWorkspaceMcpOAuth = (...a: Parameters<ReturnType<typeof createConfigStore>['setWorkspaceMcpOAuth']>) => getStore().setWorkspaceMcpOAuth(...a);
+export const getExtensions = (...a: Parameters<ReturnType<typeof createConfigStore>['getExtensions']>) => getStore().getExtensions(...a);
+export const setExtensions = (...a: Parameters<ReturnType<typeof createConfigStore>['setExtensions']>) => getStore().setExtensions(...a);

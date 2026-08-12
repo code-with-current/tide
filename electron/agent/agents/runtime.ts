@@ -7,7 +7,7 @@ import { resolveMaxOutputTokens, contextWindowSize } from '../model-capabilities
 import { buildToolsetSubset, formatArgPreview, resolveToolName } from '../tools/registry.js';
 import { getToolMeta } from '../tools/tool-meta.js';
 import { currentToolCallId } from '../tools/tool-call-context.js';
-import { categorizeTool } from '../../../src/lib/stream/blockState.js';
+import { categorizeTool } from '../../../src/lib/stream/block-state.js';
 import { createLogger } from '../../logger.js';
 import type { Provider, Usage, AutonomyMode, ToolName } from '../../../src/types/index.js';
 import type { CompactionSettings } from '../../../src/types/compaction.js';

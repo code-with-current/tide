@@ -27,6 +27,12 @@ export interface Config {
   agentSettings?: AgentSettings;
   generalSettings?: GeneralSettings;
   ragEnabledWorkspaces?: string[];
+  /** Global/user-scoped MCP server configs (migrated from mcp.json). */
+  mcpServers?: Record<string, unknown>;
+  /** Global MCP OAuth credentials (migrated from mcp.json). */
+  mcpOAuth?: { tokens?: Record<string, string>; clients?: Record<string, string>; verifiers?: Record<string, string> };
+  /** Disabled extensions (migrated from extensions.json). */
+  extensions?: { disabled: { agents: string[]; skills: string[]; mcp: string[] } };
 }
 
 export interface AgentSettings {
@@ -149,7 +155,64 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     } catch {
       cache = structuredClone(DEFAULT_CONFIG);
     }
+    // One-time migration: fold mcp.json + extensions.json into config.json.
+    migrateLegacyFiles();
     return cache;
+  }
+
+  /** Merge legacy standalone config files into config.json. Runs once; renames
+   *  the old files so it doesn't re-run. Also moves any workspace .mcp.json
+   *  oauth sections into the workspace object's mcpOAuth. */
+  function migrateLegacyFiles(): void {
+    if (!cache) return;
+    let changed = false;
+    // 1. Migrate mcp.json → config.mcpServers + config.mcpOAuth
+    const mcpPath = path.join(rootDir, 'mcp.json');
+    try {
+      if (fs.existsSync(mcpPath) && !cache.mcpServers) {
+        const mcp = JSON.parse(fs.readFileSync(mcpPath, 'utf-8'));
+        cache.mcpServers = mcp.mcpServers ?? mcp; // handle wrapped or flat
+        if (mcp.oauth) cache.mcpOAuth = mcp.oauth;
+        changed = true;
+        fs.renameSync(mcpPath, mcpPath + '.migrated');
+        log.info('migrated mcp.json → config.json');
+      }
+    } catch (e) { log.warn('mcp.json migration failed', { err: String(e) }); }
+    // 2. Migrate extensions.json → config.extensions
+    const extPath = path.join(rootDir, 'extensions.json');
+    try {
+      if (fs.existsSync(extPath) && !cache.extensions) {
+        const ext = JSON.parse(fs.readFileSync(extPath, 'utf-8'));
+        cache.extensions = {
+          disabled: {
+            agents: ext.disabled?.agents ?? [],
+            skills: ext.disabled?.skills ?? [],
+            mcp: ext.disabled?.mcp ?? ['tide-filesystem'],
+          },
+        };
+        changed = true;
+        fs.renameSync(extPath, extPath + '.migrated');
+        log.info('migrated extensions.json → config.json');
+      }
+    } catch (e) { log.warn('extensions.json migration failed', { err: String(e) }); }
+    // 3. Move workspace .mcp.json oauth sections → workspace.mcpOAuth
+    for (const ws of cache.workspaces ?? []) {
+      if (ws.mcpOAuth) continue; // already migrated
+      try {
+        const wsMcpPath = path.join(ws.path, '.mcp.json');
+        if (fs.existsSync(wsMcpPath)) {
+          const wsMcp = JSON.parse(fs.readFileSync(wsMcpPath, 'utf-8'));
+          if (wsMcp.oauth) {
+            ws.mcpOAuth = wsMcp.oauth;
+            delete wsMcp.oauth;
+            fs.writeFileSync(wsMcpPath, JSON.stringify(wsMcp, null, 2), 'utf-8');
+            changed = true;
+            log.info('migrated workspace oauth → config.json', { workspace: ws.id });
+          }
+        }
+      } catch { /* workspace .mcp.json not readable — skip */ }
+    }
+    if (changed) write(cache);
   }
 
   function write(cfg: Config): void {
@@ -407,6 +470,48 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     write(cfg);
   }
 
+  // ── MCP config (merged from mcp.json) ──────────────────────────
+
+  function getMcpServers(): Record<string, unknown> {
+    return read().mcpServers ?? {};
+  }
+  function setMcpServers(servers: Record<string, unknown>): void {
+    const cfg = read();
+    cfg.mcpServers = servers;
+    write(cfg);
+  }
+  function getMcpOAuth(): Config['mcpOAuth'] {
+    return read().mcpOAuth;
+  }
+  function setMcpOAuth(oauth: Config['mcpOAuth']): void {
+    const cfg = read();
+    cfg.mcpOAuth = oauth;
+    write(cfg);
+  }
+  function getWorkspaceMcpOAuth(workspaceId: string): Config['mcpOAuth'] {
+    const ws = read().workspaces.find((w) => w.id === workspaceId);
+    return ws?.mcpOAuth;
+  }
+  function setWorkspaceMcpOAuth(workspaceId: string, oauth: Config['mcpOAuth']): void {
+    const cfg = read();
+    const ws = cfg.workspaces.find((w) => w.id === workspaceId);
+    if (ws) { ws.mcpOAuth = oauth; write(cfg); }
+  }
+
+  // ── Extensions config (merged from extensions.json) ────────────
+
+  function getExtensions(): NonNullable<Config['extensions']> {
+    const cfg = read();
+    return cfg.extensions ?? {
+      disabled: { agents: [], skills: [], mcp: ['tide-filesystem'] },
+    };
+  }
+  function setExtensions(ext: NonNullable<Config['extensions']>): void {
+    const cfg = read();
+    cfg.extensions = ext;
+    write(cfg);
+  }
+
   return {
     listProviders,
     addProvider,
@@ -429,6 +534,14 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     listRagEnabledWorkspaces,
     addRagEnabledWorkspace,
     removeRagEnabledWorkspace,
+    getMcpServers,
+    setMcpServers,
+    getMcpOAuth,
+    setMcpOAuth,
+    getWorkspaceMcpOAuth,
+    setWorkspaceMcpOAuth,
+    getExtensions,
+    setExtensions,
   };
 
   function listRagEnabledWorkspaces(): string[] {

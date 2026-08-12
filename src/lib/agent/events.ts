@@ -172,6 +172,9 @@ export interface TurnEndEvent extends AgentEventBase {
   reasoning?: string;
   reasoningTokens?: number;
   reasoningMs?: number;
+  /** Wall-clock duration of the turn (ms), from turn start to turn end.
+   *  Persisted on the message so the send→result timer survives reload. */
+  totalMs?: number;
   toolCalls?: ToolCall[];
   /** Canonical block list for this turn, in emission order. The renderer
    *  uses this as the source of truth for the persisted message and the

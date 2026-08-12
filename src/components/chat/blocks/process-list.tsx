@@ -1,0 +1,142 @@
+import { useEffect, useState } from 'react';
+import { ChevronRight, ChevronUp, Wrench, Clock } from 'lucide-react';
+import type { TextBlock, ToolBlock } from '@/types';
+import { Streamdown } from 'streamdown';
+import remarkGfm from 'remark-gfm';
+import { cn } from '@/lib/utils';
+import { ToolRow, ExploringGroup } from './tool-row';
+import { buildProcessSummary, formatMs } from '@/lib/stream/block-state';
+import { toolBlockToToolCall } from '@/components/chat/turn/block-adapter';
+import { Button } from '@/components/ui/button';
+
+const EXPLORING = new Set(['read_file', 'grep', 'glob', 'list_dir', 'directory_tree']);
+
+type RenderItem =
+  | { kind: 'text'; block: TextBlock }
+  | { kind: 'tool'; block: ToolBlock }
+  | { kind: 'exploring'; blocks: ToolBlock[] };
+
+/** Group consecutive exploring tools into a single group item.
+ *  Mirrors the existing emission-order grouping behavior. */
+function groupExploring(items: RenderItem[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  for (const item of items) {
+    if (item.kind === 'tool' && EXPLORING.has(item.block.toolName)) {
+      const last = out[out.length - 1];
+      if (last && last.kind === 'exploring') {
+        last.blocks.push(item.block);
+      } else {
+        out.push({ kind: 'exploring', blocks: [item.block] });
+      }
+    } else {
+      out.push(item);
+    }
+  }
+  // Exploring groups with <3 calls stay inline as individual rows.
+  return out.flatMap(item =>
+    item.kind === 'exploring' && item.blocks.length < 3
+      ? item.blocks.map(b => ({ kind: 'tool' as const, block: b }))
+      : [item],
+  );
+}
+
+export function ProcessList({
+  blocks, totals, streaming, onViewFile, childrenByParent,
+}: {
+  blocks: Array<ToolBlock | TextBlock>;
+  totals: { commands: number; edits: number; exploration: number; other: number; failedCount: number; totalMs: number };
+  streaming: boolean;
+  onViewFile?: (path: string) => void;
+  /** Child tool blocks indexed by their parent dispatch_agent's toolCallId.
+   *  Each parent row receives its children for nested rendering. */
+  childrenByParent?: Map<string, ToolBlock[]>;
+}) {
+  const [open, setOpen] = useState(streaming);
+  useEffect(() => {
+    if (!streaming) setOpen(false);
+  }, [streaming]);
+
+  const summary = buildProcessSummary({ ...totals, totalMs: 0 });
+  const timeStr = totals.totalMs > 0 ? formatMs(totals.totalMs) : '';
+
+  // Build the emission-order render items.
+  const items = groupExploring(
+    blocks.map(b => b.kind === 'text' ? { kind: 'text' as const, block: b } : { kind: 'tool' as const, block: b }),
+  );
+
+  return (
+    <div className="py-0.5">
+      <span
+        role="button"
+        onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center text-[0.8rem] text-muted-foreground/80 hover:text-muted-foreground/60 font-mono gap-1"
+      >
+        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
+        <Wrench className="size-[0.8rem]" />
+        <span>{summary}</span>
+        {timeStr && (
+          <span className="flex items-center gap-0.5 text-muted-foreground/50">
+            <Clock className="size-2.5" />
+            {timeStr}
+          </span>
+        )}
+      </span>
+      {open && (
+        <div className="mt-1.5 ml-5 border-l border-input animate-slide-up">
+          {/* Emission-order view — always. Same narrative during streaming
+              and after completion: narration paragraphs interleave with
+              tool rows in the exact order the model emitted them. The
+              summary line above shows the category counts for at-a-glance
+              indexing; the expanded view shows the story. */}
+          <div className="space-y-0.5 pl-3 py-3 text-card-foreground/80 bg-card">
+            {items.map((item, i) => {
+              if (item.kind === 'text') {
+                if (!item.block.text.trim()) return null;
+                return (
+                  <div key={`t_${i}`} className="text-[0.85rem] text-card-foreground/80 leading-relaxed py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px] [&_table]:text-[11px] [&_th]:text-[10px] [&_td]:text-[11px]">
+                    <Streamdown
+                      mode="static"
+                      remarkPlugins={[remarkGfm]}
+                      controls={false}
+                      animated={false}
+                    >
+                      {item.block.text.trim()}
+                    </Streamdown>
+                  </div>
+                );
+              }
+              if (item.kind === 'exploring') {
+                return (
+                  <ExploringGroup
+                    key={`g_${i}`}
+                    calls={item.blocks.map(toolBlockToToolCall)}
+                    streaming={streaming}
+                  />
+                );
+              }
+              return (
+                <ToolRow
+                  key={item.block.toolCallId}
+                  call={toolBlockToToolCall(item.block)}
+                  streaming={streaming}
+                  onViewFile={onViewFile}
+                  childToolCalls={childrenByParent?.get(item.block.toolCallId)?.map(toolBlockToToolCall)}
+                />
+              );
+            })}
+          </div>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => setOpen(false)}
+            className="w-full rounded-none uppercase tracking-wider gap-2"
+          >
+            <ChevronUp className='size-3'/>
+            Collapse
+            <ChevronUp className='size-3'/>
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

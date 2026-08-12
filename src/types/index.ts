@@ -124,6 +124,14 @@ export interface Workspace {
    *  before this feature existed get sensible defaults. See hydrateRagConfig
    *  in electron/configStore.ts. */
   ragConfig?: RagConfig;
+  /** Per-workspace MCP OAuth credentials (tokens/clients/verifiers) for
+   *  project-scoped OAuth servers. Stored in config.json, not .mcp.json, so
+   *  credentials don't leak to the filesystem or git. */
+  mcpOAuth?: {
+    tokens?: Record<string, string>;
+    clients?: Record<string, string>;
+    verifiers?: Record<string, string>;
+  };
 }
 
 export type AutonomyMode = 'plan' | 'ask' | 'edit' | 'full';
@@ -270,6 +278,9 @@ export interface Message {
   reasoningTokens?: number;
   /** Thinking duration in ms, if known. */
   reasoningMs?: number;
+  /** Wall-clock duration of the turn (ms), from send to result. Persisted so
+   *  the answer-block timer survives reload. */
+  totalMs?: number;
   createdAt: string;
   /** Tool calls made during this message (assistant only). */
   toolCalls?: ToolCall[];
@@ -474,6 +485,7 @@ export interface SessionStream {
     turn?: Turn;
     reasoning?: string;
     reasoningTokens?: number;
+    totalMs?: number;
     toolCalls?: ToolCall[];
     usage?: Usage;
     /** The last step's usage only — for the context meter. */

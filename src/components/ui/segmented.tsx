@@ -42,7 +42,7 @@ export function Segmented<T extends string>({
               size === 'sm' ? 'px-2 py-1 text-[12px]' : 'px-2.5 py-1 text-[12px]',
               active
                 ? cn(
-                    'bg-primary text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
+                    'bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04)]',
                     opt.accent && 'text-primary',
                   )
                 : 'text-muted-foreground/60 hover:text-muted',
