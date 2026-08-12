@@ -40,8 +40,8 @@ function ChatTimelineImpl({
 
   return (
     <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll px-6 py-5', className)}>
-        <div className="max-w-4xl mx-auto flex flex-col min-w-0">
+      <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll px-6 py-3', className)}>
+        <div className="max-w-4xl mx-auto flex flex-col">
           {sessionLoading && messages.length === 0 ? loadingFallback
             : isEmpty ? emptyState
             : (

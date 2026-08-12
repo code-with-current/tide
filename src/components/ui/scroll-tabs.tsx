@@ -55,9 +55,9 @@ export function ScrollTabsList({
 
     // Map vertical wheel to horizontal scroll on the strip and block the vertical delta from bubbling to parent containers (which could scroll the panel behind the tabs). Pure-horizontal wheel (trackpad swipe, shift+wheel) is left to native behavior. Registered non-passive so preventDefault works — React's synthetic onWheel can be passive in some setups, silently breaking the intercept.
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY === 0) return;
+      if (e.deltaY === 0 && e.deltaX === 0) return;
       e.preventDefault();
-      el.scrollLeft += e.deltaY;
+      el.scrollLeft += e.deltaY || e.deltaX;
     };
 
     el.addEventListener('scroll', update, { passive: true });
@@ -67,10 +67,34 @@ export function ScrollTabsList({
     // when the user adds a tab without scrolling.
     const ro = new ResizeObserver(update);
     ro.observe(el);
+
+    // ── Auto-scroll to the active tab ──
+    // When the active tab changes (data-state on a child flips to "active"),
+    // scroll it into view if it's off-screen. Uses a MutationObserver since
+    // the list's children don't remount when the value changes — only the
+    // data-state attribute does.
+    const scrollToActive = () => {
+      const active = el.querySelector('[data-state="active"]') as HTMLElement | null;
+      if (!active) return;
+      const elRect = el.getBoundingClientRect();
+      const aRect = active.getBoundingClientRect();
+      const PAD = 32;
+      if (aRect.left < elRect.left + PAD) {
+        el.scrollTo({ left: active.offsetLeft - PAD, behavior: 'smooth' });
+      } else if (aRect.right > elRect.right - PAD) {
+        el.scrollTo({ left: active.offsetLeft + active.offsetWidth - el.clientWidth + PAD, behavior: 'smooth' });
+      }
+    };
+    // Run once on mount (in case the initial active tab is off-screen).
+    requestAnimationFrame(scrollToActive);
+    const mo = new MutationObserver(scrollToActive);
+    mo.observe(el, { subtree: true, attributes: true, attributeFilter: ['data-state'] });
+
     return () => {
       el.removeEventListener('scroll', update);
       el.removeEventListener('wheel', onWheel);
       ro.disconnect();
+      mo.disconnect();
     };
   }, [update]);
 

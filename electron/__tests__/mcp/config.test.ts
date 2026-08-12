@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+vi.mock('../../appPaths.js', () => ({
+  appDataDir: () => '/tmp/tide-mock-appdata',
+}));
+
 import { readMcpConfig, writeMcpConfig, mergeConfigs, validateServerConfig } from '../../agent/mcp/config';
 
 let tmpDir: string;

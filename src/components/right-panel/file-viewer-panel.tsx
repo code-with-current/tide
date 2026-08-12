@@ -1,468 +1,285 @@
-import { useEffect, useRef, useState } from 'react';
-import { FileText, X, Loader2, GitCompareArrows, ChevronLeft, ChevronRight, Eye, Code2, Image as ImageIcon } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+/**
+ * FileViewerPanel — ScrollTabs strip of open files + body showing file content
+ * or diffs. Uses the same ScrollTabs component as the right panel (chevrons,
+ * drag-to-scroll, folder-tab curves). Rendered inside a Sheet below the topbar.
+ */
+import { useEffect, useState, useCallback } from 'react';
+import { FileText, X, Loader2, GitCompareArrows, Copy, Check } from 'lucide-react';
 import { useUi, type OpenFile } from '@/lib/stores/ui';
 import * as api from '@/lib/api/client';
 import { DiffView } from '@/components/chat/blocks/diff-view';
-import { MemoizedMarkdown } from '@/components/chat/memoized-markdown';
-import { Image } from '@/components/ui/image';
-import { resolveLanguage } from '@/lib/highlight';
-import { cn } from '@/lib/utils';
+import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
 
-const MD_EXTENSIONS = new Set(['md', 'mdx', 'markdown']);
+// ── Helpers ──
 
-/** Dedicated File Viewer panel (separate from the tabbed RightPanel): tab strip of open files + body reading real file content (with markdown preview/code toggle). */
+function basename(path: string): string {
+  return path.split('/').pop() ?? path;
+}
+
+function isImageExt(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i.test(path);
+}
+
+// ── Component ──
+
 export function FileViewerPanel() {
-  const activeSessionId = useUi((s) => s.activeSessionId);
-  const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
-  const openFiles = useUi((s) => (activeSessionId ? s.openFiles[activeSessionId] : undefined));
-  const activeId = useUi((s) => (activeSessionId ? s.activeOpenFile[activeSessionId] : undefined));
-  const setActiveOpenFile = useUi((s) => s.setActiveOpenFile);
-  const closeOpenFile = useUi((s) => s.closeOpenFile);
-  const toggleFileViewer = useUi((s) => s.toggleFileViewer);
-  const tabStripRef = useRef<HTMLDivElement>(null);
+  const sessionId = useUi((s) => s.activeSessionId);
+  const workspaceId = useUi((s) => s.activeWorkspaceId);
+  const files = useUi((s) => (sessionId ? s.openFiles[sessionId] : undefined));
+  const activeId = useUi((s) => (sessionId ? s.activeOpenFile[sessionId] : undefined));
+  const setActive = useUi((s) => s.setActiveOpenFile);
+  const closeFile = useUi((s) => s.closeOpenFile);
+  const closePanel = useUi((s) => s.toggleFileViewer);
 
-  const activeFile = openFiles?.find((f) => f.id === activeId);
+  const active = files?.find((f) => f.id === activeId) ?? files?.[0];
 
-  const items = (openFiles ?? []).map((f) => ({
-    id: f.id,
-    label: f.path.split('/').pop() ?? f.path,
-    title: f.path,
-    icon: f.diffHunks && f.diffHunks.length > 0
-      ? <GitCompareArrows className="size-3 text-primary" />
-      : <FileText className="size-3 text-muted-foreground/60" />,
-    file: f,
-  }));
+  const closeOthers = useCallback((keepId: string) => {
+    if (!sessionId) return;
+    for (const f of [...(files ?? [])]) {
+      if (f.id !== keepId) closeFile(sessionId, f.id);
+    }
+    setActive(sessionId, keepId);
+  }, [sessionId, files, closeFile, setActive]);
+
+  const closeAllTabs = useCallback(() => {
+    if (!sessionId) return;
+    for (const f of [...(files ?? [])]) closeFile(sessionId, f.id);
+  }, [sessionId, files, closeFile]);
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-card overflow-hidden">
-      {/* Tab strip — folder-tab style matching ScrollTabs/terminal tabs. */}
-      <div className="flex items-stretch bg-secondary flex-shrink-0">
-        <button
-          type="button"
-          onClick={() => tabStripRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
-          className="flex items-center justify-center w-6 flex-shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-card/40 cursor-pointer"
+    <div className="flex flex-col flex-1 min-h-0 bg-background">
+      <ScrollTabs
+        value={active?.id}
+        onValueChange={(id) => sessionId && setActive(sessionId, id)}
+        className="flex flex-col flex-1 min-h-0"
+      >
+        <ScrollTabsList
+          className="bg-sidebar"
+          trailing={
+            <button
+              type="button"
+              onClick={closePanel}
+              title="Close panel"
+              className="flex items-center justify-center px-2.5 flex-shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-background/40 transition-colors"
+            >
+              <X className="size-3.5" />
+            </button>
+          }
         >
-          <ChevronLeft className="size-3.5" />
-        </button>
-
-        <div
-          ref={tabStripRef}
-          className="flex items-end gap-0.5 flex-1 min-w-0 overflow-x-auto scroll px-1.5 pt-1.5 select-none"
-          style={{ scrollbarWidth: 'none' }}
-        >
-          {items.map((item) => {
-            const isActive = item.id === activeId;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                title={item.title}
-                onClick={() => activeSessionId && setActiveOpenFile(activeSessionId, item.id)}
-                className={cn(
-                  'scroll-tabs-trigger group relative flex items-center gap-1.5 px-3 py-1.5 mb-[-1px]',
-                  'text-[11.5px] font-medium whitespace-nowrap flex-shrink-0',
-                  'rounded-t-md transition-colors outline-none',
-                  'focus-visible:ring-1 focus-visible:ring-ring',
-                  isActive
-                    ? 'text-foreground bg-card'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                data-state={isActive ? 'active' : 'inactive'}
-              >
-                {item.icon}
-                <span className="truncate max-w-[12rem]">{item.label}</span>
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    if (activeSessionId) closeOpenFile(activeSessionId, item.id);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      if (activeSessionId) closeOpenFile(activeSessionId, item.id);
-                    }
-                  }}
-                  className={cn(
-                    'ml-0.5 inline-flex items-center justify-center rounded size-3.5 flex-none transition-colors',
-                    'text-muted-foreground/60 hover:bg-accent hover:text-foreground',
-                  )}
-                  title="Close file"
-                  aria-label={`Close ${item.label}`}
-                >
-                  <X className="size-2.5 pointer-events-none" />
-                </span>
-              </button>
-            );
-          })}
-          {items.length === 0 && (
+          {(files ?? []).map((file) => (
+            <FileTab
+              key={file.id}
+              file={file}
+              fileCount={files?.length ?? 0}
+              onClose={() => sessionId && closeFile(sessionId, file.id)}
+              onCloseOthers={() => closeOthers(file.id)}
+              onCloseAll={() => closeAllTabs()}
+            />
+          ))}
+          {(!files || files.length === 0) && (
             <span className="text-[11px] text-muted-foreground/50 px-3 py-1.5 self-center">No file open</span>
           )}
+        </ScrollTabsList>
+
+        {/* ── Body ── */}
+        <div className="flex-1 min-h-0 overflow-hidden bg-card">
+          {active && sessionId && workspaceId ? (
+            <FileBody key={active.id} file={active} workspaceId={workspaceId} />
+          ) : (
+            <div className="flex items-center justify-center h-full text-xs text-muted-foreground/50">
+              Open a file from a tool card or the Explorer.
+            </div>
+          )}
         </div>
-
-        <button
-          type="button"
-          onClick={() => tabStripRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
-          className="flex items-center justify-center w-6 flex-shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-card/40 cursor-pointer"
-        >
-          <ChevronRight className="size-3.5" />
-        </button>
-
-        <button
-          type="button"
-          onClick={toggleFileViewer}
-          className="flex items-center justify-center px-2.5 flex-shrink-0 text-muted-foreground/60 hover:text-foreground hover:bg-card/40 cursor-pointer"
-          title="Close panel"
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
-
-      {/* Body */}
-      {activeFile && activeSessionId && activeWorkspaceId ? (
-        <FileBody key={activeFile.id} file={activeFile} workspaceId={activeWorkspaceId} />
-      ) : (
-        <EmptyState />
-      )}
+      </ScrollTabs>
     </div>
   );
 }
 
-type BodyState =
-  | { loading: true }
-  | { loading: false; content: string; truncated: boolean }
-  | { loading: false; error: string };
+// ── FileTab: one ScrollTabsTrigger with icon, name, close X, right-click menu ──
+
+function FileTab({
+  file, fileCount, onClose, onCloseOthers, onCloseAll,
+}: {
+  file: OpenFile;
+  fileCount: number;
+  onClose: () => void;
+  onCloseOthers: () => void;
+  onCloseAll: () => void;
+}) {
+  const isDiff = !!(file.diffHunks && file.diffHunks.length > 0);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>
+        <ScrollTabsTrigger value={file.id} title={file.path}>
+          {isDiff
+            ? <GitCompareArrows className="size-3 text-primary" />
+            : <FileText className="size-3 text-muted-foreground/60" />}
+          <span className="truncate max-w-[10rem]">{basename(file.path)}</span>
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); onClose(); }}
+            className="ml-0.5 inline-flex items-center justify-center rounded size-3.5 text-muted-foreground/50 hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <X className="size-2.5" />
+          </span>
+        </ScrollTabsTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onClose} className="text-xs">
+         Close
+        </ContextMenuItem>
+        <ContextMenuItem disabled={fileCount <= 1} onClick={onCloseOthers} className="text-xs">
+          Close Others
+        </ContextMenuItem>
+        <ContextMenuItem disabled={fileCount <= 1} onClick={onCloseAll} className="text-xs">
+          Close All
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+// ── FileBody ──
 
 function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
   const isDiff = !!(file.diffHunks && file.diffHunks.length > 0);
-  const isMarkdown = MD_EXTENSIONS.has(file.language);
-  const [mdPreview, setMdPreview] = useState(isMarkdown);
-  // Inline content (e.g. a pasted/browsed attachment) skips the disk read
-  // entirely — the bytes are already in hand and the file may live outside
-  // the workspace, so readFileInWorkspace would 404.
-  const hasInline = file.inlineContent !== undefined;
-  const isExternal = file.external === true;
-  const [state, setState] = useState<BodyState>(() =>
-    hasInline
-      ? { loading: false, content: file.inlineContent!, truncated: false }
-      : { loading: true },
-  );
 
-  useEffect(() => {
-    // Skip the disk read when we already have inline content or it's a diff.
-    if (isDiff || hasInline) return;
-    let cancelled = false;
-    setState({ loading: true });
-    // External attachments (browsed/pasted from anywhere on disk) read via
-    // readExternalFile — no workspace sandbox. absPath survives reload
-    // because it's encoded in the content link target, so this works even
-    // after attachments[] is gone from memory.
-    if (isExternal && file.absPath) {
-      api.readExternalFile(file.absPath).then((res) => {
-        if (cancelled) return;
-        if (res == null) {
-          setState({ loading: false, error: 'Could not read file — it may have been moved or deleted.' });
-        } else {
-          setState({ loading: false, content: res.content, truncated: res.truncated });
-        }
-      });
-      return () => { cancelled = true; };
-    }
-    // Images without absPath (or any external file with no absPath and no
-    // inline content) can't be read — fall through to the isImage /
-    // external-placeholder render paths below instead of attempting a
-    // workspace read that would 404.
-    if (isExternal) {
-      setState({ loading: false, content: '', truncated: false });
-      return;
-    }
-    // Workspace file — read via the sandboxed workspace API.
-    api.readFileInWorkspace(workspaceId, file.path).then((res) => {
-      if (cancelled) return;
-      if (res == null || res.ok !== true) {
-        setState({ loading: false, error: 'Could not read file — missing or outside the workspace.' });
-      } else {
-        setState({ loading: false, content: res.content, truncated: res.truncated });
-      }
-    });
-    return () => { cancelled = true; };
-  }, [workspaceId, file.path, file.absPath, isDiff, hasInline, isExternal]);
-
-  // Diff mode — render DiffView (opened from Source Control).
   if (isDiff) {
     return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[10px] text-muted-foreground/60 flex-shrink-0">
-          <GitCompareArrows className="size-3 text-primary" />
-          <code className="font-mono truncate flex-1" title={file.path}>{file.path}</code>
-          <span className="uppercase">diff · {file.diffHunks!.length} hunks</span>
-        </div>
+      <div className="flex flex-col h-full">
+        <FileHeader path={file.path} badge={`diff · ${file.diffHunks!.length} hunks`} />
         <div className="flex-1 overflow-auto scroll">
-          <DiffView hunks={file.diffHunks!} mode="split" />
+          <DiffView hunks={file.diffHunks!} />
         </div>
       </div>
     );
   }
 
-  // Image preview — short-circuits BEFORE the text disk-read/error checks. Images have no text content, so they get their own loader (readImageFile → base64 data URL) rendered via the Image UI component; works for external attachments (absPath) and workspace @file mentions (relPath).
-  if (file.isImage) {
+  if (file.isImage || isImageExt(file.path)) {
     return <ImageBody file={file} workspaceId={workspaceId} />;
   }
 
-  // External attachment with no absPath and no inline content — this
-  // happens only for very old sessions saved before absPath was encoded
-  // into the link target. Don't surface the workspace disk-read error;
-  // explain the real reason.
-  if (isExternal && !hasInline && !file.absPath) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[10px] text-muted-foreground/60 flex-shrink-0">
-          <code className="font-mono truncate flex-1" title={file.path}>{file.path}</code>
-          <span className="uppercase">external</span>
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground/50 p-6 text-center">
-          <FileText className="size-6" />
-          <span className="text-xs">Attached file content isn't available after reload.</span>
-          <span className="text-[10px]">Re-attach the file to view its contents.</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (state.loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground/50">
-        <Loader2 className="size-4 animate-spin" />
-      </div>
-    );
-  }
-  if ('error' in state) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-[12px] text-destructive/80 px-6 text-center">
-        {state.error}
-      </div>
-    );
-  }
-
-  const lines = state.content.split('\n');
-  const changedSet = new Set(file.changedLines ?? []);
-
-  return (
-    <div className="flex flex-col flex-1 min-h-0">
-      {/* Header line */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[10px] text-muted-foreground/60 flex-shrink-0">
-        <code className="font-mono truncate flex-1" title={file.path}>{file.path}</code>
-        <span className="tabular-nums">{lines.length} lines</span>
-        <span className="uppercase">{file.language}</span>
-        {state.truncated && <span className="text-warning">truncated</span>}
-        {isMarkdown && (
-          <div className="flex items-center gap-0 ml-2 rounded-md border border-input overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setMdPreview(true)}
-              className={cn(
-                'flex items-center gap-1 px-2 py-0.5 text-[10px] transition-colors',
-                mdPreview ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Eye className="size-2.5" /> Preview
-            </button>
-            <button
-              type="button"
-              onClick={() => setMdPreview(false)}
-              className={cn(
-                'flex items-center gap-1 px-2 py-0.5 text-[10px] transition-colors',
-                !mdPreview ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Code2 className="size-2.5" /> Code
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Body — markdown preview or highlighted code with line numbers */}
-      {isMarkdown && mdPreview ? (
-        <div className="flex-1 overflow-auto scroll p-4">
-          <div className="prose-chat max-w-none">
-            <MemoizedMarkdown content={state.content} />
-          </div>
-        </div>
-      ) : (
-        <HighlightedCode content={state.content} language={file.language} changedSet={changedSet} />
-      )}
-    </div>
-  );
+  return <TextBody file={file} workspaceId={workspaceId} />;
 }
 
-/** Image viewer: reads images as base64 data URLs. SVGs get a preview/code toggle. */
+// ── ImageBody ──
+
 function ImageBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
-  const isSvg = file.path.toLowerCase().endsWith('.svg');
-  const [svgMode, setSvgMode] = useState<'preview' | 'code'>('preview');
-  const [state, setState] = useState<
-    | { loading: true }
-    | { loading: false; dataUrl: string }
-    | { loading: false; error: string }
-  >({ loading: true });
+  const [state, setState] = useState<{ loading: true } | { loading: false; dataUrl: string } | { loading: false; error: string }>({ loading: true });
 
   useEffect(() => {
     let cancelled = false;
     setState({ loading: true });
-    const input = file.absPath
-      ? { absPath: file.absPath }
-      : { workspaceId, relPath: file.path };
+    const input = file.absPath ? { absPath: file.absPath } : { workspaceId, relPath: file.path };
     api.readImageFile(input).then((res) => {
       if (cancelled) return;
-      if (res == null) {
-        setState({ loading: false, error: 'Could not read image — it may have been moved or deleted.' });
-      } else {
-        setState({ loading: false, dataUrl: res.dataUrl });
-      }
+      if (!res) setState({ loading: false, error: 'Could not read image.' });
+      else setState({ loading: false, dataUrl: res.dataUrl });
     });
     return () => { cancelled = true; };
   }, [file.absPath, file.path, workspaceId]);
 
-  if (state.loading) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <ImageHeader path={file.path} bytes={file.bytes} />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground/50">
-          <Loader2 className="size-4 animate-spin" />
-        </div>
-      </div>
-    );
-  }
-  if ('error' in state) {
-    return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <ImageHeader path={file.path} bytes={file.bytes} />
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground/50 p-6 text-center">
-          <ImageIcon className="size-6" />
-          <span className="text-xs">{state.error}</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Decode the base64 data URL to get raw SVG source for the code view.
-  const svgSource = isSvg ? atob(state.dataUrl.split(',')[1] ?? '') : '';
+  if (state.loading) return <CenteredSpinner />;
+  if ('error' in state) return <CenteredMessage message={state.error} />;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <ImageHeader path={file.path} bytes={file.bytes}>
-        {isSvg && (
-          <div className="flex items-center gap-0.5 ml-1">
-            <button
-              type="button"
-              onClick={() => setSvgMode('preview')}
-              className={cn(
-                'px-1.5 py-0.5 text-[10px] rounded transition-colors',
-                svgMode === 'preview' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >Preview</button>
-            <button
-              type="button"
-              onClick={() => setSvgMode('code')}
-              className={cn(
-                'px-1.5 py-0.5 text-[10px] rounded transition-colors',
-                svgMode === 'code' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >Code</button>
-          </div>
-        )}
-      </ImageHeader>
+    <div className="flex flex-col h-full">
+      <FileHeader path={file.path} badge="image" />
       <div className="flex-1 overflow-auto scroll p-4 flex items-start justify-center">
-        {isSvg && svgMode === 'code' ? (
-          <pre className="text-[12px] font-mono whitespace-pre-wrap break-all text-foreground">
-            {svgSource}
-          </pre>
-        ) : (
-          <Image
-            src={state.dataUrl}
-            alt={file.path}
-            className="max-w-full max-h-full h-auto shadow-sm"
-          />
-        )}
+        <img src={state.dataUrl} alt={file.path} className="max-w-full max-h-full h-auto" />
       </div>
     </div>
   );
 }
 
-/** Shared header bar for image previews — filename + size + "image" tag. */
-function ImageHeader({ path, bytes, children }: { path: string; bytes?: number; children?: React.ReactNode }) {
-  const sz = formatBytesStatic(bytes);
+// ── TextBody ──
+
+function TextBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
+  const [state, setState] = useState<
+    | { loading: true }
+    | { loading: false; content: string }
+    | { loading: false; error: string }
+  >(() => (file.inlineContent != null ? { loading: false, content: file.inlineContent } : { loading: true }));
+
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (file.inlineContent != null) { setState({ loading: false, content: file.inlineContent }); return; }
+    let cancelled = false;
+    setState({ loading: true });
+    api.readFileInWorkspace(workspaceId, file.path).then((res) => {
+      if (cancelled) return;
+      if (!res || res.ok !== true) setState({ loading: false, error: 'Could not read file.' });
+      else setState({ loading: false, content: res.content });
+    });
+    return () => { cancelled = true; };
+  }, [workspaceId, file.path, file.inlineContent]);
+
+  const copy = useCallback(() => {
+    if ('content' in state) {
+      navigator.clipboard.writeText(state.content).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      });
+    }
+  }, [state]);
+
+  if (state.loading) return <CenteredSpinner />;
+  if ('error' in state) return <CenteredMessage message={state.error} />;
+
+  const lines = state.content.split('\n');
+
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-input text-[10px] text-muted-foreground/60 flex-shrink-0">
-      <ImageIcon className="size-3" />
+    <div className="flex flex-col h-full">
+      <FileHeader path={file.path} badge={`${lines.length} lines`} action={
+        <button type="button" onClick={copy} title="Copy" className="text-muted-foreground/50 hover:text-foreground transition-colors">
+          {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+        </button>
+      } />
+      <div className="flex-1 overflow-auto scroll">
+        <div className="flex font-mono text-[12px] leading-relaxed">
+          {/* Line numbers */}
+          <div className="select-none text-right text-muted-foreground/30 py-3 pl-3 pr-2 flex-shrink-0 sticky left-0 bg-background">
+            {lines.map((_, i) => <div key={i}>{i + 1}</div>)}
+          </div>
+          {/* Code */}
+          <pre className="py-3 px-2 whitespace-pre-wrap break-words text-foreground/90 flex-1 min-w-0">
+            {state.content}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Shared bits ──
+
+function FileHeader({ path, badge, action }: { path: string; badge?: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border flex-shrink-0 text-[10px] text-muted-foreground/60">
       <code className="font-mono truncate flex-1" title={path}>{path}</code>
-      {sz && <span className="tabular-nums">{sz}</span>}
-      <span className="uppercase">image</span>
-      {children}
+      {badge && <span className="uppercase flex-shrink-0">{badge}</span>}
+      {action}
     </div>
   );
 }
 
-function formatBytesStatic(b?: number): string | null {
-  return b != null ? (b > 1024 ? `${Math.ceil(b / 1024)}KB` : `${b}B`) : null;
-}
-
-/** Highlighted code viewer using react-syntax-highlighter (Prism + oneDark): synchronous render, line numbers, changed-line tint. */
-function HighlightedCode({
-  content,
-  language,
-  changedSet,
-}: {
-  content: string;
-  language: string;
-  changedSet: Set<number>;
-}) {
-  const lang = resolveLanguage(language);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
+function CenteredSpinner() {
   return (
-    <div ref={scrollRef} className="flex-1 overflow-auto scroll">
-      <SyntaxHighlighter
-        language={lang}
-        style={oneDark}
-        showLineNumbers
-        wrapLongLines={false}
-        customStyle={{
-          margin: 0,
-          background: 'transparent',
-          fontSize: '12px',
-          lineHeight: '1.6',
-          padding: '8px 0',
-        }}
-        lineNumberStyle={{
-          minWidth: '2.5em',
-          paddingRight: '1em',
-          color: 'var(--color-muted-foreground)',
-          opacity: 0.35,
-          userSelect: 'none',
-        }}
-        wrapLines
-        lineProps={(lineNumber) => ({
-          style: changedSet.has(lineNumber)
-            ? { background: 'rgba(34, 197, 94, 0.08)', display: 'block' }
-            : { display: 'block' },
-        })}
-      >
-        {content}
-      </SyntaxHighlighter>
+    <div className="flex items-center justify-center h-full text-muted-foreground/50">
+      <Loader2 className="size-4 animate-spin" />
     </div>
   );
 }
 
-function EmptyState() {
+function CenteredMessage({ message }: { message: string }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground/45 p-6 text-center">
-      <FileText className="size-5" />
-      <span className="text-xs">Open a file from a tool card or the Explorer to view it here.</span>
+    <div className="flex items-center justify-center h-full text-[12px] text-destructive/80 px-6 text-center">
+      {message}
     </div>
   );
 }

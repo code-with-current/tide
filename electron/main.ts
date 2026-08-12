@@ -66,8 +66,11 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    // Minimum size that keeps the 3-panel shell usable: integrated sidebar
+    // (300–500px) + chat (min 30% of the card) + right/Git panel (min 20%) +
+    // composer. Below this the columns crush and the layout breaks.
+    minWidth: 1080,
+    minHeight: 680,
     // Frameless custom titlebar. macOS: keep the native traffic lights.
     // Windows/Linux: render native caption buttons (min/max/close) via
     // titleBarOverlay so the custom WindowTopBar has working controls.

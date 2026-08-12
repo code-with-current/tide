@@ -168,6 +168,13 @@ interface UiState {
   rightPanelOpen: boolean;
   /** Dedicated file-viewer panel (separate from the tabbed right panel). */
   fileViewerOpen: boolean;
+  /** File-viewer panel width as a percentage of the card (25–70). Persisted. */
+  fileViewerWidth: number;
+  setFileViewerWidth: (w: number) => void;
+  /** Commit shown in the floating commit-details panel; null while closed.
+   *  Set from the Git Panel → History tab on row click. */
+  commitDetail: { sha: string; author: string; date: string; subject: string } | null;
+  setCommitDetail: (c: { sha: string; author: string; date: string; subject: string } | null) => void;
   leftPanelOpen: boolean;
   sessionsPanelOpen: boolean;
   /** Sidebar layout: 'dual' = separate workspace + sessions panels;
@@ -398,6 +405,9 @@ export const useUi = create<UiState>()(
   setTerminalHeight: (h) => set({ terminalHeight: h }),
   rightPanelOpen: true,
   fileViewerOpen: false,
+  fileViewerWidth: 50,
+  setFileViewerWidth: (w) => set({ fileViewerWidth: Math.max(25, Math.min(70, w)) }),
+  commitDetail: null,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
   sidebarMode: 'dual',
@@ -537,6 +547,7 @@ export const useUi = create<UiState>()(
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   setRightPanel: (open) => set({ rightPanelOpen: open }),
   toggleFileViewer: () => set((s) => ({ fileViewerOpen: !s.fileViewerOpen })),
+  setCommitDetail: (c) => set({ commitDetail: c }),
   toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
   toggleSessionsPanel: () => set((s) => ({ sessionsPanelOpen: !s.sessionsPanelOpen })),
   setSessionsPanel: (open) => set({ sessionsPanelOpen: open }),
@@ -946,6 +957,7 @@ export const useUi = create<UiState>()(
         sidebarWidth: s.sidebarWidth,
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
+        fileViewerWidth: s.fileViewerWidth,
         terminalOpen: s.terminalOpen,
         terminalHeight: s.terminalHeight,
         terminals: s.terminals,

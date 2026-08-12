@@ -1,7 +1,7 @@
 /** IntegratedSidebar — sessions nested inside workspace items.
  *  Full context menus (right-click + ⋯ dropdown) matching dual panel. */
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, createContext, useContext, useCallback, type ReactNode } from 'react';
 import {
   ChevronRight, FolderCode, Plus,
   Loader2, Settings as SettingsIcon, Archive as ArchiveIcon,
@@ -9,6 +9,7 @@ import {
   Trash2, FolderOpen,
   ChevronDown,
   FolderLock,
+  ArrowUp,
 } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { useWorkspaces, useSessions, useArchivedSessions } from '@/lib/queries';
@@ -29,11 +30,6 @@ import {
   ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
   ContextMenuSubTrigger, ContextMenuSubContent,
 } from '@/components/ui/context-menu';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel,
-  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
-  AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 
 interface SessionLite { id: string; title: string; updatedAt: string; createdAt: string; }
 
@@ -44,6 +40,50 @@ function workspaceStatus(sessions: SessionLite[] | undefined, runningIds: string
   return 'idle';
 }
 
+/** Inline-confirm shared state: only ONE item can be confirming at a time
+ *  across the whole sidebar. Asking on a different item auto-cancels the
+ *  previous one. Esc cancels the active confirm. */
+const InlineConfirmCtx = createContext<{
+  activeKey: string | null;
+  ask: (key: string) => void;
+  cancel: () => void;
+}>({ activeKey: null, ask: () => {}, cancel: () => {} });
+
+function InlineConfirmProvider({ children }: { children: ReactNode }) {
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const ask = useCallback((key: string) => setActiveKey(key), []);
+  const cancel = useCallback(() => setActiveKey(null), []);
+  // One global Esc listener while any confirm is active.
+  useEffect(() => {
+    if (activeKey == null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveKey(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeKey]);
+  return <InlineConfirmCtx.Provider value={{ activeKey, ask, cancel }}>{children}</InlineConfirmCtx.Provider>;
+}
+
+/** Confirm state keyed by `key` — confirming is true only for the single active
+ *  item; asking here cancels any other active item. */
+function useInlineConfirm(key: string) {
+  const { activeKey, ask, cancel } = useContext(InlineConfirmCtx);
+  return { confirming: activeKey === key, ask: () => ask(key), cancel };
+}
+
+/** The inline "Confirm"/"Delete" pill that replaces the action icon once clicked. */
+function InlineConfirmButton({ label, destructive, onConfirm }: { label: string; destructive?: boolean; onConfirm: () => void }) {
+  return (
+    <button type="button"
+      onClick={(e) => { e.stopPropagation(); onConfirm(); }}
+      className={cn(
+        'inline-flex items-center h-5 px-1.5 rounded text-[0.7rem] font-medium cursor-pointer transition-colors flex-shrink-0',
+        destructive ? 'bg-destructive/15 text-destructive hover:bg-destructive/25' : 'bg-primary/15 text-primary hover:bg-primary/25',
+      )}>
+      {label}
+    </button>
+  );
+}
+
 function IntegratedSidebarImpl() {
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const activeSessionId = useUi((s) => s.activeSessionId);
@@ -51,7 +91,6 @@ function IntegratedSidebarImpl() {
   const runningSessionIds = useUi((s) => s.runningSessionIds);
   const unreadSessionIds = useUi((s) => s.unreadSessionIds);
   const openDialog = useUi((s) => s.openDialog);
-  const sidebarWidth = useUi((s) => s.sidebarWidth);
   const isMac = typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
 
   const { data: workspaces } = useWorkspaces();
@@ -86,7 +125,8 @@ function IntegratedSidebarImpl() {
   };
 
   return (
-    <aside style={{ width: sidebarWidth }} className="flex flex-col h-full overflow-hidden flex-shrink-0 p-2">
+    <InlineConfirmProvider>
+    <aside className="flex flex-col h-full w-full overflow-hidden p-2">
       {isMac && <div className="h-8 flex-shrink-0 drag-region" />}
       <div className={cn("px-3 py-2.5 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">Workspaces</div>
@@ -134,6 +174,7 @@ function IntegratedSidebarImpl() {
         <Button variant="secondary" onClick={() => setScreen('settings')} className="w-full flex items-center"><SettingsIcon className="size-4" /> Settings</Button>
       </div>
     </aside>
+    </InlineConfirmProvider>
   );
 }
 
@@ -162,6 +203,7 @@ function WorkspaceTreeItem({
   const [renameValue, setRenameValue] = useState(ws.name);
   const renameWs = useRenameWorkspace();
   const archiveWs = useArchiveWorkspace(ws.id);
+  const archiveConfirm = useInlineConfirm(`w:${ws.id}`);
   const doRename = () => { if (renameValue.trim() && renameValue !== ws.name) renameWs.mutate({ id: ws.id, name: renameValue.trim() }); setIsRenaming(false); };
 
   return (
@@ -169,7 +211,7 @@ function WorkspaceTreeItem({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div role="button" onClick={onSelect}
-            className={cn('group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors min-w-0', !isActive && 'hover:bg-secondary/10')}>
+            className={cn('group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors min-w-0', !isActive && 'hover:bg-secondary/40')}>
             <button type="button" onClick={(e) => { e.stopPropagation(); onToggle(); }} className="flex-shrink-0 p-0 text-sidebar-foreground/60 hover:text-sidebar-foreground cursor-pointer">
               <ChevronRight className={cn('size-3.5 transition-transform', isExpanded && 'rotate-90')} />
             </button>
@@ -184,33 +226,25 @@ function WorkspaceTreeItem({
             )}
             {status === 'in_progress' && <Dot tone="warn" pulse="heartbeat" />}
             {status === 'unread' && <Dot tone="ok" />}
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-              <Tip label="New Session" side="bottom">
-                <Button variant="ghost" size="icon-xs" className="p-0.5 rounded hover:bg-background text-muted-foreground/60 hover:text-sidebar-foreground cursor-pointer"
-                  onClick={(e) => { e.stopPropagation(); onNewSession(); }} aria-label="New Session">
-                  <Plus className="size-3.5" />
-                </Button>
-              </Tip>
-              {/*<DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-xs" className="p-0.5 rounded hover:bg-background text-muted-foreground/60 hover:text-sidebar-foreground cursor-pointer"
-                    onClick={(e) => e.stopPropagation()} aria-label="Workspace actions">
-                    <MoreHorizontal className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuItem onClick={onNewSession}><Plus className="size-3.5" /> New Session</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setIsRenaming(true)}><Pencil className="size-3.5" /> Rename</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => archiveWs.mutate(ws.id)}><Archive className="size-3.5" /> Archive</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>*/}
+            <div className="flex items-center flex-shrink-0">
+              {archiveConfirm.confirming ? (
+                <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveWs.mutate(ws.id); }} />
+              ) : (
+                <Tip label="Archive" side="top">
+                  <button type="button" aria-label="Archive workspace"
+                    onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
+                    className="hidden group-hover:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                    <Archive className="size-3.5" />
+                  </button>
+                </Tip>
+              )}
             </div>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">
           <ContextMenuItem onClick={(e) => { e.stopPropagation(); onNewSession(); }} ><Plus className="size-3.5" /> New Session</ContextMenuItem>
           <ContextMenuItem onClick={() => setIsRenaming(true)}><Pencil className="size-3.5" /> Rename</ContextMenuItem>
-          <ContextMenuItem onClick={() => archiveWs.mutate(ws.id)}><Archive className="size-3.5" /> Archive</ContextMenuItem>
+          <ContextMenuItem onClick={() => archiveConfirm.ask()}><Archive className="size-3.5" /> Archive</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
 
@@ -239,6 +273,7 @@ function SessionTreeItem({
   const [renameValue, setRenameValue] = useState(session.title);
   const renameSession = useRenameSession(workspaceId);
   const archiveSession = useArchiveSession(workspaceId);
+  const archiveConfirm = useInlineConfirm(`s:${session.id}`);
   const { visibleApps, pickApp, renderAppIcon } = useExternalApps();
   const doRename = () => { if (renameValue.trim() && renameValue !== session.title) renameSession.mutate({ id: session.id, title: renameValue.trim() }); setIsRenaming(false); };
 
@@ -267,15 +302,29 @@ function SessionTreeItem({
           ) : (
             <span className={cn('text-[0.85rem] truncate flex-1 pr-2', isActive && 'text-sidebar-foreground font-medium')}>{session.title || 'Untitled'}</span>
           )}
-          {isRunning && <ElapsedBadge startedAt={runningSinceRef.current} />}
-          {!isRunning && isUnread && <span className="size-1.5 rounded-full bg-success flex-shrink-0" />}
-          {!isRunning && <span className="text-[0.7rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums">{formatLastChat(session.updatedAt)}</span>}
+          {isRunning ? (
+            <ElapsedBadge startedAt={runningSinceRef.current} />
+          ) : archiveConfirm.confirming ? (
+            <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveSession.mutate(session.id); }} />
+          ) : (
+            <>
+              {isUnread && <span className="size-1.5 rounded-full bg-success flex-shrink-0 group-hover/s:hidden" />}
+              <span className="text-[0.7rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums group-hover/s:hidden">{formatLastChat(session.updatedAt)}</span>
+              <Tip label="Archive" side="top">
+                <button type="button" aria-label="Archive session"
+                  onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
+                  className="hidden group-hover/s:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                  <Archive className="size-3.5" />
+                </button>
+              </Tip>
+            </>
+          )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-40">
         <ContextMenuItem onClick={() => setIsRenaming(true)}><Pencil className="size-3.5" /> Rename</ContextMenuItem>
         <ContextMenuItem onClick={() => initiateFork(session.id)}><GitFork className="size-3.5" /> Fork…</ContextMenuItem>
-        <ContextMenuItem onClick={() => archiveSession.mutate(session.id)}><Archive className="size-3.5" /> Archive</ContextMenuItem>
+        <ContextMenuItem onClick={() => archiveConfirm.ask()}><Archive className="size-3.5" /> Archive</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger className="gap-2"><FolderOpen className="size-3.5" /><span>Open with</span></ContextMenuSubTrigger>
@@ -296,34 +345,44 @@ function SessionTreeItem({
 // ─── Archived workspace row (Unarchive + Delete) ─────────────────────
 
 function ArchivedWorkspaceRow({ ws }: { ws: { id: string; name: string } }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const del = useInlineConfirm(`aw:${ws.id}`);
   const unarchiveWs = useUnarchiveWorkspace(ws.id);
   const deleteWs = useDeleteWorkspace(ws.id);
 
   return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors min-w-0 hover:bg-secondary/60">
-            <FolderLock className="size-4 flex-shrink-0 text-muted-foreground" />
-            <span className="text-[0.9rem] truncate flex-1 text-muted-foreground">{ws.name}</span>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-40">
-          <ContextMenuItem onClick={() => unarchiveWs.mutate(ws.id)}><ArchiveRestore className="size-3.5" /> Unarchive</ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 className="size-3.5" /> Delete…</ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Delete "{ws.name}"?</AlertDialogTitle><AlertDialogDescription>Permanently deletes the workspace and all its sessions.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={() => { deleteWs.mutate(ws.id); setConfirmDelete(false); }}><Trash2 className="size-3.5" /> Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors min-w-0 hover:bg-secondary/60">
+          <FolderLock className="size-4 flex-shrink-0 text-muted-foreground" />
+          <span className="text-[0.9rem] truncate flex-1 text-muted-foreground">{ws.name}</span>
+          {del.confirming ? (
+            <InlineConfirmButton label="Delete" destructive onConfirm={() => { del.cancel(); deleteWs.mutate(ws.id); }} />
+          ) : (
+            <div className="hidden group-hover:flex items-center flex-shrink-0">
+              <Tip label="Unarchive" side="top">
+                <button type="button" aria-label="Unarchive workspace"
+                  onClick={(e) => { e.stopPropagation(); unarchiveWs.mutate(ws.id); }}
+                  className="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                  <ArrowUp className="size-3.5" />
+                </button>
+              </Tip>
+              <Tip label="Delete" side="top">
+                <button type="button" aria-label="Delete workspace"
+                  onClick={(e) => { e.stopPropagation(); del.ask(); }}
+                  className="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-destructive hover:bg-secondary cursor-pointer">
+                  <Trash2 className="size-3.5" />
+                </button>
+              </Tip>
+            </div>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-40">
+        <ContextMenuItem onClick={() => unarchiveWs.mutate(ws.id)}><ArchiveRestore className="size-3.5" /> Unarchive</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onClick={() => del.ask()}><Trash2 className="size-3.5" /> Delete…</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -350,35 +409,44 @@ function ArchivedSessionsSection({ workspaceId }: { workspaceId: string }) {
 }
 
 function ArchivedSessionRow({ session, workspaceId }: { session: { id: string; title: string; updatedAt?: string }; workspaceId: string }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const del = useInlineConfirm(`as:${session.id}`);
   const unarchiveSession = useUnarchiveSession(workspaceId);
   const deleteSession = useDeleteSession(workspaceId);
 
   return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="group/s flex items-center pr-1 py-2 rounded-md cursor-pointer transition-colors min-w-0 hover:bg-secondary/40 text-muted-foreground"
-            style={{ paddingLeft: '15px' }}>
-            <span className="text-[0.8rem] truncate flex-1">{session.title || 'Untitled'}</span>
-            {/*{session.updatedAt && <span className="text-[0.6rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums">{formatLastChat(session.updatedAt)}</span>}*/}
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-40">
-          <ContextMenuItem onClick={() => unarchiveSession.mutate(session.id)}><ArchiveRestore className="size-3.5" /> Unarchive</ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 className="size-3.5" /> Delete…</ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Delete session?</AlertDialogTitle><AlertDialogDescription>Permanently delete "{session.title}".</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={() => { deleteSession.mutate(session.id); setConfirmDelete(false); }}><Trash2 className="size-3.5" /> Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="group/s flex items-center pr-1 py-2 rounded-md cursor-pointer transition-colors min-w-0 hover:bg-secondary/40 text-muted-foreground"
+          style={{ paddingLeft: '15px' }}>
+          <span className="text-[0.8rem] truncate flex-1">{session.title || 'Untitled'}</span>
+          {del.confirming ? (
+            <InlineConfirmButton label="Delete" destructive onConfirm={() => { del.cancel(); deleteSession.mutate(session.id); }} />
+          ) : (
+            <div className="hidden group-hover/s:flex items-center flex-shrink-0">
+              <Tip label="Unarchive" side="top">
+                <button type="button" aria-label="Unarchive session"
+                  onClick={(e) => { e.stopPropagation(); unarchiveSession.mutate(session.id); }}
+                  className="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                  <ArrowUp className="size-3.5" />
+                </button>
+              </Tip>
+              <Tip label="Delete" side="top">
+                <button type="button" aria-label="Delete session"
+                  onClick={(e) => { e.stopPropagation(); del.ask(); }}
+                  className="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-destructive hover:bg-secondary cursor-pointer">
+                  <Trash2 className="size-3.5" />
+                </button>
+              </Tip>
+            </div>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-40">
+        <ContextMenuItem onClick={() => unarchiveSession.mutate(session.id)}><ArchiveRestore className="size-3.5" /> Unarchive</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onClick={() => del.ask()}><Trash2 className="size-3.5" /> Delete…</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

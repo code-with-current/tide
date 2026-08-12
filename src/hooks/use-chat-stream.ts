@@ -328,7 +328,11 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
       // Autocompact is summarizing the conversation. Show a brief indicator.
       return { ...state, compacting: true };
     case 'error':
-      return { ...state, error: event.message, isStreaming: false, retry: null, permissionRequest: null };
+      // Record the error but keep streaming — the orchestrator may retry. The
+      // retry event clears this; turn_end ends the turn. Without this, the
+      // error block would flash on (isStreaming=false) then off (retry clears
+      // it) between attempts. error UI only shows once retries are exhausted.
+      return { ...state, error: event.message };
     default:
       return state;
   }

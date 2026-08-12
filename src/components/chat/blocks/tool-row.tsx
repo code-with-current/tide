@@ -165,9 +165,16 @@ function initialOpenFor(call: ToolCall): boolean {
  *  through unchanged; oversized ones are clipped with a note. */
 const MAX_RENDER_LINES = 1000;
 const MAX_RENDER_CHARS = 100_000;
+/** Strip ANSI escape codes (colors, cursor moves, etc.) from terminal output
+ *  so raw `[31m`-style sequences don't leak into the rendered tool body. */
+const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB0]|\x1b[=>]/g;
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, '');
+}
+
 function capOutput(text: string | undefined): { body: string; note?: string } {
   if (!text) return { body: '' };
-  let body = text;
+  let body = stripAnsi(text);
   let note: string | undefined;
   const lines = body.split('\n');
   if (lines.length > MAX_RENDER_LINES) {

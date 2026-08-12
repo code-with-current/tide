@@ -34,6 +34,9 @@ import { createSlashCommandTool } from '../../agent/tools/slash-command.js';
 import { createDispatchAgentTool } from '../../agent/tools/dispatch-agent.js';
 import { createAskFollowupTool } from '../../agent/tools/ask-followup.js';
 import { createCompactTool } from '../../agent/tools/compact.js';
+import { createDirectoryTreeTool } from '../../agent/tools/directory-tree.js';
+import { createLoadSkillTool } from '../../agent/tools/load-skill.js';
+import { createInitTool } from '../../agent/tools/init.js';
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -73,9 +76,12 @@ const FACTORIES: Array<{
   { name: 'todo_write', factory: createTodoWriteTool, valid: { todos: [{ content: 'do thing', status: 'pending' }] } },
   { name: 'exit_plan_mode', factory: createExitPlanModeTool, valid: { plan: 'step 1' } },
   { name: 'slash_command', factory: createSlashCommandTool, valid: { command: 'refactor' } },
-  { name: 'dispatch_agent', factory: createDispatchAgentTool, valid: { name: 'general-purpose', task: 'find x' } },
+  { name: 'dispatch_agent', factory: createDispatchAgentTool, valid: { name: 'general-purpose', title: 'Test dispatch', task: 'find x' } },
   { name: 'ask_followup_question', factory: createAskFollowupTool, valid: { question: 'which?', options: [{ label: 'A' }] } },
   { name: 'compact', factory: createCompactTool, valid: { keep_last: 6 } },
+  { name: 'directory_tree', factory: createDirectoryTreeTool, valid: { path: 'src' } },
+  { name: 'load_skill', factory: createLoadSkillTool, valid: { path: '/abs/path/SKILL.md' } },
+  { name: 'init', factory: createInitTool, valid: {} },
 ];
 
 describe('SDK tool factories (Phase 2)', () => {

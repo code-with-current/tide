@@ -36,11 +36,12 @@ describe('protocol maxOutputTokens from catalog context', () => {
     expect(r.maxOutputTokens).toBe(Math.min(8000 + 8192, 65535));
   });
   it('openai tools-present branch still respects ctx.maxOutputTokens and cap', () => {
-    // The hasTools branch suppresses reasoning_effort but still applies the
-    // catalog-resolved base cap, min'd against MAX_OUTPUT_TOKENS_CAP.
+    // The hasTools branch raises the output floor (16K) for tool-call args
+    // but still applies reasoning_effort for non-Gemini models, min'd
+    // against MAX_OUTPUT_TOKENS_CAP.
     const ctx: ProtocolContext = { hasTools: true, maxOutputTokens: 70000 };
     const r = openaiCallOptions({ budgetTokens: 8000 }, ctx);
     expect(r.maxOutputTokens).toBe(Math.min(8000 + 70000, 65535)); // = 65535
-    expect(r.label).toContain('tools present');
+    expect(r.label).toContain('reasoning_effort');
   });
 });

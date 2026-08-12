@@ -6,13 +6,13 @@ interface TabsState {
   /** Per-session tabs. Keyed by sessionId; falls back to 'default'. */
   bySession: Record<string, RightTab[]>;
   active: Record<string, RightTabKind>;
-  /** Source control view mode per session ('tree' or 'list'). */
-  scViewMode: Record<string, 'tree' | 'list'>;
+  /** Git Panel view mode per session ('tree' or 'list'). */
+  gpViewMode: Record<string, 'tree' | 'list'>;
 
   addTab: (sessionId: string, kind: RightTabKind) => void;
   removeTab: (sessionId: string, kind: RightTabKind) => void;
   setActive: (sessionId: string, kind: RightTabKind) => void;
-  setScViewMode: (sessionId: string, mode: 'tree' | 'list') => void;
+  setGpViewMode: (sessionId: string, mode: 'tree' | 'list') => void;
   /** Purge all tab data for a session (called on session delete). */
   clearSessionTabs: (sessionId: string) => void;
 }
@@ -27,7 +27,7 @@ export const useTabs = create<TabsState>()(
     (set) => ({
       bySession: {},
       active: {},
-      scViewMode: {},
+      gpViewMode: {},
 
       addTab: (sessionId, kind) =>
         set((s) => {
@@ -57,15 +57,15 @@ export const useTabs = create<TabsState>()(
       setActive: (sessionId, kind) =>
         set((s) => ({ active: { ...s.active, [sessionId]: kind } })),
 
-      setScViewMode: (sessionId, mode) =>
-        set((s) => ({ scViewMode: { ...s.scViewMode, [sessionId]: mode } })),
+      setGpViewMode: (sessionId, mode) =>
+        set((s) => ({ gpViewMode: { ...s.gpViewMode, [sessionId]: mode } })),
 
       clearSessionTabs: (sessionId) =>
         set((s) => {
           const { [sessionId]: _b, ...restBySession } = s.bySession;
           const { [sessionId]: _a, ...restActive } = s.active;
-          const { [sessionId]: _v, ...restSc } = s.scViewMode;
-          return { bySession: restBySession, active: restActive, scViewMode: restSc };
+          const { [sessionId]: _v, ...restGp } = s.gpViewMode;
+          return { bySession: restBySession, active: restActive, gpViewMode: restGp };
         }),
     }),
     {
@@ -74,7 +74,7 @@ export const useTabs = create<TabsState>()(
       partialize: (s) => ({
         bySession: s.bySession,
         active: s.active,
-        scViewMode: s.scViewMode,
+        gpViewMode: s.gpViewMode,
       }),
     },
   ),

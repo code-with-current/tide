@@ -170,7 +170,7 @@ function ChatMessageImpl({
     };
     return (
       <div className="group flex justify-end">
-        <div className="max-w-[85%] flex flex-col items-end gap-1">
+        <div className="max-w-[75%] flex flex-col items-end gap-1">
           <div className="rounded-xl rounded-br bg-primary/80 text-primary-foreground px-3.5 py-2.5">
             {chips.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -189,7 +189,7 @@ function ChatMessageImpl({
               </div>
             )}
             {body && (
-              <div className="text-sm font-semibold leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
+              <div className="text-sm font-medium leading-relaxed whitespace-pre-wrap break-words overflow-hidden">
                 {renderUserBody(body, message.mentions)}
               </div>
             )}

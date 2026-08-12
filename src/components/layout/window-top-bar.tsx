@@ -6,7 +6,9 @@ import {
   PanelRight, Terminal, PanelRightClose,
   ChevronRight, GitBranch, Play, Square,
   Hammer, ChevronDown, Power, Trash2,
-  FolderCode,
+  FolderCode, Info,
+  FolderTree,
+  GitPullRequestArrow
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
 } from "@/components/ui/dropdown-menu";
 import { useUi } from "@/lib/stores/ui";
+import { useTabs } from "@/lib/stores/tabs";
 import { useWorkspaces, useSession } from "@/lib/queries";
 import * as api from "@/lib/api/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -33,9 +36,15 @@ export function WindowTopBar() {
   // ── Scripts dropdown open state (controlled so we can close on action) ──
   const [scriptsOpen, setScriptsOpen] = useState(false);
 
+  // ── Compact mode: on narrow windows, auto-close the right panel and collapse
+  //    the secondary topbar group (ports + scripts) so the chat column and the
+  //    essential right-side buttons keep room. One resize listener drives both. ──
+  const [compact, setCompact] = useState(false);
+
   // ── Panel toggles ──
   const toggleTerminal = useUi((s) => s.toggleTerminal);
   const toggleRightPanel = useUi((s) => s.toggleRightPanel);
+  const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
   const sidebarMode = useUi((s) => s.sidebarMode);
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
@@ -48,6 +57,14 @@ export function WindowTopBar() {
   const toggleTerminalOpen = useUi((s) => s.toggleTerminal);
   const allTerminals = useUi((s) => s.terminals);
   const terminalPorts = useUi((s) => s.terminalPorts);
+
+  // ── Right panel view switcher (after activeSessionId is declared) ──
+  const rpFeature = useTabs((s) => s.active[activeSessionId ?? 'default'] ?? 'inspector');
+  const rpSetFeature = useTabs((s) => s.setActive);
+  const switchTo = (kind: string) => {
+    rpSetFeature(activeSessionId ?? 'default', kind as any);
+    if (!rightPanelOpen) useUi.setState({ rightPanelOpen: true });
+  };
 
   const { data: workspaces } = useWorkspaces();
   const { data: session } = useSession(activeSessionId);
@@ -167,9 +184,25 @@ export function WindowTopBar() {
     }
   }, [activeWorkspaceId, activeSessionId, isRunning, addTerminal, toggleTerminalOpen]);
 
+  // Resize: enter compact mode below the threshold, and auto-close the right
+  // panel so the chat keeps room. We never force it back open — the user
+  // reopens via the toggle when they widen the window.
+  useEffect(() => {
+    const update = () => {
+      const w = window.innerWidth;
+      setCompact(w < 1200);
+      if (w < 1200 && useUi.getState().rightPanelOpen) {
+        useUi.setState({ rightPanelOpen: false });
+      }
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   return (
     <div
-      className="drag-region flex items-center px-2 gap-2 border-b border-input flex-shrink-0"
+      className="drag-region flex items-center gap-2 border-b border-border flex-shrink-0"
       style={{ height: 40 }}
     >
       {/* ══ Far left: sessions toggle + breadcrumb ══ */}
@@ -182,7 +215,7 @@ export function WindowTopBar() {
       )}
 
       {activeWorkspace && (
-        <div className="flex items-center gap-1 text-xs text-muted-foreground/60 flex-shrink-0 min-w-0">
+        <div className="flex items-center gap-1 ml-3 text-xs text-muted-foreground/60 flex-shrink-0 min-w-0">
           <FolderCode className="size-4 flex-shrink-0 text-muted-foreground " />
           <span className="text-[0.8rem] text-muted-foreground truncate max-w-[120px]">{activeWorkspace.name}</span>
           <ChevronRight className="size-4 flex-shrink-0" style={{ opacity: 0.6 }} />
@@ -198,13 +231,18 @@ export function WindowTopBar() {
       )}
 
       {/* ══ Center: drag region + git branch (centered) ══ */}
-      <div className="flex-1 flex items-center justify-center relative">
 
-      </div>
 
-      {/* ══ Right-mid: ports + merged run/stop + scripts button group ══ */}
+      {/* ══ Right-mid: ports + merged run/stop + scripts button group ══
+          Collapses (slides left + fades) in compact mode so the essential
+          right-side buttons stay visible on narrow windows. */}
       {showSessionContent && (
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div
+          className={cn(
+            'flex items-center gap-1.5 flex-shrink-0 overflow-hidden transition-[max-width,opacity] duration-200 ease-out',
+            compact ? 'max-w-0 opacity-0' : 'max-w-[800px] opacity-100',
+          )}
+        >
           {aggregatedPorts.map((p) => (
             <Tip key={p.port} label={`${p.label} — ${p.url}`}>
               <a href={p.url} target="_blank" rel="noreferrer"
@@ -314,15 +352,50 @@ export function WindowTopBar() {
           </ButtonGroup>
         </div>
       )}
+      <div className="flex-1 flex items-center justify-center relative">
 
+      </div>
       {/* ══ Far right: open-in-app + terminal + right panel ══ */}
-      <div className="flex items-center gap-1.5 flex-shrink-0" style={{ paddingRight: CAPTION_PAD }}>
+      <div className="flex items-center gap-1.5 flex-shrink-0 mr-2" style={{ paddingRight: CAPTION_PAD }}>
         <OpenInAppMenu />
+
         <Tip label="Terminal Panel">
           <Button variant="outline" size="sm" className="p-1.5" onClick={toggleTerminal}>
             <Terminal className="size-3.5" />
           </Button>
         </Tip>
+
+        {/* Right Panel Switcher — click to switch the right panel content */}
+        <ButtonGroup>
+          <Tip label="Inspector">
+            <Button
+              variant={rpFeature === 'inspector' && rightPanelOpen ? 'outline' : 'outline'}
+              size="sm"
+              onClick={() => switchTo('inspector')}
+            >
+              <Info className="size-3.5" />
+            </Button>
+          </Tip>
+          <Tip label="Explorer">
+            <Button
+              variant={rpFeature === 'files' && rightPanelOpen ? 'outline' : 'outline'}
+              size="sm"
+              onClick={() => switchTo('files')}
+            >
+              <FolderTree className="size-3.5" />
+            </Button>
+          </Tip>
+          <Tip label="Git">
+            <Button
+              variant={rpFeature === 'changes' && rightPanelOpen ? 'outline' : 'outline'}
+              size="sm"
+              onClick={() => switchTo('changes')}
+            >
+              <GitPullRequestArrow className="size-3.5" />
+            </Button>
+          </Tip>
+        </ButtonGroup>
+
         <Tip label="Right Panel">
           <Button variant="outline" size="sm" className="p-1.5" onClick={toggleRightPanel}>
             <PanelRight className="size-3.5" />

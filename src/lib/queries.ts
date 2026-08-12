@@ -334,7 +334,7 @@ export function useTerminalLines(sessionId: string | null) {
 }
 
 // ============================================================
-// Git source control
+// Git
 // ============================================================
 
 export function useGitStatus(workspaceId: string | null, sessionId?: string | null) {
@@ -359,6 +359,52 @@ export function useGitBranchInfo(workspaceId: string | null, sessionId?: string 
   });
 }
 
+export function useGitLog(workspaceId: string | null, sessionId?: string | null, limit = 100) {
+  const key = ['gitLog', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitLog(workspaceId, sessionId ?? undefined, limit) : Promise.resolve([] as import('@/lib/api/client').GitCommit[])),
+    enabled: !!workspaceId,
+    staleTime: 15_000,
+  });
+}
+
+/** Bulk working-tree op (stage-all / unstage-all / restore-all / stash / stash-pop).
+ *  Invalidates status + history + stash list on success. */
+export function useGitBulk(workspaceId: string | null, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (op: import('@/lib/api/client').GitBulkOp) => api.gitBulk(workspaceId!, op, sessionId ?? undefined),
+    onSuccess: (_d, _op) => {
+      if (workspaceId) {
+        qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+        qc.invalidateQueries({ queryKey: ['gitLog', workspaceId] });
+        qc.invalidateQueries({ queryKey: ['gitStashList', workspaceId] });
+      }
+    },
+  });
+}
+
+export function useGitStashList(workspaceId: string | null, sessionId?: string | null) {
+  const key = ['gitStashList', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitStashList(workspaceId, sessionId ?? undefined) : Promise.resolve([] as import('@/lib/api/client').GitStash[])),
+    enabled: !!workspaceId,
+    staleTime: 10_000,
+  });
+}
+
+/** Files changed in a commit — drives the commit-details side panel. */
+export function useCommitFiles(workspaceId: string | null, sha: string | null, sessionId?: string | null) {
+  return useQuery({
+    queryKey: ['gitCommitFiles', workspaceId, sha, sessionId] as const,
+    queryFn: () => (workspaceId && sha ? api.gitCommitFiles(workspaceId, sha, sessionId ?? undefined) : Promise.resolve([] as import('@/lib/api/client').GitFileChange[])),
+    enabled: !!workspaceId && !!sha,
+    staleTime: 30_000,
+  });
+}
+
 export function useGitStage(workspaceId: string, sessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
@@ -372,7 +418,11 @@ export function useGitCommit(workspaceId: string, sessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (message: string) => api.gitCommit(workspaceId, message, sessionId ?? undefined),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+      // A new commit lands at the top of history — refresh the Git Panel History tab.
+      qc.invalidateQueries({ queryKey: ['gitLog', workspaceId] });
+    },
   });
 }
 
