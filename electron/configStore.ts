@@ -85,6 +85,8 @@ export interface GeneralSettings {
   gitCoAuthorName: string;
   /** Co-author email — GitHub no-reply format for attribution. */
   gitCoAuthorEmail: string;
+  /** Automatically check for app updates on startup (default: true). */
+  autoUpdateCheck: boolean;
 }
 
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
@@ -93,6 +95,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   gitCoAuthored: true,
   gitCoAuthorName: 'Tide',
   gitCoAuthorEmail: '314188112+tide-code@users.noreply.github.com',
+  autoUpdateCheck: true,
 };
 
 // ── RAG config hydration: fill missing fields at read time and clamp chunkTokens to the recorded embedder's max (so a workspace flipped from local to cloud doesn't keep an un-embeddable chunk size).

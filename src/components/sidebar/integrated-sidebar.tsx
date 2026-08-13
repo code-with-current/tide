@@ -12,6 +12,7 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
+import { UpdatePill } from './update-pill';
 import { useWorkspaces, useSessions, useArchivedSessions } from '@/lib/queries';
 import {
   useRenameWorkspace, useArchiveWorkspace, useUnarchiveWorkspace, useDeleteWorkspace,
@@ -145,6 +146,7 @@ function IntegratedSidebarImpl() {
     <InlineConfirmProvider>
     <aside className="flex flex-col h-full w-full overflow-hidden p-2">
       {isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+      <UpdatePill />
       <div className={cn("px-3 py-2.5 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">Workspaces</div>
         <Tip label="Add Workspace" side="bottom">

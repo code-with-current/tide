@@ -79,6 +79,25 @@ export function initUpdater() {
   if (initialized) return;
   initialized = true;
 
+  // ── IPC handlers (registered in dev too so the UI doesn't crash) ──
+
+  ipcMain.handle('tide:updater:check', async () => {
+    if (!app.isPackaged) return { ok: false, error: 'Not available in dev mode' };
+    try {
+      await autoUpdater.checkForUpdates();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle('tide:updater:install', () => {
+    autoUpdater.quitAndInstall();
+    return { ok: true };
+  });
+
+  ipcMain.handle('tide:updater:status', () => current);
+
   if (!app.isPackaged) {
     log.info('skipped in dev mode (no app-update.yml)');
     return;
@@ -135,25 +154,6 @@ export function initUpdater() {
     log.error('updater error', { err: String(err) });
     emit({ state: 'error', error: err?.message ?? String(err), lastCheckedAt: Date.now() });
   });
-
-  // ── IPC handlers ─────────────────────────────────────────────
-
-  ipcMain.handle('tide:updater:check', async () => {
-    if (!app.isPackaged) return { ok: false, error: 'Not available in dev mode' };
-    try {
-      await autoUpdater.checkForUpdates();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: String(e) };
-    }
-  });
-
-  ipcMain.handle('tide:updater:install', () => {
-    autoUpdater.quitAndInstall();
-    return { ok: true };
-  });
-
-  ipcMain.handle('tide:updater:status', () => current);
 }
 
 /**

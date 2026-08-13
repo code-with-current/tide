@@ -22,6 +22,7 @@ import {
   useDeleteWorkspace,
 } from "@/lib/queries";
 import { useUi } from "@/lib/stores/ui";
+import { UpdatePill } from "./update-pill";
 import * as api from "@/lib/api/client";
 import { Dot } from "@/components/primitives";
 import { Tip } from "@/components/ui/quick-tooltip";
@@ -166,6 +167,7 @@ export function WorkspacesPanel() {
           caption buttons sit at the top-RIGHT, so this sidebar needs no
           clearance and the spacer is omitted to avoid a wasted gap. */}
       {isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+      <UpdatePill />
       <div className={cn("px-3 py-2.5 flex items-center justify-between border-accent-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-accent-foreground font-bold font-stretch-semi-expanded">
           Workspaces

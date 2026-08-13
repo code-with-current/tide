@@ -2,6 +2,7 @@
 
 import builder from 'electron-builder'
 import { execSync } from 'child_process'
+import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,9 +24,36 @@ const options = {
   files: [
     'dist/**/*',
     'dist-electron/**/*',
+    // Strip dead weight from transitive deps of @xenova/transformers:
+    //   - onnxruntime-web ships ~60 MB of WASM binaries, but transformers.js
+    //     only statically imports the JS entry — in Node it always uses
+    //     onnxruntime-node's CPU provider, so the WASM files are never loaded.
+    '!**/node_modules/onnxruntime-web/**/*.wasm',
+    '!**/node_modules/onnxruntime-web/dist/ort-wasm*.jsep.mjs',
+    //   - @xenova/transformers bundles its own ORT WASM binaries (~38 MB)
+    //     for browser inference. In Node/Electron the CPU provider is used
+    //     via onnxruntime-node, so these are dead weight.
+    '!**/node_modules/@xenova/transformers/dist/*.wasm',
+    //   - sharp (~24 MB) is pulled in for image preprocessing that Tide never
+    //     does — it only embeds source code.
+    '!**/node_modules/sharp/**',
+    '!**/node_modules/@img/**',
+    '!**/node_modules/sharp-libvips*/**',
+    //   - Strip source maps and TypeScript declarations from production builds.
+    //     They bloat the asar by ~20 MB and are useless at runtime.
+    '!**/*.map',
+    '!**/*.d.ts',
   ],
   asar: true,
+  asarUnpack: [
+    'node_modules/better-sqlite3/**',
+    'node_modules/node-pty/**',
+    'node_modules/onnxruntime-node/**',
+    'node_modules/sqlite-vec*/**',
+    'node_modules/node-mac-permissions/**',
+  ],
   electronLanguages: ['en-US'],
+  afterAllArtifactBuild: extractStandaloneAsar,
   publish: [
     {
       provider: 'github',
@@ -33,6 +61,81 @@ const options = {
       repo: 'tide',
     },
   ],
+}
+
+// Copies app.asar out of the built app as a standalone asset for delta
+// (ASAR-only) updates — the ~5-10 MB JS bundle vs ~150 MB full installer.
+// Gated by EXTRACT_ASAR=1 so only one CI leg produces it (app.asar is
+// cross-platform). Also writes a SHA256 checksum for download verification.
+function extractStandaloneAsar(context) {
+  if (process.env.EXTRACT_ASAR !== '1') return
+
+  const appOutDir = context.appOutDir
+  const candidates = [
+    // macOS: inside .app bundle
+    ...fs.readdirSync(appOutDir)
+      .filter(f => f.endsWith('.app'))
+      .map(f => path.join(appOutDir, f, 'Contents', 'Resources', 'app.asar')),
+    // Linux/Windows: resources/ dir
+    path.join(appOutDir, 'resources', 'app.asar'),
+  ]
+
+  const src = candidates.find(p => fs.existsSync(p))
+  if (!src) {
+    console.warn('EXTRACT_ASAR: app.asar not found in', appOutDir, '— skipping')
+    return
+  }
+
+  const version = context.packager.appInfo.version
+  const baseName = `tide-core-${version}`
+  const outDir = context.outDir
+  const dest = path.join(outDir, `${baseName}.asar`)
+  fs.copyFileSync(src, dest)
+
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(dest)).digest('hex')
+  fs.writeFileSync(path.join(outDir, `${baseName}.asar.sha256`), `${hash}  ${baseName}.asar\n`)
+
+  console.log(`Extracted standalone asar: ${dest} (${hash.slice(0, 12)}...)`)
+}
+
+// afterPack hook: onnxruntime-node ships pre-built binaries for ALL platforms
+// (darwin x64+arm64, linux x64+arm64, win32 x64+arm64 ≈ 74 MB). Only the
+// target platform+arch binary is needed, so we delete the rest after packing.
+// Saves ~50 MB per platform leg.
+function stripCrossPlatformOrtBinaries(context) {
+  const platform = context.electronPlatformName // 'darwin' | 'win32' | 'linux'
+  // electron-builder Arch enum: 1=ia32, 2=x64, 3=armv7l, 4=arm64, 5=universal
+  const archName = { 1: 'x86', 2: 'x64', 3: 'arm64', 4: 'arm64' }[context.arch]
+  if (!platform || !archName) return
+
+  let unpackedDir
+  if (platform === 'darwin' || platform === 'mas') {
+    const apps = fs.readdirSync(context.appOutDir).filter(f => f.endsWith('.app'))
+    if (apps.length === 0) return
+    unpackedDir = path.join(context.appOutDir, apps[0], 'Contents', 'Resources', 'app.asar.unpacked')
+  } else {
+    unpackedDir = path.join(context.appOutDir, 'resources', 'app.asar.unpacked')
+  }
+
+  const ortBin = path.join(unpackedDir, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v3')
+  if (!fs.existsSync(ortBin)) return
+
+  let stripped = false
+  for (const platDir of fs.readdirSync(ortBin)) {
+    const platPath = path.join(ortBin, platDir)
+    if (platDir !== platform) {
+      fs.rmSync(platPath, { recursive: true, force: true })
+      stripped = true
+      continue
+    }
+    for (const archDir of fs.readdirSync(platPath)) {
+      if (archDir !== archName) {
+        fs.rmSync(path.join(platPath, archDir), { recursive: true, force: true })
+        stripped = true
+      }
+    }
+  }
+  if (stripped) console.log(`Stripped ORT binaries: kept ${platform}/${archName} only`)
 }
 
 /**
@@ -44,6 +147,7 @@ const winOptions = {
     icon: 'build/icon.ico',
     target: ['nsis', 'portable', '7z'],
   },
+  afterPack: stripCrossPlatformOrtBinaries,
   nsis: {
     oneClick: false,
     language: '2052',
@@ -57,6 +161,7 @@ const winOptions = {
  * @see https://www.electron.build/configuration/configuration
  */
 const linuxOptions = {
+  afterPack: stripCrossPlatformOrtBinaries,
   linux: {
     maintainer: 'Yogi Dewansyah <yodeput@gmail.com>',
     icon: 'build/icons',
@@ -120,7 +225,10 @@ const macOptions = {
     category: 'public.app-category.productivity',
     target: ['dmg', 'zip'],
   },
-  afterPack: adHocSignMacApp,
+  afterPack: (context) => {
+    stripCrossPlatformOrtBinaries(context)
+    adHocSignMacApp(context)
+  },
   dmg: {
     window: {
       width: 530,
@@ -247,9 +355,11 @@ const createTarget = {
  */
 const build = async(target, arch, packageType, publishType) => {
   if (target == 'dir') {
+    const dirConfig = { ...options, ...winOptions, ...linuxOptions, ...macOptions }
+    delete dirConfig.publish
     await builder.build({
       dir: true,
-      config: { ...options, ...winOptions, ...linuxOptions, ...macOptions },
+      config: dirConfig,
     })
     return
   }

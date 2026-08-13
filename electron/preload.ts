@@ -393,4 +393,17 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.removeAllListeners('chat:done');
     ipcRenderer.removeAllListeners('chat:error');
   },
+
+  // ── Auto-updater (electron-updater → GitHub releases) ──
+  updater: {
+    checkForUpdates: () => ipcRenderer.invoke('tide:updater:check'),
+    installUpdate: () => ipcRenderer.invoke('tide:updater:install'),
+    getStatus: () => ipcRenderer.invoke('tide:updater:status'),
+  },
+  onUpdaterStatus: (callback: (status: any) => void) => {
+    ipcRenderer.on('updater:status', (_e, status) => callback(status));
+  },
+  removeUpdaterListeners: () => {
+    ipcRenderer.removeAllListeners('updater:status');
+  },
 });

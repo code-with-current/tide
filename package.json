@@ -1,7 +1,7 @@
 {
   "name": "tide",
   "private": true,
-  "version": "0.1.0-beta",
+  "version": "0.1.1-beta",
   "packageManager": "pnpm@10.27.0",
   "description": "Tide — Code with the current.",
   "type": "module",
@@ -49,14 +49,29 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "!**/node_modules/onnxruntime-web/**/*.wasm",
+      "!**/node_modules/onnxruntime-web/dist/ort-wasm*.jsep.mjs",
+      "!**/node_modules/@xenova/transformers/dist/*.wasm",
+      "!**/node_modules/sharp/**",
+      "!**/node_modules/@img/**",
+      "!**/node_modules/sharp-libvips*/**",
+      "!**/*.map",
+      "!**/*.d.ts"
     ],
     "asarUnpack": [
-      "node_modules/sqlite-vec-*/**",
-      "node_modules/sqlite-vec/**",
-      "node_modules/node-pty/**",
       "node_modules/better-sqlite3/**",
-      "node_modules/sharp/**"
+      "node_modules/node-pty/**",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/sqlite-vec*/**",
+      "node_modules/node-mac-permissions/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "code-with-current",
+        "repo": "tide"
+      }
     ],
     "protocols": [
       {
@@ -84,23 +99,42 @@
     }
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^13.0.1",
+    "electron-updater": "^6.8.9",
+    "node-pty": "^1.1.0",
+    "onnxruntime-common": "1.14.0",
+    "onnxruntime-node": "1.14.0",
+    "sqlite-vec": "^0.1.9",
+    "undici": "^7.24.4",
+    "web-tree-sitter": "0.25.10"
+  },
+  "devDependencies": {
     "@ai-sdk/anthropic": "^4.0.18",
     "@ai-sdk/openai": "^4.0.16",
     "@ai-sdk/openai-compatible": "^3.0.14",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "@radix-ui/react-slot": "1.3.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-virtual": "^3.14.9",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@xenova/transformers": "^2.17.2",
+    "@vitejs/plugin-react": "^6.0.3",
     "ai": "^7.0.31",
-    "better-sqlite3": "^13.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "embla-carousel-react": "^8.6.0",
     "ghostty-web": "^0.4.0",
     "input-otp": "^1.4.2",
@@ -108,9 +142,7 @@
     "mermaid": "^11.16.0",
     "minimatch": "^10.0.0",
     "next-themes": "^0.4.6",
-    "node-pty": "^1.1.0",
-    "onnxruntime-common": "1.14.0",
-    "onnxruntime-node": "1.14.0",
+    "oxlint": "^1.71.0",
     "radix-ui": "^1.6.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -121,33 +153,17 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
-    "sqlite-vec": "^0.1.9",
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
-    "undici": "^7.24.4",
-    "vaul": "^1.1.2",
-    "web-tree-sitter": "0.25.10",
-    "zod": "^4.4.3",
-    "zustand": "^5.0.14"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^24.13.3",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "concurrently": "^10.0.3",
-    "cross-env": "^10.1.0",
-    "electron": "^43.1.1",
-    "electron-builder": "^26.15.3",
-    "oxlint": "^1.71.0",
     "tailwindcss": "^4.3.3",
     "tree-sitter-wasms": "^0.1.13",
     "typescript": "~6.0.2",
+    "vaul": "^1.1.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10",
-    "wait-on": "^9.0.10"
+    "wait-on": "^9.0.10",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14"
   },
   "optionalDependencies": {
     "node-mac-permissions": "^2.5.0"

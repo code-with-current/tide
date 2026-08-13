@@ -49,6 +49,7 @@ import { initUserServers, initBuiltinServers } from './agent/mcp/pool.js';
 import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
 import { setUserDataPath, appDataDir } from './appPaths.js';
+import { initUpdater, autoCheckForUpdates } from './updater.js';
 
 // ESM doesn't provide __dirname — derive it from import.meta.url.
 const __filename = fileURLToPath(import.meta.url);
@@ -297,6 +298,17 @@ if (!gotLock) {
       } catch (e) {
         log.warn('failed to apply startAtLogin on boot', { err: String(e) });
       }
+      // Auto-updater: register IPC handlers + begin checking if enabled.
+      // In dev, initUpdater no-ops (no app-update.yml).
+      initUpdater();
+      try {
+        const { createConfigStore } = require('./configStore.js') as typeof import('./configStore.js');
+        const gs = createConfigStore(appDataDir()).getGeneralSettings();
+        if (gs.autoUpdateCheck !== false) {
+          // Delay so it doesn't compete with startup network activity.
+          setTimeout(() => void autoCheckForUpdates(), 8_000);
+        }
+      } catch { /* non-fatal */ }
       // MCP pool — boot user-scoped servers (~/.tide/mcp.json). Project-scoped
       // servers are connected lazily when the renderer signals the active
       // workspace via `tide:mcp:workspaceActivated`. Init is fire-and-forget;

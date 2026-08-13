@@ -68,6 +68,9 @@ export default defineConfig({
         // Windows/Linux, so it must stay external and be require()'d with a
         // platform guard + try/catch at the call site (see electron/permissions.ts).
         id === 'node-mac-permissions' ||
+        // electron-updater — CJS module that uses dynamic requires internally;
+        // bundling into the ESM output breaks. Left external (runtime dependency).
+        id === 'electron-updater' ||
         // MCP SDK uses child_process (cross-spawn) internally — must be
         // externalized, not bundled. Bundling breaks because the SDK's CJS
         // require('child_process') can't resolve in the ESM output.

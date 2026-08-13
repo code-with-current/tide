@@ -14,6 +14,11 @@ dist-electron
 release
 *.local
 
+# Lock files
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
 # NOTE: `build/` is intentionally NOT ignored — it holds build/build.js,
 # the electron-builder config, and the icon files that the packaging
 # pipeline (electron-builder) depends on.

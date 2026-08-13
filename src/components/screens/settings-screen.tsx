@@ -11,6 +11,7 @@ import {
   Plug,
   FolderCode,
   MessageSquare,
+  DownloadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/quick-tooltip";
@@ -23,6 +24,7 @@ import { GeneralSection } from "./settings/general";
 import { ChatSection } from "./settings/chat";
 import { ShortcutsSection } from "./settings/shortcuts";
 import { AboutSection } from "./settings/about";
+import { UpdatesSection } from "./settings/updates";
 import { WorkspaceSettingsSection } from "./settings/workspace/workspace";
 import { AgentsSection } from "./settings/extensions/agents";
 import { SkillsSection } from "./settings/extensions/skills";
@@ -76,9 +78,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "System",
     items: [
-      // Updates + Advanced are intentionally hidden until their controls are
-      // wired (autoUpdater integration / live diagnostics + working buttons).
-      // The component files are kept so they can be re-enabled as-is.
+      { id: "updates", label: "Updates", icon: DownloadCloud },
       { id: "about", label: "About", icon: Info },
     ],
   },
@@ -144,7 +144,7 @@ export function SettingsScreen() {
 
         <nav className="flex-shrink-0 flex-1 p-2 justify-between">
           {NAV_GROUPS.map((group, gi) => (
-            <div key={group.label} className={gi > 0 ? "mt-4" : ""}>
+            <div key={group.label ?? `group-${gi}`} className={gi > 0 ? "mt-4" : ""}>
               <div className="px-2.5 py-1 text-[0.7rem] uppercase tracking-wider text-sidebar-foreground/30 font-semibold">
                 {group.label}
               </div>
@@ -190,7 +190,7 @@ export function SettingsScreen() {
             {section === "agents" && <AgentsSection />}
             {section === "skills" && <SkillsSection />}
             {section === "mcp" && <McpSection />}
-            {/* Updates + Advanced hidden until wired — see NAV_GROUPS comment */}
+            {section === "updates" && <UpdatesSection />}
             {section === "about" && <AboutSection />}
           </div>
         )}
