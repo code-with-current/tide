@@ -6,12 +6,13 @@
 # gated on a secret so the workflow is inert until you configure them.
 #
 # One-time setup (see packaging/README.md for detail):
-#   winget   — first PR to microsoft/winget-pkgs (komac new / manual), then
-#              WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
-#   homebrew — first PR to Homebrew/homebrew-cask, then
-#              HOMEBREW_GITHUB_API_TOKEN (PAT: public_repo + workflow scopes).
-#   aur      — create an AUR package `tide-bin`, upload an SSH key, then
-#              AUR_SSH_PRIVATE_KEY (private key text).
+#   winget   — set WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
+#              The workflow creates Tide.Tide on first run (komac new) and
+#              bumps it on every subsequent release (komac update).
+#   homebrew — first PR to Homebrew/homebrew-cask with the rendered cask
+#              (one-time manual), then set HOMEBREW_GITHUB_API_TOKEN.
+#   aur      — set AUR_SSH_PRIVATE_KEY (private key text). The workflow
+#              creates tide-bin on first run and pushes updates thereafter.
 name: Publish package manifests
 
 on:
@@ -33,8 +34,9 @@ jobs:
     name: render · manifests
     runs-on: ubuntu-latest
     outputs:
-      # Step outputs are only visible to OTHER jobs when re-declared here.
       version: ${{ steps.meta.outputs.version }}
+      winget_version: ${{ steps.meta.outputs.winget_version }}
+      release_url: ${{ steps.meta.outputs.release_url }}
       exe_url: ${{ steps.meta.outputs.exe_url }}
       exe_sha: ${{ steps.meta.outputs.exe_sha }}
       deb_url: ${{ steps.meta.outputs.deb_url }}
@@ -68,6 +70,7 @@ jobs:
           echo "version=$(jq -r .version "$M")" >> "$GITHUB_OUTPUT"
           echo "winget_version=$(jq -r .wingetVersion "$M")" >> "$GITHUB_OUTPUT"
           echo "pkgver=$(jq -r .pkgver "$M")" >> "$GITHUB_OUTPUT"
+          echo "release_url=https://github.com/${{ github.repository }}/releases/tag/v${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
           echo "exe_url=$(jq -r .assets.exe.url "$M")" >> "$GITHUB_OUTPUT"
           echo "exe_sha=$(jq -r .assets.exe.sha256 "$M")" >> "$GITHUB_OUTPUT"
           echo "deb_url=$(jq -r .assets.deb.url "$M")" >> "$GITHUB_OUTPUT"
@@ -80,8 +83,9 @@ jobs:
           retention-days: 7
 
   winget:
-    # Requires Tide.Tide to already exist in microsoft/winget-pkgs (one-time
-    # first PR; see packaging/winget/Tide.Tide.yaml). Then this bumps it.
+    # Creates Tide.Tide on first run (komac new), then bumps it on every
+    # subsequent release (komac update). Both auto-submit a PR to
+    # microsoft/winget-pkgs. Requires WINGET_GITHUB_TOKEN.
     name: publish · winget
     needs: render
     runs-on: ubuntu-latest
@@ -90,18 +94,22 @@ jobs:
     steps:
       - name: Skip — no WINGET_GITHUB_TOKEN configured
         if: ${{ env.GITHUB_TOKEN == '' }}
-        run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (scopes public_repo + workflow) to enable winget submission."
+        run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (PAT scopes public_repo + workflow) to enable winget submission."
       - if: ${{ env.GITHUB_TOKEN != '' }}
         uses: russellbanks/Komac@v2.16.0
         with:
           komac-version: latest
-      - name: Update Tide.Tide manifest and open PR
+      - name: Update existing manifest (or create on first release)
         if: ${{ env.GITHUB_TOKEN != '' }}
         run: |
           komac update Tide.Tide \
-            "${{ needs.render.outputs.version }}" \
+            "${{ needs.render.outputs.winget_version }}" \
             "${{ needs.render.outputs.exe_url }}" \
             "${{ needs.render.outputs.exe_sha }}" \
+            --submit || \
+          komac new Tide.Tide \
+            "${{ needs.render.outputs.exe_url }}" \
+            --version "${{ needs.render.outputs.winget_version }}" \
             --submit
 
   homebrew:
