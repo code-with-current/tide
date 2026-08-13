@@ -192,7 +192,9 @@ jobs:
           GIT_COMMITTER_EMAIL: bot@tide.codes
         run: |
           git config --global --add safe.directory '*'
-          git config --global core.sshCommand "ssh -o StrictHostKeyChecking=accept-new"
+          git config --global core.sshCommand "ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          echo "SSH key type: $(head -1 ~/.ssh/aur)"
+          ssh -T aur@aur.archlinux.org 2>&1 || true
           # Clone if the package exists, otherwise init for first-time creation.
           git clone ssh://aur@aur.archlinux.org/tide-bin.git aur-repo 2>/dev/null || {
             mkdir aur-repo && cd aur-repo
