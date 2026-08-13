@@ -193,8 +193,9 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           git config --global core.sshCommand "ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-          echo "SSH key type: $(head -1 ~/.ssh/aur)"
-          ssh -T aur@aur.archlinux.org 2>&1 || true
+          echo "HOME=$HOME"
+          ssh-keygen -lf ~/.ssh/aur 2>&1 || echo "Invalid key format"
+          ssh -vT aur@aur.archlinux.org 2>&1 | grep -E "(Offering|Authenticating|Permission|denied|publickey)" || true
           # Clone if the package exists, otherwise init for first-time creation.
           git clone ssh://aur@aur.archlinux.org/tide-bin.git aur-repo 2>/dev/null || {
             mkdir aur-repo && cd aur-repo
