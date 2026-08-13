@@ -200,10 +200,11 @@ jobs:
           GIT_COMMITTER_NAME: tide-release-bot
           GIT_COMMITTER_EMAIL: bot@tide.codes
         run: |
+          git config --global --add safe.directory '*'
           # Clone if the package exists, otherwise init for first-time creation.
           git clone ssh://aur@aur.archlinux.org/tide-bin.git aur-repo 2>/dev/null || {
             mkdir aur-repo && cd aur-repo
-            git init
+            git init --initial-branch=master
             git remote add origin ssh://aur@aur.archlinux.org/tide-bin.git
             cd ..
           }
