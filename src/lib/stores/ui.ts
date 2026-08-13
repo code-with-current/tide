@@ -40,7 +40,13 @@ interface Dialogs {
  */
 export interface QueuedMessage {
   id: string;
+  /** Display text — what the user typed. Shown in the queue preview and
+   *  stored as message.content in the chat bubble. */
   text: string;
+  /** Enriched text — display text + inlined attachment/skill content. Sent
+   *  to the orchestrator when the queue drains. Undefined when there are no
+   *  attachments (falls back to `text`). */
+  promptText?: string;
   createdAt: number;
 }
 
@@ -343,7 +349,7 @@ interface UiState {
   removeStream: (sessionId: string) => void;
 
   // Queue actions
-  enqueueMessage: (sessionId: string, text: string) => void;
+  enqueueMessage: (sessionId: string, text: string, promptText?: string) => void;
   removeQueuedMessage: (sessionId: string, id: string) => void;
   editQueuedMessage: (sessionId: string, id: string, text: string) => void;
   reorderQueuedMessages: (sessionId: string, ids: string[]) => void;
@@ -724,11 +730,11 @@ export const useUi = create<UiState>()(
       return { streams: next };
     }),
 
-  enqueueMessage: (sessionId, text) =>
+  enqueueMessage: (sessionId, text, promptText) =>
     set((s) => {
       const next: QueuedMessage[] = [
         ...(s.queue[sessionId] ?? []),
-        { id: `q_${Math.random().toString(36).slice(2, 9)}`, text, createdAt: Date.now() },
+        { id: `q_${Math.random().toString(36).slice(2, 9)}`, text, promptText, createdAt: Date.now() },
       ];
       return { queue: { ...s.queue, [sessionId]: next } };
     }),
@@ -743,7 +749,7 @@ export const useUi = create<UiState>()(
     set((s) => ({
       queue: {
         ...s.queue,
-        [sessionId]: (s.queue[sessionId].map((m) => (m.id === id ? { ...m, text } : m))),
+        [sessionId]: (s.queue[sessionId].map((m) => (m.id === id ? { ...m, text, promptText: undefined } : m))),
       },
     })),
   reorderQueuedMessages: (sessionId, ids) =>

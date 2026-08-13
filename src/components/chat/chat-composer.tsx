@@ -63,7 +63,7 @@ export interface ChatComposerProps {
   onSubmit?: (payload: ChatComposerPayload) => void;
   /** "Send now" override — aborts the current turn and force-sends a queued
    *  message. Routed to QueuedMessages' per-item "Send now" button. */
-  onSendNow?: (text: string) => void;
+  onSendNow?: (text: string, promptText?: string) => void;
   onStop?: () => void;
   /** Live text callback — used by EmptyChatState to auto-suggest a
    *  worktree branch name as the user types. Optional; not needed for
@@ -804,15 +804,16 @@ export function ChatComposer({
     }
 
     if (inProgress && sessionId) {
-      // Inline attachment content into the queued text so nothing is lost
-      // when the message auto-drains after the turn finishes.
+      // Inline attachment content into a separate promptText so the queue
+      // preview shows only the display text, while the enriched text is
+      // preserved for the orchestrator when the queue drains.
       const attachmentBlocks = payload.attachments
         .filter(a => a.content)
         .map(a => `<file path="${a.path}">\n${a.content}\n</file>`);
-      const queueText = attachmentBlocks.length
+      const enrichedText = attachmentBlocks.length
         ? `${payload.text}\n\n${attachmentBlocks.join('\n\n')}`
-        : payload.text;
-      enqueue(sessionId, queueText);
+        : undefined;
+      enqueue(sessionId, payload.text, enrichedText);
       clearEditor();
       return;
     }
@@ -846,7 +847,7 @@ export function ChatComposer({
         <QueuedMessages
           sessionId={sessionId}
           inProgress={inProgress}
-          onSendItem={(text) => onSubmit?.({ text, attachments: [] })}
+          onSendItem={(text, promptText) => onSubmit?.({ text, promptText, attachments: [] })}
           onSendNow={onSendNow}
         />
       )}

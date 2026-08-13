@@ -605,13 +605,13 @@ export function MainScreen() {
   // (via "Send now" — aborts the current turn, then sends on turn_end).
   const handleSendRef = useRef(handleSend);
   handleSendRef.current = handleSend;
-  const forceSendRef = useRef<string | null>(null);
+  const forceSendRef = useRef<{ text: string; promptText?: string } | null>(null);
 
   // "Send now" override — abort the current turn and force-send this message
   // when the abort's turn_end arrives. Clears the queue (user chose to jump).
   const onSendNow = useCallback(
-    (text: string) => {
-      forceSendRef.current = text;
+    (text: string, promptText?: string) => {
+      forceSendRef.current = { text, promptText };
       if (activeSessionId) abort(activeSessionId);
     },
     [activeSessionId, abort],
@@ -630,17 +630,17 @@ export function MainScreen() {
     // handleSend's abort guard won't fire.
     const drainQueue = (sid: string) => {
       if (forceSendRef.current && sid === activeSessionId) {
-        const text = forceSendRef.current;
+        const { text, promptText } = forceSendRef.current;
         forceSendRef.current = null;
         useUi.getState().clearQueuedMessages(sid);
-        handleSendRef.current({ text, attachments: [] });
+        handleSendRef.current({ text, promptText, attachments: [] });
         return;
       }
       const q = useUi.getState().queue[sid];
       if (q && q.length > 0) {
         const next = q[0];
         useUi.getState().removeQueuedMessage(sid, next.id);
-        handleSendRef.current({ text: next.text, attachments: [] });
+        handleSendRef.current({ text: next.text, promptText: next.promptText, attachments: [] });
       }
     };
 

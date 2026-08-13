@@ -42,8 +42,8 @@ export function QueuedMessages({
 }: {
   sessionId: string;
   inProgress: boolean;
-  onSendItem: (text: string) => void;
-  onSendNow?: (text: string) => void;
+  onSendItem: (text: string, promptText?: string) => void;
+  onSendNow?: (text: string, promptText?: string) => void;
 }) {
   const queue = useUi((s) => s.queue[sessionId] ?? EMPTY_QUEUE);
   const remove = useUi((s) => s.removeQueuedMessage);
@@ -99,10 +99,10 @@ export function QueuedMessages({
                   onEdit={(text) => useUi.getState().editQueuedMessage(sessionId, m.id, text)}
                   onSendNow={() => {
                     if (inProgress && onSendNow) {
-                      onSendNow(m.text);
+                      onSendNow(m.text, m.promptText);
                     } else {
                       remove(sessionId, m.id);
-                      onSendItem(m.text);
+                      onSendItem(m.text, m.promptText);
                     }
                   }}
                 />
@@ -189,7 +189,7 @@ function SortableItem({
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => { onEdit(draft); setEditing(false); }}
+              onClick={() => { if (draft !== item.text) onEdit(draft); setEditing(false); }}
               className="size-6 text-primary hover:text-primary"
               title="Save"
             >
