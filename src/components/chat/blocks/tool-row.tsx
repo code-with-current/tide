@@ -616,8 +616,10 @@ export const ToolRow = memo(function ToolRow({
           </span>
         )}
         {!target && <span className="flex-1" />}
-        {/* Meta (orchestrator-supplied): "25 entries", "12 hits", etc. */}
-        {call.meta && <span className="text-muted-foreground/60 text-[11px]">{call.meta}</span>}
+        {/* Meta (orchestrator-supplied): "25 entries", "12 hits", etc.
+         *  Skip for bash/git — their meta ("exit 0 · 26314ms") is already
+         *  split into the statusLabel (exit code) + ms (duration) below. */}
+        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[11px]">{call.meta}</span>}
         {/* Status label: "exit 0", "end_turn", "12 hits", "failed", etc. */}
         {statusLabel && (
           <span className={cn(
@@ -671,6 +673,12 @@ export const ToolRow = memo(function ToolRow({
   );
 });
 
+/** Whether this tool type carries bash-like meta ("exit N · Nms") that's
+ *  already split into statusLabel (exit code) + ms (duration). */
+function isBashLike(toolName: ToolName): boolean {
+  return toolName === 'bash' || toolName === 'git' || toolName === 'bash_output' || toolName === 'kill_shell';
+}
+
 /** Build a human-friendly status label for the row meta (e.g. "exit 0", "12 hits", "failed"); empty when nothing applies. */
 function statusLabelOf(call: ToolCall): string {
   // Sub-agent: surface the stop reason from the display.
@@ -688,13 +696,14 @@ function statusLabelOf(call: ToolCall): string {
     const prog = writeProgressLabel(call);
     if (prog) return prog;
   }
-  // Bash / git: prefer exit code from meta ("exit 0", "exit 1").
+  // Bash / git: extract just the exit code, NOT the full meta string
+  // (which includes duration — already shown separately via `ms`).
   if (call.toolName === 'bash' || call.toolName === 'git' || call.toolName === 'bash_output') {
-    const meta = call.meta ?? '';
-    if (meta.startsWith('exit ')) return meta;
-    // Output often starts with "exit N · …"; surface that.
-    const m = (call.output ?? '').match(/^exit (\d+)/);
+    const m = (call.meta ?? '').match(/^exit (\d+)/);
     if (m) return `exit ${m[1]}`;
+    // Output often starts with "exit N · …"; surface that.
+    const m2 = (call.output ?? '').match(/^exit (\d+)/);
+    if (m2) return `exit ${m2[1]}`;
     return '';
   }
   // Grep / glob: hit count.

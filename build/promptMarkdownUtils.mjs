@@ -92,7 +92,7 @@ function buildAgentBundle() {
     const whenMatch = raw.match(/whenToUse:\s*"([^"]+)"/);
     const allowedToolsMatch = raw.match(/allowedTools:\s*"([^"]+)"/);
     const maxStepsMatch = raw.match(/maxSteps:\s*(\d+)/);
-    const thinkingBudgetMatch = raw.match(/thinkingBudget:\s*(\d+)/);
+    const thinkingLevelMatch = raw.match(/thinkingLevel:\s*"([^"]+)"/);
     // Strip frontmatter for the prompt content.
     const content = raw.replace(/^<!--[\s\S]*?-->\s*/, '').trim();
 
@@ -103,7 +103,7 @@ function buildAgentBundle() {
       systemPrompt: content,
       allowedTools: allowedToolsMatch ? allowedToolsMatch[1].split(',').map(s => s.trim()) : undefined,
       maxSteps: maxStepsMatch ? parseInt(maxStepsMatch[1]) : undefined,
-      thinkingBudget: thinkingBudgetMatch ? parseInt(thinkingBudgetMatch[1]) : undefined,
+      thinkingLevel: thinkingLevelMatch ? thinkingLevelMatch[1] : undefined,
     });
   }
 
@@ -123,7 +123,7 @@ export interface BundledAgent {
   systemPrompt: string;
   allowedTools?: string[];
   maxSteps?: number;
-  thinkingBudget?: number;
+  thinkingLevel?: string;
 }
 
 export const BUNDLED_AGENTS: BundledAgent[] = ${JSON.stringify(agents, null, 2)};

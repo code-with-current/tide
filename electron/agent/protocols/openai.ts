@@ -1,5 +1,16 @@
-/** OpenAI-protocol call options (z.ai, OpenRouter, OpenAI, …): thinking is expressed as `reasoning_effort` (high/max) via providerOptions.openaiCompatible, since the Anthropic thinking block is dropped by the openai-compatible provider. */
-import type { ProtocolCallOptions, ProtocolContext, ThinkingConfig } from './types';
+/** OpenAI-protocol call options (z.ai, OpenRouter, OpenAI, …): accepts a
+ *  ReasoningInstruction (resolved by reasoning.ts) and translates it to the
+ *  correct wire format:
+ *  - effort → `reasoningEffort` string sent directly (no precision loss!)
+ *  - budget_tokens → derives effort via budgetToEffort (lossy but correct)
+ *  - toggle → `reasoningEffort: 'medium'` (just enable thinking)
+ *
+ *  The key improvement over the old code: effort strings are sent directly
+ *  instead of collapsing the entire range to just high|max. GLM-5.2 with
+ *  effort contract now gets low/medium/high/max as discrete levels. */
+import type { ProtocolCallOptions, ProtocolContext } from './types';
+import type { ReasoningInstruction } from './reasoning';
+import { budgetToEffort } from './reasoning';
 
 const DEFAULT_MAX_TOKENS = 8192;
 /** Gemini-backed endpoints cap `max_tokens` (maxOutputTokens) at 65535 (2^16−1); requests above return 400 INVALID_ARGUMENT. Cap here so the thinking budget + base doesn't exceed the provider limit. */
@@ -12,13 +23,8 @@ const MAX_OUTPUT_TOKENS_CAP = 65_535;
  *  so the model has room to emit complete tool calls. */
 const TOOL_OUTPUT_FLOOR = 16_384;
 
-/** Map Tide's thinking budget onto GLM-5.2's discrete effort tiers: extra/max (≥48000) → `max` (z.ai's recommendation for coding), lower levels → `high`. */
-function effortFromBudget(budgetTokens: number): 'high' | 'max' {
-  return budgetTokens >= 48_000 ? 'max' : 'high';
-}
-
 export function openaiCallOptions(
-  thinking: ThinkingConfig | null,
+  reasoning: ReasoningInstruction | null,
   ctx?: ProtocolContext,
 ): ProtocolCallOptions {
   let maxBase = ctx?.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
@@ -30,19 +36,9 @@ export function openaiCallOptions(
     maxBase = TOOL_OUTPUT_FLOOR;
   }
 
-  if (!thinking) {
+  if (!reasoning) {
     return { providerOptions: undefined, maxOutputTokens: maxBase, label: 'off' };
   }
-
-  // Clamp the thinking budget so the output isn't starved. On OpenAI-protocol
-  // providers, maxOutputTokens = thinking + answer (a single pool). At `max`
-  // thinking (64K) capped at 65535 total, the model is left with only ~1535
-  // output tokens — not enough to complete even a moderate tool call. Cap the
-  // thinking portion at 75% of the total so output always gets ≥25%.
-  const totalCap = MAX_OUTPUT_TOKENS_CAP;
-  const maxThinking = Math.floor(totalCap * 0.75);
-  const budgetTokens = Math.min(thinking.budgetTokens, maxThinking);
-  const effort = effortFromBudget(budgetTokens);
 
   // Some Gemini-backed OpenAI-compatible endpoints reject `reasoning_effort`
   // combined with tools (400 INVALID_ARGUMENT). Detect Gemini by model ID —
@@ -50,21 +46,41 @@ export function openaiCallOptions(
   // (z.ai GLM, OpenRouter, OpenAI, Ollama, etc.) get the full effort level.
   const isGemini = ctx?.modelId?.includes('gemini') ?? false;
   if (isGemini && ctx?.hasTools) {
+    const budgetForCap = reasoning.budgetTokens ?? 8192;
     return {
       providerOptions: undefined,
-      maxOutputTokens: Math.min(budgetTokens + maxBase, totalCap),
+      maxOutputTokens: Math.min(budgetForCap + maxBase, MAX_OUTPUT_TOKENS_CAP),
       label: `reasoning_effort=off (gemini + tools)`,
     };
   }
 
-  const computed = Math.min(budgetTokens + maxBase, totalCap);
+  // Resolve the effort string from the instruction.
+  let effort: string;
+  if (reasoning.contract === 'effort') {
+    effort = reasoning.effort ?? 'high';
+  } else if (reasoning.contract === 'budget_tokens') {
+    // Budget contract on OpenAI protocol: derive effort (lossy).
+    effort = budgetToEffort(reasoning.budgetTokens ?? 8192);
+  } else {
+    // Toggle: just enable thinking at a medium level.
+    effort = 'medium';
+  }
+
+  // Compute maxOutputTokens. For effort-based reasoning, we no longer add
+  // a budget to maxBase — the effort string controls thinking depth, and
+  // maxOutputTokens is the total output pool. For budget-derived effort,
+  // preserve the old behavior of budget + maxBase (capped).
+  const computed = reasoning.budgetTokens != null
+    ? Math.min(reasoning.budgetTokens + maxBase, MAX_OUTPUT_TOKENS_CAP)
+    : Math.min(maxBase, MAX_OUTPUT_TOKENS_CAP);
+
   return {
     providerOptions: {
       openaiCompatible: { reasoningEffort: effort },
     },
     maxOutputTokens: computed,
-    label: budgetTokens < thinking.budgetTokens
-      ? `reasoning_effort=${effort} (budget ${thinking.budgetTokens}→${budgetTokens} clamped, max_tokens=${computed})`
+    label: reasoning.contract === 'budget_tokens'
+      ? `reasoning_effort=${effort} (derived from budget=${reasoning.budgetTokens}, max_tokens=${computed})`
       : `reasoning_effort=${effort} (max_tokens=${computed})`,
   };
 }

@@ -62,6 +62,7 @@ export const AnswerBlock = memo(function AnswerBlock({
               Stopped
             </div>
           )}
+
         </div>
 
         {showActions && (
@@ -72,6 +73,7 @@ export const AnswerBlock = memo(function AnswerBlock({
                 {formatMs(elapsedMs)}
               </span>
             ) : <span className="mr-auto" />}
+
             <div className="flex items-center gap-0.5 opacity-60 transition-opacity group-hover/answer:opacity-100">
               <button
                 type="button"
@@ -105,6 +107,7 @@ export const AnswerBlock = memo(function AnswerBlock({
                 </button>
               )}
             </div>
+
           </div>
         )}
       </figure>

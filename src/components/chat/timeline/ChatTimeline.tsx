@@ -5,6 +5,7 @@ import { memo, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { Message } from '@/types';
 import { ChatMessage } from '../chat-message';
+import { CompactedDivider } from '../blocks/compacted-divider';
 import { useTimelineScroll } from './useTimelineScroll';
 import { cn } from '@/lib/utils';
 
@@ -47,7 +48,15 @@ function ChatTimelineImpl({
             : (
               <>
                 {messages.map((msg) => (
-                  <ChatMessage key={msg.id} message={msg} stopReason={msg.stopReason} />
+                  <div key={msg.id}>
+                    {msg.compactionInfo && (
+                      <CompactedDivider
+                        tokensBefore={msg.compactionInfo.tokensBefore}
+                        tokensAfter={msg.compactionInfo.tokensAfter}
+                      />
+                    )}
+                    <ChatMessage message={msg} stopReason={msg.stopReason} />
+                  </div>
                 ))}
                 {streamingMessage && (
                   <ChatMessage

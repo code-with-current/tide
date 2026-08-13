@@ -150,6 +150,7 @@ export function useChatStream(): {
       const sid = event.sessionId;
       const urgent = event.type === 'turn_end' || event.type === 'error'
                   || event.type === 'retry'
+                  || event.type === 'compacting'
                   || event.type === 'permission_required'
                   || event.type === 'followup_required';
       const arr = queues.get(sid) ?? [];
@@ -324,9 +325,26 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
         isStreaming: true,
         retry: { attempt: event.attempt, maxAttempts: event.maxAttempts, reason: event.reason },
       };
-    case 'compacting':
-      // Autocompact is summarizing the conversation. Show a brief indicator.
+    case 'compacting': {
+      // Autocompact is summarizing the conversation. Show the indicator.
+      // When tokensAfter is present, compaction is done — store the counts
+      // for the meter's "compacted N→M" annotation and update the live usage
+      // so the context meter drops immediately instead of waiting for the
+      // next step's UsageEvent.
+      if (event.tokensAfter !== undefined) {
+        const prevUsage = state.usage;
+        const updatedUsage = prevUsage
+          ? { ...prevUsage, inputTokens: event.tokensAfter }
+          : { inputTokens: event.tokensAfter, outputTokens: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, calls: 0, costUsd: 0 };
+        return {
+          ...state,
+          compacting: false,
+          compactedTokens: { before: event.tokensBefore, after: event.tokensAfter },
+          usage: updatedUsage,
+        };
+      }
       return { ...state, compacting: true };
+    }
     case 'error':
       // Record the error but keep streaming — the orchestrator may retry. The
       // retry event clears this; turn_end ends the turn. Without this, the

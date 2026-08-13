@@ -81,8 +81,8 @@ export function InspectorTab({ session }: { session: Session }) {
   const effectiveMode = liveMode ?? session.autonomyMode;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 min-h-0 scroll">
+    <div className="flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden">
+      <div className="flex-1 min-h-0 scroll min-w-0">
         {/* Hero — status, stats, pinned context meter (replaces the old
             non-collapsible header + the bottom ContextWindowSection). */}
         <PanelSection title="Session" defaultOpen>
@@ -290,6 +290,9 @@ const CONTEXT_WARN_PCT = 80;
 
 function ContextWindowDetailSection({ session }: { session: Session }) {
   // Subscribe to live stream fields for real-time stats during streaming.
+  // `blocks` is included so we can estimate streaming output tokens as they
+  // arrive — giving the meter a live-updating projected context count instead
+  // of freezing between `usage` events (which only fire at step boundaries).
   const streamFields = useUi(
     useShallow((s) => {
       if (!session.id) return null;
@@ -299,6 +302,8 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
         isStreaming: st.isStreaming,
         usage: st.usage,
         iteration: st.iteration,
+        compactedTokens: st.compactedTokens,
+        blocks: st.blocks,
       };
     }),
   );
@@ -320,15 +325,35 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
     ? (streamFields.usage ?? session.lastTurnUsage ?? session.usage)
     : (session.lastTurnUsage ?? session.usage);
 
-  // Context window fill = input tokens only, measured against the usable budget.
-  const liveContext = u.inputTokens;
+  // ── Live streaming token estimate ──────────────────────────────────
+  // Between `usage` events (which only arrive at step boundaries), estimate
+  // the growing output/reasoning tokens from the accumulated block text so
+  // the meter updates live as the model generates.
+  const isLive = streamFields?.isStreaming && !!streamFields.blocks;
+  const liveTokens = useMemo(() => {
+    if (!isLive || !streamFields?.blocks) return { output: 0, reasoning: 0 };
+    let textChars = 0;
+    let reasoningChars = 0;
+    for (const b of streamFields.blocks) {
+      if (b.kind === 'text') textChars += b.text.length;
+      else if (b.kind === 'reasoning') reasoningChars += b.text.length;
+    }
+    return {
+      output: Math.round(textChars / 4),
+      reasoning: Math.round(reasoningChars / 4),
+    };
+  }, [isLive, streamFields?.blocks]);
+
+  // Context window fill = input tokens + streaming output, measured against
+  // the usable budget. When idle, this is just the last-known input tokens.
+  const liveContext = u.inputTokens + (isLive ? liveTokens.output + liveTokens.reasoning : 0);
   const pctUsed = Math.min(100, (liveContext / usableInput) * 100);
   const seg = (n: number) => Math.min(100, (n / usableInput) * 100);
   const meterSegments = [
     { label: 'Cache read', tokens: u.cacheRead, pct: seg(u.cacheRead), cls: 'bg-slate-500' },
     { label: 'Input', tokens: Math.max(0, u.inputTokens - u.cacheRead), pct: seg(Math.max(0, u.inputTokens - u.cacheRead)), cls: 'bg-sky-400' },
-    { label: 'Output', tokens: u.outputTokens, pct: seg(u.outputTokens), cls: 'bg-primary' },
-    { label: 'Reasoning', tokens: u.reasoningTokens, pct: seg(u.reasoningTokens), cls: 'bg-purple-400' },
+    { label: 'Output', tokens: u.outputTokens + (isLive ? liveTokens.output : 0), pct: seg(u.outputTokens + (isLive ? liveTokens.output : 0)), cls: 'bg-primary' },
+    { label: 'Reasoning', tokens: u.reasoningTokens + (isLive ? liveTokens.reasoning : 0), pct: seg(u.reasoningTokens + (isLive ? liveTokens.reasoning : 0)), cls: 'bg-purple-400' },
   ];
 
   // Detail breakdown rows (cumulative session usage for cost accounting).
@@ -380,8 +405,13 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
         <div className="flex items-baseline justify-between text-[0.65rem] mb-1.5">
           <span className="font-semibold uppercase tracking-wider text-muted-foreground">Context fill</span>
           <span className="font-mono text-muted-foreground">
-            <span className="text-foreground text-[0.75rem] font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(usableInput)}{maxOutput > 0 && <span className="text-muted-foreground/60"> (−{formatNumber(maxOutput)} out)</span>} ·{' '}
-            <span className={pctUsed >= CONTEXT_WARN_PCT ? 'text-amber-300 text-[0.75rem]' : 'text-[0.75rem]'}>{pctUsed.toFixed(1)}%</span>
+            <span className={cn('text-foreground text-[0.75rem] font-semibold', isLive && 'live-counter')}>{formatNumber(liveContext)}</span> / {formatNumber(usableInput)}{maxOutput > 0 && <span className="text-muted-foreground/60"> (−{formatNumber(maxOutput)} out)</span>} ·{' '}
+            <span className={cn(pctUsed >= CONTEXT_WARN_PCT && 'text-amber-300', 'text-[0.75rem]', isLive && 'live-counter')}>{pctUsed.toFixed(1)}%</span>
+            {streamFields?.compactedTokens && (
+              <span className="ml-1.5 text-emerald-400/80 text-[0.7rem] font-normal" title={`Compacted from ${formatNumber(streamFields.compactedTokens.before)} to ${formatNumber(streamFields.compactedTokens.after)} tokens`}>
+                · ↓{formatNumber(streamFields.compactedTokens.before - streamFields.compactedTokens.after)}
+              </span>
+            )}
           </span>
         </div>
         <div

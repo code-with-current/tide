@@ -1,11 +1,5 @@
 /** Shared types for per-protocol call-option resolution: each protocol expresses "thinking" differently and may grow its own knobs, but every builder returns the same ProtocolCallOptions shape so the orchestrator can consume it uniformly. */
 
-/** Resolved thinking config (from Tide's thinkingLevel). */
-export interface ThinkingConfig {
-  /** Anthropic budget_tokens / the level's token budget. */
-  budgetTokens: number;
-}
-
 /** What a protocol builder hands back to the orchestrator. */
 export interface ProtocolCallOptions {
   /** Passed straight to `streamText({ providerOptions })`. */

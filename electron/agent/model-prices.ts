@@ -22,6 +22,7 @@ const CATALOG_URL = 'https://models.dev/api.json';
  *  Costs are per-million-token (models.dev native units). */
 export interface RawCatalogEntry {
   reasoning?: boolean;
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number }>;
   tool_call?: boolean;
   attachment?: boolean;
   limit?: { context?: number; input?: number; output?: number };
@@ -56,6 +57,7 @@ export function flattenModelsDevApi(api: unknown): Record<string, RawCatalogEntr
       // Keep only the slim subset; drop description/name/release_date/etc.
       out[id] = {
         reasoning: m.reasoning,
+        reasoning_options: m.reasoning_options,
         tool_call: m.tool_call,
         attachment: m.attachment,
         limit: m.limit,
@@ -85,6 +87,9 @@ export interface CatalogEntry {
   supportsFunctionCalling: boolean;
   supportsVision: boolean;
   supportsPromptCaching: boolean;
+  /** Reasoning contracts from models.dev (effort / budget_tokens / toggle).
+   *  Undefined when the catalog entry has no reasoning_options. */
+  reasoningOptions?: Array<{ type: string; values?: string[]; min?: number }>;
 }
 
 /** Version metadata embedded at the top of the catalog file. */
@@ -130,6 +135,7 @@ function normalizeEntry(catalogId: string, raw: RawCatalogEntry): CatalogEntry {
     supportsFunctionCalling: raw.tool_call ?? false,
     supportsVision: raw.attachment ?? false,
     supportsPromptCaching: hasCache,
+    reasoningOptions: raw.reasoning_options,
   };
 }
 

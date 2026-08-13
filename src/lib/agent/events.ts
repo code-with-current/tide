@@ -210,12 +210,19 @@ export interface RetryEvent extends AgentEventBase {
 
 /** Emitted when autocompact fires — the conversation was summarized to fit the
  *  context window. Lets the UI show a "Compacting…" indicator so the user knows
- *  why there's a brief pause before the next step streams. */
+ *  why there's a brief pause before the next step streams.
+ *
+ *  Two-phase: the first event (tokensAfter absent) signals "compaction starting."
+ *  After compactConversation() returns, a second event with `tokensAfter` set
+ *  signals completion so the context meter can drop to the reduced count. */
 export interface CompactingEvent extends AgentEventBase {
   type: 'compacting';
   messageId: string;
   /** Estimated token count before compaction. */
   tokensBefore: number;
+  /** Token count after compaction (estimated). Present on the completion
+   *  event; absent on the "starting" event. */
+  tokensAfter?: number;
   /** Whether the user triggered it via /compact (vs auto threshold). */
   forced: boolean;
 }

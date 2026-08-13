@@ -22,7 +22,7 @@ export function RightPanel() {
   const feature = useTabs((s) => s.active[sessionId] ?? 'inspector') as RightTabKind;
 
   return (
-    <aside className="bg-card flex flex-col h-full w-full overflow-hidden relative">
+    <aside className="bg-card flex flex-col h-full w-full min-w-0 overflow-hidden relative">
       {hasPermissionPending && (
         <div className="absolute inset-0 z-40 bg-background/60 backdrop-blur-[2px] pointer-events-none" />
       )}

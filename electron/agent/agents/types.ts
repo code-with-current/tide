@@ -15,6 +15,7 @@ export interface AgentDef {
   allowedTools?: string[];
   /** Max tool-call steps for multi-step agents. Default 10. */
   maxSteps?: number;
-  /** Thinking budget override (tokens). Default 4096. */
-  thinkingBudget?: number;
+  /** Thinking level override for this agent. Default 'low' — sub-agents are
+   *  focused specialists that don't need deep reasoning. */
+  thinkingLevel?: import('../../../src/types/index.js').ThinkingLevel;
 }

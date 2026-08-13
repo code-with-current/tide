@@ -1,9 +1,10 @@
 /** Sub-agent runtime: single-shot (no allowedTools → one generateText call) or multi-step (has allowedTools → streamText tool loop with repairToolCall, recursive + depth-guarded). Both inherit parent provider/model/protocol, fold usage into the parent, and return a ToolResult. */
 import { generateText, streamText, isStepCount } from 'ai';
-import type { LanguageModelUsage } from 'ai';
+import type { LanguageModelUsage, ModelMessage } from 'ai';
 import { resolveModel } from '../provider-factory.js';
-import { resolveProtocolOptions } from '../protocols/index.js';
-import { resolveMaxOutputTokens, contextWindowSize } from '../model-capabilities.js';
+import { resolveProtocolOptions, resolveReasoning } from '../protocols/index.js';
+import type { ReasoningInstruction } from '../protocols/index.js';
+import { resolveMaxOutputTokens, contextWindowSize, resolveReasoningContracts } from '../model-capabilities.js';
 import { buildToolsetSubset, formatArgPreview, resolveToolName } from '../tools/registry.js';
 import { getToolMeta } from '../tools/tool-meta.js';
 import { currentToolCallId } from '../tools/tool-call-context.js';
@@ -42,6 +43,10 @@ export interface RunAgentOptions {
   ctx?: ToolContext;
   /** Recursion depth (0 = dispatched from main orchestrator). */
   depth?: number;
+  /** The parent turn's thinking level — inherited as the sub-agent default
+   *  when AgentDef.thinkingLevel is not set. Lets the user's slider choice
+   *  propagate to dispatched specialists. */
+  thinkingLevel?: import('../../../src/types/index.js').ThinkingLevel;
   /** The parent dispatch_agent's toolCallId — used as parentToolCallId on
    *  child tool events so the renderer nests them under the dispatch block.
    *  Captured automatically from AsyncLocalStorage if omitted. */
@@ -52,10 +57,10 @@ export interface RunAgentOptions {
   title?: string;
 }
 
-/** Default thinking budget for sub-agents. Sub-agents are focused
- *  specialists — they don't need deep reasoning, they need speed.
- *  Individual agents can override via AgentDef.thinkingBudget. */
-const DEFAULT_THINKING_BUDGET = 1024;
+/** Default thinking level for sub-agents when neither the agent definition
+ *  nor the parent turn specifies one. 'medium' gives enough reasoning room
+ *  for multi-step investigation without excessive latency. */
+const DEFAULT_THINKING_LEVEL = 'medium' as const;
 
 /** Max nesting depth for recursive dispatch. */
 export const MAX_AGENT_DEPTH = 3;
@@ -76,7 +81,7 @@ function mapUsage(u: LanguageModelUsage, calls = 1): Usage {
 export async function runAgent(opts: RunAgentOptions): Promise<ToolResult> {
   const { agent, task, provider, modelId, signal, onUsage, ctx, depth = 0 } = opts;
   const start = Date.now();
-  const thinkingBudget = agent.thinkingBudget ?? DEFAULT_THINKING_BUDGET;
+  const thinkingLevel = agent.thinkingLevel ?? opts.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
 
   if (!provider.apiKey) {
     return {
@@ -88,27 +93,32 @@ export async function runAgent(opts: RunAgentOptions): Promise<ToolResult> {
 
   // Multi-step agent: has tools + ctx.
   if (agent.allowedTools?.length && ctx) {
-    return runMultiStepAgent(opts, thinkingBudget, start);
+    return runMultiStepAgent(opts, thinkingLevel, start);
   }
 
   // Single-shot agent: no tools (legacy path).
-  return runSingleShotAgent(opts, thinkingBudget, start);
+  return runSingleShotAgent(opts, thinkingLevel, start);
 }
 
 // ─── Single-shot path (unchanged from before) ──────────────────────────
 
 async function runSingleShotAgent(
   opts: RunAgentOptions,
-  thinkingBudget: number,
+  thinkingLevel: import('../../../src/types/index.js').ThinkingLevel,
   start: number,
 ): Promise<ToolResult> {
   const { agent, task, provider, modelId, signal, onUsage } = opts;
   const modelEntry = provider.models.find((m) => m.modelId === modelId);
+  const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
+  const contracts = resolveReasoningContracts(modelId, modelEntry);
+  const reasoning: ReasoningInstruction | null = resolveReasoning(
+    thinkingLevel, contracts, provider.apiStyle, knownMaxOutput,
+  );
 
   const proto = resolveProtocolOptions(
     provider.apiStyle,
-    { budgetTokens: thinkingBudget },
-    { hasTools: false, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry) },
+    reasoning,
+    { hasTools: false, modelId, maxOutputTokens: knownMaxOutput },
   );
 
   try {
@@ -136,7 +146,7 @@ async function runSingleShotAgent(
 
 async function runMultiStepAgent(
   opts: RunAgentOptions,
-  thinkingBudget: number,
+  thinkingLevel: import('../../../src/types/index.js').ThinkingLevel,
   start: number,
 ): Promise<ToolResult> {
   const { agent, task, provider, modelId, signal, onUsage, ctx, depth, title } = opts;
@@ -181,10 +191,15 @@ async function runMultiStepAgent(
   const tools = buildToolsetSubset(childCtx, agent.allowedTools!);
 
   const modelEntry = provider.models.find((m) => m.modelId === modelId);
+  const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
+  const contracts = resolveReasoningContracts(modelId, modelEntry);
+  const reasoning: ReasoningInstruction | null = resolveReasoning(
+    thinkingLevel, contracts, provider.apiStyle, knownMaxOutput,
+  );
   const proto = resolveProtocolOptions(
     provider.apiStyle,
-    { budgetTokens: thinkingBudget },
-    { hasTools: true, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry) },
+    reasoning,
+    { hasTools: true, modelId, maxOutputTokens: knownMaxOutput },
   );
 
   // ── CONTEXT MANAGEMENT (mirrors main loop, orchestrator-sdk.ts:408-432) ──
@@ -348,6 +363,30 @@ async function runMultiStepAgent(
         : undefined;
 
     if (!report) {
+      // The agent exhausted its step budget calling tools without producing a
+      // text report (finishReason=tool-calls). Rather than failing, make one
+      // final tool-free call so the model synthesizes its findings into text.
+      // The steps array carries the full conversation (task + tool results);
+      // we reuse it as context and instruct the model to write its report.
+      const synthesized = await synthesizeReport({
+        agent, steps, provider, modelId, signal, proto, onUsage,
+      });
+      if (synthesized) {
+        log.info('multi-step agent synthesized report', { name: agent.name, steps: stepCount, durationMs: Date.now() - start });
+        return {
+          status: 'executed',
+          output: synthesized,
+          durationMs: Date.now() - start,
+          meta: `${agent.name} · ${proto.label} · ${stepCount}+1 steps`,
+          display: {
+            kind: 'agent',
+            agentName: agent.name,
+            ...(title ? { title } : {}),
+            task,
+            report: synthesized,
+          },
+        };
+      }
       return {
         status: 'failed',
         output: `Agent ${agent.name} returned no content (finishReason=${finishReason}, steps=${stepCount}).`,
@@ -374,6 +413,58 @@ async function runMultiStepAgent(
     };
   } catch (e: any) {
     return handleError(agent.name, e, signal, start);
+  }
+}
+
+// ─── Forced synthesis (step-budget exhaustion recovery) ────────────────
+
+/** When a multi-step agent exhausts its step budget calling tools (finishReason=tool-calls)
+ *  without emitting a text report, make one final tool-free generateText call
+ *  so the model synthesizes its findings. The steps array carries the full
+ *  conversation (user task + tool calls + tool results); we reuse it as
+ *  context and instruct the model to write its report. Returns null on failure
+ *  so the caller falls back to the 'no content' error. */
+async function synthesizeReport(opts: {
+  agent: AgentDef;
+  steps: ReadonlyArray<{ messages?: ModelMessage[] }>;
+  provider: Provider;
+  modelId: string;
+  signal: AbortSignal;
+  proto: { providerOptions: unknown; maxOutputTokens: number | undefined; label: string };
+  onUsage?: (u: Usage) => void;
+}): Promise<string | null> {
+  try {
+    const allMessages: ModelMessage[] = [];
+    for (const step of opts.steps) {
+      if (step?.messages && Array.isArray(step.messages)) {
+        allMessages.push(...step.messages);
+      }
+    }
+    if (allMessages.length === 0) return null;
+
+    allMessages.push({
+      role: 'user',
+      content: 'Based on your investigation above, write your final report now. Do not call any more tools. Summarize what you found and provide your conclusion.',
+    } as ModelMessage);
+
+    const model = resolveModel(opts.provider, { modelId: opts.modelId, contextWindow: 0 } as any);
+    const result = await generateText({
+      model,
+      system: opts.agent.systemPrompt,
+      messages: allMessages,
+      providerOptions: opts.proto.providerOptions as any,
+      maxOutputTokens: opts.proto.maxOutputTokens,
+      abortSignal: opts.signal,
+    });
+
+    if (result.usage && opts.onUsage) {
+      opts.onUsage(mapUsage(result.usage as LanguageModelUsage));
+    }
+
+    return ((result.text as string | null | undefined) ?? '').trim() || null;
+  } catch (e: any) {
+    log.warn('synthesizeReport failed', { agent: opts.agent.name, err: e?.message ?? String(e) });
+    return null;
   }
 }
 
