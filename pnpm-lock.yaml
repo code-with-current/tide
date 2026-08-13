@@ -17,9 +17,6 @@ importers:
       better-sqlite3:
         specifier: ^13.0.1
         version: 13.0.3
-      electron:
-        specifier: ^43.1.1
-        version: 43.4.0
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9
@@ -32,12 +29,6 @@ importers:
       onnxruntime-node:
         specifier: 1.14.0
         version: 1.14.0
-      react:
-        specifier: ^19.2.7
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.2.7
-        version: 19.2.8(react@19.2.8)
       sqlite-vec:
         specifier: ^0.1.9
         version: 0.1.9
@@ -114,6 +105,9 @@ importers:
       cross-env:
         specifier: ^10.1.0
         version: 10.1.0
+      electron:
+        specifier: ^43.1.1
+        version: 43.4.0
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
@@ -144,6 +138,12 @@ importers:
       radix-ui:
         specifier: ^1.6.2
         version: 1.6.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react:
+        specifier: ^19.2.7
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.7
+        version: 19.2.8(react@19.2.8)
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
