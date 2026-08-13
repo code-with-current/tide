@@ -1,20 +1,19 @@
-# Publish package-manager manifests (winget / homebrew) after each Release.
+# Publish package-manager manifests (winget / homebrew / snap) after each Release.
 #
 # Triggered when the Release workflow (tag-driven) completes successfully.
 # Renders manifests once (packaging/render.mjs — downloads each installer,
 # hashes it), then submits to each package index. Every submission step is
 # gated on a secret so the workflow is inert until you configure them.
 #
-# Snap Store publishing is handled directly in release.yml (electron-builder
-# builds + snapcraft pushes in one step). This workflow handles the manifest-
-# based package managers only.
-#
 # One-time setup (see packaging/README.md for detail):
 #   winget   — set WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
-#              The workflow creates Tide.Tide on first run (komac new) and
-#              bumps it on every subsequent release (komac update).
+#              The workflow pushes manifests to code-with-current/winget-pkgs
+#              (our org fork) and opens a PR to microsoft/winget-pkgs.
 #   homebrew — set HOMEBREW_GITHUB_API_TOKEN. The workflow pushes the cask
 #              directly to code-with-current/homebrew-tap (our own tap).
+#   snap     — set SNAPCRAFT_STORE_CREDENTIALS (snapcraft export-login).
+#              The workflow downloads the .snap from the release and uploads
+#              it to the Snap Store.
 name: Publish package manifests
 
 on:
@@ -63,13 +62,11 @@ jobs:
             TAG="${{ inputs.tag }}"
           else
             REF="${{ github.event.workflow_run.head_branch }}"
-            TAG="${REF#refs/tags/}"   # defensive: head_branch is the bare tag
+            TAG="${REF#refs/tags/}"
           fi
-          TAG="${TAG#v}"   # strip leading 'v'
+          TAG="${TAG#v}"
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
-      # Downloads every installer from the GitHub Release once and streams each
-      # through sha256, then writes the rendered manifests + meta.json.
       - name: Render manifests
         run: |
           node packaging/render.mjs \
@@ -95,35 +92,61 @@ jobs:
           retention-days: 7
 
   winget:
-    # Creates Tide.Tide on first run (komac new), then bumps it on every
-    # subsequent release (komac update). Both auto-submit a PR to
-    # microsoft/winget-pkgs. Requires WINGET_GITHUB_TOKEN.
+    # Pushes rendered manifests to code-with-current/winget-pkgs (org fork)
+    # and opens a PR to microsoft/winget-pkgs. Requires WINGET_GITHUB_TOKEN.
     name: publish · winget
     needs: render
     runs-on: ubuntu-latest
     env:
-      GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+      WINGET_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
     steps:
       - name: Skip — no WINGET_GITHUB_TOKEN configured
-        if: ${{ env.GITHUB_TOKEN == '' }}
+        if: ${{ env.WINGET_TOKEN == '' }}
         run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (PAT scopes public_repo + workflow) to enable winget submission."
-      - name: Install Komac
-        if: ${{ env.GITHUB_TOKEN != '' }}
-        run: |
-          curl -sL -o /tmp/komac.deb https://github.com/russellbanks/Komac/releases/download/v2.16.0/komac_2.16.0-1_amd64.deb
-          sudo dpkg -i /tmp/komac.deb
 
-      - name: Update existing manifest (or create on first release)
-        if: ${{ env.GITHUB_TOKEN != '' }}
+      - name: Download rendered manifests
+        if: ${{ env.WINGET_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+
+      - name: Push manifests and open PR
+        if: ${{ env.WINGET_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
         run: |
-          komac update Tide.Tide \
-            --version "${{ needs.render.outputs.winget_version }}" \
-            --urls "${{ needs.render.outputs.exe_url }}" \
-            --submit || \
-          komac new Tide.Tide \
-            --version "${{ needs.render.outputs.winget_version }}" \
-            --urls "${{ needs.render.outputs.exe_url }}" \
-            --submit
+          VERSION="${{ needs.render.outputs.winget_version }}"
+          PKG_ID="Tide.Tide"
+          # winget-pkgs stores manifests at manifests/<first-letter>/<Publisher>/<Product>/<Version>/
+          MANIFEST_DIR="manifests/t/Tide/Tide/${VERSION}"
+          BRANCH="${PKG_ID}.${VERSION}"
+          FORK="code-with-current/winget-pkgs"
+          UPSTREAM="microsoft/winget-pkgs"
+
+          # Sparse-clone the fork — only the Tide subtree to keep it fast.
+          git clone --depth=1 --filter=blob:none --sparse \
+            "https://x-access-token:${WINGET_TOKEN}@github.com/${FORK}.git" winget
+          cd winget
+          git sparse-checkout set manifests/t/Tide
+          git checkout -b "$BRANCH"
+
+          # Copy rendered manifests into the version directory.
+          mkdir -p "$MANIFEST_DIR"
+          cp ../manifests/winget/*.yaml "$MANIFEST_DIR/"
+
+          git add -A
+          git commit -m "Add ${PKG_ID} version ${VERSION}"
+          git push -u origin "$BRANCH"
+
+          # Open PR to microsoft/winget-pkgs from the org fork.
+          gh pr create \
+            --repo "$UPSTREAM" \
+            --head "code-with-current:${BRANCH}" \
+            --base master \
+            --title "${PKG_ID} version ${VERSION}" \
+            --body "Adds ${PKG_ID} version ${VERSION}." || \
+          echo "::notice::PR may already exist for this version."
 
   homebrew:
     # Pushes the rendered cask directly to code-with-current/homebrew-tap.
@@ -149,7 +172,6 @@ jobs:
         run: |
           VERSION="${{ needs.render.outputs.version }}"
           TAP="code-with-current/homebrew-tap"
-          # Get the existing file SHA (needed to update; absent on first push).
           EXISTING_SHA=$(gh api "repos/${TAP}/contents/Casks/tide.rb" --jq '.sha // empty' 2>/dev/null || true)
           CONTENT=$(base64 -w0 manifests/homebrew/tide.rb)
           ARGS=(-f message="tide ${VERSION}" -f content="${CONTENT}")
@@ -158,3 +180,34 @@ jobs:
           fi
           gh api --method PUT "repos/${TAP}/contents/Casks/tide.rb" "${ARGS[@]}" >/dev/null
           echo "::notice::Updated Casks/tide.rb in ${TAP} to ${VERSION}"
+
+  snap:
+    # Downloads the .snap from the GitHub Release and uploads it to the
+    # Snap Store. Requires SNAPCRAFT_STORE_CREDENTIALS.
+    name: publish · snap store
+    needs: render
+    runs-on: ubuntu-latest
+    env:
+      CREDS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+    steps:
+      - name: Skip — no SNAPCRAFT_STORE_CREDENTIALS configured
+        if: ${{ env.CREDS == '' }}
+        run: echo "::notice::Set SNAPCRAFT_STORE_CREDENTIALS (snapcraft export-login) to enable Snap Store publishing."
+
+      - name: Download .snap from release
+        if: ${{ env.CREDS != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p snap
+          gh release download "v${{ needs.render.outputs.version }}" \
+            --pattern "*.snap" \
+            --dir snap/
+
+      - name: Upload to Snap Store
+        if: ${{ env.CREDS != '' }}
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft upload snap/*.snap
