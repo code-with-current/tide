@@ -113,6 +113,7 @@ jobs:
           name: ${{ matrix.label }}
           path: |
             release/*.dmg
+            release/*.zip
             release/*.exe
             release/*.AppImage
             release/*.deb
@@ -147,7 +148,7 @@ jobs:
           mkdir -p dist
           # Flatten everything into dist/ — download-artifact may create
           # per-leg subdirs; glob them out.
-          find assets -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.asar' -o -name '*.sha256' -o -name 'latest.yml' -o -name 'latest-linux.yml' -o -name 'latest-mac-*.yml' \) -exec cp {} dist/ \;
+          find assets -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.asar' -o -name '*.sha256' -o -name 'latest.yml' -o -name 'latest-linux.yml' -o -name 'latest-mac-*.yml' \) -exec cp {} dist/ \;
           echo "## Installers" > dist/notes.md
           echo "" >> dist/notes.md
           for f in dist/*; do
@@ -189,6 +190,6 @@ jobs:
               $PRE
           fi
           gh release upload "$TAG" \
-            dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb dist/*.asar dist/*.sha256 \
+            dist/*.dmg dist/*.zip dist/*.exe dist/*.AppImage dist/*.deb dist/*.asar dist/*.sha256 \
             dist/latest-mac.yml dist/latest.yml dist/latest-linux.yml \
             --clobber
