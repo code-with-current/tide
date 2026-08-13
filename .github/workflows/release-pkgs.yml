@@ -116,13 +116,12 @@ jobs:
         if: ${{ env.GITHUB_TOKEN != '' }}
         run: |
           komac update Tide.Tide \
-            "${{ needs.render.outputs.winget_version }}" \
-            "${{ needs.render.outputs.exe_url }}" \
-            "${{ needs.render.outputs.exe_sha }}" \
+            --version "${{ needs.render.outputs.winget_version }}" \
+            --urls "${{ needs.render.outputs.exe_url }}" \
             --submit || \
           komac new Tide.Tide \
-            "${{ needs.render.outputs.exe_url }}" \
             --version "${{ needs.render.outputs.winget_version }}" \
+            --urls "${{ needs.render.outputs.exe_url }}" \
             --submit
 
   homebrew:
@@ -208,4 +207,4 @@ jobs:
           su builder -c "makepkg --printsrcinfo > .SRCINFO"
           git add PKGBUILD .SRCINFO
           git commit -m "upgpkg: ${{ needs.render.outputs.version }}" || echo "nothing to commit (already up to date)"
-          git push
+          git push -u origin HEAD
