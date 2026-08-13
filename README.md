@@ -35,7 +35,7 @@ winget install Tide.Tide
 **Linux** (Snap):
 
 ```sh
-snap install tide
+snap install tide-codes
 ```
 
 Prefer a direct download? Grab the latest installer from the [releases page](https://github.com/code-with-current/tide/releases) — `.dmg` (mac), `.exe` (Windows), or `.deb` / `.AppImage` / `.snap` (Linux).

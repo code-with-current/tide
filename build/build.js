@@ -194,6 +194,7 @@ const linuxOptions = {
     category: 'Utility',
   },
   snap: {
+    name: 'tide-codes',
     summary: 'Tide — Code with the current',
     description: 'Local-first agentic coding companion with local ONNX embeddings, 20+ AI tools, and a permission system.',
     confinement: 'strict',
