@@ -66,13 +66,6 @@
       "node_modules/sqlite-vec*/**",
       "node_modules/node-mac-permissions/**"
     ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "code-with-current",
-        "repo": "tide"
-      }
-    ],
     "protocols": [
       {
         "name": "Tide OAuth callback",
