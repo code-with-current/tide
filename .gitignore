@@ -14,8 +14,8 @@ dist-electron
 release
 *.local
 
-# Lock files
-pnpm-lock.yaml
+# Lock files — pnpm-lock.yaml MUST be committed: CI installs with
+# --frozen-lockfile and actions/setup-node caches on it.
 package-lock.json
 yarn.lock
 
