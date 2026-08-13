@@ -250,7 +250,7 @@ export function WindowTopBar() {
         useUi.setState({ rightPanelOpen: false });
       }
     };
-    update();
+    setCompact(window.innerWidth < 1200);
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);

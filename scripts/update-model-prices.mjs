@@ -34,6 +34,7 @@ for (const provider of Object.values(json)) {
     if (!model || typeof model !== 'object') continue;
     models[id] = {
       reasoning: model.reasoning,
+      reasoning_options: model.reasoning_options,
       tool_call: model.tool_call,
       attachment: model.attachment,
       limit: model.limit,

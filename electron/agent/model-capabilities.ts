@@ -1,5 +1,5 @@
 /** Model capability resolution — reads directly from the provider-config Model entry, falling back to the models.dev catalog when the entry lacks a field. No heuristic prefix tables. */
-import type { Model } from '../../src/types/index.js';
+import type { Model, ReasoningOption } from '../../src/types/index.js';
 import { resolveModelMeta } from './model-catalog.js';
 import type { CatalogMap, ModelRef } from './model-catalog.js';
 import { createModelPricesLoader } from './model-prices.js';
@@ -116,9 +116,29 @@ export function enrichModelFromCatalog(model: Model, catalog: CatalogMap): Model
     reasoning: model.reasoning ?? meta.supportsReasoning,
     inputCostPerToken: model.inputCostPerToken ?? meta.pricing?.inputPerToken,
     outputCostPerToken: model.outputCostPerToken ?? meta.pricing?.outputPerToken,
+    reasoningContracts: meta.reasoningOptions as ReasoningOption[] | undefined,
   };
 }
 
 // Re-export for callers that want full metadata.
 export { resolveModelMeta, formatPriceRate } from './model-catalog.js';
 export type { ModelMeta } from './model-catalog.js';
+
+/** Resolve the reasoning contracts for a model. Reads `model.reasoningContracts`
+ *  (populated during catalog enrichment); falls back to catalog lookup when
+ *  the entry lacks the field (e.g. pre-enrichment or manual entry). Returns
+ *  undefined when no contracts are available — callers fall back to the
+ *  legacy fixed budget map in that case. */
+export function resolveReasoningContracts(
+  modelId: string,
+  modelEntry?: Model,
+): ReasoningOption[] | undefined {
+  if (modelEntry?.reasoningContracts) return modelEntry.reasoningContracts;
+  if (activeCatalog) {
+    const meta = resolveModelMeta({ modelId, contextWindow: 0 }, activeCatalog);
+    if (meta.resolvedCatalogId && meta.reasoningOptions) {
+      return meta.reasoningOptions as ReasoningOption[];
+    }
+  }
+  return undefined;
+}

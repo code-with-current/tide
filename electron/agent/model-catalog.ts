@@ -107,6 +107,9 @@ export interface ModelMeta {
   pricing: { inputPerToken: number; outputPerToken: number } | null;
   /** The catalogId this meta was resolved from, if any. */
   resolvedCatalogId: string | null;
+  /** Reasoning contracts from models.dev (effort / budget_tokens / toggle).
+   *  Undefined when the catalog entry has no reasoning_options. */
+  reasoningOptions?: Array<{ type: string; values?: string[]; min?: number }>;
 }
 
 const CONSERVATIVE_MAX_OUTPUT = 8192;
@@ -167,6 +170,7 @@ export function resolveModelMeta(model: ModelRef, catalog: CatalogMap): ModelMet
       ? { inputPerToken: entry.inputCostPerToken, outputPerToken: entry.outputCostPerToken }
       : null,
     resolvedCatalogId: entry.catalogId,
+    reasoningOptions: entry.reasoningOptions,
   };
 }
 

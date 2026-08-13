@@ -21,13 +21,14 @@ import { createConfigStore } from '../configStore.js';
 import { createTurnController, type TurnController } from './turn-controller.js';
 import { loadHookConfig, type HookConfig } from './hooks/hook-config.js';
 import { shouldCompact, compactConversation, isContextOverflow } from './context/auto-compact.js';
-import { supportsThinking, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens } from './model-capabilities.js';
+import { supportsThinking, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts } from './model-capabilities.js';
 import type { ToolResult } from './tools/types.js';
 import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
 import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
 import { resolveFollowup, abortFollowup, clearFollowupSession } from './followup-resolver.js';
-import { resolveProtocolOptions } from './protocols/index.js';
-import { DEFAULT_COMPACTION_SETTINGS } from '../../src/types/compaction.js';
+import { resolveProtocolOptions, resolveReasoning } from './protocols/index.js';
+import type { ReasoningInstruction } from './protocols/index.js';
+import type { CompactionSettings } from '../../src/types/compaction.js';
 import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events.js';
 import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agent/events.js';
 import type { AutonomyMode, Provider, ToolCall, ToolName, Usage } from '../../src/types/index.js';
@@ -54,9 +55,6 @@ const RESUME_MESSAGE =
   'Output token limit hit. Resume directly — no apology, no recap of what you ' +
   'were doing. Pick up mid-thought if that is where the cut happened. Break ' +
   'remaining work into smaller pieces.';
-const THINKING_BUDGET: Record<string, number> = {
-  low: 1_024, medium: 8_000, high: 24_000, extra: 48_000, max: 64_000,
-};
 
 type TimelineEntry = { type: 'text'; text: string } | { type: 'tool'; toolIndex: number };
 type StopReason = 'end_turn' | 'max_tokens' | 'content_filter' | 'iteration_limit' | 'aborted' | 'refusal';
@@ -263,15 +261,21 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
   const modelSupportsThinking = supportsThinking(modelId, modelEntry);
   const reasoningMandatory = modelEntry?.reasoningMandatory === true;
-  let thinking = modelSupportsThinking ? thinkingPayload(thinkingLevel) : null;
-  if (reasoningMandatory && !thinking) thinking = thinkingPayload('medium');
+  const reasoningContracts = resolveReasoningContracts(modelId, modelEntry);
+  let reasoning: ReasoningInstruction | null = modelSupportsThinking
+    ? resolveReasoning(thinkingLevel, reasoningContracts, provider.apiStyle, knownMaxOutput)
+    : null;
+  if (reasoningMandatory && !reasoning) {
+    reasoning = resolveReasoning('medium', reasoningContracts, provider.apiStyle, knownMaxOutput);
+  }
 
   const ctx: ToolContext = {
     sessionId, workspaceRoot: root, workspaceId, autonomyMode,
     permissionRules: loadPermissionRules(root), modelId, provider,
-    compactionSettings: DEFAULT_COMPACTION_SETTINGS,
+    compactionSettings: { enabled: compactionEnabled, threshold: compactionThreshold, keepRecentTurns: compactionKeepTurns, onFailure: 'truncate' } satisfies CompactionSettings,
     onUsage: (u) => accumulateUsage(turn, u),
     abortSignal: controller.signal,
+    thinkingLevel,
     emit: (raw) => bridgeToolEmit(wc, turn, raw),
     emitToolEvent: (e) => send(wc, sessionId, { ...e, sessionId, seq: nextSeq(sessionId), messageId: turn.messageId } as any),
   };
@@ -280,8 +284,8 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const tools = { ...buildToolset(ctx, loadHookConfig(root)), ...mcpToolsetForWorkspace(workspaceId) };
 
   const baseProtocol = resolveProtocolOptions(
-    provider.apiStyle, thinking,
-    { hasTools: true, modelId, maxOutputTokens: resolveMaxOutputTokens(modelId, modelEntry), providerBaseUrl: provider.baseUrl },
+    provider.apiStyle, reasoning,
+    { hasTools: true, modelId, maxOutputTokens: knownMaxOutput, providerBaseUrl: provider.baseUrl },
   );
 
   log.info('runTurn', { session: sessionId, model: modelId, mode: autonomyMode, thinking: thinkingLevel, tools: Object.keys(tools).length });
@@ -307,12 +311,16 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
           send(wc, sessionId, { type: 'compacting', sessionId, seq: nextSeq(sessionId), messageId, tokensBefore: lastStepTokens ?? 0, forced: false });
           const compacted = await compactConversation(currentConvo, turnController.compactionConfig, { provider, modelId, signal: controller.signal });
           currentConvo = compacted.postCompactMessages as ModelMessage[];
+          if (compacted.prunedToolOutputs > 0) {
+            log.info('autocompact pruned tool outputs', { count: compacted.prunedToolOutputs, pruningSufficient: compacted.pruningSufficient });
+          }
+          send(wc, sessionId, { type: 'compacting', sessionId, seq: nextSeq(sessionId), messageId, tokensBefore: compacted.preCompactTokens, tokensAfter: compacted.postCompactTokens, forced: false });
         } catch (e: any) { log.warn('autocompact failed', { err: e?.message ?? e }); }
       }
 
       const isLastStep = turn.stepsCompleted >= turn.maxSteps - 1;
       const maxOutputTokens = escalated ? ESCALATED_MAX_TOKENS : baseProtocol.maxOutputTokens;
-      const resolved = resolveProtocolOptions(provider.apiStyle, thinking,
+      const resolved = resolveProtocolOptions(provider.apiStyle, reasoning,
         { hasTools: !isLastStep, modelId, maxOutputTokens, providerBaseUrl: provider.baseUrl });
 
       try {
@@ -388,6 +396,18 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
               send(wc, sessionId, { type: 'compacting', sessionId, seq: nextSeq(sessionId), messageId, tokensBefore: turn.lastStepUsage?.inputTokens ?? 0, forced: true });
               const compacted = await compactConversation(currentConvo, turnController.compactionConfig, { provider, modelId, signal: controller.signal });
               currentConvo = compacted.postCompactMessages as ModelMessage[];
+              // Layer 5: replay the last user message after overflow compaction
+              // so the model doesn't lose the user's original request.
+              if (compacted.replayMessage) {
+                const lastMsg = currentConvo[currentConvo.length - 1];
+                const lastIsUser = lastMsg && lastMsg.role === 'user';
+                const lastText = typeof lastMsg?.content === 'string' ? lastMsg.content : '';
+                if (!lastIsUser || lastText.startsWith('[Compacted context') || lastText.startsWith('[Context truncated') || lastText.startsWith('[Context pruned')) {
+                  currentConvo = [...currentConvo, compacted.replayMessage];
+                  log.info('overflow replay — appended last user message after forced compaction');
+                }
+              }
+              send(wc, sessionId, { type: 'compacting', sessionId, seq: nextSeq(sessionId), messageId, tokensBefore: compacted.preCompactTokens, tokensAfter: compacted.postCompactTokens, forced: true });
             } catch (e: any) {
               log.warn('forced compaction failed', { err: e?.message ?? e });
             }
@@ -756,11 +776,6 @@ function toCoreMessage(m: TurnMessage): ModelMessage | null {
     if (blocks.length) content += '\n\n' + blocks.join('\n\n');
   }
   return { role: m.role, content } as ModelMessage;
-}
-
-function thinkingPayload(level: string): { type: 'enabled'; budgetTokens: number } | null {
-  if (level === 'off') return null;
-  return { type: 'enabled', budgetTokens: THINKING_BUDGET[level] ?? THINKING_BUDGET.medium };
 }
 
 function normalizeStatus(s: string | undefined): ToolCall['status'] {

@@ -630,6 +630,34 @@ body {
   animation: heartbeat 1.4s ease-in-out infinite;
 }
 
+/* Compaction bars — three horizontal bars that compress and expand,
+   representing context being summarized into a smaller space. */
+@keyframes compact-bar {
+  0%, 100% { width: 100%; opacity: 0.5; }
+  50% { width: 35%; opacity: 1; }
+}
+.compact-bar {
+  animation: compact-bar 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .compact-bar {
+    animation: none;
+  }
+}
+
+/* Live counter — subtle opacity pulse for values that update in real-time
+   (streaming token counts, context fill percentage). */
+@keyframes live-counter-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.live-counter {
+  animation: live-counter-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-counter { animation: none; }
+}
+
 /* Braille ASCII spinner. Pair with the <AsciiSpinner /> component which
    swaps characters on a timer. This class just colors it. */
 .ascii-spinner {

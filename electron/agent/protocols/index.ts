@@ -1,21 +1,27 @@
-/** Protocol dispatcher: single entry point returning per-protocol `{providerOptions, maxOutputTokens, label}` from apiStyle + thinking config. The orchestrator never branches on protocol; adding one = add a builder file + one case. */
+/** Protocol dispatcher: single entry point returning per-protocol
+ *  `{providerOptions, maxOutputTokens, label}` from apiStyle + reasoning
+ *  instruction. The orchestrator never branches on protocol; adding one =
+ *  add a builder file + one case. */
 import type { ApiStyle } from '../../../src/types';
 import { anthropicCallOptions } from './anthropic';
 import { openaiCallOptions } from './openai';
-import type { ProtocolCallOptions, ProtocolContext, ThinkingConfig } from './types';
+import type { ProtocolCallOptions, ProtocolContext } from './types';
+import type { ReasoningInstruction } from './reasoning';
 
-export type { ProtocolCallOptions, ProtocolContext, ThinkingConfig } from './types';
+export type { ProtocolCallOptions, ProtocolContext } from './types';
+export type { ReasoningInstruction } from './reasoning';
+export { resolveReasoning, budgetToEffort } from './reasoning';
 
 export function resolveProtocolOptions(
   apiStyle: ApiStyle,
-  thinking: ThinkingConfig | null,
+  reasoning: ReasoningInstruction | null,
   ctx?: ProtocolContext,
 ): ProtocolCallOptions {
   switch (apiStyle) {
     case 'openai':
-      return openaiCallOptions(thinking, ctx);
+      return openaiCallOptions(reasoning, ctx);
     case 'anthropic':
-      return anthropicCallOptions(thinking, ctx);
+      return anthropicCallOptions(reasoning, ctx);
     default:
       // ApiStyle is currently 'openai' | 'anthropic'; a new value landing here
       // means a protocol builder hasn't been written yet. Degrade to a plain

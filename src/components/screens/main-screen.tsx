@@ -212,6 +212,7 @@ export function MainScreen() {
               turn: m.turn,
               blocks: m.blocks,
               attachments: m.attachments,
+              compactionInfo: m.compactionInfo,
             })),
           ),
         );
@@ -686,6 +687,9 @@ export function MainScreen() {
         createdAt: new Date().toISOString(),
         toolCalls: fm.toolCalls,
         stopReason: stream.stopReason,
+        compactionInfo: stream.compactedTokens
+          ? { tokensBefore: stream.compactedTokens.before, tokensAfter: stream.compactedTokens.after }
+          : undefined,
       };
       // Only push to the visible chatHistory if the user is currently viewing
       // the session that just finished. Other sessions' histories will refresh
@@ -769,7 +773,7 @@ export function MainScreen() {
           <ResizablePanel
             id="sidebar"
             defaultSize={sidebarWidth}
-            minSize={300}
+            minSize={240}
             maxSize={300}
             className="min-h-0"
             onResize={(size) => setSidebarWidth(size.inPixels)}
@@ -780,7 +784,7 @@ export function MainScreen() {
         </>
       ) : leftPanelOpen && sidebarMode === 'dual' ? (
         <>
-          <ResizablePanel id="workspaces" defaultSize="20" minSize="15" maxSize="30" className="min-h-0">
+          <ResizablePanel id="workspaces" defaultSize={260} minSize={200} maxSize={400} className="min-h-0">
             <WorkspacesPanel />
           </ResizablePanel>
           <ResizableHandle className="!bg-transparent" />
@@ -1012,9 +1016,9 @@ export function MainScreen() {
             <ResizablePanel
               id="right"
               defaultSize="25"
-              minSize="25"
-              maxSize="35"
-              className="h-full relative"
+              minSize="20"
+              maxSize="30"
+              className="h-full relative min-w-0"
             >
               <RightPanel />
               {/* Floating permission card — anchored inside the right panel so

@@ -117,7 +117,7 @@ export const TurnBlock = memo(function TurnBlock({
           sessionProviderId={activeSession?.providerId}
           compacting={compacting}
         />
-        {streaming && (
+        {streaming && !compacting && (
           <TurnWorkingFooter startedAt={message.createdAt} />
         )}
       </div>

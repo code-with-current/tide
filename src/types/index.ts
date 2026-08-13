@@ -12,6 +12,22 @@ import type { Block } from './block';
 
 export type ApiStyle = 'openai' | 'anthropic';
 
+/** How a model exposes reasoning control — derived from models.dev's
+ *  `reasoning_options` field. A model may support multiple contracts
+ *  (e.g. both `effort` and `budget_tokens`); the resolver picks the best
+ *  one for the active protocol. */
+export type ReasoningContractType = 'effort' | 'budget_tokens' | 'toggle';
+
+/** One reasoning option entry from models.dev's `reasoning_options` array. */
+export interface ReasoningOption {
+  type: ReasoningContractType;
+  /** For `effort`: the discrete levels the model accepts, e.g.
+   *  ['low','medium','high','xhigh','max']. */
+  values?: string[];
+  /** For `budget_tokens`: minimum token budget the model requires. */
+  min?: number;
+}
+
 /** A user-configured LLM endpoint (any OpenAI- or Anthropic-compatible URL). */
 export interface Provider {
   id: string;
@@ -49,6 +65,12 @@ export interface Model {
    *  Sourced from a rich provider /models response. When present, the
    *  thinking-level selector only offers these levels. */
   supportedEfforts?: string[];
+  /** Reasoning contracts this model supports (effort / budget_tokens / toggle),
+   *  sourced from models.dev's `reasoning_options` during catalog enrichment.
+   *  When present, the protocol resolver uses these to pick the correct wire
+   *  format per provider instead of the fixed budget map. Absent = no catalog
+   *  enrichment (falls back to the legacy fixed budget map). */
+  reasoningContracts?: ReasoningOption[];
   /** "$in / $out per Mtok" price label, sourced from the provider's /models
    *  response. Display-only (shown in the model picker + table). */
   priceLabel?: string;
@@ -298,6 +320,10 @@ export interface Message {
    *  = user-stopped. Persisted so the TurnHeader renders the correct status
    *  ("Failed" / "Stopped" / "Done") on reload, not just during the live turn. */
   stopReason?: string | null;
+  /** Present when context compaction occurred during this turn. Renders a
+   *  horizontal "Compacted" divider before this message in the timeline so
+   *  the user can see where context was summarized. */
+  compactionInfo?: { tokensBefore: number; tokensAfter: number };
 }
 
 /** The three behaviors of the `ask_followup_question` tool, derived from its parsed args (see `docs/plans/2026-07-20-turn-block-streaming-design.md` Section 10 for routing rules). */
@@ -478,6 +504,9 @@ export interface SessionStream {
   /** True while autocompact is summarizing the conversation. Shows a
    *  "Compacting…" indicator so the user understands the pause. */
   compacting: boolean;
+  /** Token counts from the last compaction, for the context meter's
+   *  "compacted N→M" annotation. Null until a compaction completes. */
+  compactedTokens: { before: number; after: number } | null;
   /** Stop reason from the last turn_end. */
   stopReason: string | null;
   /** Frozen assistant message shape once the turn ends (for persistence).

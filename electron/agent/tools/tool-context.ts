@@ -1,6 +1,6 @@
 /** Per-turn context bound into every tool factory via closure (the SDK's execute only gets {messages, toolCallId, abortSignal}; everything Tide-specific rides through here). Mutable fields (autonomyMode, compactionSettings) may change mid-turn — read at execution time, not factory-build time. */
 
-import type { Provider, Usage, AutonomyMode } from '../../../src/types';
+import type { Provider, Usage, AutonomyMode, ThinkingLevel } from '../../../src/types';
 import type { CompactionSettings } from '../../../src/types/compaction';
 import type { RuleSet } from '../permissions/rules.js';
 
@@ -50,6 +50,9 @@ export interface ToolContext {
   emitToolEvent?: EmitToolEvent;
   /** Abort signal for the parent turn — checked by long-running tools. */
   abortSignal: AbortSignal;
+  /** The parent turn's thinking level — sub-agents inherit this as their
+   *  default unless the agent definition overrides via AgentDef.thinkingLevel. */
+  thinkingLevel?: ThinkingLevel;
   /** Recursion depth for sub-agent dispatch. 0 = main orchestrator, 1+ = nested.
    *  Used to prevent infinite agent-spawns-agent chains. */
   _depth?: number;

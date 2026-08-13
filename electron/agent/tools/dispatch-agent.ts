@@ -26,6 +26,8 @@ export async function runDispatchAgent(
     /** Full tool context for multi-step agents (optional — single-shot agents don't need it). */
     toolCtx?: ToolContext;
     depth?: number;
+    /** The parent turn's thinking level — inherited by the sub-agent. */
+    thinkingLevel?: import('../../../src/types/index.js').ThinkingLevel;
     /** The dispatch_agent's toolCallId — used as parentToolCallId so the
      *  sub-agent's tool calls nest under this block in the renderer. */
     parentToolCallId?: string;
@@ -65,6 +67,7 @@ export async function runDispatchAgent(
     onDelta: ctx.onDelta,
     ctx: ctx.toolCtx,
     depth: ctx.depth,
+    thinkingLevel: ctx.thinkingLevel,
     parentToolCallId: ctx.parentToolCallId,
     title: ctx.title,
   });
@@ -156,6 +159,7 @@ export function createDispatchAgentTool(ctx: ToolContext) {
           // Pass the full context for multi-step agents + recursion depth.
           toolCtx: ctx,
           depth: ctx._depth ?? 0,
+          thinkingLevel: ctx.thinkingLevel,
           // Capture this dispatch_agent's toolCallId so the sub-agent's
           // internal tool calls can be nested under this block. Read from
           // AsyncLocalStorage (set by buildToolset's execute wrapper).

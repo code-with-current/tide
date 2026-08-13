@@ -118,6 +118,7 @@ export const EMPTY_STREAM: SessionStream = Object.freeze({
   error: null,
   retry: null,
   compacting: false,
+  compactedTokens: null,
   stopReason: null,
   finalMessage: null,
 });
@@ -140,7 +141,7 @@ export function freshStream(): SessionStream {
     turn: undefined,
     usage: null, sessionCostUsd: 0, iteration: 0,
     permissionRequest: null, isStreaming: false, error: null, retry: null,
-    compacting: false, stopReason: null, finalMessage: null,
+    compacting: false, compactedTokens: null, stopReason: null, finalMessage: null,
   };
 }
 
@@ -410,7 +411,7 @@ export const useUi = create<UiState>()(
   commitDetail: null,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
-  sidebarMode: 'dual',
+  sidebarMode: 'integrated',
   setSidebarMode: (mode) => set({ sidebarMode: mode }),
   sidebarWidth: 300,
   setSidebarWidth: (w) => set({ sidebarWidth: w }),

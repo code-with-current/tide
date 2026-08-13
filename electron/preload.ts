@@ -159,6 +159,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
+    compactionInfo?: { tokensBefore: number; tokensAfter: number };
   }) =>
     ipcRenderer.invoke('tide:finalizeAssistantMessage', sessionId, messageId, message),
   addSessionUsage: (

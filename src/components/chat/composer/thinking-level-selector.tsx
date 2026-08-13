@@ -33,6 +33,15 @@ const effortToLevel = (e: string): ThinkingLevel | undefined => {
   return undefined;
 };
 
+/** Derive supported effort strings from either the provider response
+ *  (supportedEfforts) or the catalog reasoning contracts (reasoningContracts).
+ *  Returns undefined when neither source has data. */
+function effortsForModel(model: { supportedEfforts?: string[]; reasoningContracts?: import('@/types').ReasoningOption[] }): string[] | undefined {
+  if (model.supportedEfforts && model.supportedEfforts.length > 0) return model.supportedEfforts;
+  const effortContract = model.reasoningContracts?.find((c) => c.type === 'effort');
+  return effortContract?.values;
+}
+
 /** Compute the visible levels for a model, honoring mandatory + supportedEfforts. */
 function visibleLevels(
   mandatory: boolean | undefined,
@@ -61,7 +70,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
   const model = useModelOption(selectedProviderId, selectedModelId);
   const supported = model ? (model.reasoning ?? supportsThinking(model.modelId, model)) : false;
   const mandatory = model?.reasoningMandatory;
-  const efforts = model?.supportedEfforts;
+  const efforts = effortsForModel(model ?? {});
 
   const levels = visibleLevels(mandatory, efforts);
   const levelToIndex = (l: ThinkingLevel): number => levels.findIndex((x) => x.value === l);

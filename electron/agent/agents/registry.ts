@@ -10,7 +10,7 @@ export const BUILTIN_AGENTS: AgentDef[] = BUNDLED_AGENTS.map((a) => ({
   systemPrompt: a.systemPrompt,
   allowedTools: a.allowedTools?.length ? a.allowedTools : undefined,
   maxSteps: a.maxSteps,
-  thinkingBudget: a.thinkingBudget,
+  thinkingLevel: a.thinkingLevel as import('../../../src/types/index.js').ThinkingLevel | undefined,
 }));
 
 /** Look up an agent by name. Returns undefined for unknown names. */
