@@ -23,7 +23,7 @@ Works with Anthropic & OpenAI compatible endpoint. Each session can branch into 
 **macOS** (Homebrew):
 
 ```sh
-brew install --cask tide
+brew install --cask code-with-current/tap/tide
 ```
 
 **Windows** (winget):

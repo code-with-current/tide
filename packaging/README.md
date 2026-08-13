@@ -5,7 +5,7 @@ managers so users can install with:
 
 ```
 winget install Tide.Tide            # Windows
-brew install --cask tide            # macOS
+brew install --cask code-with-current/tap/tide  # macOS
 yay -S tide-bin                     # Linux (Arch / AUR)
 ```
 
@@ -14,6 +14,10 @@ the installers already produced by `.github/workflows/release.yml` (NSIS `.exe`,
 macOS `.dmg`, Linux `.deb`). The manifests live in community repos
 (winget-pkgs, homebrew-cask) or a self-owned AUR package, and are kept in sync
 with each release by `.github/workflows/release-pkgs.yml`.
+
+> macOS uses our own tap (`code-with-current/homebrew-tap`) rather than the
+> official `Homebrew/homebrew-cask`, which has notability requirements that
+> Tide doesn't meet yet.
 
 ```
 packaging/
@@ -54,7 +58,7 @@ flowchart LR
   Rel --> Run["release-pkgs.yml<br/>workflow_run"]
   Run --> Rnd["render.mjs<br/>hash + fill manifests"]
   Rnd --> W["winget-pkgs PR<br/>WINGET_GITHUB_TOKEN"]
-  Rnd --> B["homebrew-cask PR<br/>HOMEBREW_GITHUB_API_TOKEN"]
+  Rnd --> B["homebrew-tap push<br/>HOMEBREW_GITHUB_API_TOKEN"]
   Rnd --> A["AUR tide-bin<br/>AUR_SSH_PRIVATE_KEY"]
 ```
 
@@ -82,18 +86,17 @@ that, the automation bumps it on each release.
 > `render.mjs` handles this; just be aware a `-beta` and its later stable of the
 > same numbers would collide — promote the version (e.g. `0.2.0`) for stable.
 
-### macOS — Homebrew cask (`tide`)
+### macOS — Homebrew tap (`code-with-current/tap`)
 
-1. Render the current release: `node packaging/render.mjs --version <ver> …`
-2. Fork `Homebrew/homebrew-cask`, copy `packaging/out/homebrew/tide.rb` to
-   `Casks/t/tide.rb`, then validate and PR:
-   ```bash
-   brew audit --cask tide
-   brew style Casks/t/tide.rb
-   ```
-3. Add a GitHub **PAT** (`public_repo` + `workflow`) as the secret
-   **`HOMEBREW_GITHUB_API_TOKEN`**. Subsequent releases bump automatically via
-   `brew bump-cask-pr`.
+No manual first submission needed — the tap repo (`code-with-current/homebrew-tap`)
+is ours, so the workflow pushes directly. Users install via:
+```
+brew install --cask code-with-current/tap/tide
+```
+
+Just add a GitHub **PAT** (`public_repo` + `workflow`) as the secret
+**`HOMEBREW_GITHUB_API_TOKEN`**. The workflow pushes the rendered cask to
+`Casks/tide.rb` in the tap on every release.
 
 > Tide's `.app` is **ad-hoc signed** (no Apple Developer ID). Homebrew installs
 > casks with `--no-quarantine`, so Gatekeeper is bypassed and the app launches
@@ -139,7 +142,7 @@ Leave any unset to disable that platform — the workflow skips it with a notice
   `artifactName` templates change there, update the URL builders in
   `packaging/render.mjs` to match.
 - **`LICENSE` file.** Present at the repo root (MIT); winget's `LicenseUrl`
-  points at `…/blob/main/LICENSE`.
+  points at `…/blob/master/LICENSE`.
 - **Partial automation is fine.** You can wire up AUR (fully self-served) first
   and add winget/homebrew after their first PRs merge — each job is independent.
 - **Inspect before trusting.** Rendered manifests upload as a `manifests`
