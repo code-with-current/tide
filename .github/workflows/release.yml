@@ -223,4 +223,4 @@ jobs:
         if: hashFiles('dist/*.snap') != '' && env.SNAPCRAFT_STORE_CREDENTIALS != ''
         run: |
           sudo snap install snapcraft --classic
-          snapcraft push dist/*.snap
+          snapcraft upload dist/*.snap
