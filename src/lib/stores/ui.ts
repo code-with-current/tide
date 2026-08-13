@@ -7,6 +7,11 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('ui');
 
+/** Sentinel key for the new-session (empty-state) composer, which has no
+ *  sessionId yet. Per-session composer state (draft, attachments, pending
+ *  paste reads) is keyed by sessionId — or this when no session exists yet. */
+export const COMPOSER_NEW_KEY = '__new__';
+
 export type ScreenName = 'splash' | 'onboarding' | 'consent' | 'main' | 'settings';
 
 // Re-export for back-compat — ThinkingLevel now lives in @/types (with 'off' added).
@@ -98,6 +103,10 @@ export interface ComposerAttachment {
    *  when the inline content is gone. The short display name stays in `path`. */
   absPath?: string;
 }
+
+/** Module-level stable empty array — never re-create the fallback, or
+ *  Zustand's selector sees a "new" snapshot every render and loops. */
+export const EMPTY_COMPOSER_ATTACHMENTS: ComposerAttachment[] = [];
 
 /** Default empty stream state. Used as the fallback when no entry exists
  *  for a session — selectors return this rather than undefined so consumers
@@ -252,23 +261,30 @@ interface UiState {
   openFiles: Record<string, OpenFile[]>;
   activeOpenFile: Record<string, string | undefined>;
 
-  /** Composer attachments shared across the two ChatComposer instances
-   *  (chat view + empty/new-session view) so pasted/attached files survive
-   *  switching sessions/workspaces, which remounts the composer. */
-  composerAttachments: ComposerAttachment[];
-  /** In-flight paste-file reads; send is gated on this reaching 0. */
-  composerPendingReads: number;
+  /** Per-session composer attachments, keyed by sessionId (or COMPOSER_NEW_KEY
+   *  for the empty-state composer). Keying per session isolates drafts so a
+   *  pasted file / typed text in session A never leaks into session B — same
+   *  model as the queue and prompt history. */
+  composerAttachments: Record<string, ComposerAttachment[]>;
+  /** Per-session in-flight paste-file reads; the active session's send button
+   *  is gated on its own count reaching 0. */
+  composerPendingReads: Record<string, number>;
+  /** Per-session plain-text draft (keyed by sessionId, or COMPOSER_NEW_KEY).
+   *  Restored into the contentEditable on mount so in-progress typing survives
+   *  session switches. Runtime only — not persisted. */
+  composerDrafts: Record<string, string>;
 
   /** Session ids whose title is currently being LLM-generated. Drives a
    *  shimmer animation on the sidebar title while the fire-and-forget
    *  generateSessionTitle call is in flight. */
   titleGeneratingSessionIds: Set<string>;
 
-  // Composer attachment actions
-  addComposerAttachment: (f: ComposerAttachment) => void;
-  removeComposerAttachment: (path: string) => void;
-  clearComposerAttachments: () => void;
-  bumpComposerPendingReads: (delta: number) => void;
+  // Composer attachment + draft actions (all keyed by sessionId-or-COMPOSER_NEW_KEY)
+  addComposerAttachment: (key: string, f: ComposerAttachment) => void;
+  removeComposerAttachment: (key: string, path: string) => void;
+  clearComposerAttachments: (key: string) => void;
+  bumpComposerPendingReads: (key: string, delta: number) => void;
+  setComposerDraft: (key: string, text: string) => void;
   /** Title-generation flag actions (shimmer on the sidebar title). */
   addTitleGenerating: (sessionId: string) => void;
   removeTitleGenerating: (sessionId: string) => void;
@@ -437,26 +453,42 @@ export const useUi = create<UiState>()(
   terminalPorts: {},
   openFiles: {},
   activeOpenFile: {},
-  composerAttachments: [],
-  composerPendingReads: 0,
+  composerAttachments: {},
+  composerPendingReads: {},
+  composerDrafts: {},
   titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
 
   setScreen: (screen) => set({ screen }),
   setMainView: (mainView) => set({ mainView }),
-  addComposerAttachment: (f) =>
+  addComposerAttachment: (key, f) =>
+    set((state) => {
+      const list = state.composerAttachments[key] ?? [];
+      return {
+        composerAttachments: {
+          ...state.composerAttachments,
+          [key]: list.some((x) => x.path === f.path) ? list : [...list, f],
+        },
+      };
+    }),
+  removeComposerAttachment: (key, path) =>
     set((state) => ({
-      composerAttachments: state.composerAttachments.some((x) => x.path === f.path)
-        ? state.composerAttachments
-        : [...state.composerAttachments, f],
+      composerAttachments: {
+        ...state.composerAttachments,
+        [key]: (state.composerAttachments[key] ?? []).filter((x) => x.path !== path),
+      },
     })),
-  removeComposerAttachment: (path) =>
+  clearComposerAttachments: (key) =>
+    set((s) => ({ composerAttachments: { ...s.composerAttachments, [key]: [] } })),
+  bumpComposerPendingReads: (key, delta) =>
     set((state) => ({
-      composerAttachments: state.composerAttachments.filter((x) => x.path !== path),
+      composerPendingReads: {
+        ...state.composerPendingReads,
+        [key]: Math.max(0, (state.composerPendingReads[key] ?? 0) + delta),
+      },
     })),
-  clearComposerAttachments: () => set({ composerAttachments: [] }),
-  bumpComposerPendingReads: (delta) =>
-    set((state) => ({ composerPendingReads: Math.max(0, state.composerPendingReads + delta) })),
+  setComposerDraft: (key, text) =>
+    set((s) => ({ composerDrafts: { ...s.composerDrafts, [key]: text } })),
   // Set-based add/remove so the sidebar title re-renders (and starts/stops
   // shimmering) the instant the flag flips. New Set identity each update so
   // Zustand's shallow-equality subscribers detect the change.
@@ -515,6 +547,9 @@ export const useUi = create<UiState>()(
     const { [sessionId]: _aof, ...restActiveOpenFile } = state.activeOpenFile;
     const { [sessionId]: _s, ...restStream } = state.streams;
     const { [sessionId]: _la, ...restLastActive } = state.sessionLastActive;
+    const { [sessionId]: _ca, ...restComposerAttachments } = state.composerAttachments;
+    const { [sessionId]: _cpr, ...restComposerPendingReads } = state.composerPendingReads;
+    const { [sessionId]: _cd, ...restComposerDrafts } = state.composerDrafts;
     set({
       terminals: restTerminals,
       activeTerminal: restActiveTerminal,
@@ -522,6 +557,9 @@ export const useUi = create<UiState>()(
       activeOpenFile: restActiveOpenFile,
       streams: restStream,
       sessionLastActive: restLastActive,
+      composerAttachments: restComposerAttachments,
+      composerPendingReads: restComposerPendingReads,
+      composerDrafts: restComposerDrafts,
     });
   },
   toggleTerminal: () =>

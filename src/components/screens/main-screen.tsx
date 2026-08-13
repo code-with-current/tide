@@ -961,6 +961,7 @@ export function MainScreen() {
                           over the chat scroll without blocking interaction. */}
                         <OptionsPopup onSubmit={handleOptionsSubmit} />
                         <ChatComposer
+                          key={activeSessionId}
                           compact
                           sessionId={activeSessionId ?? undefined}
                           placeholder={

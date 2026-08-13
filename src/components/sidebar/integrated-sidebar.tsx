@@ -125,8 +125,17 @@ function IntegratedSidebarImpl() {
     return next;
   });
 
+  // Keep the workspace we're leaving in the `expanded` set so switching away
+  // doesn't auto-collapse it (a workspace otherwise stays open only while active).
+  const preserveExpansion = (nextActiveId: string) => {
+    if (activeWorkspaceId && activeWorkspaceId !== nextActiveId) {
+      setExpanded((prev) => prev.has(activeWorkspaceId) ? prev : new Set(prev).add(activeWorkspaceId));
+    }
+  };
+
   const selectWorkspace = async (workspaceId: string) => {
     if (workspaceId === activeWorkspaceId) { toggleExpand(workspaceId); return; }
+    preserveExpansion(workspaceId);
     setSwitchingTo(workspaceId);
     const sessions = await api.listSessions(workspaceId);
     const latest = sessions.length > 0 ? sessions.reduce((a, b) => ((a.updatedAt ?? '') > (b.updatedAt ?? '') ? a : b)) : null;
@@ -135,10 +144,12 @@ function IntegratedSidebarImpl() {
   };
 
   const selectSession = (workspaceId: string, sessionId: string) => {
+    preserveExpansion(workspaceId);
     useUi.setState({ activeWorkspaceId: workspaceId, activeSessionId: sessionId, mainView: 'chat' });
   };
 
   const newSession = (workspaceId: string) => {
+    preserveExpansion(workspaceId);
     useUi.setState({ activeWorkspaceId: workspaceId, activeSessionId: null, mainView: 'new', sessionsPanelOpen: true });
   };
 

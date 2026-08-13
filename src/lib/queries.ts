@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import * as api from './api/client';
-import { useUi } from './stores/ui';
+import { useUi, COMPOSER_NEW_KEY } from './stores/ui';
 import { toast } from './toast';
 import type { RagDownloadProgressEvent, RagInitProgressEvent, WorkspaceProgressEvent } from '@/types';
 
@@ -263,8 +263,11 @@ export async function initiateFork(sourceSessionId: string, resultText?: string)
   if (!text) return;
 
   const ui = useUi.getState();
-  ui.clearComposerAttachments();
-  ui.addComposerAttachment({
+  // Fork seeds the NEW-session composer (no session id yet) — target the
+  // COMPOSER_NEW_KEY slot so the attachment shows up in the empty-state
+  // composer and doesn't leak into an existing session's draft.
+  ui.clearComposerAttachments(COMPOSER_NEW_KEY);
+  ui.addComposerAttachment(COMPOSER_NEW_KEY, {
     path: 'fork-result.md',
     kind: 'paste',
     content: text,

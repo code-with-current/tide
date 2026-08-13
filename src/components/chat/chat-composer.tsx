@@ -2,7 +2,7 @@ import { useState, useRef, useReducer, useEffect, useCallback, useMemo } from 'r
 import { ClipboardPaste, FileCode2, FileText, Image as ImageIcon } from 'lucide-react';
 import { Chip } from '@/components/primitives';
 import { cn } from '@/lib/utils';
-import { useUi } from '@/lib/stores/ui';
+import { useUi, COMPOSER_NEW_KEY, EMPTY_COMPOSER_ATTACHMENTS, type ComposerAttachment } from '@/lib/stores/ui';
 import { useModelOption, supportsThinking, useSessions } from '@/lib/queries';
 import { ModelSelector } from './composer/model-selector';
 import { PermissionModeSelector } from './composer/permission-mode-selector';
@@ -126,16 +126,33 @@ export function ChatComposer({
   const savedRangeRef = useRef<Range | null>(null);
   const [, bumpVersion] = useReducer((x: number) => x + 1, 0);
 
-  // Attachments + pending paste reads live in the shared UI store (not local
-  // useState) so they persist across the two ChatComposer instances (chat
-  // view + empty/new-session view) — otherwise switching sessions/workspaces
-  // remounts the composer and drops pasted files.
-  const attachments = useUi((s) => s.composerAttachments);
-  const pendingReads = useUi((s) => s.composerPendingReads);
-  const addAttachment = useUi((s) => s.addComposerAttachment);
-  const removeAttachment = useUi((s) => s.removeComposerAttachment);
-  const clearAttachments = useUi((s) => s.clearComposerAttachments);
-  const bumpPendingReads = useUi((s) => s.bumpComposerPendingReads);
+  // Composer working state (draft text, attachments, pending paste reads) is
+  // keyed per session so a draft in session A never leaks into session B —
+  // same isolation model as the queue. The empty-state composer (no session
+  // yet) uses the COMPOSER_NEW_KEY slot.
+  const ckey = sessionId ?? COMPOSER_NEW_KEY;
+  const attachments = useUi((s) => s.composerAttachments[ckey] ?? EMPTY_COMPOSER_ATTACHMENTS);
+  const pendingReads = useUi((s) => s.composerPendingReads[ckey] ?? 0);
+  const addComposerAttachment = useUi((s) => s.addComposerAttachment);
+  const removeComposerAttachment = useUi((s) => s.removeComposerAttachment);
+  const clearComposerAttachments = useUi((s) => s.clearComposerAttachments);
+  const bumpComposerPendingReads = useUi((s) => s.bumpComposerPendingReads);
+  const setComposerDraft = useUi((s) => s.setComposerDraft);
+  // Bind the keyed actions so the rest of the component (paste handler, chip
+  // remove buttons, clearEditor) calls them with no extra arg.
+  const addAttachment = useCallback(
+    (f: ComposerAttachment) => addComposerAttachment(ckey, f),
+    [addComposerAttachment, ckey],
+  );
+  const removeAttachment = useCallback(
+    (path: string) => removeComposerAttachment(ckey, path),
+    [removeComposerAttachment, ckey],
+  );
+  const clearAttachments = useCallback(() => clearComposerAttachments(ckey), [clearComposerAttachments, ckey]);
+  const bumpPendingReads = useCallback(
+    (d: number) => bumpComposerPendingReads(ckey, d),
+    [bumpComposerPendingReads, ckey],
+  );
   const setMainView = useUi((s) => s.setMainView);
   const enqueue = useUi((s) => s.enqueueMessage);
   const pushPromptHistory = useUi((s) => s.pushPromptHistory);
@@ -259,16 +276,19 @@ export function ChatComposer({
     return () => document.removeEventListener('selectionchange', handler);
   }, [detectTriggers]);
 
-  // Seed initial text once on mount. Subsequent `defaultValue` changes are
-  // ignored — the editor is uncontrolled, matching the prior textarea's
-  // behavior (the parent remounts the composer to "reset" it).
+  // Seed the editor from this session's saved draft on mount. The running
+  // composer is keyed by sessionId in MainScreen, so switching sessions
+  // remounts it and this effect re-runs — restoring whatever the user was
+  // typing in that session. `defaultValue` is kept as a fallback for callers
+  // that pass explicit seed text.
   useEffect(() => {
-    if (defaultValue && editorRef.current && editorRef.current.innerText.trim() === '') {
-      editorRef.current.textContent = defaultValue;
+    const saved = useUi.getState().composerDrafts[ckey] ?? defaultValue ?? '';
+    if (saved && editorRef.current && editorRef.current.innerText.trim() === '') {
+      editorRef.current.textContent = saved;
       bumpVersion();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ckey]);
 
   const removeChip = useCallback((chipId: string) => {
     const editor = editorRef.current;
@@ -807,6 +827,7 @@ export function ChatComposer({
     if (editor) editor.innerHTML = '';
     mentionsRef.current.clear();
     clearAttachments();
+    setComposerDraft(ckey, '');
     setHistoryIndex(-1);
     savedDraftRef.current = '';
     bumpVersion();
@@ -924,9 +945,13 @@ export function ChatComposer({
               onInput={() => {
                 bumpVersion();
                 detectTriggers();
+                const text = editorRef.current?.innerText ?? '';
+                // Persist the draft per session so switching away and back
+                // restores what the user was typing (queue-style isolation).
+                setComposerDraft(ckey, text);
                 // Fire live text to the parent — EmptyChatState uses this
                 // to auto-suggest a worktree branch name as the user types.
-                onChange?.(editorRef.current?.innerText ?? '');
+                onChange?.(text);
               }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
