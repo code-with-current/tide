@@ -126,7 +126,7 @@ jobs:
 
           # Sparse-clone the fork — only the Tide subtree to keep it fast.
           git clone --depth=1 --filter=blob:none --sparse \
-            "https://x-access-token:${WINGET_TOKEN}@github.com/${FORK}.git" winget
+            "https://x-access-token:${WINGET_TOKEN}@github.com/${FORK}" winget
           cd winget
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -174,7 +174,7 @@ jobs:
         run: |
           VERSION="${{ needs.render.outputs.version }}"
           TAP="code-with-current/homebrew-tap"
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP}.git" tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP}" tap
           cd tap
           mkdir -p Casks
           cp ../manifests/homebrew/tide.rb Casks/tide.rb
