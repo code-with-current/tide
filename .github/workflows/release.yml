@@ -140,7 +140,7 @@ jobs:
           done
           cat dist/notes.md
 
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -152,9 +152,20 @@ jobs:
           else
             PRE=""
           fi
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes \
-            --notes-file dist/notes.md \
-            $PRE \
-            dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb
+          # Idempotent: if the release already exists (e.g. created manually
+          # or by a partial previous run), edit its notes and clobber assets
+          # instead of failing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --notes-file dist/notes.md \
+              $PRE
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              --notes-file dist/notes.md \
+              $PRE
+          fi
+          gh release upload "$TAG" \
+            dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb \
+            --clobber
