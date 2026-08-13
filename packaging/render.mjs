@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Renders the winget / homebrew / AUR manifests for a given Tide release by
+// Renders the winget / homebrew manifests for a given Tide release by
 // substituting @@MARKERS@@ in the templates under packaging/<platform>/ and
 // streaming each GitHub Release asset through sha256.
 //
@@ -54,14 +54,11 @@ if (!version) {
   process.exit(1)
 }
 
-// Version forms required by each format's quirks.
-//   winget PackageVersion: dotted numeric only (drop the prerelease segment),
-//                          padded to four parts: "0.1.2-beta" -> "0.1.2.0".
-//   pacman pkgver:         no hyphens — collapse the prerelease tag: "0.1.2beta".
+// winget PackageVersion: dotted numeric only (drop the prerelease segment),
+// padded to four parts: "0.1.2-beta" -> "0.1.2.0".
 const wingetParts = version.replace(/-[A-Za-z0-9.]+$/, '').split('.').map(Number)
 while (wingetParts.length < 4) wingetParts.push(0)
 const WINGET_VERSION = wingetParts.slice(0, 4).join('.')
-const PKGVER = version.replace('-', '')
 
 const BASE = args.base ?? `https://github.com/${repo}/releases/download/v${version}`
 const ASSETS = {
@@ -118,11 +115,10 @@ const SHAS = {
 }
 
 // meta.json carries every value the release-pkgs workflow needs to submit to
-// winget/homebrew/AUR without re-downloading the installers.
+// winget/homebrew without re-downloading the installers.
 const meta = {
   version,
   wingetVersion: WINGET_VERSION,
-  pkgver: PKGVER,
   assets: {
     exe: { url: ASSETS.EXE, sha256: SHAS.EXE },
     dmgArm64: { url: ASSETS.DMG_ARM64, sha256: SHAS.DMG_ARM64 },
@@ -135,7 +131,6 @@ writeOut('meta.json', JSON.stringify(meta, null, 2) + '\n')
 const common = {
   VERSION: version,
   VERSION_WINGET: WINGET_VERSION,
-  VERSION_PKGVER: PKGVER,
   SHA256_EXE: SHAS.EXE,
   SHA256_ARM64: SHAS.DMG_ARM64,
   SHA256_X64: SHAS.DMG_X64,
@@ -146,9 +141,6 @@ console.error('Writing rendered manifests…')
 
 // homebrew
 writeOut('homebrew/tide.rb', render(readTpl('homebrew/tide.rb'), common))
-
-// aur
-writeOut('aur/PKGBUILD', render(readTpl('aur/PKGBUILD'), common))
 
 // winget (version + installer + default locale)
 writeOut('winget/Tide.Tide.yaml', render(readTpl('winget/Tide.Tide.yaml'), common))

@@ -193,6 +193,11 @@ const linuxOptions = {
   appImage: {
     category: 'Utility',
   },
+  snap: {
+    summary: 'Tide — Code with the current',
+    description: 'Local-first agentic coding companion with local ONNX embeddings, 20+ AI tools, and a permission system.',
+    confinement: 'strict',
+  },
 }
 
 /**
@@ -338,6 +343,12 @@ const createTarget = {
         linuxOptions.artifactName = `\${productName}-\${version}.${arch}.\${ext}`
         return {
           buildOptions: { linux: ['rpm'] },
+          options: linuxOptions,
+        }
+      case 'snap':
+        linuxOptions.artifactName = `\${productName}_\${version}_${arch}.\${ext}`
+        return {
+          buildOptions: { linux: ['snap'] },
           options: linuxOptions,
         }
       default: throw new Error('Unknown package type: ' + packageType)

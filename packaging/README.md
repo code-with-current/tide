@@ -1,19 +1,19 @@
-# Packaging manifests (winget · homebrew · AUR)
+# Packaging manifests (winget · homebrew · snap)
 
 Distributes Tide's existing GitHub Release installers to the three OS package
 managers so users can install with:
 
 ```
-winget install Tide.Tide            # Windows
+winget install Tide.Tide                        # Windows
 brew install --cask code-with-current/tap/tide  # macOS
-yay -S tide-bin                     # Linux (Arch / AUR)
+snap install tide                               # Linux (Snap Store)
 ```
 
-None of these host binaries themselves — each is a small manifest pointing at
-the installers already produced by `.github/workflows/release.yml` (NSIS `.exe`,
-macOS `.dmg`, Linux `.deb`). The manifests live in community repos
-(winget-pkgs, homebrew-cask) or a self-owned AUR package, and are kept in sync
-with each release by `.github/workflows/release-pkgs.yml`.
+winget and homebrew use small manifest files pointing at the installers already
+produced by `.github/workflows/release.yml` (NSIS `.exe`, macOS `.dmg`). Snap is
+built natively by electron-builder and published to the Snap Store directly in
+`release.yml`. The manifests are kept in sync with each release by
+`.github/workflows/release-pkgs.yml`.
 
 > macOS uses our own tap (`code-with-current/homebrew-tap`) rather than the
 > official `Homebrew/homebrew-cask`, which has notability requirements that
@@ -27,10 +27,8 @@ packaging/
 │   ├── Tide.Tide.yaml                ← version manifest   ┐ these three form one
 │   ├── Tide.Tide.installer.yaml      ← installer manifest │ winget "version dir"
 │   └── Tide.Tide.locale.en-US.yaml   ← default locale     ┘
-├── homebrew/
-│   └── tide.rb                       ← Homebrew cask
-└── aur/
-    └── PKGBUILD                      ← AUR package (tide-bin)
+└── homebrew/
+    └── tide.rb                       ← Homebrew cask
 ```
 
 The templates use `@@MARKER@@` placeholders. `render.mjs` downloads each
@@ -39,33 +37,30 @@ result under `packaging/out/` (gitignored). Run it locally to preview a release:
 
 ```bash
 node packaging/render.mjs --version 0.1.2-beta --repo code-with-current/tide
-# → packaging/out/{winget,homebrew,aur}/…
+# → packaging/out/{winget,homebrew}/…
 ```
 
 ## How a release flows
 
-1. You tag `vX.Y.Z` and push it. `release.yml` builds the installers and
-   publishes the GitHub Release (existing flow — unchanged).
+1. You tag `vX.Y.Z` and push it. `release.yml` builds the installers (including
+   a `.snap` for Linux), publishes the GitHub Release, and pushes the snap to
+   the Snap Store — all in one workflow.
 2. When that workflow finishes, `release-pkgs.yml` wakes up via `workflow_run`,
-   runs `render.mjs` once, then submits to each package index.
-3. Each submission step is **gated on a secret** — until you add the secret,
-   that platform is skipped with a notice. So committing this pipeline today is
-   safe; it's inert until configured.
+   runs `render.mjs` once, then submits the winget and homebrew manifests.
+3. Each manifest submission is **gated on a secret** — until you add the secret,
+   that platform is skipped with a notice. Snap publishing runs from `release.yml`
+   and is gated on `SNAPCRAFT_STORE_CREDENTIALS`.
 
 ```mermaid
 flowchart LR
-  Tag["git tag vX.Y.Z"] --> Rel["release.yml<br/>build + GitHub Release"]
+  Tag["git tag vX.Y.Z"] --> Rel["release.yml<br/>build + GitHub Release + snap push"]
   Rel --> Run["release-pkgs.yml<br/>workflow_run"]
   Run --> Rnd["render.mjs<br/>hash + fill manifests"]
   Rnd --> W["winget-pkgs PR<br/>WINGET_GITHUB_TOKEN"]
   Rnd --> B["homebrew-tap push<br/>HOMEBREW_GITHUB_API_TOKEN"]
-  Rnd --> A["AUR tide-bin<br/>AUR_SSH_PRIVATE_KEY"]
 ```
 
 ## One-time setup (per platform)
-
-Every platform needs a **manual first submission** so the package exists. After
-that, the automation bumps it on each release.
 
 ### Windows — winget (`Tide.Tide`)
 
@@ -103,28 +98,27 @@ Just add a GitHub **PAT** (`public_repo` + `workflow`) as the secret
 > directly — no "unidentified developer" dance for `brew` users. Notarization
 > would still improve the direct-download experience (see `release.yml` header).
 
-### Linux — AUR (`tide-bin`)
+### Linux — Snap Store (`tide`)
 
-The AUR is self-maintained — there's no PR to wait on.
+Snap is built natively by electron-builder during `release.yml` and published to
+the Snap Store in the same workflow — no manifest files, no external repo.
 
-1. Register at <https://aur.archlinux.org> and upload an SSH public key.
-2. Create the package:
+1. Register the snap name `tide` at <https://snapcraft.io/register>.
+2. Generate a login token locally:
    ```bash
-   git clone ssh://aur@aur.archlinux.org/tide-bin.git
-   node packaging/render.mjs --version <ver> …
-   cp packaging/out/aur/PKGBUILD tide-bin/
-   cd tide-bin && makepkg --printsrcinfo > .SRCINFO
-   git add . && git commit -m "init" && git push
+   snapcraft export-login -   # outputs credentials text
    ```
-   `yay -S tide-bin` works immediately.
-3. Add the matching **private key** as the secret **`AUR_SSH_PRIVATE_KEY`** (the
-   full private-key text). Subsequent releases push the bumped PKGBUILD
-   automatically (the workflow runs in an `archlinux` container so `makepkg` can
-   regenerate `.SRCINFO`).
+3. Store the output as the repo secret **`SNAPCRAFT_STORE_CREDENTIALS`**.
 
-> pacman forbids `-` in `pkgver`, so `0.1.2-beta` becomes `0.1.2beta`. The
-> PKGBUILD keeps the real version in `_realver` for the asset URL. `render.mjs`
-> fills both.
+Every tagged release builds the `.snap`, uploads it to the GitHub Release, and
+pushes it to the Snap Store via `snapcraft push`. Users install with:
+```
+snap install tide
+```
+
+> The snap uses **strict confinement** by default. For a coding tool that needs
+> full filesystem access, consider applying for **classic confinement** via the
+> Snap Store request process, then change `confinement` in `build/build.js`.
 
 ## Secrets summary
 
@@ -132,7 +126,7 @@ The AUR is self-maintained — there's no PR to wait on.
 |---|---|---|
 | `WINGET_GITHUB_TOKEN` | winget | PAT: `public_repo`, `workflow` |
 | `HOMEBREW_GITHUB_API_TOKEN` | homebrew | PAT: `public_repo`, `workflow` |
-| `AUR_SSH_PRIVATE_KEY` | AUR | AUR account private key (text) |
+| `SNAPCRAFT_STORE_CREDENTIALS` | snap | snapcraft login token (text) |
 
 Leave any unset to disable that platform — the workflow skips it with a notice.
 
@@ -143,8 +137,8 @@ Leave any unset to disable that platform — the workflow skips it with a notice
   `packaging/render.mjs` to match.
 - **`LICENSE` file.** Present at the repo root (MIT); winget's `LicenseUrl`
   points at `…/blob/master/LICENSE`.
-- **Partial automation is fine.** You can wire up AUR (fully self-served) first
-  and add winget/homebrew after their first PRs merge — each job is independent.
+- **Partial automation is fine.** You can wire up snap (fully self-served) first
+  and add winget/homebrew after — each job is independent.
 - **Inspect before trusting.** Rendered manifests upload as a `manifests`
   workflow artifact (7-day retention) even when a platform's secret is unset, so
   you can review the exact files the pipeline would publish.

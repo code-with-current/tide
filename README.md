@@ -32,13 +32,13 @@ brew install --cask code-with-current/tap/tide
 winget install Tide.Tide
 ```
 
-**Linux** (AUR):
+**Linux** (Snap):
 
 ```sh
-yay -S tide-bin
+snap install tide
 ```
 
-Prefer a direct download? Grab the latest installer from the [releases page](https://github.com/code-with-current/tide/releases) — `.dmg` (mac), `.exe` (Windows), or `.deb` / `.AppImage` (Linux).
+Prefer a direct download? Grab the latest installer from the [releases page](https://github.com/code-with-current/tide/releases) — `.dmg` (mac), `.exe` (Windows), or `.deb` / `.AppImage` / `.snap` (Linux).
 
 ---
 
