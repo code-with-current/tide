@@ -137,8 +137,8 @@ jobs:
         run: echo "::notice::Set the HOMEBREW_GITHUB_API_TOKEN secret (scopes public_repo + workflow) to enable homebrew submission."
       - name: Bump the tide cask (opens PR to homebrew-cask)
         if: ${{ env.HOMEBREW_GITHUB_API_TOKEN != '' }}
+        continue-on-error: true
         run: |
-          brew tap --force homebrew/cask
           brew bump-cask-pr tide \
             --version="${{ needs.render.outputs.version }}" \
             --no-browse \
@@ -199,7 +199,10 @@ jobs:
           }
           cp manifests/aur/PKGBUILD aur-repo/PKGBUILD
           cd aur-repo
-          makepkg --printsrcinfo > .SRCINFO
+          # makepkg refuses to run as root; use a dedicated builder user.
+          useradd -m builder
+          chown -R builder .
+          su builder -c "makepkg --printsrcinfo > .SRCINFO"
           git add PKGBUILD .SRCINFO
           git commit -m "upgpkg: ${{ needs.render.outputs.version }}" || echo "nothing to commit (already up to date)"
           git push
