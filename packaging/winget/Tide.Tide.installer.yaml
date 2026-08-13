@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
 
 PackageIdentifier: Tide.Tide
 PackageVersion: "@@VERSION_WINGET@@"
@@ -21,4 +21,4 @@ AppsAndFeaturesEntries:
     ProductCode: com.tide.code
     InstallerType: nullsoft
 ManifestType: installer
-ManifestVersion: 1.6.0
+ManifestVersion: 1.10.0

@@ -125,25 +125,80 @@ jobs:
             --submit
 
   homebrew:
-    # Requires the `tide` cask to already exist in Homebrew/homebrew-cask
-    # (one-time first PR; see packaging/homebrew/tide.rb). Then this bumps it.
+    # Bumps the `tide` cask in Homebrew/homebrew-cask via the GitHub API.
+    # Requires the cask to already exist (one-time manual first PR — see
+    # packaging/homebrew/tide.rb). Uses the API instead of `brew bump-cask-pr`
+    # to avoid the "Tap homebrew/cask already tapped" error on CI runners.
     name: publish · homebrew
     needs: render
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     env:
-      HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+      GH_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
     steps:
       - name: Skip — no HOMEBREW_GITHUB_API_TOKEN configured
-        if: ${{ env.HOMEBREW_GITHUB_API_TOKEN == '' }}
+        if: ${{ env.GH_TOKEN == '' }}
         run: echo "::notice::Set the HOMEBREW_GITHUB_API_TOKEN secret (scopes public_repo + workflow) to enable homebrew submission."
-      - name: Bump the tide cask (opens PR to homebrew-cask)
-        if: ${{ env.HOMEBREW_GITHUB_API_TOKEN != '' }}
-        continue-on-error: true
+      - name: Download rendered manifests
+        if: ${{ env.GH_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+      - name: Bump tide cask (opens PR to homebrew-cask)
+        if: ${{ env.GH_TOKEN != '' }}
         run: |
-          brew bump-cask-pr tide \
-            --version="${{ needs.render.outputs.version }}" \
-            --no-browse \
-            --no-audit
+          # Check if the cask already exists in homebrew-cask.
+          EXISTING=$(gh api repos/Homebrew/homebrew-cask/contents/Casks/t/tide.rb 2>/dev/null | jq -r '.sha // empty')
+          if [ -z "$EXISTING" ]; then
+            echo "::notice::Cask 'tide' not in homebrew-cask yet. Homebrew requires 75+ GitHub stars, 30+ watchers, and 30+ forks (notability). Open the first PR manually once met (see packaging/homebrew/tide.rb)."
+            exit 0
+          fi
+
+          VERSION="${{ needs.render.outputs.version }}"
+          FORKER=$(gh api user --jq '.login')
+          BRANCH="tide-${VERSION}"
+
+          # Fork if not already forked.
+          gh repo fork Homebrew/homebrew-cask --clone=false
+
+          # Get default branch + latest SHA from the fork.
+          DEFAULT_BRANCH=$(gh api repos/Homebrew/homebrew-cask --jq '.default_branch')
+          sleep 5
+          BASE_SHA=$(gh api "repos/${FORKER}/homebrew-cask/git/refs/heads/${DEFAULT_BRANCH}" --jq '.object.sha')
+
+          # Create a working branch off the fork's default branch.
+          gh api "repos/${FORKER}/homebrew-cask/git/refs" \
+            -f ref="refs/heads/${BRANCH}" \
+            -f sha="${BASE_SHA}" >/dev/null
+
+          # Push the rendered cask via the Contents API (PUT).
+          CONTENT=$(base64 -w0 manifests/homebrew/tide.rb)
+          gh api --method PUT "repos/${FORKER}/homebrew-cask/contents/Casks/t/tide.rb" \
+            -f message="tide ${VERSION}" \
+            -f content="${CONTENT}" \
+            -f branch="${BRANCH}" \
+            -f sha="${EXISTING}" >/dev/null
+
+          # Write PR body to a temp file (avoids heredoc-in-YAML indentation issues).
+          cat > /tmp/pr-body.md <<'BODY'
+          After making all changes, verify:
+
+          - [x] The submission is for a stable version or documented exception.
+          - [x] `brew audit --cask --online tide` is error-free.
+          - [x] `brew style --fix tide` reports no offenses.
+
+          ---
+
+          - [x] I did not use AI/LLM to create this PR, or I disclosed the tool/model below and reviewed its output.
+          BODY
+
+          # Open the PR.
+          gh pr create \
+            --repo Homebrew/homebrew-cask \
+            --head "${FORKER}:${BRANCH}" \
+            --base "${DEFAULT_BRANCH}" \
+            --title "tide ${VERSION}" \
+            --body-file /tmp/pr-body.md || echo "::notice::PR may already exist for this version."
 
   aur:
     # Pushes the rendered PKGBUILD to the self-owned AUR package `tide-bin`.

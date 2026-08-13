@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
 
 PackageIdentifier: Tide.Tide
 PackageVersion: "@@VERSION_WINGET@@"
@@ -9,7 +9,7 @@ PublisherSupportUrl: https://github.com/code-with-current/tide/issues
 PackageName: Tide
 PackageUrl: https://tide.codes
 License: MIT
-LicenseUrl: https://github.com/code-with-current/tide/blob/main/LICENSE
+LicenseUrl: https://github.com/code-with-current/tide/blob/master/LICENSE
 ShortDescription: Local-first agentic coding companion.
 Description: |-
   Tide is a local-first agentic coding companion. It indexes your codebase
@@ -23,4 +23,4 @@ Tags:
   - electron
 ReleaseNotesUrl: https://github.com/code-with-current/tide/releases/tag/v@@VERSION@@
 ManifestType: defaultLocale
-ManifestVersion: 1.6.0
+ManifestVersion: 1.10.0
