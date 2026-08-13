@@ -5,8 +5,8 @@
 <p align="center">
   <a href="https://github.com/code-with-current/tide/releases/latest"><img src="https://img.shields.io/github/package-json/v/code-with-current/tide?style=flat-square&logo=github&label=Release&color=blue" alt="Release" /></a>
   <a href="https://github.com/code-with-current/tide/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/code-with-current/tide/ci.yml?style=flat-square&logo=githubactions&label=Build" alt="Build" /></a>
-  <a href="https://github.com/code-with-current/tide"><img src="https://img.shields.io/github/package-json/dependency-version/code-with-current/tide/dev/electron/master?style=flat-square&logo=electron&logoColor=white&label=Electron" alt="Electron" /></a>
-  <a href="https://github.com/code-with-current/tide"><img src="https://img.shields.io/github/package-json/dependency-version/code-with-current/tide/dev/react/master?style=flat-square&logo=react&logoColor=white&label=React" alt="React" /></a>
+  <a href="https://github.com/code-with-current/tide"><img src="https://img.shields.io/github/package-json/dependency-version/code-with-current/tide/electron/master?style=flat-square&logo=electron&logoColor=white&label=Electron" alt="Electron" /></a>
+  <a href="https://github.com/code-with-current/tide"><img src="https://img.shields.io/github/package-json/dependency-version/code-with-current/tide/react/master?style=flat-square&logo=react&logoColor=white&label=React" alt="React" /></a>
 </p>
 
 <h1>Tide</h1>
