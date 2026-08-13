@@ -70,25 +70,41 @@ const options = {
 function extractStandaloneAsar(context) {
   if (process.env.EXTRACT_ASAR !== '1') return
 
-  const appOutDir = context.appOutDir
-  const candidates = [
-    // macOS: inside .app bundle
-    ...fs.readdirSync(appOutDir)
-      .filter(f => f.endsWith('.app'))
-      .map(f => path.join(appOutDir, f, 'Contents', 'Resources', 'app.asar')),
-    // Linux/Windows: resources/ dir
-    path.join(appOutDir, 'resources', 'app.asar'),
-  ]
+  // afterAllArtifactBuild receives a BuildResult ({ outDir, artifactPaths,
+  // platformToTargets, configuration }) — NOT a PackContext, so appOutDir
+  // and packager are unavailable. Locate app.asar in the platform-specific
+  // unpacked directory under outDir.
+  const { outDir } = context
+  let src = null
+  for (const dir of fs.readdirSync(outDir)) {
+    const dirPath = path.join(outDir, dir)
+    // Linux / Windows: <outDir>/{linux,win}-unpacked/resources/app.asar
+    const direct = path.join(dirPath, 'resources', 'app.asar')
+    if (fs.existsSync(direct)) {
+      src = direct
+      break
+    }
+    // macOS: <outDir>/{mac,mac-arm64}/<App>.app/Contents/Resources/app.asar
+    if (dir === 'mac' || dir.startsWith('mac-')) {
+      for (const entry of fs.readdirSync(dirPath)) {
+        if (!entry.endsWith('.app')) continue
+        const macAsar = path.join(dirPath, entry, 'Contents', 'Resources', 'app.asar')
+        if (fs.existsSync(macAsar)) {
+          src = macAsar
+          break
+        }
+      }
+    }
+    if (src) break
+  }
 
-  const src = candidates.find(p => fs.existsSync(p))
   if (!src) {
-    console.warn('EXTRACT_ASAR: app.asar not found in', appOutDir, '— skipping')
+    console.warn('EXTRACT_ASAR: app.asar not found in', outDir, '— skipping')
     return
   }
 
-  const version = context.packager.appInfo.version
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
   const baseName = `tide-core-${version}`
-  const outDir = context.outDir
   const dest = path.join(outDir, `${baseName}.asar`)
   fs.copyFileSync(src, dest)
 
