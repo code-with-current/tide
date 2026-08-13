@@ -106,22 +106,32 @@ jobs:
       - name: Skip — no WINGET_GITHUB_TOKEN configured
         if: ${{ env.GITHUB_TOKEN == '' }}
         run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (PAT scopes public_repo + workflow) to enable winget submission."
-      - if: ${{ env.GITHUB_TOKEN != '' }}
+      - name: Update existing manifest
+        id: winget-update
+        if: ${{ env.GITHUB_TOKEN != '' }}
         uses: russellbanks/Komac@v2.16.0
         with:
-          komac-version: latest
-      - name: Update existing manifest (or create on first release)
-        if: ${{ env.GITHUB_TOKEN != '' }}
-        run: |
-          komac update Tide.Tide \
-            "${{ needs.render.outputs.winget_version }}" \
-            "${{ needs.render.outputs.exe_url }}" \
-            "${{ needs.render.outputs.exe_sha }}" \
-            --submit || \
-          komac new Tide.Tide \
-            "${{ needs.render.outputs.exe_url }}" \
-            --version "${{ needs.render.outputs.winget_version }}" \
+          args: >-
+            update Tide.Tide
+            ${{ needs.render.outputs.winget_version }}
+            ${{ needs.render.outputs.exe_url }}
+            ${{ needs.render.outputs.exe_sha }}
             --submit
+        env:
+          GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Create new manifest (first release)
+        if: ${{ env.GITHUB_TOKEN != '' && steps.winget-update.outcome == 'failure' }}
+        uses: russellbanks/Komac@v2.16.0
+        with:
+          args: >-
+            new Tide.Tide
+            ${{ needs.render.outputs.exe_url }}
+            --version ${{ needs.render.outputs.winget_version }}
+            --submit
+        env:
+          GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
 
   homebrew:
     # Requires the `tide` cask to already exist in Homebrew/homebrew-cask
