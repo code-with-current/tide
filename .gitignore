@@ -58,6 +58,7 @@ AGENTS.md
 GEMINI.md
 *.md
 !README.md
+!CONTRIBUTING.md
 # Prompt sources — app source code, not docs.
 !src/lib/prompts/**/*.md
 docs/plans/
@@ -65,3 +66,8 @@ docs/plans/
 src/lib/prompts/_system-prompt-bundle.ts
 src/lib/prompts/_agent-prompts-bundle.ts
 src/lib/prompts/_tool-descriptions-bundle.ts
+
+# Packaging manifest pipeline (winget/homebrew/AUR). Templates are tracked;
+# rendered output from packaging/render.mjs is generated per-release.
+!packaging/README.md
+packaging/out/

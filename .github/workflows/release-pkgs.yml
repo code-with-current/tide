@@ -1,0 +1,180 @@
+# Publish package-manager manifests (winget / homebrew / AUR) after each Release.
+#
+# Triggered when the Release workflow (tag-driven) completes successfully.
+# Renders manifests once (packaging/render.mjs — downloads each installer,
+# hashes it), then submits to each package index. Every submission step is
+# gated on a secret so the workflow is inert until you configure them.
+#
+# One-time setup (see packaging/README.md for detail):
+#   winget   — first PR to microsoft/winget-pkgs (komac new / manual), then
+#              WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
+#   homebrew — first PR to Homebrew/homebrew-cask, then
+#              HOMEBREW_GITHUB_API_TOKEN (PAT: public_repo + workflow scopes).
+#   aur      — create an AUR package `tide-bin`, upload an SSH key, then
+#              AUR_SSH_PRIVATE_KEY (private key text).
+name: Publish package manifests
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pkg-manifests-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    # Only act when the Release workflow that woke us up actually succeeded.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: render · manifests
+    runs-on: ubuntu-latest
+    outputs:
+      # Step outputs are only visible to OTHER jobs when re-declared here.
+      version: ${{ steps.meta.outputs.version }}
+      exe_url: ${{ steps.meta.outputs.exe_url }}
+      exe_sha: ${{ steps.meta.outputs.exe_sha }}
+      deb_url: ${{ steps.meta.outputs.deb_url }}
+      deb_sha: ${{ steps.meta.outputs.deb_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve version from release tag
+        id: ver
+        run: |
+          REF="${{ github.event.workflow_run.head_branch }}"
+          TAG="${REF#refs/tags/}"   # defensive: head_branch is the bare tag
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # Downloads every installer from the GitHub Release once and streams each
+      # through sha256, then writes the rendered manifests + meta.json.
+      - name: Render manifests
+        run: |
+          node packaging/render.mjs \
+            --version "${{ steps.ver.outputs.version }}" \
+            --repo "${{ github.repository }}"
+
+      - name: Expose manifest values to downstream jobs
+        id: meta
+        run: |
+          M=packaging/out/meta.json
+          echo "version=$(jq -r .version "$M")" >> "$GITHUB_OUTPUT"
+          echo "winget_version=$(jq -r .wingetVersion "$M")" >> "$GITHUB_OUTPUT"
+          echo "pkgver=$(jq -r .pkgver "$M")" >> "$GITHUB_OUTPUT"
+          echo "exe_url=$(jq -r .assets.exe.url "$M")" >> "$GITHUB_OUTPUT"
+          echo "exe_sha=$(jq -r .assets.exe.sha256 "$M")" >> "$GITHUB_OUTPUT"
+          echo "deb_url=$(jq -r .assets.deb.url "$M")" >> "$GITHUB_OUTPUT"
+          echo "deb_sha=$(jq -r .assets.deb.sha256 "$M")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifests
+          path: packaging/out/
+          retention-days: 7
+
+  winget:
+    # Requires Tide.Tide to already exist in microsoft/winget-pkgs (one-time
+    # first PR; see packaging/winget/Tide.Tide.yaml). Then this bumps it.
+    name: publish · winget
+    needs: render
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+    steps:
+      - name: Skip — no WINGET_GITHUB_TOKEN configured
+        if: ${{ env.GITHUB_TOKEN == '' }}
+        run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (scopes public_repo + workflow) to enable winget submission."
+      - if: ${{ env.GITHUB_TOKEN != '' }}
+        uses: russellbanks/Komac@v2
+        with:
+          komac-version: latest
+      - name: Update Tide.Tide manifest and open PR
+        if: ${{ env.GITHUB_TOKEN != '' }}
+        run: |
+          komac update Tide.Tide \
+            "${{ needs.render.outputs.version }}" \
+            "${{ needs.render.outputs.exe_url }}" \
+            "${{ needs.render.outputs.exe_sha }}" \
+            --submit
+
+  homebrew:
+    # Requires the `tide` cask to already exist in Homebrew/homebrew-cask
+    # (one-time first PR; see packaging/homebrew/tide.rb). Then this bumps it.
+    name: publish · homebrew
+    needs: render
+    runs-on: macos-latest
+    env:
+      HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+    steps:
+      - name: Skip — no HOMEBREW_GITHUB_API_TOKEN configured
+        if: ${{ env.HOMEBREW_GITHUB_API_TOKEN == '' }}
+        run: echo "::notice::Set the HOMEBREW_GITHUB_API_TOKEN secret (scopes public_repo + workflow) to enable homebrew submission."
+      - name: Bump the tide cask (opens PR to homebrew-cask)
+        if: ${{ env.HOMEBREW_GITHUB_API_TOKEN != '' }}
+        run: |
+          brew tap --force homebrew/cask
+          brew bump-cask-pr tide \
+            --version="${{ needs.render.outputs.version }}" \
+            --no-browse \
+            --no-audit
+
+  aur:
+    # Pushes the rendered PKGBUILD to the self-owned AUR package `tide-bin`.
+    # Runs inside an archlinux container so makepkg can emit .SRCINFO.
+    name: publish · AUR
+    needs: render
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Skip — no AUR_SSH_PRIVATE_KEY configured
+        if: ${{ env.AUR_SSH_PRIVATE_KEY == '' }}
+        run: echo "::notice::Set the AUR_SSH_PRIVATE_KEY secret to enable AUR submission."
+      # nodejs is required for actions/checkout and actions/download-artifact
+      # (JS actions) to run inside the container.
+      - name: Install build + VCS tools
+        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        run: pacman -Syu --noconfirm --needed git openssh base-devel nodejs
+      - if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        uses: actions/checkout@v4
+      - name: Download rendered manifests
+        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+      - name: Configure SSH for AUR
+        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> ~/.ssh/known_hosts
+          {
+            echo "Host aur.archlinux.org"
+            echo "  IdentityFile ~/.ssh/aur"
+            echo "  IdentitiesOnly yes"
+          } > ~/.ssh/config
+      - name: Push PKGBUILD + .SRCINFO to AUR
+        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        env:
+          GIT_AUTHOR_NAME: tide-release-bot
+          GIT_AUTHOR_EMAIL: bot@tide.codes
+          GIT_COMMITTER_NAME: tide-release-bot
+          GIT_COMMITTER_EMAIL: bot@tide.codes
+        run: |
+          git clone ssh://aur@aur.archlinux.org/tide-bin.git aur-repo
+          cp manifests/aur/PKGBUILD aur-repo/PKGBUILD
+          cd aur-repo
+          makepkg --printsrcinfo > .SRCINFO
+          git add PKGBUILD .SRCINFO
+          git commit -m "upgpkg: ${{ needs.render.outputs.version }}" || echo "nothing to commit (already up to date)"
+          git push

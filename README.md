@@ -1,10 +1,44 @@
-# Tide
+<p align="center">
+  <img src="./src/assets/tide-logo.png" alt="Tide" width="300" />
+</p>
 
-**Code with the current.** → [tide.codes](https://tide.codes)
+<p align="center">
+  <a href="https://github.com/code-with-current/tide/releases/latest"><img src="https://img.shields.io/github/package-json/v/code-with-current/tide?style=flat-square&logo=github&label=Release&color=blue" alt="Release" /></a>
+  <a href="https://github.com/code-with-current/tide/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/code-with-current/tide/ci.yml?style=flat-square&logo=githubactions&label=Build" alt="Build" /></a>
+  <a href="https://github.com/code-with-current/tide"><img src="https://img.shields.io/github/package-json/dependency-version/code-with-current/tide/dev/electron/master?style=flat-square&logo=electron&logoColor=white&label=Electron" alt="Electron" /></a>
+  <a href="https://github.com/code-with-current/tide"><img src="https://img.shields.io/github/package-json/dependency-version/code-with-current/tide/dev/react/master?style=flat-square&logo=react&logoColor=white&label=React" alt="React" /></a>
+</p>
+
+<h1>Tide</h1>
+<p>
+  <strong>Code with the current.</strong> → <a href="https://tide.codes">tide.codes</a>
+</p>
 
 Tide is a local-first agentic coding companion. It indexes your codebase with local ONNX embeddings, gives the AI 20+ real tools (file edits, terminal, git, grep, web search, MCP), and puts you in control with a permission system — plan, ask, edit, or full-access modes. Your code never leaves your machine; API keys stay encrypted in the OS keychain.
 
-Works with Anthropic, OpenAI, or any OpenAI-compatible endpoint. Each session can branch into its own git worktree so your main branch stays untouched.
+Works with Anthropic & OpenAI compatible endpoint. Each session can branch into its own git worktree so your main branch stays untouched.
+
+## Installation
+
+**macOS** (Homebrew):
+
+```sh
+brew install --cask tide
+```
+
+**Windows** (winget):
+
+```powershell
+winget install Tide.Tide
+```
+
+**Linux** (AUR):
+
+```sh
+yay -S tide-bin
+```
+
+Prefer a direct download? Grab the latest installer from the [releases page](https://github.com/code-with-current/tide/releases) — `.dmg` (mac), `.exe` (Windows), or `.deb` / `.AppImage` (Linux).
 
 ---
 
@@ -23,7 +57,12 @@ Works with Anthropic, OpenAI, or any OpenAI-compatible endpoint. Each session ca
 
 - **Homepage:** [tide.codes](https://tide.codes)
 - **GitHub:** [github.com/code-with-current/tide](https://github.com/code-with-current/tide)
+- **Releases:** [latest download](https://github.com/code-with-current/tide/releases)
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding conventions, and pull request guidelines.
 
 ## License
 
-MIT
+[MIT](LICENSE)

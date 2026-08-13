@@ -1,0 +1,51 @@
+# Maintainer: Tide <maintainer@example.com>
+#
+# AUR package: tide-bin (binary, built from the GitHub Release .deb)
+# Repo: https://aur.archlinux.org/packages/tide-bin
+#
+# Pushed automatically by .github/workflows/release-pkgs.yml on each release.
+# To publish by hand:
+#   git clone ssh://aur@aur.archlinux.org/tide-bin.git
+#   cp packaging/aur/PKGBUILD tide-bin/
+#   cd tide-bin && makepkg --printsrcinfo > .SRCINFO
+#   git add . && git commit -m "upgpkg: ${pkgver}" && git push
+#
+# Markers filled by packaging/render.mjs: VERSION, VERSION_PKGVER, SHA256_DEB.
+
+pkgname=tide-bin
+# pkgver must not contain '-' (pacman uses it as the pkgver/pkgrel separator),
+# so the prerelease tag from the git tag (0.1.2-beta) is flattened to 0.1.2beta.
+pkgver='@@VERSION_PKGVER@@'
+pkgrel=1
+pkgdesc="Local-first agentic coding companion"
+arch=('x86_64')
+url='https://tide.codes'
+license=('MIT')
+provides=("${pkgname%-bin}")
+conflicts=("${pkgname%-bin}")
+# Standard Electron runtime dependencies on Arch.
+depends=('alsa-lib' 'gtk3' 'nss' 'libxss' 'libxtst')
+optdepends=('libappindicator-gtk3: system tray icon')
+options=('!strip' '!emptydirs')
+
+# _realver is the upstream version string exactly as it appears in the tag and
+# the .deb filename (keeps the '-beta' hyphen that pkgver can't hold).
+_realver='@@VERSION@@'
+
+_release="https://github.com/code-with-current/tide/releases/download/v${_realver}"
+source=("${pkgname}_${_realver}.deb::${_release}/Tide_${_realver}_amd64.deb")
+noextract=("${pkgname}_${_realver}.deb")
+sha256sums=('@@SHA256_DEB@@')
+
+package() {
+  cd "${srcdir}"
+  # libarchive (bsdtar) reads the .deb ar archive, yielding debian-binary,
+  # control.tar.*, and data.tar.*. Extract data.tar into the package root so
+  # /usr and the .desktop/icons land at the correct prefix.
+  bsdtar -xf "${pkgname}_${_realver}.deb"
+  bsdtar -xf data.tar.* -C "${pkgdir}/"
+
+  # The .deb ships no LICENSE; namcap will warn about a missing license file,
+  # which is preferable to fabricating an empty one. Add a real license here
+  # if/when one is bundled upstream.
+}
