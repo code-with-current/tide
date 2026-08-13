@@ -128,6 +128,8 @@ jobs:
           git clone --depth=1 --filter=blob:none --sparse \
             "https://x-access-token:${WINGET_TOKEN}@github.com/${FORK}.git" winget
           cd winget
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git sparse-checkout set manifests/t/Tide
           git checkout -b "$BRANCH"
 
@@ -172,13 +174,15 @@ jobs:
         run: |
           VERSION="${{ needs.render.outputs.version }}"
           TAP="code-with-current/homebrew-tap"
-          EXISTING_SHA=$(gh api "repos/${TAP}/contents/Casks/tide.rb" --jq '.sha // empty' 2>/dev/null || true)
-          CONTENT=$(base64 -w0 manifests/homebrew/tide.rb)
-          ARGS=(-f message="tide ${VERSION}" -f content="${CONTENT}")
-          if [ -n "$EXISTING_SHA" ]; then
-            ARGS+=(-f sha="${EXISTING_SHA}")
-          fi
-          gh api --method PUT "repos/${TAP}/contents/Casks/tide.rb" "${ARGS[@]}" >/dev/null
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP}.git" tap
+          cd tap
+          mkdir -p Casks
+          cp ../manifests/homebrew/tide.rb Casks/tide.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "tide ${VERSION}" || true
+          git push
           echo "::notice::Updated Casks/tide.rb in ${TAP} to ${VERSION}"
 
   snap:
@@ -201,6 +205,7 @@ jobs:
         run: |
           mkdir -p snap
           gh release download "v${{ needs.render.outputs.version }}" \
+            --repo "${{ github.repository }}" \
             --pattern "*.snap" \
             --dir snap/
 
