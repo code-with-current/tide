@@ -20,6 +20,7 @@ export interface StoredMessage {
   timeline?: any[];
   turn?: any;
   attachments?: any[];
+  compactionInfo?: { tokensBefore: number; tokensAfter: number };
 }
 
 export interface StoredSession {
@@ -229,7 +230,7 @@ export interface SessionStore {
   finalizeAssistantMessage(
     sessionId: string,
     messageId: string,
-    message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; totalMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
+    message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; totalMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any; compactionInfo?: { tokensBefore: number; tokensAfter: number } },
   ): void;
   /** Hook called BEFORE the session JSON is unlinked during delete.
    *  Lets the runtime cascade-remove the worktree directory + branch.
@@ -527,6 +528,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
+      compactionInfo?: { tokensBefore: number; tokensAfter: number };
     },
   ): void {
     ensureLoaded();
@@ -544,6 +546,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       if (message.toolCalls) existing.toolCalls = message.toolCalls;
       if (message.timeline) existing.timeline = message.timeline;
       if (message.turn !== undefined) existing.turn = message.turn;
+      if (message.compactionInfo !== undefined) existing.compactionInfo = message.compactionInfo;
     } else {
       s.messages.push({
         id: messageId,
@@ -558,6 +561,7 @@ export function createSessionStore(rootDir: string): SessionStore {
         toolCalls: message.toolCalls,
         timeline: message.timeline,
         turn: message.turn,
+        compactionInfo: message.compactionInfo,
       });
     }
     s.updatedAt = now;

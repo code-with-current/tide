@@ -808,9 +808,9 @@ export function MainScreen() {
           {sessionsPanelOpen && sidebarMode === 'dual' && !workspaceMissing && (
             <ResizablePanel
               id="sessions"
-              defaultSize={220}
-              minSize={180}
-              maxSize={400}
+              defaultSize="15"
+              minSize="12"
+              maxSize="25"
               className="min-h-0"
             >
               <SessionsPanel />
@@ -820,7 +820,7 @@ export function MainScreen() {
 
           <ResizablePanel
             id="chat"
-            minSize={320}
+            minSize="30"
             className="h-full min-h-0"
           >
             <main className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden">
@@ -1015,9 +1015,9 @@ export function MainScreen() {
           {showRightPanel && !workspaceMissing && (
             <ResizablePanel
               id="right"
-              defaultSize={340}
-              minSize={280}
-              maxSize={400}
+              defaultSize="25"
+              minSize="20"
+              maxSize="30"
               className="h-full relative min-w-0"
             >
               <RightPanel />
