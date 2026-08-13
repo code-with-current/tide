@@ -46,20 +46,25 @@ jobs:
           # ── macOS: dmg for Apple Silicon + Intel ──
           - label: mac · dmg · arm64
             runner: macos-latest
+            arch: arm64
             cmd: node build/build.js target=mac arch=arm64 type=dmg publish=never
           - label: mac · dmg · x64
             runner: macos-latest
+            arch: x64
             cmd: node build/build.js target=mac arch=x64 type=dmg publish=never
           # ── Windows: nsis installer, 64-bit ──
           - label: win · nsis · x64
             runner: windows-latest
+            arch: x64
             cmd: node build/build.js target=win arch=x64 type=setup publish=never
           # ── Linux: AppImage + deb, 64-bit ──
           - label: linux · AppImage · x64
             runner: ubuntu-latest
+            arch: x64
             cmd: EXTRACT_ASAR=1 node build/build.js target=linux arch=x64 type=appImage publish=never
           - label: linux · deb · amd64
             runner: ubuntu-latest
+            arch: x64
             cmd: node build/build.js target=linux arch=x64 type=deb publish=never
 
     steps:
