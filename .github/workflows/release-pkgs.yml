@@ -92,7 +92,7 @@ jobs:
         if: ${{ env.GITHUB_TOKEN == '' }}
         run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (scopes public_repo + workflow) to enable winget submission."
       - if: ${{ env.GITHUB_TOKEN != '' }}
-        uses: russellbanks/Komac@v2
+        uses: russellbanks/Komac@v2.16.0
         with:
           komac-version: latest
       - name: Update Tide.Tide manifest and open PR
