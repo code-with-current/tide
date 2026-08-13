@@ -215,4 +215,7 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
           sudo snap install snapcraft --classic
-          snapcraft upload snap/*.snap
+          snapcraft upload snap/*.snap || {
+            echo "::notice::Snap already uploaded — this is expected for re-runs."
+            exit 0
+          }
