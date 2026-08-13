@@ -19,18 +19,24 @@ on:
   workflow_run:
     workflows: ["Release"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.1.2-beta)"
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: pkg-manifests-${{ github.event.workflow_run.head_branch }}
+  group: pkg-manifests-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
   render:
-    # Only act when the Release workflow that woke us up actually succeeded.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only act when the Release workflow that woke us up actually succeeded
+    # (skipped for manual workflow_dispatch runs).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     name: render · manifests
     runs-on: ubuntu-latest
     outputs:
@@ -51,9 +57,14 @@ jobs:
       - name: Resolve version from release tag
         id: ver
         run: |
-          REF="${{ github.event.workflow_run.head_branch }}"
-          TAG="${REF#refs/tags/}"   # defensive: head_branch is the bare tag
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            REF="${{ github.event.workflow_run.head_branch }}"
+            TAG="${REF#refs/tags/}"   # defensive: head_branch is the bare tag
+          fi
+          TAG="${TAG#v}"   # strip leading 'v'
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
       # Downloads every installer from the GitHub Release once and streams each
       # through sha256, then writes the rendered manifests + meta.json.
@@ -179,7 +190,13 @@ jobs:
           GIT_COMMITTER_NAME: tide-release-bot
           GIT_COMMITTER_EMAIL: bot@tide.codes
         run: |
-          git clone ssh://aur@aur.archlinux.org/tide-bin.git aur-repo
+          # Clone if the package exists, otherwise init for first-time creation.
+          git clone ssh://aur@aur.archlinux.org/tide-bin.git aur-repo 2>/dev/null || {
+            mkdir aur-repo && cd aur-repo
+            git init
+            git remote add origin ssh://aur@aur.archlinux.org/tide-bin.git
+            cd ..
+          }
           cp manifests/aur/PKGBUILD aur-repo/PKGBUILD
           cd aur-repo
           makepkg --printsrcinfo > .SRCINFO
