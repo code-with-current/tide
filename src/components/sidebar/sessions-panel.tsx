@@ -72,6 +72,18 @@ export function SessionsPanel() {
   const setMainView = useUi((s) => s.setMainView);
   const runningSessionIds = useUi((s) => s.runningSessionIds);
   const unreadSessionIds = useUi((s) => s.unreadSessionIds);
+  const terminalPorts = useUi((s) => s.terminalPorts);
+  const allTerminals = useUi((s) => s.terminals);
+
+  const sessionsWithPorts = useMemo(() => {
+    const set = new Set<string>();
+    for (const [sid, terms] of Object.entries(allTerminals)) {
+      for (const t of terms) {
+        if (terminalPorts[t.id]?.length > 0) { set.add(sid); break; }
+      }
+    }
+    return set;
+  }, [allTerminals, terminalPorts]);
   const sessionSearchFocus = useUi((s) => s.sessionSearchFocus);
   const overrides = useUi((s) => s.shortcutOverrides);
   const { data: sessions, isLoading } = useSessions(activeWorkspaceId);
@@ -201,6 +213,7 @@ export function SessionsPanel() {
                   active={s.id === activeSessionId}
                   isRunning={runningSessionIds.includes(s.id)}
                   isUnread={unreadSessionIds.includes(s.id)}
+                  hasPort={sessionsWithPorts.has(s.id)}
                   onClick={() => setActiveSession(s.id)}
                 />
               ))}
@@ -243,6 +256,7 @@ function SessionItem({
   active,
   isRunning,
   isUnread,
+  hasPort,
   onClick,
   archived = false,
 }: {
@@ -250,6 +264,7 @@ function SessionItem({
   active: boolean;
   isRunning?: boolean;
   isUnread?: boolean;
+  hasPort?: boolean;
   onClick: () => void;
   archived?: boolean;
 }) {
@@ -337,6 +352,8 @@ function SessionItem({
             {!archived &&
               (isRunning ? (
                 <Dot tone="warn" pulse="heartbeat" />
+              ) : hasPort ? (
+                <Dot tone="ok" pulse="heartbeat" />
               ) : isUnread ? (
                 <Dot tone="ok" />
               ) : (

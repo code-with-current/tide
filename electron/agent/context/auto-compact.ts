@@ -21,9 +21,16 @@ export interface CompactionResult {
 }
 
 export interface AutoCompactConfig {
-  /** Context window size for the model (tokens). */
+  /** Total context window for the model (tokens). */
   contextWindow: number;
-  /** Compaction threshold as fraction of contextWindow (default 0.75). */
+  /** Max input tokens the provider accepts. Falls back to contextWindow.
+   *  Some providers (Google) cap this below context − output. */
+  maxInputTokens?: number;
+  /** Max output tokens the model will request per response. Subtracted from
+   *  the context window to compute the usable input budget — mirrors
+   *  opencode: usable = (input || context) − maxOutputTokens. */
+  maxOutputTokens: number;
+  /** Compaction threshold as fraction of the usable input budget (default 0.75). */
   threshold: number;
   /** Recent turns to keep verbatim (default 3). A "turn" = user + assistant pair. */
   keepRecentTurns: number;
@@ -33,6 +40,7 @@ export interface AutoCompactConfig {
 
 export const DEFAULT_AUTO_COMPACT_CONFIG: AutoCompactConfig = {
   contextWindow: 128_000,
+  maxOutputTokens: 8_192,
   threshold: 0.75,
   keepRecentTurns: 3,
   onFailure: 'truncate',
@@ -64,7 +72,20 @@ export function estimateTokens(messages: ModelMessage[]): number {
 
 // ─── Threshold check ────────────────────────────────────────────────────
 
-/** Should we compact? True when tokens exceed threshold fraction of (contextWindow − output reserve). Prefers `actualInputTokens` from the SDK when available — the heuristic underestimates code-heavy chats 2-5x. */
+/** Usable input budget: how many input tokens the conversation can hold
+ *  before the provider rejects it. Mirrors opencode's usable():
+ *    usable = (maxInputTokens || contextWindow) − maxOutputTokens
+ *  The provider subtracts max_tokens from the available input, so the real
+ *  ceiling is context − maxOutputTokens, not context − 8000. */
+export function usableInputBudget(config: AutoCompactConfig): number {
+  const context = config.maxInputTokens ?? config.contextWindow;
+  return Math.max(0, context - config.maxOutputTokens);
+}
+
+/** Should we compact? True when tokens exceed threshold fraction of the
+ *  usable input budget ((input || context) − maxOutputTokens). Prefers
+ *  `actualInputTokens` from the API response when available — the char
+ *  heuristic underestimates code-heavy chats 2–5x. */
 export function shouldCompact(
   messages: ModelMessage[],
   config: AutoCompactConfig,
@@ -74,8 +95,9 @@ export function shouldCompact(
   // Circuit breaker — don't try again after repeated failures
   if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) return false;
 
-  const effectiveWindow = config.contextWindow - 8_000; // reserve for output
-  const thresholdTokens = Math.floor(effectiveWindow * config.threshold);
+  const usable = usableInputBudget(config);
+  if (usable <= 0) return false;
+  const thresholdTokens = Math.floor(usable * config.threshold);
 
   // Use actual token count if available (from the last API response's usage).
   // Fall back to the character-based heuristic.
@@ -177,4 +199,28 @@ export async function compactConversation(
 // ─── Summarization ──────────────────────────────────────────────────────
 
 // summarizeMessages + serializeForSummary extracted to ./summarize.ts (shared with session-fork).
+
+// ─── Overflow detection ─────────────────────────────────────────────────
+
+/** Patterns that indicate the provider rejected the request because the
+ *  prompt exceeded the context window. These are NOT transient — retrying
+ *  with the same payload will fail identically. The orchestrator should
+ *  force-compaction instead of blind-retrying. */
+const OVERFLOW_PATTERNS = [
+  /prompt too long/i,
+  /context.{0,20}length/i,
+  /context.{0,20}exceed/i,
+  /maximum.{0,20}context/i,
+  /input.{0,20}token.{0,20}limit/i,
+  /request.{0,20}too large/i,
+  /token.{0,20}limit/i,
+  /code["']?:\s*["']?1261/i, // z.ai "Prompt too long"
+  /maximum.{0,20}tokens/i,
+];
+
+/** True when an error message indicates a context-overflow rejection. */
+export function isContextOverflow(msg: string): boolean {
+  if (!msg) return false;
+  return OVERFLOW_PATTERNS.some((re) => re.test(msg));
+}
 

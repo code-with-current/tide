@@ -269,7 +269,7 @@ declare global {
         apiKey: string;
         modelId: string;
       }): Promise<{ ok: true } | { ok: false; error: string }>;
-      /** Resolve a model against the LiteLLM catalog — returns match state +
+      /** Resolve a model against the models.dev catalog — returns match state +
        *  full metadata. Shapes mirror ModelMeta / MatchResult / CatalogEntry
        *  from electron/agent/model-catalog.ts and model-prices.ts. */
       modelCatalog: {
@@ -369,6 +369,9 @@ declare global {
       gitBulk: (workspaceId: string, op: string, sessionId?: string, opts?: { message?: string }) => Promise<{ ok: boolean; error?: string }>;
       gitStashList: (workspaceId: string, sessionId?: string) => Promise<any[]>;
       gitBranchInfo: (workspaceId: string, sessionId?: string) => Promise<{ branch: string | null; headCommit: string | null }>;
+      gitRecentBranches: (workspaceId: string, sessionId?: string) => Promise<string[]>;
+      gitCheckout: (workspaceId: string, branch: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitCommit: (workspaceId: string, message: string, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;
       gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) => Promise<any[]>;

@@ -222,7 +222,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   testProviderConnection: (input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string; modelId: string }) =>
     ipcRenderer.invoke('tide:provider:testConnection', input),
 
-  // Resolve a model against the LiteLLM catalog — returns match state +
+  // Resolve a model against the models.dev catalog — returns match state +
   // full metadata. Used by the Fetch Models dialog to enrich rows with
   // price / context / capabilities.
   modelCatalog: {
@@ -314,6 +314,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitStashList', workspaceId, sessionId),
   gitBranchInfo: (workspaceId: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitBranchInfo', workspaceId, sessionId),
+  gitRecentBranches: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitRecentBranches', workspaceId, sessionId),
+  gitCheckout: (workspaceId: string, branch: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitCheckout', workspaceId, branch, sessionId),
+  gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitCreateBranch', workspaceId, branchName, sessionId),
   gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStage', workspaceId, filePath, stage, sessionId),
   gitCommit: (workspaceId: string, message: string, sessionId?: string) =>

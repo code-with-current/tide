@@ -20,8 +20,8 @@ import { createExtensionsStore } from '../extensionsStore.js';
 import { createConfigStore } from '../configStore.js';
 import { createTurnController, type TurnController } from './turn-controller.js';
 import { loadHookConfig, type HookConfig } from './hooks/hook-config.js';
-import { shouldCompact, compactConversation } from './context/auto-compact.js';
-import { supportsThinking, contextWindowSize, resolveMaxOutputTokens } from './model-capabilities.js';
+import { shouldCompact, compactConversation, isContextOverflow } from './context/auto-compact.js';
+import { supportsThinking, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens } from './model-capabilities.js';
 import type { ToolResult } from './tools/types.js';
 import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
 import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
@@ -43,6 +43,10 @@ const TURN_MAX_RETRIES = 10;
 const TURN_RETRY_TIMEOUT_MS = 120_000;
 const ESCALATED_MAX_TOKENS = 65_535;
 const MAX_RESUME_ATTEMPTS = 3;
+/** Max forced compactions triggered by a context-overflow 400 in a single
+ *  turn. Each shrinks the conversation; if the prompt is still too long
+ *  after 3 attempts, the turn ends with an error rather than looping. */
+const MAX_OVERFLOW_COMPACTIONS = 3;
 /** Delay between auto-retries so a transient failure (rate limit, blip) can
  *  recover and the UI doesn't hammer the provider. Aborted turns cancel it. */
 const RETRY_DELAY_MS = 10_000;
@@ -228,13 +232,26 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const turnController = createTurnController(effectiveMaxSteps);
   const modelEntry = provider.models.find((m) => m.modelId === modelId);
   const knownCtxWindow = contextWindowSize(modelId, modelEntry);
+  const knownMaxInput = resolveMaxInputTokens(modelId, modelEntry) ?? knownCtxWindow;
+  const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
   const compactionEnabled = agentSettings.compactionEnabled ?? true;
   const compactionThreshold = Math.min(0.95, Math.max(0.5, agentSettings.compactionThreshold ?? 0.75));
   const compactionKeepTurns = Math.max(1, Math.floor(agentSettings.compactionKeepTurns ?? 3));
   if (knownCtxWindow && compactionEnabled) {
-    turnController.compactionConfig = { contextWindow: knownCtxWindow, threshold: compactionThreshold, keepRecentTurns: compactionKeepTurns };
+    turnController.compactionConfig = {
+      contextWindow: knownCtxWindow,
+      maxInputTokens: knownMaxInput,
+      maxOutputTokens: knownMaxOutput,
+      threshold: compactionThreshold,
+      keepRecentTurns: compactionKeepTurns,
+    };
   } else if (knownCtxWindow) {
-    turnController.compactionConfig = { contextWindow: knownCtxWindow, threshold: 0.99, keepRecentTurns: 3 };
+    turnController.compactionConfig = {
+      contextWindow: knownCtxWindow,
+      maxOutputTokens: knownMaxOutput,
+      threshold: 0.99,
+      keepRecentTurns: 3,
+    };
   }
 
   const skillResult = await processSkillPipeline(wc, turn, convo, root, priorSkillRef, turnController);
@@ -276,6 +293,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   let retryCount = 0;
   let resumeCount = 0;
   let escalated = false;
+  let overflowCompactions = 0;
   let currentConvo = convo;
 
   try {
@@ -358,6 +376,24 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
         }
 
         if (turn.errored) {
+          // Context overflow → force compaction then retry (max 3 forced
+          // compactions per turn). This is NOT a transient error: retrying
+          // with the same payload will fail identically, so we shrink the
+          // conversation instead of blind-retrying 10×.
+          if (isContextOverflow(turn.errored) && turnController.compactionConfig && overflowCompactions < MAX_OVERFLOW_COMPACTIONS && !controller.signal.aborted) {
+            overflowCompactions++;
+            log.info('context overflow — forcing compaction', { attempt: overflowCompactions, error: turn.errored });
+            turn.errored = null; turn.finishReason = null;
+            try {
+              send(wc, sessionId, { type: 'compacting', sessionId, seq: nextSeq(sessionId), messageId, tokensBefore: turn.lastStepUsage?.inputTokens ?? 0, forced: true });
+              const compacted = await compactConversation(currentConvo, turnController.compactionConfig, { provider, modelId, signal: controller.signal });
+              currentConvo = compacted.postCompactMessages as ModelMessage[];
+            } catch (e: any) {
+              log.warn('forced compaction failed', { err: e?.message ?? e });
+            }
+            if (controller.signal.aborted) { emitTurnEnd(wc, turn, 'aborted'); break; }
+            continue;
+          }
           if (retryCount < TURN_MAX_RETRIES && !controller.signal.aborted && isTransientError(turn.errored)) {
             retryCount++;
             send(wc, sessionId, { type: 'retry', sessionId, seq: nextSeq(sessionId), attempt: retryCount, maxAttempts: TURN_MAX_RETRIES, reason: turn.errored });
@@ -782,6 +818,10 @@ function retryDelay(ms: number, signal: AbortSignal): Promise<void> {
 function isTransientError(msg: string): boolean {
   if (/no output generated/i.test(msg)) return false;
   if (/api key|unauthorized|forbidden|401|403/i.test(msg)) return false;
+  // Context overflow is NOT transient — retrying the same payload fails
+  // identically. The overflow handler above routes these to forced
+  // compaction; if we get here, the circuit breaker already tripped.
+  if (isContextOverflow(msg)) return false;
   return true;
 }
 

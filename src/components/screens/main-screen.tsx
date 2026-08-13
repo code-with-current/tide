@@ -266,25 +266,38 @@ export function MainScreen() {
     setRightPanelOpen,
   ]);
 
-  // When a `git` tool completes in the active session, refetch git status +
-  // branch so the Git Panel and the Inspector's Git section reflect
-  // changes the agent made (new branch, checkout, commit, etc.) immediately.
+  // When a git-state-mutating tool completes in the active session, refetch
+  // git status + branch + history so the Git Panel, the Inspector's Git
+  // section, and the top-bar branch reflect changes the agent made (new
+  // branch, checkout, commit, etc.) immediately. Covers both the dedicated
+  // `git` tool and `git …` run through `bash`.
   const seenGitToolsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const calls = activeStream?.toolCalls ?? [];
     let changed = false;
     for (const c of calls) {
       const name = (c.toolName || '').replace(/^(server_|mcp_)/, '');
-      if (name !== 'git') continue;
       const terminal = c.status === 'executed' || c.status === 'failed' || c.status === 'rejected';
-      if (terminal && !seenGitToolsRef.current.has(c.id)) {
+      if (!terminal || seenGitToolsRef.current.has(c.id)) continue;
+      // Dedicated git tool — any subcommand may mutate state, so always refresh.
+      if (name === 'git') {
         seenGitToolsRef.current.add(c.id);
         changed = true;
+        continue;
+      }
+      // git run through bash — only refresh on branch/state-mutating subcommands.
+      if (name === 'bash') {
+        const cmd = String(c.arguments?.command ?? '');
+        if (/\bgit\b\s+(?:checkout|switch|branch|reset|merge|rebase|stash|commit|pull|cherry-pick|revert|restore|rm)\b/.test(cmd)) {
+          seenGitToolsRef.current.add(c.id);
+          changed = true;
+        }
       }
     }
     if (changed && activeWorkspaceId) {
       qc.invalidateQueries({ queryKey: ['gitStatus', activeWorkspaceId] });
       qc.invalidateQueries({ queryKey: ['gitBranch', activeWorkspaceId] });
+      qc.invalidateQueries({ queryKey: ['gitLog', activeWorkspaceId] });
     }
   }, [activeStream?.toolCalls, activeWorkspaceId, qc]);
 
@@ -923,7 +936,7 @@ export function MainScreen() {
                       {/* Retry indicator — floating above the composer while
                           the orchestrator auto-retries a failed request. */}
                       {retry && (
-                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary border border-border shadow-lg text-xs">
+                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary border border-border shadow-lg text-xs animate-shimmer-pill overflow-hidden">
                           <svg className="size-3.5 -rotate-90" viewBox="0 0 36 36">
                             <circle cx="18" cy="18" r="15" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted/30" />
                             <circle

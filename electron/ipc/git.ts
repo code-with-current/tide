@@ -285,6 +285,41 @@ export async function listBranches(rootDir: string): Promise<string[]> {
   }
 }
 
+/** Recently checked-out branches from the reflog, excluding the current
+ *  branch. Falls back to local branches sorted by latest commit date when
+ *  the reflog is empty or unavailable. Powers the top-bar branch switcher. */
+export async function recentBranches(rootDir: string, limit = 5): Promise<string[]> {
+  const current = await currentBranch(rootDir);
+  try {
+    const { stdout } = await runGit(['reflog', 'show', '--format=%gs', '-n', '100'], rootDir, 5000);
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const line of stdout.split('\n')) {
+      const m = line.match(/checkout: moving from (.+) to (.+)/);
+      if (!m) continue;
+      // "to" first (most recently visited), then "from".
+      for (const b of [m[2], m[1]]) {
+        if (b && b !== current && !seen.has(b)) { seen.add(b); ordered.push(b); }
+      }
+    }
+    if (ordered.length > 0) return ordered.slice(0, limit);
+  } catch { /* reflog unavailable — fall through */ }
+  try {
+    const { stdout } = await runGit(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', `--count=${limit + 1}`, 'refs/heads/'], rootDir);
+    return stdout.split('\n').map((l) => l.trim()).filter((b) => b && b !== current).slice(0, limit);
+  } catch { return []; }
+}
+
+/** Checkout a branch in the working directory. */
+export async function gitCheckout(rootDir: string, branch: string): Promise<void> {
+  await runGit(['checkout', branch, '--'], rootDir, 10000);
+}
+
+/** Create a new branch from the current HEAD and check it out. */
+export async function gitCreateBranch(rootDir: string, branchName: string): Promise<void> {
+  await runGit(['checkout', '-b', branchName, '--'], rootDir, 10000);
+}
+
 /** Resolve the current branch name. */
 export async function currentBranch(rootDir: string): Promise<string | undefined> {
   try {

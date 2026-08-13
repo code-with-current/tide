@@ -1,32 +1,81 @@
-/** LiteLLM catalog loader: vendored snapshot in electron/data/, refreshed from GitHub every 7 days with graceful fallback. Loaded once at app start; the in-memory map is queried by model-catalog.ts's resolveModelMeta(). Pure main-process module. */
+/**
+ * Model catalog loader. Source: models.dev (https://models.dev/api.json) — the
+ * opencode catalog, no auth, regenerated from TOML on every contribution.
+ * Loaded once at app start; the in-memory map is queried by model-catalog.ts's
+ * resolveModelMeta() and injected into model-capabilities.ts via setCatalog().
+ *
+ * The on-disk shape (bundled + cache) is a slim flattened wrapper:
+ *   { fetchedAt, source, count, models: { [catalogId]: RawCatalogEntry } }
+ * The raw models.dev API is nested { provider: { models: { id: {...} } } } and
+ * is flattened via flattenModelsDevApi() before it is written anywhere, so the
+ * bundled baseline, the runtime cache, and the in-memory map all share one
+ * uniform shape. Costs are stored per-million-token (models.dev units) in the
+ * file and converted to per-token in normalizeEntry(). Pure main-process module.
+ */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 
-/** Raw shape of one entry in the LiteLLM catalog JSON (only fields we use). */
+const CATALOG_URL = 'https://models.dev/api.json';
+
+/** One model as it appears in the flattened catalog file (only fields we use).
+ *  Costs are per-million-token (models.dev native units). */
 export interface RawCatalogEntry {
-  mode?: string;
-  litellm_provider?: string;
-  max_input_tokens?: number;
-  max_output_tokens?: number;
-  max_tokens?: number; // legacy alias for max_output_tokens
-  input_cost_per_token?: number;
-  output_cost_per_token?: number;
-  cache_read_input_token_cost?: number;
-  cache_creation_input_token_cost?: number;
-  supports_reasoning?: boolean;
-  supports_function_calling?: boolean;
-  supports_vision?: boolean;
-  supports_prompt_caching?: boolean;
-  // Many other fields exist in the catalog; we deliberately ignore them.
+  reasoning?: boolean;
+  tool_call?: boolean;
+  attachment?: boolean;
+  limit?: { context?: number; input?: number; output?: number };
+  cost?: {
+    input?: number;
+    output?: number;
+    cache_read?: number;
+    cache_write?: number;
+  };
   [key: string]: unknown;
 }
 
-/** Normalized entry after loading (only the Tier-1 fields we consume). */
+/** The nested models.dev API: { providerId: { id, models: { modelId: {...} } } }. */
+type RawModelsDevApi = Record<string, {
+  models?: Record<string, RawCatalogEntry>;
+}>;
+
+/** Flatten the nested models.dev API into a flat { catalogId: model } map,
+ *  keeping only the slim fields we consume. Duplicate ids across providers
+ *  collapse (last wins) — acceptable for a fallback catalog. Exported so the
+ *  refresh path and the vendor script share one canonical flattening. */
+export function flattenModelsDevApi(api: unknown): Record<string, RawCatalogEntry> {
+  const out: Record<string, RawCatalogEntry> = {};
+  if (!api || typeof api !== 'object') return out;
+  for (const provider of Object.values(api as Record<string, unknown>)) {
+    if (!provider || typeof provider !== 'object') continue;
+    const models = (provider as { models?: Record<string, unknown> }).models;
+    if (!models || typeof models !== 'object') continue;
+    for (const [id, model] of Object.entries(models)) {
+      if (!model || typeof model !== 'object') continue;
+      const m = model as RawCatalogEntry;
+      // Keep only the slim subset; drop description/name/release_date/etc.
+      out[id] = {
+        reasoning: m.reasoning,
+        tool_call: m.tool_call,
+        attachment: m.attachment,
+        limit: m.limit,
+        cost: m.cost,
+      };
+    }
+  }
+  return out;
+}
+
+/** Normalized entry after loading (only the fields we consume). */
 export interface CatalogEntry {
-  catalogId: string; // the canonical key, e.g. 'anthropic/claude-sonnet-4-5'
+  catalogId: string; // the canonical key, e.g. 'anthropic/claude-opus-4-7'
   mode: string;
+  /** Total context window (limit.context). The model's full input capacity. */
+  contextWindow: number;
+  /** Max input tokens the provider accepts (limit.input ?? limit.context).
+   *  Equals contextWindow for most providers; Google/OpenAI cap it lower. */
   maxInputTokens: number;
+  /** Max output tokens the model can generate (limit.output). */
   maxOutputTokens: number;
   inputCostPerToken: number; // 0 if absent
   outputCostPerToken: number; // 0 if absent
@@ -38,43 +87,56 @@ export interface CatalogEntry {
   supportsPromptCaching: boolean;
 }
 
-/** Version metadata from electron/data/model-prices-version.json. */
+/** Version metadata embedded at the top of the catalog file. */
 export interface CatalogVersion {
   fetchedAt: string;
   source: string;
   count: number;
 }
 
+/** On-disk catalog file shape (bundled baseline + runtime cache). */
+export interface CatalogFile {
+  fetchedAt: string;
+  source: string;
+  count: number;
+  models: Record<string, RawCatalogEntry>;
+}
+
 const REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const CACHE_FILENAME = 'model-prices.json';
-const CACHE_VERSION_FILENAME = 'model-prices-version.json';
-const CATALOG_URL =
-  'https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/litellm_internal_staging/model_prices_and_context_window.json';
 
-/** Normalizes a raw catalog entry into the Tier-1 CatalogEntry shape. */
+/** Convert models.dev per-Mtok cost to per-token. */
+function perToken(perMtok: number | undefined): number {
+  return (perMtok ?? 0) / 1_000_000;
+}
+
+/** Normalizes a raw catalog entry into the CatalogEntry shape. */
 function normalizeEntry(catalogId: string, raw: RawCatalogEntry): CatalogEntry {
+  const limit = raw.limit ?? {};
+  const cost = raw.cost ?? {};
+  const context = limit.context ?? 0;
+  const hasCache = cost.cache_read != null || cost.cache_write != null;
   return {
     catalogId,
-    mode: raw.mode ?? 'chat',
-    maxInputTokens: raw.max_input_tokens ?? 0,
-    // max_output_tokens preferred; legacy max_tokens as fallback.
-    maxOutputTokens: raw.max_output_tokens ?? raw.max_tokens ?? 0,
-    inputCostPerToken: raw.input_cost_per_token ?? 0,
-    outputCostPerToken: raw.output_cost_per_token ?? 0,
-    cacheReadInputTokenCost: raw.cache_read_input_token_cost ?? null,
-    cacheCreationInputTokenCost: raw.cache_creation_input_token_cost ?? null,
-    supportsReasoning: raw.supports_reasoning ?? false,
-    supportsFunctionCalling: raw.supports_function_calling ?? false,
-    supportsVision: raw.supports_vision ?? false,
-    supportsPromptCaching: raw.supports_prompt_caching ?? false,
+    mode: 'chat',
+    contextWindow: context,
+    maxInputTokens: limit.input ?? context,
+    maxOutputTokens: limit.output ?? 0,
+    inputCostPerToken: perToken(cost.input),
+    outputCostPerToken: perToken(cost.output),
+    cacheReadInputTokenCost: cost.cache_read != null ? perToken(cost.cache_read) : null,
+    cacheCreationInputTokenCost: cost.cache_write != null ? perToken(cost.cache_write) : null,
+    supportsReasoning: raw.reasoning ?? false,
+    supportsFunctionCalling: raw.tool_call ?? false,
+    supportsVision: raw.attachment ?? false,
+    supportsPromptCaching: hasCache,
   };
 }
 
-/** Parse + normalize raw JSON into the entries map. Strips sample_spec. */
+/** Parse + normalize the flattened model map into the entries map. */
 function buildCatalog(raw: Record<string, RawCatalogEntry>): Map<string, CatalogEntry> {
   const entries = new Map<string, CatalogEntry>();
   for (const [key, value] of Object.entries(raw)) {
-    if (key === 'sample_spec') continue;
     if (!value || typeof value !== 'object') continue;
     entries.set(key, normalizeEntry(key, value));
   }
@@ -86,91 +148,96 @@ export interface LoadedCatalog {
   version: CatalogVersion | null;
 }
 
-export interface LoaderPaths {
-  bundledPath: string;
-  bundledVersionPath: string;
+export interface LoaderConfig {
+  /** Inlined bundled baseline (imported JSON in main.ts). null in tests. */
+  bundled: CatalogFile | null;
+  /** Directory for the runtime cache file (appDataDir). */
   cacheDir: string;
 }
 
-export function createModelPricesLoader(paths: LoaderPaths) {
+export function createModelPricesLoader(config: LoaderConfig) {
   let cached: LoadedCatalog | null = null;
 
-  async function readWithVersion(
-    dataPath: string,
-    versionPath: string,
-  ): Promise<{ catalog: LoadedCatalog; fetchedAt: number } | null> {
-    if (!existsSync(dataPath)) return null;
+  /** Read the cache wrapper file. Returns null when absent or corrupt. */
+  async function readCache(): Promise<LoadedCatalog | null> {
+    const cachePath = path.join(config.cacheDir, CACHE_FILENAME);
+    if (!existsSync(cachePath)) return null;
     try {
-      const raw = JSON.parse(await readFile(dataPath, 'utf8')) as Record<
-        string,
-        RawCatalogEntry
-      >;
-      let version: CatalogVersion | null = null;
-      let fetchedAt = 0;
-      if (existsSync(versionPath)) {
-        try {
-          version = JSON.parse(await readFile(versionPath, 'utf8')) as CatalogVersion;
-          fetchedAt = Date.parse(version.fetchedAt) || 0;
-        } catch {
-          /* malformed version file — treat as age 0 */
-        }
-      }
-      return { catalog: { entries: buildCatalog(raw), version }, fetchedAt };
+      const file = JSON.parse(await readFile(cachePath, 'utf8')) as CatalogFile;
+      const version: CatalogVersion = {
+        fetchedAt: file.fetchedAt,
+        source: file.source,
+        count: file.count,
+      };
+      return { entries: buildCatalog(file.models ?? {}), version };
     } catch {
       return null; // corrupt JSON — treat as absent
     }
   }
 
+  /** Build a LoadedCatalog from the inlined bundled wrapper. */
+  function fromBundled(): LoadedCatalog | null {
+    if (!config.bundled) return null;
+    return {
+      entries: buildCatalog(config.bundled.models ?? {}),
+      version: {
+        fetchedAt: config.bundled.fetchedAt,
+        source: config.bundled.source,
+        count: config.bundled.count,
+      },
+    };
+  }
+
   async function load(): Promise<LoadedCatalog> {
     if (cached) return cached;
 
-    const cacheDataPath = path.join(paths.cacheDir, CACHE_FILENAME);
-    const cacheVersionPath = path.join(paths.cacheDir, CACHE_VERSION_FILENAME);
-
     const [cacheResult, bundledResult] = await Promise.all([
-      readWithVersion(cacheDataPath, cacheVersionPath),
-      readWithVersion(paths.bundledPath, paths.bundledVersionPath),
+      readCache(),
+      Promise.resolve(fromBundled()),
     ]);
 
     // Prefer whichever is newer. Bundled wins ties (reviewed baseline).
     let chosen: LoadedCatalog | null = null;
     if (cacheResult && bundledResult) {
-      chosen = cacheResult.fetchedAt > bundledResult.fetchedAt
-        ? cacheResult.catalog
-        : bundledResult.catalog;
+      chosen = Date.parse(cacheResult.version?.fetchedAt ?? '') >
+        Date.parse(bundledResult.version?.fetchedAt ?? '')
+        ? cacheResult
+        : bundledResult;
     } else {
-      chosen = cacheResult?.catalog ?? bundledResult?.catalog ?? null;
+      chosen = cacheResult ?? bundledResult;
     }
 
     cached = chosen ?? { entries: new Map(), version: null };
     return cached;
   }
 
-  /** Background refresh from GitHub. Never throws — on failure, keeps the
-   *  currently loaded catalog. Call this fire-and-forget after load(). */
-  async function refresh(): Promise<void> {
+  /** Background refresh from models.dev. Never throws — on failure, keeps the
+   *  currently loaded catalog. Call this fire-and-forget after load(). Returns
+   *  the refreshed catalog (or null on failure) so callers can re-inject it. */
+  async function refresh(): Promise<LoadedCatalog | null> {
     try {
       const res = await fetch(CATALOG_URL, { redirect: 'follow' });
-      if (!res.ok) return;
-      const text = await res.text();
-      const parsed = JSON.parse(text) as Record<string, RawCatalogEntry>;
-      const entries = buildCatalog(parsed);
-      if (entries.size < 100) return; // sanity check — abort on tiny payload
-      await mkdir(paths.cacheDir, { recursive: true });
-      await writeFile(path.join(paths.cacheDir, CACHE_FILENAME), text, 'utf8');
-      const version: CatalogVersion = {
+      if (!res.ok) return null;
+      const json = await res.json();
+      const flat = flattenModelsDevApi(json);
+      const entries = buildCatalog(flat);
+      if (entries.size < 100) return null; // sanity check — abort on tiny payload
+      const file: CatalogFile = {
         fetchedAt: new Date().toISOString(),
         source: CATALOG_URL,
         count: entries.size,
+        models: flat,
       };
-      await writeFile(
-        path.join(paths.cacheDir, CACHE_VERSION_FILENAME),
-        JSON.stringify(version, null, 2) + '\n',
-        'utf8',
-      );
-      cached = { entries, version };
+      await mkdir(config.cacheDir, { recursive: true });
+      await writeFile(path.join(config.cacheDir, CACHE_FILENAME), JSON.stringify(file), 'utf8');
+      cached = {
+        entries,
+        version: { fetchedAt: file.fetchedAt, source: file.source, count: file.count },
+      };
+      return cached;
     } catch {
       // Network failure, parse error, disk write error — all non-fatal.
+      return null;
     }
   }
 
@@ -181,5 +248,10 @@ export function createModelPricesLoader(paths: LoaderPaths) {
     return Date.now() - Date.parse(at) > REFRESH_INTERVAL_MS;
   }
 
-  return { load, refresh, isStale };
+  /** The currently loaded catalog (loads lazily if not yet loaded). */
+  async function getCatalog(): Promise<LoadedCatalog> {
+    return load();
+  }
+
+  return { load, refresh, isStale, getCatalog };
 }

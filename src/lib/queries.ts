@@ -110,7 +110,7 @@ export interface ModelOption {
   providerName: string;
   apiStyle: 'openai' | 'anthropic';
   contextWindow: number;
-  /** LiteLLM catalog canonical id, when the model was matched at fetch time. */
+  /** models.dev catalog canonical id, when the model was matched at fetch time. */
   catalogId?: string;
   /** "$in / $out per Mtok" price rate, when the catalog has pricing. */
   priceLabel?: string;
@@ -120,6 +120,9 @@ export interface ModelOption {
   reasoningMandatory?: boolean;
   /** Valid reasoning effort levels the model accepts, e.g. ['high','medium','low'] (live provider data). */
   supportedEfforts?: string[];
+  /** Max output tokens per response — subtracted from contextWindow to show
+   *  the real usable input budget in the context meter. */
+  maxCompletionTokens?: number;
 }
 
 /** Reasoning support — re-exported from the shared model-capabilities module. */
@@ -148,6 +151,7 @@ export function useModels(): { models: ModelOption[]; isLoading: boolean } {
         reasoningMandatory: m.reasoningMandatory,
         supportedEfforts: m.supportedEfforts,
         priceLabel: m.priceLabel,
+        maxCompletionTokens: m.max_completion_tokens,
       });
     }
   }
@@ -356,6 +360,17 @@ export function useGitBranchInfo(workspaceId: string | null, sessionId?: string 
     queryKey: key,
     queryFn: () => (workspaceId ? api.gitBranchInfo(workspaceId, sessionId ?? undefined) : Promise.resolve({ branch: null, headCommit: null })),
     enabled: !!workspaceId,
+  });
+}
+
+/** Recently checked-out branches (max 5, worktree-aware) for the branch switcher. */
+export function useGitRecentBranches(workspaceId: string | null, sessionId?: string | null, enabled = true) {
+  const key = ['gitRecentBranches', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitRecentBranches(workspaceId, sessionId ?? undefined) : Promise.resolve([])),
+    enabled: !!workspaceId && enabled,
+    staleTime: 5_000,
   });
 }
 

@@ -80,6 +80,7 @@ function disambiguate(
   const agree = hits.every((h) =>
     h.inputCostPerToken === first.inputCostPerToken &&
     h.outputCostPerToken === first.outputCostPerToken &&
+    h.contextWindow === first.contextWindow &&
     h.maxInputTokens === first.maxInputTokens,
   );
   if (agree) return first;
@@ -90,7 +91,12 @@ function disambiguate(
 }
 
 export interface ModelMeta {
+  /** Total context window (tokens). The model's full input capacity. */
   contextWindow: number;
+  /** Max input tokens the provider accepts. Equals contextWindow for most
+   *  providers, but some cap input below context − output. */
+  maxInputTokens: number;
+  /** Max output tokens the model can generate per response. */
   maxOutputTokens: number;
   supportsReasoning: boolean;
   supportsFunctionCalling: boolean;
@@ -128,6 +134,7 @@ export function resolveModelMeta(model: ModelRef, catalog: CatalogMap): ModelMet
   if (!entry) {
     return {
       contextWindow: model.contextWindow || 200000,
+      maxInputTokens: model.contextWindow || 200000,
       maxOutputTokens: CONSERVATIVE_MAX_OUTPUT,
       supportsReasoning: false,
       supportsFunctionCalling: true, // assume capable; callers guard separately
@@ -141,8 +148,14 @@ export function resolveModelMeta(model: ModelRef, catalog: CatalogMap): ModelMet
   }
 
   const validForMain = entry.mode === 'chat' || entry.mode === 'completion';
+  // contextWindow (limit.context) and maxInputTokens (limit.input ?? context)
+  // are distinct ceilings for some providers (Google/OpenAI cap input below
+  // context − output). Preserve both instead of collapsing to one.
+  const resolvedContext = entry.contextWindow || model.contextWindow || 200000;
+  const resolvedMaxInput = entry.maxInputTokens || resolvedContext;
   return {
-    contextWindow: entry.maxInputTokens || model.contextWindow || 200000,
+    contextWindow: resolvedContext,
+    maxInputTokens: resolvedMaxInput,
     maxOutputTokens: entry.maxOutputTokens || CONSERVATIVE_MAX_OUTPUT,
     supportsReasoning: entry.supportsReasoning,
     supportsFunctionCalling: entry.supportsFunctionCalling,

@@ -38,6 +38,11 @@ import { killAllBackgroundShells } from './agent/tools/background-shell.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
 import { registerSettingsHandlers } from './ipc/settings.js';
 import { registerExtensionsHandlers } from './ipc/extensions.js';
+import { initModelCatalog, enrichModelFromCatalog, getActiveCatalog } from './agent/model-capabilities.js';
+import { listProviders, updateProvider } from './store.js';
+// Inlined bundled models.dev catalog — Vite bundles this JSON into main.mjs so
+// the baseline ships with the app (electron/data isn't included in the build).
+import bundledModelCatalog from './data/model-prices.json';
 import { registerMcpHandlers } from './ipc/mcp.js';
 import { syncAllWorkspaceHooks } from './git-coauthor.js';
 import { initUserServers, initBuiltinServers } from './agent/mcp/pool.js';
@@ -51,9 +56,14 @@ const __dirname = path.dirname(__filename);
 
 const isDev = !app.isPackaged;
 
-// Register the `tide://` scheme as privileged BEFORE app ready: `standard` parses it like a normal URL, `secure` gives a same-origin context (cookies), and `supportFetchAPI` lets the MCP SDK fetch against it during the PKCE metadata-exchange step. Must run before app.whenReady() or it throws.
+// Dev uses `tide-dev://` so OAuth callbacks route to the dev instance, not the
+// installed Tide.app (which owns `tide://`). Prod keeps `tide://`.
+const PROTOCOL = isDev ? 'tide-dev' : 'tide';
+const OAUTH_CALLBACK = `${PROTOCOL}://oauth/callback`;
+
+// Register the protocol scheme as privileged BEFORE app ready: `standard` parses it like a normal URL, `secure` gives a same-origin context (cookies), and `supportFetchAPI` lets the MCP SDK fetch against it during the PKCE metadata-exchange step. Must run before app.whenReady() or it throws.
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'tide', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: PROTOCOL, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 const log = createLogger('main');
 
@@ -118,9 +128,9 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Block navigation away from the app — except tide:// OAuth callbacks.
+  // Block navigation away from the app — except OAuth callbacks.
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (url.startsWith('tide://oauth/callback')) {
+    if (url.startsWith(OAUTH_CALLBACK)) {
       handleOAuthCallback(url);
       return; // don't preventDefault — let it fail silently
     }
@@ -137,31 +147,33 @@ function createWindow() {
 
 // ── App lifecycle ─────────────────────────────────────────────
 
-const gotLock = app.requestSingleInstanceLock();
+// In dev, skip the single-instance lock so a dev server can run alongside the
+// installed Tide.app (which holds the prod lock). Prod still enforces one instance.
+const gotLock = isDev || app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  // Register open-url BEFORE whenReady — on macOS, a tide:// callback that
+  // Register open-url BEFORE whenReady — on macOS, an OAuth callback that
   // launches the app fires open-url during launch, before ready. If we
   // register inside whenReady, the event is missed and OAuth fails in dev.
   // Queue any URLs that arrive before the handler is ready.
   const earlyOAuthUrls: string[] = [];
   app.on('open-url', (event, url) => {
-    if (url.startsWith('tide://oauth/callback')) {
+    if (url.startsWith(OAUTH_CALLBACK)) {
       event.preventDefault();
-      log.info('open-url: tide:// callback received', { url: url.slice(0, 50) + '…' });
+      log.info('open-url: OAuth callback received', { url: url.slice(0, 50) + '…' });
       earlyOAuthUrls.push(url);
     }
   });
 
   app.on('second-instance', (_event, argv, _workingDirectory, _additionalData) => {
-    // On Windows/Linux the OS relaunches Tide with the `tide://` callback URL
+    // On Windows/Linux the OS relaunches the app with the OAuth callback URL
     // as the last argv arg (macOS uses `open-url` instead). Forward OAuth
     // callbacks to the primary instance's handler; non-oauth second launches
     // just focus the window.
     const lastArg = argv[argv.length - 1];
-    if (lastArg?.startsWith('tide://oauth/callback')) {
-      log.info('second-instance: tide:// callback received', { url: lastArg.slice(0, 50) + '…' });
+    if (lastArg?.startsWith(OAUTH_CALLBACK)) {
+      log.info('second-instance: OAuth callback received', { url: lastArg.slice(0, 50) + '…' });
       handleOAuthCallback(lastArg);
     }
     if (mainWindow) {
@@ -169,6 +181,26 @@ if (!gotLock) {
       mainWindow.focus();
     }
   });
+
+  /** One-time migration: enrich existing provider-config models with
+   *  authoritative contextWindow, max output, reasoning, and pricing from the
+   *  models.dev catalog. Runs after initModelCatalog() at boot. Idempotent —
+   *  models with a catalogId are skipped, so user edits are preserved. */
+  async function enrichExistingModels() {
+    const catalog = getActiveCatalog();
+    if (!catalog || catalog.size === 0) return;
+    let enriched = 0;
+    for (const p of listProviders()) {
+      let changed = false;
+      const models = p.models.map((m) => {
+        const e = enrichModelFromCatalog(m, catalog);
+        if (e) { changed = true; enriched++; return e; }
+        return m;
+      });
+      if (changed) updateProvider(p.id, { models });
+    }
+    if (enriched > 0) log.info('enriched models from catalog', { count: enriched });
+  }
 
   app.whenReady().then(() => {
     const t0 = Date.now();
@@ -185,19 +217,14 @@ if (!gotLock) {
       app.setAppUserModelId('com.tide.app');
     }
 
-    // Claim the `tide://` protocol for OAuth callbacks.
-    // In dev, DON'T call setAsDefaultProtocolClient — it registers the bare
-    // Electron binary as the handler, so macOS opens a new empty Electron
-    // window on tide:// redirects. Instead, rely on open-url (which fires in
-    // the existing instance if LaunchServices can identify it) and the
-    // will-navigate interceptor on the main window.
-    if (!isDev) {
-      app.setAsDefaultProtocolClient('tide');
-    }
+    // Claim the protocol for OAuth callbacks. In dev this registers
+    // `tide-dev://` — safe because it doesn't collide with the installed
+    // Tide.app's `tide://`. Prod registers `tide://`.
+    app.setAsDefaultProtocolClient(PROTOCOL);
 
-    // Intercept tide:// at the protocol level — catches in-app navigations.
-    protocol.handle('tide', (request) => {
-      log.info('protocol.handle: tide:// intercepted', { url: request.url.slice(0, 50) + '…' });
+    // Intercept the protocol at the protocol level — catches in-app navigations.
+    protocol.handle(PROTOCOL, (request) => {
+      log.info('protocol.handle: OAuth intercepted', { url: request.url.slice(0, 50) + '…' });
       handleOAuthCallback(request.url);
       return new Response('OK', { status: 200 });
     });
@@ -210,9 +237,9 @@ if (!gotLock) {
     earlyOAuthUrls.length = 0;
     // Subsequent open-url events (same-session) go directly to the handler.
     app.on('open-url', (event, url) => {
-      if (url.startsWith('tide://oauth/callback')) {
+      if (url.startsWith(OAUTH_CALLBACK)) {
         event.preventDefault();
-        log.info('open-url: tide:// callback received (post-ready)', { url: url.slice(0, 50) + '…' });
+        log.info('open-url: OAuth callback received (post-ready)', { url: url.slice(0, 50) + '…' });
         handleOAuthCallback(url);
       }
     });
@@ -245,6 +272,11 @@ if (!gotLock) {
       // a provider's /models returns bare ids (z.ai, OpenAI direct), we enrich
       // them from this catalog. Fire-and-forget; cached to disk, refreshed weekly.
       void bootstrapCatalog();
+      // Load the models.dev catalog (bundled baseline, refreshed weekly) so the
+      // runtime token budget + capability lookups resolve real limits for models
+      // whose provider-config entry omits contextWindow / max_completion_tokens.
+      void initModelCatalog({ bundled: bundledModelCatalog, cacheDir: appDataDir() })
+        .then(enrichExistingModels);
       registerChatHandlers();
       registerAgentSdkHandlers(ipcMain);
       registerScriptHandlers();

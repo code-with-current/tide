@@ -359,6 +359,8 @@ function ProviderFormDialog({
       return next;
     });
 
+  useCatalogEnrichment(rows, updateRow);
+
   const detectProtocol = async () => {
     if (!baseUrl.trim() || !apiKey.trim()) return;
     setDetecting(true);
@@ -563,7 +565,7 @@ function ProviderFormDialog({
                             className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
                             value={row.modelId}
                             onChange={(e) =>
-                              updateRow(i, { modelId: e.target.value })
+                              updateRow(i, modelIdChangePatch(row, e.target.value))
                             }
                             placeholder="model-id"
                           />
@@ -689,7 +691,7 @@ export interface Row {
   alias: string;
   modelId: string;
   context: string;
-  /** LiteLLM catalog canonical id, set when the row came from the Fetch Models
+  /** LiteLLM/models.dev catalog canonical id, set when the row came from the Fetch Models
    *  dialog with a confident match. Enables O(1) metadata lookup at runtime. */
   catalogId?: string;
   /** "$in / $out per Mtok" price label, set when the row came from the Fetch
@@ -830,6 +832,8 @@ function ProviderDetail({
       next[i] = { ...next[i], ...patch };
       return next;
     });
+
+  useCatalogEnrichment(rows, updateRow);
 
   return (
     <div className="flex flex-col h-full">
@@ -995,7 +999,7 @@ function ProviderDetail({
                             className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
                             value={row.modelId}
                             onChange={(e) =>
-                              updateRow(i, { modelId: e.target.value })
+                              updateRow(i, modelIdChangePatch(row, e.target.value))
                             }
                             placeholder="model-id"
                           />
@@ -1259,9 +1263,74 @@ export function appendFetchedModels(
   return [...prev, ...fresh];
 }
 
-// (The catalog resolve path — toFetchedModel + its inline interfaces — was
-// removed when provider /models became the sole metadata source. Provider data
-// is used directly via liveToFetchedModel; bare-id models are added as 'none'.)
+/**
+ * Debounced catalog enrichment for model rows. Watches for rows with a
+ * modelId but no catalogId, resolves each against the models.dev catalog via
+ * IPC, and fills in context / reasoning / price when a match is found. Skips
+ * rows that already have a catalogId (enriched) or whose modelId has already
+ * been tried (avoids redundant IPC calls + infinite update loops).
+ *
+ * Used by all three provider forms (onboarding, add dialog, edit detail) so
+ * a manually-typed model ID like "glm-5.2" gets the same metadata as one
+ * added via Fetch Models.
+ */
+export function useCatalogEnrichment(
+  rows: Row[],
+  updateRow: (i: number, patch: Partial<Row>) => void,
+) {
+  const triedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const pending = rows
+      .map((r, i) => ({ i, id: r.modelId.trim(), row: r }))
+      .filter(({ id, row }) => id.length > 0 && !row.catalogId && !triedRef.current.has(id));
+
+    if (pending.length === 0) return;
+
+    const timer = setTimeout(() => {
+      for (const { i, id, row } of pending) {
+        triedRef.current.add(id);
+        void api
+          .resolveModelCatalog({ modelId: id, contextWindow: parseInt(row.context, 10) || 0 })
+          .then((res) => {
+            if (!res?.meta?.resolvedCatalogId) return;
+            updateRow(i, {
+              catalogId: res.meta.resolvedCatalogId,
+              context: row.context || String(res.meta.contextWindow),
+              reasoning: res.meta.supportsReasoning || row.reasoning,
+              priceLabel: row.priceLabel ?? (res.meta.pricing ? formatPriceRate(res.meta.pricing) : undefined),
+              inputCostPerToken: row.inputCostPerToken ?? res.meta.pricing?.inputPerToken,
+              outputCostPerToken: row.outputCostPerToken ?? res.meta.pricing?.outputPerToken,
+            });
+          });
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+    // Key on row modelIds so the timer resets while typing, but triedRef
+    // prevents re-resolution of already-attempted IDs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+}
+
+/**
+ * Build the row patch for a modelId input change. If the row was
+ * catalog-enriched (has a catalogId), changing the modelId invalidates the
+ * enrichment — clear all catalog-sourced fields so useCatalogEnrichment can
+ * re-resolve the new ID. Pass the current row + the new value.
+ */
+export function modelIdChangePatch(row: Row, value: string): Partial<Row> {
+  if (!row.catalogId) return { modelId: value };
+  return {
+    modelId: value,
+    catalogId: undefined,
+    context: "",
+    reasoning: undefined,
+    priceLabel: undefined,
+    inputCostPerToken: undefined,
+    outputCostPerToken: undefined,
+  };
+}
 
 /** True when a provider model entry carries rich metadata beyond a bare id.
  *  OpenRouter populates these; OpenAI/Anthropic direct + LM Studio do not. */
@@ -1322,7 +1391,7 @@ function liveToFetchedModel(m: ProviderModelMeta): FetchedModel {
   };
 }
 
-/** Fetch-models button — probes the provider's /models endpoint, resolves each result against the LiteLLM catalog, and opens a grouped dialog (✅ MATCHED / ⚠ AMBIGUOUS / — NONE) where the user multi-selects models to add. baseUrl/apiKey come from the form's current state so it works in the add form before the provider is saved. Errors show inline next to the button (no modal). */
+/** Fetch-models button — probes the provider's /models endpoint, resolves each result against the models.dev catalog, and opens a grouped dialog (✅ MATCHED / ⚠ AMBIGUOUS / — NONE) where the user multi-selects models to add. baseUrl/apiKey come from the form's current state so it works in the add form before the provider is saved. Errors show inline next to the button (no modal). */
 export function FetchModelsButton({
   apiStyle,
   baseUrl,
@@ -1366,10 +1435,30 @@ export function FetchModelsButton({
     // Bare-id responses (OpenAI/Anthropic direct, LM Studio) → add as-is
     // (no catalog fallback; the user can edit context manually).
     const live = probed.filter(isRichProviderModel).map(liveToFetchedModel);
-    const bare = probed
-      .filter((m) => !isRichProviderModel(m))
-      .map((m): FetchedModel => ({ modelId: m.id, matchState: "none" }));
-    setAvailable([...live, ...bare]);
+    const bareIds = probed.filter((m) => !isRichProviderModel(m));
+    // Enrich bare-id models against the models.dev catalog — bare providers
+    // (z.ai, OpenAI/Anthropic direct, LM Studio) return only an id, but the
+    // catalog can fill in context, reasoning, and pricing so the user sees
+    // metadata immediately in the dialog instead of after adding.
+    const enriched = await Promise.all(
+      bareIds.map(async (m): Promise<FetchedModel> => {
+        const cat = await api.resolveModelCatalog({ modelId: m.id, contextWindow: 0 });
+        if (cat?.meta?.resolvedCatalogId) {
+          return {
+            modelId: m.id,
+            matchState: "none",
+            catalogId: cat.meta.resolvedCatalogId,
+            contextWindow: cat.meta.contextWindow,
+            reasoning: cat.meta.supportsReasoning,
+            priceLabel: cat.meta.pricing ? formatPriceRate(cat.meta.pricing) : undefined,
+            inputCostPerToken: cat.meta.pricing?.inputPerToken,
+            outputCostPerToken: cat.meta.pricing?.outputPerToken,
+          };
+        }
+        return { modelId: m.id, matchState: "none" };
+      }),
+    );
+    setAvailable([...live, ...enriched]);
     setSelected({});
     setState({ status: "idle" });
   };
@@ -1456,7 +1545,7 @@ export function FetchModelsButton({
             </DialogTitle>
             <DialogDescription className="text-[11px] mt-0.5">
               Live data from the provider where available; auto-matched against
-              the LiteLLM catalog otherwise.
+              the models.dev catalog otherwise.
             </DialogDescription>
           </DialogHeader>
 
@@ -1510,7 +1599,7 @@ export function FetchModelsButton({
                   tone="muted"
                   label="Available models"
                   count={grouped.available.length}
-                  hint="no metadata"
+                  hint={grouped.available.some((m) => m.catalogId) ? "catalog-enriched" : "no metadata"}
                 >
                   {grouped.available.map((m) => (
                     <FetchRow
@@ -1523,6 +1612,12 @@ export function FetchModelsButton({
                         }))
                       }
                       modelId={m.modelId}
+                      reasoning={m.reasoning}
+                      meta={
+                        m.contextWindow
+                          ? `${formatContext(m.contextWindow)} ctx${m.priceLabel ? " · " + m.priceLabel : ""}`
+                          : m.priceLabel
+                      }
                     />
                   ))}
                 </FetchSection>

@@ -560,6 +560,26 @@ body {
   }
 }
 
+/* Pill shimmer — a translucent highlight band sweeps across the surface of a
+   floating pill (e.g. the auto-retry indicator). Layers on top of an existing
+   background-color via background-image; respects border-radius. */
+.animate-shimmer-pill {
+  background-image: linear-gradient(
+    110deg,
+    transparent 30%,
+    color-mix(in oklab, var(--color-foreground) 12%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer-pill {
+    animation: none;
+    background-image: none;
+  }
+}
+
 /* Heartbeat — scale + glow pulse for "in-progress" status dots. */
 @keyframes heartbeat {
   0%,

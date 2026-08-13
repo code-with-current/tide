@@ -443,7 +443,7 @@ export async function probeProviderModels(input: {
   return { ok: false, error: 'IPC unavailable' };
 }
 
-/** Resolve a model against the LiteLLM catalog — returns match state + full
+/** Resolve a model against the models.dev catalog — returns match state + full
  *  metadata. Used by the Fetch Models dialog to enrich rows with price /
  *  context / capabilities. Returns null when IPC is unavailable. */
 export async function resolveModelCatalog(input: {
@@ -593,6 +593,18 @@ export async function gitStashList(workspaceId: string, sessionId?: string): Pro
 export async function gitBranchInfo(workspaceId: string, sessionId?: string): Promise<{ branch: string | null; headCommit: string | null }> {
   if (ipc) return ipc.gitBranchInfo(workspaceId, sessionId);
   return { branch: null, headCommit: null };
+}
+export async function gitRecentBranches(workspaceId: string, sessionId?: string): Promise<string[]> {
+  if (ipc) return ipc.gitRecentBranches(workspaceId, sessionId);
+  return [];
+}
+export async function gitCheckout(workspaceId: string, branch: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitCheckout(workspaceId, branch, sessionId);
+  return { ok: false };
+}
+export async function gitCreateBranch(workspaceId: string, branchName: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitCreateBranch(workspaceId, branchName, sessionId);
+  return { ok: false };
 }
 export async function gitStage(workspaceId: string, filePath: string, stage: boolean, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
   if (ipc) return ipc.gitStage(workspaceId, filePath, stage, sessionId);
