@@ -6,6 +6,7 @@ function entry(id: string, over: Partial<CatalogEntry> = {}): CatalogEntry {
   return {
     catalogId: id,
     mode: 'chat',
+    contextWindow: 200000,
     maxInputTokens: 200000,
     maxOutputTokens: 8192,
     inputCostPerToken: 3e-6,

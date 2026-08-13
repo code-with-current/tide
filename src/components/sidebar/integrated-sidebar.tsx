@@ -90,6 +90,23 @@ function IntegratedSidebarImpl() {
   const setScreen = useUi((s) => s.setScreen);
   const runningSessionIds = useUi((s) => s.runningSessionIds);
   const unreadSessionIds = useUi((s) => s.unreadSessionIds);
+  const terminalPorts = useUi((s) => s.terminalPorts);
+  const allTerminals = useUi((s) => s.terminals);
+
+  // Sessions → port numbers (dev servers running).
+  const sessionPorts = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const [sid, terms] of Object.entries(allTerminals)) {
+      const ports: number[] = [];
+      for (const t of terms) {
+        for (const p of terminalPorts[t.id] ?? []) {
+          if (!ports.includes(p.port)) ports.push(p.port);
+        }
+      }
+      if (ports.length > 0) map.set(sid, ports.sort((a, b) => a - b));
+    }
+    return map;
+  }, [allTerminals, terminalPorts]);
   const openDialog = useUi((s) => s.openDialog);
   const isMac = typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
 
@@ -140,7 +157,7 @@ function IntegratedSidebarImpl() {
           <WorkspaceTreeItem key={ws.id} ws={ws}
             isActive={ws.id === activeWorkspaceId} isExpanded={ws.id === activeWorkspaceId || expanded.has(ws.id)}
             isSwitching={switchingTo === ws.id} activeSessionId={activeSessionId}
-            runningIds={runningSessionIds} unreadIds={unreadSessionIds}
+            runningIds={runningSessionIds} unreadIds={unreadSessionIds} sessionPorts={sessionPorts}
             onToggle={() => toggleExpand(ws.id)} onSelect={() => selectWorkspace(ws.id)}
             onSelectSession={(sid) => selectSession(ws.id, sid)} onNewSession={() => newSession(ws.id)}
           />
@@ -179,12 +196,12 @@ function IntegratedSidebarImpl() {
 }
 
 function WorkspaceTreeItem({
-  ws, isActive, isExpanded, isSwitching, activeSessionId, runningIds, unreadIds,
+  ws, isActive, isExpanded, isSwitching, activeSessionId, runningIds, unreadIds, sessionPorts,
   onToggle, onSelect, onSelectSession, onNewSession,
 }: {
   ws: { id: string; name: string; path: string };
   isActive: boolean; isExpanded: boolean; isSwitching: boolean;
-  activeSessionId: string | null; runningIds: string[]; unreadIds: string[];
+  activeSessionId: string | null; runningIds: string[]; unreadIds: string[]; sessionPorts: Map<string, number[]>;
   onToggle: () => void; onSelect: () => void;
   onSelectSession: (sessionId: string) => void; onNewSession: () => void;
 }) {
@@ -253,7 +270,7 @@ function WorkspaceTreeItem({
           {sorted.slice(0, 20).map((s, idx) => (
             <SessionTreeItem key={s.id} session={s} workspaceId={ws.id}
               isLast={idx === Math.min(sorted.length, 20) - 1}
-              isActive={s.id === activeSessionId} isRunning={runningIds.includes(s.id)} isUnread={unreadIds.includes(s.id)}
+              isActive={s.id === activeSessionId} isRunning={runningIds.includes(s.id)} isUnread={unreadIds.includes(s.id)} ports={sessionPorts.get(s.id)}
               onSelect={() => onSelectSession(s.id)} />
           ))}
           {sorted.length > 20 && <div style={{ paddingLeft: '25px' }} className="py-0.5 text-[0.7rem] text-muted-foreground/40">+{sorted.length - 20} more</div>}
@@ -265,9 +282,9 @@ function WorkspaceTreeItem({
 }
 
 function SessionTreeItem({
-  session, workspaceId, isLast, isActive, isRunning, isUnread, onSelect,
+  session, workspaceId, isLast, isActive, isRunning, isUnread, ports, onSelect,
 }: {
-  session: SessionLite; workspaceId: string; isLast: boolean; isActive: boolean; isRunning: boolean; isUnread: boolean; onSelect: () => void;
+  session: SessionLite; workspaceId: string; isLast: boolean; isActive: boolean; isRunning: boolean; isUnread: boolean; ports?: number[]; onSelect: () => void;
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(session.title);
@@ -291,33 +308,62 @@ function SessionTreeItem({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div role="button" onClick={onSelect}
-          className={cn('group/s flex items-center pr-1 py-2 rounded-md cursor-pointer transition-colors min-w-0',
+          className={cn('group/s rounded-md cursor-pointer transition-colors min-w-0',
             isActive ? 'text-sidebar-foreground font-medium' : 'hover:bg-secondary/40 text-muted-foreground')}
-          style={{ paddingLeft: '25px' }}>
-          <span className={cn("text-muted-foreground/30 text-[0.7rem] font-mono select-none flex-shrink-0 leading-none mr-1.5", isActive && 'text-sidebar-foreground font-medium')}>{isLast ? '└─' : '├─'}</span>
-          {isRenaming ? (
-            <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onBlur={doRename}
-              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') { setIsRenaming(false); setRenameValue(session.title); } }}
-              autoFocus className="flex-1 h-5 text-[0.78rem] bg-input border border-input rounded px-1 py-1 outline-none focus:border-primary/60" />
-          ) : (
-            <span className={cn('text-[0.85rem] truncate flex-1 pr-2', isActive && 'text-sidebar-foreground font-medium')}>{session.title || 'Untitled'}</span>
+          style={{ paddingLeft: '25px', paddingRight: '4px' }}>
+          {/* ── Top row: tree prefix + title + status ── */}
+          <div className="flex items-center py-1.5">
+            <span className={cn("text-muted-foreground/30 text-[0.7rem] font-mono select-none flex-shrink-0 leading-none mr-1.5", isActive && 'text-sidebar-foreground font-medium')}>{isLast ? '└─' : '├─'}</span>
+            {isRenaming ? (
+              <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onBlur={doRename}
+                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') { setIsRenaming(false); setRenameValue(session.title); } }}
+                autoFocus className="flex-1 h-5 text-[0.78rem] bg-input border border-input rounded px-1 py-1 outline-none focus:border-primary/60" />
+            ) : (
+              <span className={cn('text-[0.85rem] truncate flex-1 pr-2', isActive && 'text-sidebar-foreground font-medium')}>{session.title || 'Untitled'}</span>
+            )}
+            {isRunning ? (
+              <ElapsedBadge startedAt={runningSinceRef.current} />
+            ) : archiveConfirm.confirming ? (
+              <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveSession.mutate(session.id); }} />
+            ) : (
+              <>
+                <span className="text-[0.7rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums group-hover/s:hidden">{formatLastChat(session.updatedAt)}</span>
+                {!(ports && ports.length > 0) && (
+                  <Tip label="Archive" side="top">
+                    <button type="button" aria-label="Archive session"
+                      onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
+                      className="hidden group-hover/s:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                      <Archive className="size-3.5" />
+                    </button>
+                  </Tip>
+                )}
+              </>
+            )}
+          </div>
+          {/* ── Bottom row: port indicators ── */}
+          {ports && ports.length > 0 && (
+            <div className="flex items-center gap-1.5 pb-1.5 pl-5">
+              {/* Normal: just dots. Hover: full port pills. */}
+              <div className="flex items-center gap-1 group-hover/s:hidden">
+                {ports.map((p) => (
+                  <span key={p} className="size-1.5 rounded-full bg-success animate-pulse" />
+                ))}
+              </div>
+              <div className="hidden group-hover/s:flex items-center gap-1">
+                {ports.map((p) => (
+                  <Tip key={p} label={`:${p}`} side="top">
+                    <span className="inline-flex items-center gap-1 h-4 px-1.5 rounded-full text-[0.6rem] font-mono font-medium text-success bg-success/10 border border-success/20">
+                      <span className="size-1 rounded-full bg-success" />
+                      :{p}
+                    </span>
+                  </Tip>
+                ))}
+              </div>
+            </div>
           )}
-          {isRunning ? (
-            <ElapsedBadge startedAt={runningSinceRef.current} />
-          ) : archiveConfirm.confirming ? (
-            <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveSession.mutate(session.id); }} />
-          ) : (
-            <>
-              {isUnread && <span className="size-1.5 rounded-full bg-success flex-shrink-0 group-hover/s:hidden" />}
-              <span className="text-[0.7rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums group-hover/s:hidden">{formatLastChat(session.updatedAt)}</span>
-              <Tip label="Archive" side="top">
-                <button type="button" aria-label="Archive session"
-                  onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
-                  className="hidden group-hover/s:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
-                  <Archive className="size-3.5" />
-                </button>
-              </Tip>
-            </>
+          {/* ── Unread indicator (inline on top row, no ports) ── */}
+          {isUnread && !(ports && ports.length > 0) && !isRunning && !archiveConfirm.confirming && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 size-1.5 rounded-full bg-success group-hover/s:hidden" />
           )}
         </div>
       </ContextMenuTrigger>

@@ -25,6 +25,7 @@ import {
 import {
   PROTOCOL, ApiStylePicker, EndpointPreview, FetchModelsButton,
   SectionLabel, FormField, appendFetchedModels,
+  useCatalogEnrichment, modelIdChangePatch,
   type Row,
 } from './settings/providers/providers';
 import { Card, CardContent } from '../ui/card';
@@ -220,6 +221,8 @@ function ProviderStep({
       return next;
     });
 
+  useCatalogEnrichment(rows, updateRow);
+
   // Validation: form is complete when name, baseUrl, apiKey are filled AND
   // at least one model has a modelId (alias-only rows don't count — the agent
   // can't call a model without knowing its ID).
@@ -339,7 +342,7 @@ function ProviderStep({
                         </TableCell>
                         <TableCell className="py-1 pr-1">
                           <input className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                            value={row.modelId} onChange={(e) => updateRow(i, { modelId: e.target.value })} placeholder="model-id" />
+                            value={row.modelId} onChange={(e) => updateRow(i, modelIdChangePatch(row, e.target.value))} placeholder="model-id" />
                         </TableCell>
                         <TableCell className="py-1 pr-1">
                           {row.catalogId ? (

@@ -1,4 +1,4 @@
-/** LLM session-title generation: uses the SAME provider+model+protocol as the session's chat turn — no separate model resolution, no system-model fallback. Returns null (caller keeps placeholder) on any failure. Fire-and-forget, best-effort. */
+/** Best-effort session title generation using the session's own provider+model. Returns null on failure. */
 import { generateText } from 'ai';
 import { resolveModel } from './provider-factory.js';
 import { resolveProtocolOptions } from './protocols/index.js';
@@ -36,7 +36,7 @@ export interface TitleModelSource {
   modelId: string;
 }
 
-/** Generate a session title using the session's own provider+model (same resolution path as the orchestrator). @returns cleaned title or null. */
+/** @returns cleaned title or null */
 export async function generateSessionTitle(
   firstMessage: string,
   source: TitleModelSource,
@@ -50,7 +50,6 @@ export async function generateSessionTitle(
   }
 
   try {
-    // Mirror the orchestrator's exact model + protocol resolution.
     const model = resolveModel(source.provider, { modelId: source.modelId, contextWindow: 0 } as any);
     const modelEntry = source.provider.models.find((m) => m.modelId === source.modelId);
     const proto = resolveProtocolOptions(
@@ -64,7 +63,9 @@ export async function generateSessionTitle(
       system: TITLE_SYSTEM,
       prompt,
       providerOptions: proto.providerOptions,
-      maxOutputTokens: Math.min(proto.maxOutputTokens, 80),
+      // Reasoning models burn tokens on internal reasoning; too small a budget
+      // leaves nothing for the title text. Title is sliced to 80 chars below.
+      maxOutputTokens: Math.min(proto.maxOutputTokens, 1024),
       abortSignal: AbortSignal.timeout(30_000),
     });
 
@@ -73,6 +74,16 @@ export async function generateSessionTitle(
       .replace(/^["'`]+|["'`.]+$/g, '')
       .replace(/\s*[.\s]+$/, '')
       .slice(0, 80);
+    if (!clean) {
+      const usage = (result as any).usage;
+      log.warn('title-gen returned empty text', {
+        provider: source.provider.id,
+        modelId: source.modelId,
+        reasoningTokens: usage?.reasoningTokens ?? usage?.completionTokensDetails?.reasoningTokens,
+        totalTokens: usage?.totalTokens,
+        finishReason: (result as any).finishReason,
+      });
+    }
     return clean || null;
   } catch (e: any) {
     log.warn('title-gen failed', { err: e?.message, provider: source.provider.id, modelId: source.modelId });

@@ -4,39 +4,29 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 // We test against a synthetic in-memory catalog by injecting fixture data
-// into a temp userData dir, rather than depending on the real vendored file.
-// This keeps the loader tests fast and deterministic.
+// into a temp cache dir, rather than depending on the real vendored file.
+// Fixtures use the slim models.dev shape the loader consumes.
 
-const FIXTURE = {
-  'sample_spec': { mode: 'chat' }, // must be stripped
-  'anthropic/claude-sonnet-4-5': {
-    mode: 'chat',
-    litellm_provider: 'anthropic',
-    max_input_tokens: 200000,
-    max_output_tokens: 16000,
-    input_cost_per_token: 3e-6,
-    output_cost_per_token: 15e-6,
-    cache_read_input_token_cost: 3e-7,
-    cache_creation_input_token_cost: 3.75e-6,
-    supports_reasoning: true,
-    supports_function_calling: true,
-    supports_vision: true,
-    supports_prompt_caching: true,
-  },
-  'openai/gpt-5': {
-    mode: 'chat',
-    max_input_tokens: 200000,
-    max_output_tokens: 128000,
-    input_cost_per_token: 1.25e-6,
-    output_cost_per_token: 10e-6,
-    supports_function_calling: true,
-  },
-  'amazon.titan-embed-text-v1': {
-    mode: 'embedding',
-    max_input_tokens: 8192,
-    input_cost_per_token: 1e-7,
-    output_cost_per_token: 0,
-    output_vector_size: 1536,
+const BUNDLED = {
+  fetchedAt: '2026-01-01T00:00:00Z',
+  source: 'test',
+  count: 2,
+  models: {
+    'anthropic/claude-opus-4-7': {
+      reasoning: true,
+      tool_call: true,
+      attachment: true,
+      limit: { context: 1000000, output: 128000 },
+      cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+    },
+    'openai/gpt-5.5': {
+      reasoning: true,
+      tool_call: true,
+      attachment: true,
+      // input capped below context (Google/OpenAI-style three-limit model).
+      limit: { context: 1050000, input: 922000, output: 128000 },
+      cost: { input: 5, output: 30 },
+    },
   },
 };
 
@@ -45,50 +35,35 @@ describe('model-prices loader', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tide-catalog-'));
-    fs.writeFileSync(
-      path.join(tmpDir, 'bundled-model-prices.json'),
-      JSON.stringify(FIXTURE),
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, 'bundled-model-prices-version.json'),
-      JSON.stringify({ fetchedAt: '2026-01-01T00:00:00Z', source: 'test', count: 4 }),
-    );
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('loads the bundled catalog and strips sample_spec', async () => {
+  it('loads the bundled catalog', async () => {
     const { createModelPricesLoader } = await import('../agent/model-prices.js');
-    const loader = createModelPricesLoader({
-      bundledPath: path.join(tmpDir, 'bundled-model-prices.json'),
-      bundledVersionPath: path.join(tmpDir, 'bundled-model-prices-version.json'),
-      cacheDir: tmpDir,
-    });
+    const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
-    expect(catalog.entries.has('sample_spec')).toBe(false);
-    expect(catalog.entries.has('anthropic/claude-sonnet-4-5')).toBe(true);
+    expect(catalog.entries.has('anthropic/claude-opus-4-7')).toBe(true);
+    expect(catalog.version?.count).toBe(2);
   });
 
-  it('normalizes raw entries into CatalogEntry shape', async () => {
+  it('normalizes raw models.dev entries into CatalogEntry shape (per-Mtok → per-token)', async () => {
     const { createModelPricesLoader } = await import('../agent/model-prices.js');
-    const loader = createModelPricesLoader({
-      bundledPath: path.join(tmpDir, 'bundled-model-prices.json'),
-      bundledVersionPath: path.join(tmpDir, 'bundled-model-prices-version.json'),
-      cacheDir: tmpDir,
-    });
+    const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
-    const e = catalog.entries.get('anthropic/claude-sonnet-4-5')!;
+    const e = catalog.entries.get('anthropic/claude-opus-4-7')!;
     expect(e).toEqual({
-      catalogId: 'anthropic/claude-sonnet-4-5',
+      catalogId: 'anthropic/claude-opus-4-7',
       mode: 'chat',
-      maxInputTokens: 200000,
-      maxOutputTokens: 16000,
-      inputCostPerToken: 3e-6,
-      outputCostPerToken: 15e-6,
-      cacheReadInputTokenCost: 3e-7,
-      cacheCreationInputTokenCost: 3.75e-6,
+      contextWindow: 1000000,
+      maxInputTokens: 1000000,
+      maxOutputTokens: 128000,
+      inputCostPerToken: 5e-6,
+      outputCostPerToken: 25e-6,
+      cacheReadInputTokenCost: 5e-7,
+      cacheCreationInputTokenCost: 6.25e-6,
       supportsReasoning: true,
       supportsFunctionCalling: true,
       supportsVision: true,
@@ -96,53 +71,63 @@ describe('model-prices loader', () => {
     });
   });
 
+  it('preserves the separate context/input ceilings when limit.input is present', async () => {
+    const { createModelPricesLoader } = await import('../agent/model-prices.js');
+    const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
+    const catalog = await loader.load();
+    const e = catalog.entries.get('openai/gpt-5.5')!;
+    expect(e.contextWindow).toBe(1050000);
+    expect(e.maxInputTokens).toBe(922000); // capped below context
+    expect(e.maxOutputTokens).toBe(128000);
+  });
+
   it('prefers a newer cached copy over the bundled one', async () => {
     fs.writeFileSync(
       path.join(tmpDir, 'model-prices.json'),
-      JSON.stringify({ 'openai/gpt-5': { mode: 'chat', max_input_tokens: 300000 } }),
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, 'model-prices-version.json'),
-      JSON.stringify({ fetchedAt: '2026-06-01T00:00:00Z', source: 'test', count: 1 }),
+      JSON.stringify({
+        fetchedAt: '2026-06-01T00:00:00Z',
+        source: 'test',
+        count: 1,
+        models: {
+          'openai/gpt-5.5': { tool_call: true, limit: { context: 300000, output: 8000 } },
+        },
+      }),
     );
     const { createModelPricesLoader } = await import('../agent/model-prices.js');
-    const loader = createModelPricesLoader({
-      bundledPath: path.join(tmpDir, 'bundled-model-prices.json'),
-      bundledVersionPath: path.join(tmpDir, 'bundled-model-prices-version.json'),
-      cacheDir: tmpDir,
-    });
+    const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
-    expect(catalog.entries.has('anthropic/claude-sonnet-4-5')).toBe(false);
-    expect(catalog.entries.get('openai/gpt-5')!.maxInputTokens).toBe(300000);
+    expect(catalog.entries.has('anthropic/claude-opus-4-7')).toBe(false);
+    expect(catalog.entries.get('openai/gpt-5.5')!.contextWindow).toBe(300000);
   });
 
   it('falls back to bundled when cache is older than bundled', async () => {
     fs.writeFileSync(
       path.join(tmpDir, 'model-prices.json'),
-      JSON.stringify({ 'stale-only': { mode: 'chat' } }),
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, 'model-prices-version.json'),
-      JSON.stringify({ fetchedAt: '2025-01-01T00:00:00Z', source: 'test', count: 1 }),
+      JSON.stringify({
+        fetchedAt: '2025-01-01T00:00:00Z',
+        source: 'test',
+        count: 1,
+        models: { 'stale-only': { limit: { context: 1000 } } },
+      }),
     );
     const { createModelPricesLoader } = await import('../agent/model-prices.js');
-    const loader = createModelPricesLoader({
-      bundledPath: path.join(tmpDir, 'bundled-model-prices.json'),
-      bundledVersionPath: path.join(tmpDir, 'bundled-model-prices-version.json'),
-      cacheDir: tmpDir,
-    });
+    const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
-    expect(catalog.entries.has('anthropic/claude-sonnet-4-5')).toBe(true);
+    expect(catalog.entries.has('anthropic/claude-opus-4-7')).toBe(true);
   });
 
   it('returns an empty catalog when both sources are missing', async () => {
     const { createModelPricesLoader } = await import('../agent/model-prices.js');
-    const loader = createModelPricesLoader({
-      bundledPath: path.join(tmpDir, 'does-not-exist.json'),
-      bundledVersionPath: path.join(tmpDir, 'does-not-exist-version.json'),
-      cacheDir: tmpDir,
-    });
+    const loader = createModelPricesLoader({ bundled: null, cacheDir: tmpDir });
     const catalog = await loader.load();
     expect(catalog.entries.size).toBe(0);
+  });
+
+  it('isStale is true for a bundled baseline older than the refresh interval', async () => {
+    const { createModelPricesLoader } = await import('../agent/model-prices.js');
+    const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
+    await loader.load();
+    // BUNDLED.fetchedAt is 2026-01-01 — well over 7 days ago relative to now.
+    expect(loader.isStale()).toBe(true);
   });
 });

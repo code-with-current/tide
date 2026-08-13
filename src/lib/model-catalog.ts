@@ -3,8 +3,9 @@
 
 /** Normalized catalog entry (Tier-1 fields only). Inlined from electron/agent/model-prices.ts. */
 export interface CatalogEntry {
-  catalogId: string; // the canonical key, e.g. 'anthropic/claude-sonnet-4-5'
+  catalogId: string; // the canonical key, e.g. 'anthropic/claude-opus-4-7'
   mode: string;
+  contextWindow: number;
   maxInputTokens: number;
   maxOutputTokens: number;
   inputCostPerToken: number; // 0 if absent
@@ -95,6 +96,7 @@ function disambiguate(
   const agree = hits.every((h) =>
     h.inputCostPerToken === first.inputCostPerToken &&
     h.outputCostPerToken === first.outputCostPerToken &&
+    h.contextWindow === first.contextWindow &&
     h.maxInputTokens === first.maxInputTokens,
   );
   if (agree) return first;
@@ -106,6 +108,7 @@ function disambiguate(
 
 export interface ModelMeta {
   contextWindow: number;
+  maxInputTokens: number;
   maxOutputTokens: number;
   supportsReasoning: boolean;
   supportsFunctionCalling: boolean;
@@ -143,6 +146,7 @@ export function resolveModelMeta(model: ModelRef, catalog: CatalogMap): ModelMet
   if (!entry) {
     return {
       contextWindow: model.contextWindow || 200000,
+      maxInputTokens: model.contextWindow || 200000,
       maxOutputTokens: CONSERVATIVE_MAX_OUTPUT,
       supportsReasoning: false,
       supportsFunctionCalling: true, // assume capable; callers guard separately
@@ -156,8 +160,13 @@ export function resolveModelMeta(model: ModelRef, catalog: CatalogMap): ModelMet
   }
 
   const validForMain = entry.mode === 'chat' || entry.mode === 'completion';
+  // contextWindow (limit.context) and maxInputTokens (limit.input ?? context)
+  // are distinct ceilings for some providers. Preserve both.
+  const resolvedContext = entry.contextWindow || model.contextWindow || 200000;
+  const resolvedMaxInput = entry.maxInputTokens || resolvedContext;
   return {
-    contextWindow: entry.maxInputTokens || model.contextWindow || 200000,
+    contextWindow: resolvedContext,
+    maxInputTokens: resolvedMaxInput,
     maxOutputTokens: entry.maxOutputTokens || CONSERVATIVE_MAX_OUTPUT,
     supportsReasoning: entry.supportsReasoning,
     supportsFunctionCalling: entry.supportsFunctionCalling,

@@ -15,7 +15,7 @@ export interface StoredProvider {
   /** Encrypted API key (base64 of encrypted bytes when safeStorage is available). */
   encryptedKey: string | null;
   enabled: boolean;
-  models: { id: string; alias: string; modelId: string; contextWindow: number; providerId: string; role?: string; catalogId?: string; reasoning?: boolean; reasoningMandatory?: boolean; supportedEfforts?: string[]; priceLabel?: string; inputCostPerToken?: number; outputCostPerToken?: number; cacheReadCostPerToken?: number; cacheWriteCostPerToken?: number }[];
+  models: { id: string; alias: string; modelId: string; contextWindow: number; providerId: string; role?: string; catalogId?: string; reasoning?: boolean; reasoningMandatory?: boolean; supportedEfforts?: string[]; priceLabel?: string; inputCostPerToken?: number; outputCostPerToken?: number; cacheReadCostPerToken?: number; cacheWriteCostPerToken?: number; max_completion_tokens?: number; maxInputTokens?: number }[];
 }
 
 export interface Config {
@@ -260,7 +260,7 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     apiStyle: 'openai' | 'anthropic';
     baseUrl: string;
     apiKey?: string;
-    models?: { alias: string; modelId: string; contextWindow: number; catalogId?: string; reasoning?: boolean; reasoningMandatory?: boolean; supportedEfforts?: string[]; priceLabel?: string; inputCostPerToken?: number; outputCostPerToken?: number; cacheReadCostPerToken?: number; cacheWriteCostPerToken?: number }[];
+    models?: { alias: string; modelId: string; contextWindow: number; catalogId?: string; reasoning?: boolean; reasoningMandatory?: boolean; supportedEfforts?: string[]; priceLabel?: string; inputCostPerToken?: number; outputCostPerToken?: number; cacheReadCostPerToken?: number; cacheWriteCostPerToken?: number; max_completion_tokens?: number; maxInputTokens?: number }[];
   }): Provider {
     const cfg = read();
     const id = `p_${Math.random().toString(36).slice(2, 10)}`;

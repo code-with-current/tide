@@ -34,7 +34,7 @@ export interface Model {
   providerId: string;
   /** Optional routing role: which operation this model is the default for. */
   role?: 'main' | 'summarization' | 'embedding';
-  /** LiteLLM catalog canonical id (e.g. 'anthropic/claude-sonnet-4-5'). Set
+  /** models.dev catalog canonical id (e.g. 'anthropic/claude-opus-4-7'). Set
    *  during the Fetch Models dialog match flow; enables O(1) metadata lookup
    *  at runtime. Absent = no catalog match (manual/fallback metadata). */
   catalogId?: string;
@@ -61,9 +61,17 @@ export interface Model {
   cacheReadCostPerToken?: number;
   /** Raw per-token cache-write cost (USD), when the provider reports it. */
   cacheWriteCostPerToken?: number;
+  /** Max output tokens the model can generate per response. Overrides the
+   *  catalog value when set (sourced from provider /models or manual config).
+   *  Used for compaction budget calculation: usable input = context − this. */
+  max_completion_tokens?: number;
+  /** Max input tokens the provider accepts, when it differs from the context
+   *  window (some providers cap input below context − output). When absent,
+   *  falls back to contextWindow. Used for compaction budget calculation. */
+  maxInputTokens?: number;
 }
 
-/** Rich metadata for a model from a provider's /models endpoint. OpenRouter populates all fields; OpenAI/Anthropic direct + LM Studio return only `id` (bare). The probe handler returns an array; FetchModelsButton uses the rich fields directly when present and falls back to the LiteLLM catalog for bare-id entries. */
+/** Rich metadata for a model from a provider's /models endpoint. OpenRouter populates all fields; OpenAI/Anthropic direct + LM Studio return only `id` (bare). The probe handler returns an array; FetchModelsButton uses the rich fields directly when present and falls back to the models.dev catalog for bare-id entries. */
 export interface ProviderModelMeta {
   id: string;
   /** Display name (OpenRouter "name"). */
@@ -97,8 +105,8 @@ export interface ProviderModelMeta {
 
 /** A user-defined shell command bound to a workspace lifecycle. */
 export interface WorkspaceScript {
-  /** 'setup' = runs on first open / fresh clone; 'run' = ad-hoc; 'delete' = runs before removal. */
-  kind: 'setup' | 'run' | 'delete';
+  /** 'setup' = install script (runs on first open); 'run' = dev server script. */
+  kind: 'setup' | 'run';
   /** Shell command to execute. */
   command: string;
 }

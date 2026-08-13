@@ -9,9 +9,11 @@ import { workspaces as mockWorkspaces, sessionsByWorkspace, allSessions, fileTre
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry';
+import { resolveModelMeta, matchModelToCatalog } from '../agent/model-catalog.js';
+import { getActiveCatalog } from '../agent/model-capabilities.js';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList } from './git.js';
+import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches } from './git.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
@@ -236,6 +238,36 @@ export function registerIpcHandlers() {
     platform: `${process.platform} ${os.release()} ${process.arch}`,
     userDataPath: appDataDir(),
   }));
+
+  // Resolve a model against the loaded models.dev catalog — the Fetch Models
+  // dialog uses this to enrich rows with price / context / capabilities. With
+  // no catalog loaded, returns a conservative-fallback meta + no match.
+  ipcMain.handle(
+    'tide:modelCatalog:resolve',
+    async (_e, input: { catalogId?: string; modelId: string; contextWindow: number }) => {
+      const catalog = getActiveCatalog();
+      if (!catalog) {
+        return {
+          meta: {
+            contextWindow: input.contextWindow || 200000,
+            maxInputTokens: input.contextWindow || 200000,
+            maxOutputTokens: 8192,
+            supportsReasoning: false,
+            supportsFunctionCalling: true,
+            supportsPromptCaching: false,
+            supportsVision: false,
+            mode: 'chat',
+            isValidForMainRole: true,
+            pricing: null,
+            resolvedCatalogId: null,
+          },
+          match: { state: 'none' as const, matches: [] },
+        };
+      }
+      const ref = { catalogId: input.catalogId, modelId: input.modelId, contextWindow: input.contextWindow };
+      return { meta: resolveModelMeta(ref, catalog), match: matchModelToCatalog(input.modelId, catalog) };
+    },
+  );
 
   // External file picker — for the Attach button. Returns multiple file paths.
   ipcMain.handle('tide:pickFiles', async (e) => {
@@ -1232,6 +1264,28 @@ export function registerIpcHandlers() {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { branch: null, headCommit: null };
     try { return await branchInfo(root); } catch { return { branch: null, headCommit: null }; }
+  });
+
+  // Recently checked-out branches (max 5) for the top-bar branch switcher.
+  ipcMain.handle('tide:gitRecentBranches', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await recentBranches(root); } catch { return []; }
+  });
+
+  // Checkout a branch (worktree-aware). Returns { ok, error? }.
+  handle('tide:gitCheckout', async (_e, workspaceId: string, branch: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    try { await gitCheckout(root, branch); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
+  });
+
+  handle('tide:gitCreateBranch', async (_e, workspaceId: string, branchName: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    try { await gitCreateBranch(root, branchName); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
   });
 
   handle('tide:gitStage', async (_e, workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => {

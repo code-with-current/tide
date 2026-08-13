@@ -936,7 +936,7 @@ export function MainScreen() {
                       {/* Retry indicator — floating above the composer while
                           the orchestrator auto-retries a failed request. */}
                       {retry && (
-                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary border border-border shadow-lg text-xs">
+                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary border border-border shadow-lg text-xs animate-shimmer-pill overflow-hidden">
                           <svg className="size-3.5 -rotate-90" viewBox="0 0 36 36">
                             <circle cx="18" cy="18" r="15" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted/30" />
                             <circle

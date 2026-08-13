@@ -1,14 +1,16 @@
 /** OAuth authProvider for MCP remote servers. Credentials stored in config.json:
  *  user-scoped servers use the top-level mcpOAuth; project-scoped servers use
  *  the workspace object's mcpOAuth (per-workspace isolation).
- *  Uses tide://oauth/callback for the redirect URI in both dev and production. */
-import { safeStorage } from 'electron';
+ *  Uses tide://oauth/callback (prod) or tide-dev://oauth/callback (dev) as the
+ *  redirect URI. */
+import { app, safeStorage } from 'electron';
 import * as store from '../../store.js';
 import { createLogger } from '../../logger';
 
 const log = createLogger('mcp/oauth');
 
-const REDIRECT_URL = 'tide://oauth/callback';
+const PROTOCOL = app.isPackaged ? 'tide' : 'tide-dev';
+const REDIRECT_URL = `${PROTOCOL}://oauth/callback`;
 
 const pendingAuthUrls = new Map<string, URL>();
 

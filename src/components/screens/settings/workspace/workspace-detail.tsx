@@ -55,13 +55,6 @@ const SCRIPT_META: Record<
     hint: 'Default command for the "Run" action.',
     placeholder: "npm run dev",
   },
-  delete: {
-    label: "Cleanup",
-    icon: <Trash2 className="size-3" />,
-    tone: "text-destructive",
-    hint: "Runs before the workspace is removed.",
-    placeholder: "git worktree prune",
-  },
 };
 
 
@@ -93,7 +86,6 @@ export function WorkspaceColumn({
     workspace.scripts.find((s) => s.kind === kind)?.command ?? "";
   const [setupCmd, setSetupCmd] = useState(initialCmd("setup"));
   const [runCmd, setRunCmd] = useState(initialCmd("run"));
-  const [deleteCmd, setDeleteCmd] = useState(initialCmd("delete"));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -103,8 +95,6 @@ export function WorkspaceColumn({
     if (setupCmd.trim())
       scripts.push({ kind: "setup", command: setupCmd.trim() });
     if (runCmd.trim()) scripts.push({ kind: "run", command: runCmd.trim() });
-    if (deleteCmd.trim())
-      scripts.push({ kind: "delete", command: deleteCmd.trim() });
     try {
       await api.updateWorkspace(workspace.id, {
         name: name.trim() || workspace.name,
@@ -202,18 +192,16 @@ export function WorkspaceColumn({
       {/* Scripts */}
       <SettingsGroup title="Scripts">
         <Card>
-          {(["setup", "run", "delete"] as const).map((kind, i) => {
+          {(["setup", "run"] as const).map((kind, i) => {
             const meta = SCRIPT_META[kind];
             const [val, setVal] =
               kind === "setup"
                 ? [setupCmd, setSetupCmd]
-                : kind === "run"
-                  ? [runCmd, setRunCmd]
-                  : [deleteCmd, setDeleteCmd];
+                : [runCmd, setRunCmd];
             return (
               <div
                 key={kind}
-                className={cn("px-4 py-3", i < 2 && "border-b border-input")}
+                className={cn("px-4 py-3", i < 1 && "border-b border-input")}
               >
                 <div
                   className={cn(
@@ -251,7 +239,6 @@ export function WorkspaceColumn({
             setWorktreeLocation(workspace.worktreeLocation);
             setSetupCmd(initialCmd("setup"));
             setRunCmd(initialCmd("run"));
-            setDeleteCmd(initialCmd("delete"));
           }}
         >
           <RefreshCw className="size-3" /> Reset
@@ -278,7 +265,6 @@ export function WorkspaceColumn({
               </div>
               <div className="text-[11px] text-muted-foreground/60 mt-0.5">
                 Removes from Tide. Disk repo untouched.
-                {deleteCmd && " Cleanup script runs first."}
               </div>
             </div>
             <Button

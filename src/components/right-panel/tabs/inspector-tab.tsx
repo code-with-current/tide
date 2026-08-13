@@ -307,6 +307,12 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
   const maxSteps = agentSettings?.maxSteps ?? 100;
   const model = useModelOption(null, session.modelId);
   const contextWindow = model?.contextWindow ?? 200_000;
+  // Usable input budget = context − maxOutputTokens. The provider subtracts
+  // max_tokens from the available input, so the real ceiling is smaller than
+  // the raw context window. When we don't know maxOutputTokens, fall back to
+  // the full window (no reserve shown).
+  const maxOutput = model?.maxCompletionTokens ?? 0;
+  const usableInput = Math.max(1, contextWindow - maxOutput);
 
   // While streaming, use the live step usage; after completion, use the
   // persisted last-turn usage (the last step's actual input).
@@ -314,10 +320,10 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
     ? (streamFields.usage ?? session.lastTurnUsage ?? session.usage)
     : (session.lastTurnUsage ?? session.usage);
 
-  // Context window fill = input tokens only.
+  // Context window fill = input tokens only, measured against the usable budget.
   const liveContext = u.inputTokens;
-  const pctUsed = Math.min(100, (liveContext / contextWindow) * 100);
-  const seg = (n: number) => Math.min(100, (n / contextWindow) * 100);
+  const pctUsed = Math.min(100, (liveContext / usableInput) * 100);
+  const seg = (n: number) => Math.min(100, (n / usableInput) * 100);
   const meterSegments = [
     { label: 'Cache read', tokens: u.cacheRead, pct: seg(u.cacheRead), cls: 'bg-slate-500' },
     { label: 'Input', tokens: Math.max(0, u.inputTokens - u.cacheRead), pct: seg(Math.max(0, u.inputTokens - u.cacheRead)), cls: 'bg-sky-400' },
@@ -374,7 +380,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
         <div className="flex items-baseline justify-between text-[0.65rem] mb-1.5">
           <span className="font-semibold uppercase tracking-wider text-muted-foreground">Context fill</span>
           <span className="font-mono text-muted-foreground">
-            <span className="text-foreground text-[0.75rem] font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(contextWindow)} ·{' '}
+            <span className="text-foreground text-[0.75rem] font-semibold">{formatNumber(liveContext)}</span> / {formatNumber(usableInput)}{maxOutput > 0 && <span className="text-muted-foreground/60"> (−{formatNumber(maxOutput)} out)</span>} ·{' '}
             <span className={pctUsed >= CONTEXT_WARN_PCT ? 'text-amber-300 text-[0.75rem]' : 'text-[0.75rem]'}>{pctUsed.toFixed(1)}%</span>
           </span>
         </div>
