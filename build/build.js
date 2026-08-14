@@ -34,11 +34,6 @@ const options = {
     //     for browser inference. In Node/Electron the CPU provider is used
     //     via onnxruntime-node, so these are dead weight.
     '!**/node_modules/@xenova/transformers/dist/*.wasm',
-    //   - sharp (~24 MB) is pulled in for image preprocessing that Tide never
-    //     does — it only embeds source code.
-    '!**/node_modules/sharp/**',
-    '!**/node_modules/@img/**',
-    '!**/node_modules/sharp-libvips*/**',
     //   - Strip source maps and TypeScript declarations from production builds.
     //     They bloat the asar by ~20 MB and are useless at runtime.
     '!**/*.map',

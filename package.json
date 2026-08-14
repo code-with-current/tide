@@ -53,9 +53,6 @@
       "!**/node_modules/onnxruntime-web/**/*.wasm",
       "!**/node_modules/onnxruntime-web/dist/ort-wasm*.jsep.mjs",
       "!**/node_modules/@xenova/transformers/dist/*.wasm",
-      "!**/node_modules/sharp/**",
-      "!**/node_modules/@img/**",
-      "!**/node_modules/sharp-libvips*/**",
       "!**/*.map",
       "!**/*.d.ts"
     ],
@@ -160,5 +157,10 @@
   },
   "optionalDependencies": {
     "node-mac-permissions": "^2.5.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "sharp": "file:./build/sharp-stub"
+    }
   }
 }
