@@ -138,8 +138,8 @@ jobs:
           cp ../manifests/winget/*.yaml "$MANIFEST_DIR/"
 
           git add -A
-          git commit -m "Add ${PKG_ID} version ${VERSION}"
-          git push -u origin "$BRANCH"
+          git commit -m "Add ${PKG_ID} version ${VERSION}" || true
+          git push -u origin "$BRANCH" --force
 
           # Open PR to microsoft/winget-pkgs from the org fork.
           gh pr create \
