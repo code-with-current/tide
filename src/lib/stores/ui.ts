@@ -114,6 +114,17 @@ export interface ComposerAttachment {
  *  Zustand's selector sees a "new" snapshot every render and loops. */
 export const EMPTY_COMPOSER_ATTACHMENTS: ComposerAttachment[] = [];
 
+/** A draft (unsent) session. Created the moment the user types in the
+ *  new-session composer; shows in the session list as "(draft) …" until
+ *  the message is sent (promoted to a real Session) or the text is cleared.
+ *  The composer text itself lives in `composerDrafts[id]` — this record
+ *  only holds list metadata. Runtime only — not persisted. */
+export interface DraftSession {
+  id: string;
+  workspaceId: string;
+  updatedAt: number;
+}
+
 /** Default empty stream state. Used as the fallback when no entry exists
  *  for a session — selectors return this rather than undefined so consumers
  *  don't need null checks. Module-level for stable identity (prevents
@@ -277,8 +288,15 @@ interface UiState {
   composerPendingReads: Record<string, number>;
   /** Per-session plain-text draft (keyed by sessionId, or COMPOSER_NEW_KEY).
    *  Restored into the contentEditable on mount so in-progress typing survives
-   *  session switches. Runtime only — not persisted. */
+   *  session switches. Persisted to localStorage so drafts survive restarts. */
   composerDrafts: Record<string, string>;
+
+  /** Draft (unsent) sessions, keyed by draft id. Each entry's text lives in
+   *  `composerDrafts[id]`; this map holds only list metadata. Persisted. */
+  draftSessions: Record<string, DraftSession>;
+  /** The draft currently loaded in the new-session composer (null on the
+   *  chat screen or before any new-session screen has been shown). */
+  activeDraftId: string | null;
 
   /** Session ids whose title is currently being LLM-generated. Drives a
    *  shimmer animation on the sidebar title while the fire-and-forget
@@ -291,6 +309,21 @@ interface UiState {
   clearComposerAttachments: (key: string) => void;
   bumpComposerPendingReads: (key: string, delta: number) => void;
   setComposerDraft: (key: string, text: string) => void;
+
+  // Draft (unsent) session lifecycle — backs the "Drafts" section of the
+  // session list. Text is stored in composerDrafts[id]; these manage the
+  // list entries + which draft the new-session composer is bound to.
+  /** Open a fresh blank new-session composer (new activeDraftId). */
+  startNewDraft: () => void;
+  /** Create/update the active draft from live composer text; removes the
+   *  draft entry when text is empty so the list stays clean. */
+  touchDraft: (workspaceId: string, text: string) => void;
+  /** Load an existing draft into the new-session composer. */
+  selectDraft: (id: string) => void;
+  /** Remove the active draft (called after it's promoted to a real session). */
+  consumeDraft: () => void;
+  /** Permanently delete a draft by id. */
+  deleteDraft: (id: string) => void;
   /** Title-generation flag actions (shimmer on the sidebar title). */
   addTitleGenerating: (sessionId: string) => void;
   removeTitleGenerating: (sessionId: string) => void;
@@ -462,6 +495,8 @@ export const useUi = create<UiState>()(
   composerAttachments: {},
   composerPendingReads: {},
   composerDrafts: {},
+  draftSessions: {},
+  activeDraftId: null,
   titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
 
@@ -495,6 +530,56 @@ export const useUi = create<UiState>()(
     })),
   setComposerDraft: (key, text) =>
     set((s) => ({ composerDrafts: { ...s.composerDrafts, [key]: text } })),
+
+  startNewDraft: () => {
+    const workspaceId = get().activeWorkspaceId;
+    // Only assign a draft slot when there's a workspace to bind it to —
+    // the no-workspace screen shows a placeholder, not a composer.
+    set({
+      activeDraftId: workspaceId ? crypto.randomUUID() : null,
+      activeSessionId: null,
+      mainView: 'new',
+    });
+  },
+  touchDraft: (workspaceId, text) => {
+    const id = get().activeDraftId;
+    if (!id) return;
+    // Empty text → drop the list entry (the draft id persists in
+    // activeDraftId so the composer keeps its slot; it just hides from
+    // the list until the user types again).
+    if (!text.trim()) {
+      if (!get().draftSessions[id]) return;
+      const { [id]: _d, ...rest } = get().draftSessions;
+      set({ draftSessions: rest });
+      return;
+    }
+    set({
+      draftSessions: {
+        ...get().draftSessions,
+        [id]: { id, workspaceId, updatedAt: Date.now() },
+      },
+    });
+  },
+  selectDraft: (id) => {
+    set({ activeDraftId: id, activeSessionId: null, mainView: 'new' });
+  },
+  consumeDraft: () => {
+    const id = get().activeDraftId;
+    if (!id) return;
+    const { [id]: _ds, ...restDrafts } = get().draftSessions;
+    const { [id]: _cd, ...restComposer } = get().composerDrafts;
+    set({ draftSessions: restDrafts, composerDrafts: restComposer, activeDraftId: null });
+  },
+  deleteDraft: (id) => {
+    const { [id]: _ds, ...restDrafts } = get().draftSessions;
+    const { [id]: _cd, ...restComposer } = get().composerDrafts;
+    const patch: Partial<UiState> = {
+      draftSessions: restDrafts,
+      composerDrafts: restComposer,
+    };
+    if (get().activeDraftId === id) patch.activeDraftId = null;
+    set(patch);
+  },
   // Set-based add/remove so the sidebar title re-renders (and starts/stops
   // shimmering) the instant the flag flips. New Set identity each update so
   // Zustand's shallow-equality subscribers detect the change.
@@ -511,7 +596,7 @@ export const useUi = create<UiState>()(
       return { titleGeneratingSessionIds: next };
     }),
   setActiveWorkspace: (activeWorkspaceId) =>
-    set({ activeWorkspaceId, activeSessionId: null, mainView: 'new', sessionsPanelOpen: true }),
+    set({ activeWorkspaceId, activeSessionId: null, activeDraftId: null, mainView: 'new', sessionsPanelOpen: true }),
   setActiveSession: (activeSessionId) => {
     const now = Date.now();
     const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
@@ -1003,7 +1088,6 @@ export const useUi = create<UiState>()(
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         fileViewerWidth: s.fileViewerWidth,
-        terminalOpen: s.terminalOpen,
         terminalHeight: s.terminalHeight,
         terminals: s.terminals,
         fontScale: s.fontScale,
@@ -1014,12 +1098,24 @@ export const useUi = create<UiState>()(
         reasoningView: s.reasoningView,
         chatView: s.chatView,
         activeTerminal: s.activeTerminal,
+        // Draft sessions + their composer text persist across restarts so
+        // unsent drafts survive. activeDraftId is runtime-only — the app
+        // restores the last real session on startup, not a draft slot.
+        draftSessions: s.draftSessions,
+        composerDrafts: s.composerDrafts,
         // shortcutOverrides is intentionally NOT persisted here — it lives in
         // settings.json (via the tide:settings:* IPC) so it's shared across
         // windows and platform-aware. Hydrated by loadShortcuts() at startup.
       }),
       // Don't restore screen — splash always routes first to validate providers/workspaces.
       // mainView is also runtime state — start at 'new' each load.
+      // terminalOpen is forced false on every startup — the terminal should
+      // only open via the explicit Terminal button, never auto-restored.
+      merge: (persistedState, current) => ({
+        ...current,
+        ...(persistedState as Partial<UiState>),
+        terminalOpen: false,
+      }),
       version: 1,
     },
   ),

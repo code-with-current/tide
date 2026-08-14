@@ -29,10 +29,8 @@ const commandPalette: Action = () => {
 };
 
 const newSession: Action = () => {
-  // Clear active session and show the new-session view.
-  const ui = useUi.getState();
-  ui.setActiveSession(null);
-  ui.setMainView('new');
+  // Clear active session and show a fresh new-session composer.
+  useUi.getState().startNewDraft();
   return true;
 };
 

@@ -22,8 +22,21 @@ export function EmptyChatState({
   isStreaming?: boolean;
 }) {
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
+  const activeDraftId = useUi((s) => s.activeDraftId);
+  const startNewDraft = useUi((s) => s.startNewDraft);
+  const touchDraft = useUi((s) => s.touchDraft);
   const { data: workspaces } = useWorkspaces();
   const workspace = workspaces?.find((w) => w.id === activeWorkspaceId);
+
+  // Ensure the new-session composer always has a draft slot bound to the
+  // active workspace (so typed text shows as a draft in the session list).
+  // Re-runs when the workspace changes — startNewDraft needs activeWorkspaceId
+  // to assign a slot, and on startup the workspace may not be set yet when
+  // this component first mounts (splash-screen IPC restore is async).
+  useEffect(() => {
+    if (!activeDraftId) startNewDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId]);
 
   // ── Worktree config state ──
   // Disabled by default — worktree isolation is opt-in per session. The user
@@ -73,7 +86,10 @@ export function EmptyChatState({
   }, [showSettings, activeWorkspaceId]);
 
   return (
-    <div className="flex-1 overflow-y-auto scroll">
+    <div className="flex-1 overflow-y-auto scroll relative">
+      {/* Invisible drag region — keeps the window movable on macOS
+          now that the top bar is hidden on this screen. */}
+      <div className="drag-region absolute inset-x-0 top-0 h-10 z-10" />
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 gap-6 min-h-full">
         {/* Workspace context strip */}
         {workspace && (
@@ -94,17 +110,22 @@ export function EmptyChatState({
 
         {/* Hero */}
         <div className="flex flex-col items-center gap-1.5">
-          <h2 className="text-2xl font-semibold tracking-tight">Start a new session</h2>
-          <p className="text-sm text-muted-foreground">What do you want to work on?</p>
+          <h2 className="text-2xl font-semibold tracking-tight text-center">
+            Let's build something great{workspace ? <> on <span className="pl-2 text-primary italic">"{workspace.name}"</span></> : ' — what are we working on?'}
+          </h2>
         </div>
 
         {/* Composer */}
         <div className="w-full max-w-[40rem]">
           <ChatComposer
+            key={activeDraftId ?? '__new__'}
             compact={false}
             placeholder="Describe what you want to build, fix, or explain…"
             inProgress={isStreaming}
-            onChange={setComposerText}
+            onChange={(text) => {
+              setComposerText(text);
+              touchDraft(activeWorkspaceId ?? '', text);
+            }}
             onSubmit={(payload) => {
               if (!payload.text.trim()) return;
               onSend?.({

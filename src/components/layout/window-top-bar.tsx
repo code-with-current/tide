@@ -55,7 +55,6 @@ export function WindowTopBar() {
   const activeSessionId = useUi((s) => s.activeSessionId);
   const mainView = useUi((s) => s.mainView);
   const addTerminal = useUi((s) => s.addTerminal);
-  const toggleTerminalOpen = useUi((s) => s.toggleTerminal);
   const allTerminals = useUi((s) => s.terminals);
   const terminalPorts = useUi((s) => s.terminalPorts);
 
@@ -214,8 +213,7 @@ export function WindowTopBar() {
     const sid = activeSessionId ?? activeWorkspaceId;
     if (!sid) return;
     addTerminal(sid, cmd.slice(0, 40), cmd);
-    if (!useUi.getState().terminalOpen) toggleTerminalOpen();
-  }, [activeSessionId, activeWorkspaceId, addTerminal, toggleTerminalOpen]);
+  }, [activeSessionId, activeWorkspaceId, addTerminal]);
 
   const toggleScript = useCallback(async (cmd: string) => {
     if (!activeWorkspaceId) return;
@@ -235,9 +233,8 @@ export function WindowTopBar() {
         return;
       }
       addTerminal(activeSessionId ?? activeWorkspaceId, `Run: ${cmd.slice(0, 30)}`);
-      toggleTerminalOpen();
     }
-  }, [activeWorkspaceId, activeSessionId, isRunning, addTerminal, toggleTerminalOpen]);
+  }, [activeWorkspaceId, activeSessionId, isRunning, addTerminal]);
 
   // Resize: enter compact mode below the threshold, and auto-close the right
   // panel so the chat keeps room. We never force it back open — the user
@@ -254,6 +251,9 @@ export function WindowTopBar() {
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
+
+  // New-session screen: hide the top bar entirely.
+  if (mainView !== 'chat') return null;
 
   return (
     <div

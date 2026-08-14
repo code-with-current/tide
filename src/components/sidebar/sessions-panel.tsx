@@ -69,7 +69,12 @@ export function SessionsPanel() {
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const activeSessionId = useUi((s) => s.activeSessionId);
   const setActiveSession = useUi((s) => s.setActiveSession);
-  const setMainView = useUi((s) => s.setMainView);
+  const startNewDraft = useUi((s) => s.startNewDraft);
+  const draftSessions = useUi((s) => s.draftSessions);
+  const composerDrafts = useUi((s) => s.composerDrafts);
+  const activeDraftId = useUi((s) => s.activeDraftId);
+  const selectDraft = useUi((s) => s.selectDraft);
+  const deleteDraft = useUi((s) => s.deleteDraft);
   const runningSessionIds = useUi((s) => s.runningSessionIds);
   const unreadSessionIds = useUi((s) => s.unreadSessionIds);
   const terminalPorts = useUi((s) => s.terminalPorts);
@@ -117,6 +122,19 @@ export function SessionsPanel() {
   }, [sessions, trimmed]);
 
   const buckets = !filtered && sessions ? bucketByRecency(sessions) : [];
+
+  // Unsents: drafts bound to this workspace, newest first. Text comes from
+  // composerDrafts[id]; draftSessions only holds list metadata. Hidden during
+  // search so matches stay focused on real sessions.
+  const drafts = useMemo(
+    () =>
+      activeWorkspaceId
+        ? Object.values(draftSessions)
+            .filter((d) => d.workspaceId === activeWorkspaceId)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+        : [],
+    [draftSessions, activeWorkspaceId],
+  );
 
   return (
     <aside className="bg-background flex flex-col h-full w-full overflow-hidden">
@@ -172,10 +190,7 @@ export function SessionsPanel() {
         <Button
           size="sm"
           className="w-full align-middle font-medium"
-          onClick={() => {
-            setActiveSession(null);
-            setMainView("new");
-          }}
+          onClick={() => startNewDraft()}
         >
           <Plus/> New Session
           <span className="ml-auto flex items-center gap-0.5 pointer-events-none">
@@ -195,6 +210,25 @@ export function SessionsPanel() {
         {!isLoading && sessions?.length === 0 && (
           <div className="text-xs text-muted-foreground/60 px-2 py-4 text-center">
             No sessions yet. Click "New session" to start.
+          </div>
+        )}
+
+        {!filtered && drafts.length > 0 && (
+          <div>
+            <div className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60 font-semibold mt-3 mb-1 px-1">
+              Drafts
+            </div>
+            <div className="space-y-0.5">
+              {drafts.map((d) => (
+                <DraftItem
+                  key={d.id}
+                  text={composerDrafts[d.id] ?? ""}
+                  active={d.id === activeDraftId}
+                  onClick={() => selectDraft(d.id)}
+                  onDelete={() => deleteDraft(d.id)}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -247,6 +281,60 @@ export function SessionsPanel() {
         )}
       </div>
     </aside>
+  );
+}
+
+/** DraftItem: an unsent composer draft rendered as a session-list row. Lighter
+ *  than SessionItem (no rename/archive/fork) — click reloads it into the
+ *  new-session composer; × discards it. Italic + "(draft)" prefix distinguishes
+ *  it from real sessions. */
+function DraftItem({
+  text,
+  active,
+  onClick,
+  onDelete,
+}: {
+  text: string;
+  active: boolean;
+  onClick: () => void;
+  onDelete: () => void;
+}) {
+  const firstLine = text.split("\n")[0].trim() || "New draft";
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className={cn(
+        "group w-full px-2.5 py-1.5 rounded-md text-left flex items-center gap-2 transition-colors cursor-default outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        active
+          ? "bg-secondary text-foreground"
+          : "text-muted-foreground hover:bg-secondary",
+      )}
+    >
+      <Dot tone="muted" />
+      <div className="text-[0.9rem] flex-1 truncate italic">
+        <span className="text-muted-foreground/70 not-italic">(draft)</span>{" "}
+        {firstLine}
+      </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className="text-muted-foreground/60 hover:text-destructive px-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+        aria-label="Discard draft"
+      >
+        <X className="size-3.5" />
+      </button>
+    </div>
   );
 }
 

@@ -138,6 +138,7 @@ export function WorkspacesPanel() {
         useUi.setState({
           activeWorkspaceId: workspaceId,
           activeSessionId: null,
+          activeDraftId: null,
           mainView: "new",
           sessionsPanelOpen: true,
         });
@@ -152,6 +153,7 @@ export function WorkspacesPanel() {
       useUi.setState({
         activeWorkspaceId: workspaceId,
         activeSessionId: null,
+        activeDraftId: null,
         mainView: "new",
         sessionsPanelOpen: true,
       });

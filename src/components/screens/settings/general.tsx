@@ -29,7 +29,7 @@ export function GeneralSection() {
         notifications: (raw.notifications as boolean) ?? true,
         gitCoAuthored: (raw.gitCoAuthored as boolean) ?? false,
         gitCoAuthorName: (raw.gitCoAuthorName as string) ?? 'Tide',
-        gitCoAuthorEmail: (raw.gitCoAuthorEmail as string) ?? '314188112+tide-code@users.noreply.github.com',
+        gitCoAuthorEmail: (raw.gitCoAuthorEmail as string) ?? '314188112+tide-codes@users.noreply.github.com',
       });
     });
   }, []);

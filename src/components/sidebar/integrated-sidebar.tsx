@@ -10,6 +10,7 @@ import {
   ChevronDown,
   FolderLock,
   ArrowUp,
+  X,
 } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { UpdatePill } from './update-pill';
@@ -150,7 +151,8 @@ function IntegratedSidebarImpl() {
 
   const newSession = (workspaceId: string) => {
     preserveExpansion(workspaceId);
-    useUi.setState({ activeWorkspaceId: workspaceId, activeSessionId: null, mainView: 'new', sessionsPanelOpen: true });
+    useUi.getState().setActiveWorkspace(workspaceId);
+    useUi.getState().startNewDraft();
   };
 
   return (
@@ -160,8 +162,8 @@ function IntegratedSidebarImpl() {
       <UpdatePill />
       <div className={cn("px-3 py-2.5 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">Workspaces</div>
-        <Tip label="Add Workspace" side="bottom">
-          <Button variant="default" size="icon-sm" onClick={() => openDialog('addWorkspace')}><Plus /></Button>
+        <Tip label="New Session" side="bottom">
+          <Button variant="default" size="icon-sm" onClick={() => activeWorkspaceId ? newSession(activeWorkspaceId) : openDialog('addWorkspace')}><Plus /></Button>
         </Tip>
       </div>
 
@@ -219,6 +221,19 @@ function WorkspaceTreeItem({
   onSelectSession: (sessionId: string) => void; onNewSession: () => void;
 }) {
   const { data: sessions } = useSessions(ws.id);
+
+  const draftSessions = useUi((s) => s.draftSessions);
+  const composerDrafts = useUi((s) => s.composerDrafts);
+  const activeDraftId = useUi((s) => s.activeDraftId);
+  const selectDraft = useUi((s) => s.selectDraft);
+  const deleteDraft = useUi((s) => s.deleteDraft);
+  const workspaceDrafts = useMemo(
+    () => Object.values(draftSessions)
+      .filter((d) => d.workspaceId === ws.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt),
+    [draftSessions, ws.id],
+  );
+
   // Latest first: most recently active session (by updatedAt, falling back to
   // createdAt) sits at the top. ISO strings compare chronologically.
   const sorted = useMemo(
@@ -278,8 +293,14 @@ function WorkspaceTreeItem({
         </ContextMenuContent>
       </ContextMenu>
 
-      {isExpanded && sorted.length > 0 && (
+      {isExpanded && (sorted.length > 0 || workspaceDrafts.length > 0) && (
         <div className="mt-1 mb-1 space-y-0.5">
+          {workspaceDrafts.map((d) => (
+            <DraftTreeItem key={d.id} text={composerDrafts[d.id] ?? ''}
+              isActive={d.id === activeDraftId}
+              onSelectDraft={() => selectDraft(d.id)}
+              onDelete={() => deleteDraft(d.id)} />
+          ))}
           {sorted.slice(0, 20).map((s, idx) => (
             <SessionTreeItem key={s.id} session={s} workspaceId={ws.id}
               isLast={idx === Math.min(sorted.length, 20) - 1}
@@ -290,6 +311,33 @@ function WorkspaceTreeItem({
           <ArchivedSessionsSection workspaceId={ws.id} />
         </div>
       )}
+    </div>
+  );
+}
+
+function DraftTreeItem({
+  text, isActive, onSelectDraft, onDelete,
+}: {
+  text: string; isActive: boolean; onSelectDraft: () => void; onDelete: () => void;
+}) {
+  const firstLine = text.split('\n')[0].trim() || 'New draft';
+  return (
+    <div role="button" onClick={onSelectDraft}
+      className={cn('group/s rounded-md cursor-pointer transition-colors min-w-0',
+        isActive ? 'bg-secondary/60 text-sidebar-foreground font-medium' : 'hover:bg-secondary/40 text-muted-foreground')}
+      style={{ paddingLeft: '25px', paddingRight: '4px' }}>
+      <div className="flex items-center py-1.5">
+        <span className="text-muted-foreground/30 text-[0.7rem] font-mono select-none flex-shrink-0 leading-none mr-1.5">└─</span>
+        <span className={cn('text-[0.85rem] truncate flex-1 pr-2 italic', !isActive && 'text-muted-foreground/80')}>
+          <span className="text-muted-foreground/60 not-italic">(draft)</span>{' '}
+          {firstLine}
+        </span>
+        <button type="button" aria-label="Discard draft"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="hidden group-hover/s:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-destructive hover:bg-secondary cursor-pointer">
+          <X className="size-3" />
+        </button>
+      </div>
     </div>
   );
 }

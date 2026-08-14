@@ -63,6 +63,7 @@ export function MainScreen() {
   const terminalOpen = useUi((s) => s.terminalOpen);
   const terminalHeight = useUi((s) => s.terminalHeight);
   const setTerminalHeight = useUi((s) => s.setTerminalHeight);
+  const screen = useUi((s) => s.screen);
   // Imperative ref on the terminal ResizablePanel — collapse/expand it from
   // the terminal toggle (which still just flips the persisted `terminalOpen`).
   const terminalPanelRef = useRef<PanelImperativeHandle>(null);
@@ -71,7 +72,7 @@ export function MainScreen() {
     if (!ref) return;
     if (terminalOpen) ref.expand();
     else ref.collapse();
-  }, [terminalOpen]);
+  }, [terminalOpen, screen]);
 
   const activeSessionId = useUi((s) => s.activeSessionId);
   const selectedModelId = useUi((s) => s.selectedModelId);
@@ -431,6 +432,8 @@ export function MainScreen() {
         isNewSession = true;
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
+        // The draft was promoted to a real session — drop it from the list.
+        useUi.getState().consumeDraft();
         // Title generation moved below — it must run AFTER addMessage persists
         // the first user message, otherwise the handler finds no user message.
 
@@ -725,7 +728,11 @@ export function MainScreen() {
   // Persist the active session/workspace to the main-process config so the
   // app reopens to the same session on restart. Independent of localStorage
   // (which is scoped to the dev server port and may change between runs).
+  // Guarded: MainScreen is always-mounted, so on a fresh start (before the
+  // splash restore resolves) both values are null — persisting that would
+  // clobber the saved last-session and break the next restart's restore.
   useEffect(() => {
+    if (!activeWorkspaceId) return;
     api.setLastSession(activeSessionId, activeWorkspaceId);
   }, [activeSessionId, activeWorkspaceId]);
 
@@ -999,7 +1006,7 @@ export function MainScreen() {
                   id="terminal"
                   collapsible
                   collapsedSize={0}
-                  defaultSize={terminalHeight}
+                  defaultSize={terminalOpen ? terminalHeight : 0}
                   minSize={120}
                   maxSize={720}
                   panelRef={terminalPanelRef}

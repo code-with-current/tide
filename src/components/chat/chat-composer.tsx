@@ -129,8 +129,10 @@ export function ChatComposer({
   // Composer working state (draft text, attachments, pending paste reads) is
   // keyed per session so a draft in session A never leaks into session B —
   // same isolation model as the queue. The empty-state composer (no session
-  // yet) uses the COMPOSER_NEW_KEY slot.
-  const ckey = sessionId ?? COMPOSER_NEW_KEY;
+  // yet) binds to the active draft session id (so each draft restores its own
+  // text), falling back to COMPOSER_NEW_KEY before any draft slot exists.
+  const activeDraftId = useUi((s) => s.activeDraftId);
+  const ckey = sessionId ?? activeDraftId ?? COMPOSER_NEW_KEY;
   const attachments = useUi((s) => s.composerAttachments[ckey] ?? EMPTY_COMPOSER_ATTACHMENTS);
   const pendingReads = useUi((s) => s.composerPendingReads[ckey] ?? 0);
   const addComposerAttachment = useUi((s) => s.addComposerAttachment);
