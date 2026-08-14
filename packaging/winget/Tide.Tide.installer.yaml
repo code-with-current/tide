@@ -8,8 +8,6 @@ Installers:
     Scope: user
     InstallerUrl: https://github.com/code-with-current/tide/releases/download/v@@VERSION@@/Tide-v@@VERSION@@-x64-Setup.exe
     InstallerSha256: @@SHA256_EXE@@
-    Silent: /S
-    SilentWithProgress: /S
     ProductCode: com.tide.code
     AppsAndFeaturesEntries:
       - DisplayName: Tide
