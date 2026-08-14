@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
 
 PackageIdentifier: Tide.Tide
-PackageVersion: "@@VERSION_WINGET@@"
+PackageVersion: @@VERSION_WINGET@@
 PackageLocale: en-US
 Publisher: Tide
 PublisherUrl: https://tide.codes
