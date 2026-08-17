@@ -700,7 +700,6 @@ export function ChatComposer({
               } else {
                 displayText += `/${m.name}`;
               }
-              // Prompt: for skills/agents WITH a file path, emit the LOAD_SKILL marker so the orchestrator runs the skill as a sub-agent BEFORE the model thinks (inlining the body produces a CRITICAL directive GLM-5.2 ignores). For entries without absPath (built-in agents, context files), fall back to the inline content block.
               if (m.absPath && (m.kind === 'skill' || m.kind === 'agent')) {
                 promptText += `\n[[LOAD_SKILL:${m.absPath}|${m.name}]]\n`;
               } else {
@@ -747,7 +746,6 @@ export function ChatComposer({
           if (found.source === 'builtin' && found.kind === 'skill' && !found.absPath) {
             promptText = `/${found.name}${rest ? ` ${rest}` : ''}`;
           } else if (found.absPath) {
-            // Orchestrator-driven load (reliable): runSdkTurn reads the file BEFORE the model thinks and replaces the marker with the body wrapped in a strong "follow this first" directive. This doesn't depend on the model calling any tool — GLM-5.2 ignores "call load_skill first" directives. The load_skill tool stays available for future model-initiated skill discovery.
             promptText = `[[LOAD_SKILL:${found.absPath}|${found.name}]]${rest ? `\n${rest}` : ''}`;
           } else {
             // No file (built-in agent, mocked MCP) — inline the guidance block.
@@ -881,7 +879,7 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-xs focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground">
+      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-xs focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground">
         {/* ====================================================
             LEFT — vertical toolbar (attach, @).
            ==================================================== */}
@@ -964,14 +962,14 @@ export function ChatComposer({
               className={cn(
                 'chat-composer-editor',
                 'w-full bg-transparent border-0 resize-none outline-none text-sm focus:outline-none',
-                // min-height: 4 rows compact (~5rem at 14px text + 1.5 line-height),
-                // 6 rows full (~8.5rem). Grows naturally with content beyond that.
-                compact ? 'min-h-[5.25rem] py-2 px-3' : 'min-h-[5.25rem] py-3 px-3',
+                compact ? 'min-h-[4.25rem] py-2 px-3' : 'min-h-[5.25rem] py-3 px-3',
               )}
           />
 
-          {/* Bottom row — selectors, counters, send/stop */}
-          <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
+          {/* Bottom row — selectors, counters, send/stop. Wraps at narrow
+              widths so the selector row stacks above the send button instead
+              of overflowing the composer. */}
+          <div className="flex flex-wrap items-center gap-0.5 px-1.5 pb-1.5 min-w-0">
             <PermissionModeSelector />
             <ModelSelector locked={modelLocked} onLockedClick={() => { if (sessionId) void initiateFork(sessionId, undefined, 'model'); }} />
             {thinkingSupported && <ThinkingLevelSelector />}
@@ -988,16 +986,16 @@ export function ChatComposer({
               </span>
             )}
 
-            <div className="flex-1" />
-
             {inProgress && (!editorEmpty || attachments.length > 0) && (
               <SendStopButton
+                className="ml-auto"
                 mode="stop"
                 onSend={() => send()}
                 onStop={() => onStop?.()}
               />
             )}
             <SendStopButton
+              className="ml-auto"
               mode={!editorEmpty || attachments.length > 0 ? 'send' : inProgress ? 'stop' : 'send'}
               willQueue={inProgress && !!sessionId}
               disabled={pendingReads > 0 || (!inProgress && editorEmpty && attachments.length === 0)}

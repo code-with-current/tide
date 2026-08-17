@@ -1269,10 +1269,6 @@ export function appendFetchedModels(
  * IPC, and fills in context / reasoning / price when a match is found. Skips
  * rows that already have a catalogId (enriched) or whose modelId has already
  * been tried (avoids redundant IPC calls + infinite update loops).
- *
- * Used by all three provider forms (onboarding, add dialog, edit detail) so
- * a manually-typed model ID like "glm-5.2" gets the same metadata as one
- * added via Fetch Models.
  */
 export function useCatalogEnrichment(
   rows: Row[],

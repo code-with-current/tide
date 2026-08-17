@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tide — Responsive Panel System Mockup</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --card: #141416;
+    --border: #1e1e22;
+    --input: #2a2a30;
+    --fg: #e4e4e7;
+    --muted: #71717a;
+    --primary: #e4e4e7;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --info: #3b82f6;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; }
+
+  /* --- app frame: the simulated window --- */
+  .window-frame {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: var(--bg); margin: 0 auto;
+    transition: max-width .25s ease;
+    display: flex; flex-direction: column; height: 78vh; min-height: 520px;
+  }
+  .viewport-strip { display: flex; gap: 8px; align-items: center; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+
+  .vp-btn {
+    padding: 5px 12px; border-radius: 9999px; border: 1px solid var(--border);
+    background: var(--card); color: var(--muted); font-size: 12px; cursor: pointer; transition: all .15s;
+  }
+  .vp-btn.active { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  .vp-btn:hover:not(.active) { border-color: var(--muted); }
+
+  .tier-badge {
+    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 6px; letter-spacing: .03em;
+  }
+  .tier-wide  { background: rgba(34,197,94,.12); color: var(--success); }
+  .tier-med   { background: rgba(59,130,246,.12); color: var(--info); }
+  .tier-narrow{ background: rgba(245,158,11,.12); color: var(--warning); }
+
+  /* --- topbar --- */
+  .topbar { height: 40px; display: flex; align-items: center; border-bottom: 1px solid var(--border); background: var(--card); gap: 2px; padding-right: 8px; flex-shrink: 0; }
+  .crumbs { display: flex; align-items: center; gap: 6px; padding: 0 12px; min-width: 0; flex-shrink: 1; }
+  .crumb-ws { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .crumb-sep { color: var(--muted); opacity: .5; font-size: 12px; flex-shrink: 0; }
+  .crumb-sess { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 220px; }
+  .branch-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: var(--input); font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+
+  .port-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 9999px; border: 1px solid rgba(59,130,246,.4); background: rgba(59,130,246,.08); color: var(--info); font-family: ui-monospace, monospace; font-size: 11px; flex-shrink: 0; white-space: nowrap; }
+  .port-dot { width: 5px; height: 5px; border-radius: 9999px; background: var(--info); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: .4 } 50% { opacity: 1 } }
+  .port-more { padding: 2px 6px; border-radius: 9999px; border: 1px dashed var(--border); color: var(--muted); font-size: 10px; flex-shrink: 0; }
+
+  .run-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; background: var(--fg); color: var(--bg); font-size: 12px; font-weight: 600; flex-shrink: 0; white-space: nowrap; }
+  .topbar-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
+  .icon-btn { width: 28px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .icon-btn:hover { background: var(--input); color: var(--fg); }
+
+  /* --- panel row --- */
+  .panel-row { display: flex; flex: 1; min-height: 0; }
+  .panel { position: relative; min-width: 0; overflow: hidden; display: flex; flex-direction: column; flex-shrink: 0; }
+  .panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px; }
+
+  /* sidebar */
+  .ws-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  .ws-row:hover { background: var(--card); }
+  .ws-row.active { background: var(--input); }
+  .ws-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-weight: 500; }
+  .orb { width: 18px; height: 18px; border-radius: 9999px; flex-shrink: 0; }
+  .sess-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 24px; border-radius: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .sess-row:hover { background: var(--card); }
+  .sess-row.active { background: var(--input); color: var(--fg); }
+  .sess-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .dot { width: 6px; height: 6px; border-radius: 9999px; flex-shrink: 0; }
+  .dot-green { background: var(--success); }
+  .dot-blue { background: var(--info); animation: pulse 1.6s infinite; }
+  .elapsed { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .q-mark { color: var(--warning); font-size: 13px; font-weight: 700; flex-shrink: 0; animation: pulse 1.2s infinite; }
+
+  /* chat */
+  .chat-col { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .msg { max-width: 720px; margin: 0 auto; padding: 10px 16px; width: 100%; }
+  .bubble-u { background: var(--input); border-radius: 10px; padding: 8px 12px; font-size: 13px; width: fit-content; max-width: 100%; }
+  .bubble-a { font-size: 13px; line-height: 1.55; color: var(--fg); }
+  .codeblk { background: #0d0d10; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 8px 0; max-width: 100%; }
+  .codeblk-h { display: flex; justify-content: space-between; padding: 4px 10px; font-size: 10px; color: var(--muted); border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; }
+  .codeblk pre { margin: 0; padding: 10px; font-family: ui-monospace, monospace; font-size: 11.5px; overflow-x: auto; white-space: pre; }
+  .composer { border-top: 1px solid var(--border); padding: 10px 16px 12px; flex-shrink: 0; }
+  .composer-inner { max-width: 720px; margin: 0 auto; width: 100%; }
+  .composer-box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .composer-input { padding: 10px 12px; font-size: 13px; color: var(--muted); min-height: 38px; }
+  .composer-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; flex-wrap: wrap; border-top: 1px solid transparent; }
+  .sel { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); white-space: nowrap; }
+  .sel-label { display: inline; }
+  .send { margin-left: auto; width: 26px; height: 26px; border-radius: 6px; background: var(--fg); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+
+  /* right panel */
+  .rp-tab { flex: 1; text-align: center; font-size: 11px; color: var(--muted); padding: 6px 0; border-bottom: 2px solid transparent; cursor: pointer; }
+  .rp-tab.active { color: var(--fg); border-bottom-color: var(--fg); }
+  .file-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; font-family: ui-monospace, monospace; color: var(--muted); border-radius: 4px; }
+  .file-row:hover { background: var(--card); }
+  .delta-add { color: var(--success); margin-left: auto; font-size: 10px; }
+  .delta-del { color: #ef4444; margin-left: auto; font-size: 10px; }
+
+  /* terminal */
+  .term { background: #0d0d10; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); padding: 8px 12px; flex-shrink: 0; overflow: hidden; white-space: nowrap; }
+  .term-line { overflow: hidden; text-overflow: ellipsis; }
+  .term-prompt { color: var(--success); }
+
+  /* handles */
+  .handle { width: 5px; cursor: col-resize; flex-shrink: 0; position: relative; background: transparent; z-index: 5; }
+  .handle::after { content: ''; position: absolute; inset: 0 2px; border-radius: 3px; transition: background .15s; }
+  .handle:hover::after, .handle.dragging::after { background: var(--muted); }
+  .handle-v { height: 5px; cursor: row-resize; flex-shrink: 0; position: relative; z-index: 5; }
+  .handle-v::after { content: ''; position: absolute; inset: 2px 0; border-radius: 3px; transition: background .15s; }
+  .handle-v:hover::after, .handle-v.dragging::after { background: var(--muted); }
+
+  /* spec drawer */
+  .spec { max-width: 1180px; margin: 20px auto 0; }
+  .spec-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+  .spec h2 { font-size: 13px; font-weight: 600; margin: 0 0 12px; }
+  .spec table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .spec th { text-align: left; color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .spec td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--fg); }
+  .spec td:first-child { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; white-space: nowrap; }
+  .spec .note { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+  kbd { background: var(--input); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-family: ui-monospace, monospace; }
+
+  .off-canvas {
+    position: absolute; top: 0; bottom: 0; width: 260px; background: var(--card);
+    border-right: 1px solid var(--border); z-index: 20; transition: transform .2s ease; padding-top: 46px;
+  }
+  .off-canvas.left { left: 0; transform: translateX(-100%); }
+  .off-canvas.left.open { transform: translateX(0); }
+  .overlay { position: absolute; inset: 0; background: rgba(0,0,0,.5); z-index: 15; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+
+  .panel-label { position: absolute; top: 4px; right: 8px; font-size: 9px; color: var(--muted-60, #52525b); font-family: ui-monospace, monospace; z-index: 4; letter-spacing: .04em; }
+  .rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; border-right: 1px solid var(--border); flex-shrink: 0; }
+  .rail-btn { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .rail-btn:hover, .rail-btn.on { background: var(--input); color: var(--fg); }
+</style>
+</head>
+<body>
+
+<div class="viewport-strip">
+  <span style="font-size:11px; color:var(--muted);">Simulated window width:</span>
+  <button class="vp-btn" data-w="1680">1680 · Wide</button>
+  <button class="vp-btn" data-w="1440">1440 · Default</button>
+  <button class="vp-btn" data-w="1200">1200</button>
+  <button class="vp-btn" data-w="1080">1080 · Min</button>
+  <span style="width:1px; height:18px; background:var(--border);"></span>
+  <span style="font-size:11px; color:var(--muted);">or drag the window edge (real resize)</span>
+  <span class="tier-badge tier-wide" id="tierBadge">TIER 1 · WIDE</span>
+</div>
+
+<div class="window-frame" id="frame">
+  <div style="position:relative; display:flex; flex-direction:column; flex:1; min-height:0;">
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="crumbs">
+        <span class="crumb-ws" id="tbWs">tide</span>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-sess" id="tbSess">orchestrator rewrite, subagent UI, and scroll fixes…</span>
+      </div>
+      <span class="branch-chip" id="tbBranch">⎇ feat/orchestrator-rewrite</span>
+      <div id="tbPorts" style="display:flex; gap:4px; margin-left:10px; align-items:center;">
+        <span class="port-chip"><span class="port-dot"></span>5173</span>
+        <span class="port-chip"><span class="port-dot"></span>3000</span>
+        <span class="port-chip"><span class="port-dot"></span>8080</span>
+        <span class="port-more">+2</span>
+      </div>
+      <div style="flex:1"></div>
+      <button class="run-btn" id="tbRun">▶ Run script</button>
+      <div class="topbar-actions">
+        <span class="icon-btn">▤</span>
+        <span class="icon-btn">◫</span>
+        <span class="icon-btn">⌥</span>
+      </div>
+    </div>
+
+    <!-- PANEL ROW -->
+    <div class="panel-row" id="panelRow">
+
+      <!-- SIDEBAR -->
+      <div class="panel" id="sidebar" style="background:var(--bg);">
+        <span class="panel-label">SIDEBAR 200–320</span>
+        <div class="panel-body">
+          <div class="ws-row active">
+            <span class="orb" style="background:conic-gradient(from 0deg, #f59e0b, #78350f, #f59e0b);"></span>
+            <span class="ws-name">tide</span>
+            <span class="dot dot-green"></span>
+          </div>
+          <div class="ws-row">
+            <span style="width:18px"></span>
+            <span class="ws-name">side-project</span>
+          </div>
+          <div style="height:8px"></div>
+          <div class="sess-row active">
+            <span class="sess-title">orchestrator rewrite, subagent UI…</span>
+            <span class="dot dot-blue"></span>
+          </div>
+          <div class="sess-row">
+            <span class="sess-title">fix draft session eviction</span>
+            <span class="elapsed">12s</span>
+          </div>
+          <div class="sess-row">
+            <span class="sess-title">diff viewer split mode</span>
+            <span class="q-mark">?</span>
+          </div>
+          <div class="sess-row">
+            <span class="sess-title">port reaper</span>
+            <span class="dot dot-green"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="handle" data-target="sidebar" data-min="200" data-max="320"></div>
+
+      <!-- CHAT COLUMN -->
+      <div class="panel" style="flex:1; background:var(--bg);">
+        <span class="panel-label">CHAT · FLEX-1 · MIN 420px</span>
+        <div class="chat-col">
+          <div style="flex:1; overflow-y:auto; padding: 12px 0;">
+            <div class="msg">
+              <div class="bubble-u">make the diff viewer split mode with intraline highlight</div>
+            </div>
+            <div class="msg">
+              <div class="bubble-a">
+                Done — every surface now has a <b>Unified | Split</b> tab toggle with word-level highlighting:
+                <div class="codeblk">
+                  <div class="codeblk-h"><span>diff-view.tsx</span><span>TSX</span></div>
+                  <pre>export function DiffView({ hunks, mode }: DiffViewProps) {
+  const diffMode = mode ?? useUi(s => s.diffMode)   // ← persisted preference
+  return mode === 'split' ? <SplitDiff hunks={hunks}/> : <UnifiedDiff hunks={hunks}/>
+}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TERMINAL (tier-dependent) -->
+          <div class="term" id="termPanel">
+            <div class="term-line"><span class="term-prompt">❯</span> pnpm dev</div>
+            <div class="term-line" style="color:var(--success)">ready on http://localhost:5173 in 412ms</div>
+          </div>
+          <div class="handle-v" data-target="termPanel" data-min="80" data-max="400" data-v="1"></div>
+
+          <!-- COMPOSER -->
+          <div class="composer">
+            <div class="composer-inner">
+              <div class="composer-box">
+                <div class="composer-input">Reply, or describe a task… <span style="float:right; font-size:10px;">⏎ send · ⇧⏎ newline</span></div>
+                <div class="composer-bar" id="composerBar">
+                  <span class="sel">🛡 <span class="sel-label">Edit</span></span>
+                  <span class="sel">◆ <span class="sel-label">GLM-5.3</span></span>
+                  <span class="sel">◈ <span class="sel-label">Think: Medium</span></span>
+                  <span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="handle" data-target="rightPanel" data-min="220" data-max="480"></div>
+
+      <!-- RIGHT PANEL -->
+      <div class="panel" id="rightPanel" style="background:var(--card);">
+        <span class="panel-label">RIGHT 220–480</span>
+        <div style="display:flex; border-bottom:1px solid var(--border); flex-shrink:0;">
+          <div class="rp-tab active">Changes</div>
+          <div class="rp-tab">Files</div>
+          <div class="rp-tab">Terminal</div>
+        </div>
+        <div class="panel-body">
+          <div class="file-row">src/components/chat/blocks/diff-view.tsx <span class="delta-add">+182</span></div>
+          <div class="file-row">src/lib/stores/ui.ts <span class="delta-add">+9</span></div>
+          <div class="file-row">electron/ipc/terminal.ts <span class="delta-add">+64 −12</span></div>
+          <div class="file-row">src/hooks/use-chat-stream.ts <span class="delta-add">+8</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NARROW-TIER OFF-CANVAS SIDEBAR -->
+    <div class="overlay" id="ocOverlay"></div>
+    <div class="off-canvas left" id="offCanvas">
+      <div style="padding:10px 12px; font-size:11px; color:var(--muted); border-bottom:1px solid var(--border);">◀ press Esc or click outside</div>
+      <div class="panel-body">
+        <div class="ws-row active"><span class="orb" style="background:conic-gradient(from 0deg,#f59e0b,#78350f,#f59e0b);"></span><span class="ws-name">tide</span></div>
+        <div class="sess-row active"><span class="sess-title">orchestrator rewrite…</span><span class="dot dot-blue"></span></div>
+        <div class="sess-row"><span class="sess-title">fix draft session eviction</span><span class="elapsed">12s</span></div>
+      </div>
+    </div>
+
+    <!-- NARROW-TIER ICON RAIL -->
+    <div class="rail" id="rail" style="display:none;">
+      <span class="rail-btn on">▤</span>
+      <span class="rail-btn">◫</span>
+      <span class="rail-btn">▶</span>
+      <span class="rail-btn">⌥</span>
+    </div>
+  </div>
+</div>
+
+<!-- SPEC -->
+<div class="spec">
+  <div class="spec-card">
+    <h2>Panel system rules (this mockup)</h2>
+    <table>
+      <tr><th>Region</th><th>Min</th><th>Max / collapse</th><th>Behavior</th></tr>
+      <tr><td>sidebar</td><td>200px</td><td>320px · overlay at ≤1200px</td><td>Pixel-based drag. At Tier 3 it becomes an off-canvas overlay (hamburger in topbar / icon rail). User width persists per workspace.</td></tr>
+      <tr><td>chat column</td><td>420px</td><td>flex: 1 (unbounded)</td><td>Always visible in every tier — it is the floor the others yield to. Timeline + composer share one max-width (720px) so they stay edge-aligned.</td></tr>
+      <tr><td>right panel</td><td>220px</td><td>480px · hidden at ≤1200px</td><td>Pixel-based drag. Tier 2: shrinks before hiding. Tier 3: hidden, content reachable via topbar toggle (opens as overlay).</td></tr>
+      <tr><td>terminal</td><td>80px</td><td>400px · collapsible</td><td>Vertical drag inside chat column. Collapsed = 0. Persisted per session.</td></tr>
+      <tr><td>topbar</td><td>—</td><td>3 tiers</td><td>Wide: full breadcrumb + all port chips. Medium: 2 port chips + "+N" overflow, branch chip icon-only. Narrow: session title only, scripts move into "…" menu. Run/Stop always visible.</td></tr>
+    </table>
+    <p class="note">
+      <b>Tier thresholds are measured on the panel-row width</b> (not window.innerWidth) — so dragging the sidebar or a collapsed right panel re-evaluates the tier correctly.<br/>
+      Tiers: <b>T1 Wide ≥ 1360px</b> · <b>T2 Medium 1200–1359px</b> · <b>T3 Narrow ≤ 1199px</b>. The window min stays 1080×680, which always lands in T3.<br/>
+      All drag handles enforce their min/max in <b>pixels</b> — no percent constraints anywhere, eliminating the px/% mixing class of bugs. Composer selector row wraps below 300px. Every truncating text node sits in a <code>min-width:0</code> chain.
+    </p>
+  </div>
+</div>
+
+<script>
+const frame = document.getElementById('frame');
+const row = document.getElementById('panelRow');
+const badge = document.getElementById('tierBadge');
+const sidebar = document.getElementById('sidebar');
+const rightPanel = document.getElementById('rightPanel');
+const offCanvas = document.getElementById('offCanvas');
+const overlay = document.getElementById('ocOverlay');
+const rail = document.getElementById('rail');
+const tbBranch = document.getElementById('tbBranch');
+const tbPorts = document.getElementById('tbPorts');
+const tbRun = document.getElementById('tbRun');
+const tbSess = document.getElementById('tbSess');
+const composerSels = () => document.querySelectorAll('#composerBar .sel');
+
+let sidebarW = 260, rightW = 300;
+
+// --- viewport simulation buttons ---
+const simBtns = document.querySelectorAll('.vp-btn');
+simBtns.forEach(b => b.addEventListener('click', () => {
+  simBtns.forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  frame.style.maxWidth = b.dataset.w + 'px';
+  layout();
+}));
+document.querySelector('.vp-btn[data-w="1440"]').classList.add('active');
+frame.style.maxWidth = '1440px';
+
+// --- tier engine: measures the PANEL ROW, not the window ---
+function currentTier() {
+  const w = row.clientWidth;
+  return w >= 1360 ? 1 : (w >= 1200 ? 2 : 3);
+}
+let tier = 0;
+
+function layout() {
+  const t = currentTier();
+  const changed = t !== tier;
+  tier = t;
+
+  // sidebar: inline in T1/T2, off-canvas + rail in T3
+  const t3 = t === 3;
+  sidebar.style.display = t3 ? 'none' : '';
+  document.querySelector('[data-target="sidebar"]').style.display = t3 ? 'none' : '';
+  rail.style.display = t3 ? 'flex' : 'none';
+  if (t3) { offCanvas.classList.remove('open'); overlay.classList.remove('show'); }
+
+  // right panel: visible T1, pressure T2, hidden T3
+  const rpHandle = document.querySelector('[data-target="rightPanel"]');
+  if (t === 3) { rightPanel.style.display = 'none'; rpHandle.style.display = 'none'; }
+  else { rightPanel.style.display = ''; rpHandle.style.display = ''; }
+
+  if (changed) {
+    badge.textContent = t === 1 ? 'TIER 1 · WIDE' : t === 2 ? 'TIER 2 · MEDIUM' : 'TIER 3 · NARROW';
+    badge.className = 'tier-badge ' + (t === 1 ? 'tier-wide' : t === 2 ? 'tier-med' : 'tier-narrow');
+  }
+
+  // topbar tiers
+  if (t === 1) {
+    tbBranch.textContent = '⎇ feat/orchestrator-rewrite';
+    tbPorts.innerHTML = '<span class="port-chip"><span class="port-dot"></span>5173</span><span class="port-chip"><span class="port-dot"></span>3000</span><span class="port-chip"><span class="port-dot"></span>8080</span><span class="port-more">+2</span>';
+    tbRun.textContent = '▶ Run script';
+    tbSess.style.display = '';
+    composerSels().forEach(s => s.querySelector('.sel-label').style.display = '');
+  } else if (t === 2) {
+    tbBranch.textContent = '⎇';
+    tbPorts.innerHTML = '<span class="port-chip"><span class="port-dot"></span>5173</span><span class="port-more">+4</span>';
+    tbRun.textContent = '▶ Run';
+    tbSess.style.display = '';
+    composerSels().forEach(s => s.querySelector('.sel-label').style.display = '');
+  } else {
+    tbBranch.style.display = 'none';
+    tbPorts.innerHTML = '<span class="port-chip"><span class="port-dot"></span>5173</span>';
+    tbRun.textContent = '▶';
+    tbSess.style.display = 'none';
+    composerSels().forEach(s => s.querySelector('.sel-label').style.display = 'none');
+  }
+
+  applyWidths();
+}
+
+function applyWidths() {
+  // chat column floor: if remaining space can't fit chat min (420), shrink right panel toward min first
+  const available = row.clientWidth - (tier === 3 ? 0 : sidebarW) - 5 * (tier === 3 ? 1 : 2);
+  let rw = rightW;
+  if (tier !== 3) {
+    const minChat = 420, minRight = 220;
+    const maxRight = available - minChat;
+    rw = Math.max(minRight, Math.min(rightW, maxRight));
+  }
+  sidebar.style.width = sidebarW + 'px';
+  rightPanel.style.width = rw + 'px';
+}
+
+// --- drag handles (all pixel-based) ---
+document.querySelectorAll('.handle').forEach(h => {
+  h.addEventListener('mousedown', e => {
+    e.preventDefault();
+    h.classList.add('dragging');
+    const target = h.dataset.target, min = +h.dataset.min, max = +h.dataset.max;
+    const startX = e.clientX;
+    const start = target === 'sidebar' ? sidebarW : rightW;
+    const move = ev => {
+      const d = ev.clientX - startX;
+      let v = Math.max(min, Math.min(max, start + d));
+      if (target === 'sidebar') sidebarW = v; else rightW = v;
+      applyWidths();
+    };
+    const up = () => {
+      h.classList.remove('dragging');
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      layout(); // re-evaluate tier after drag
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  });
+});
+
+const termPanel = document.getElementById('termPanel');
+let termH = 64;
+document.querySelector('.handle-v').addEventListener('mousedown', e => {
+  e.preventDefault();
+  const startY = e.clientY, start = termH;
+  const move = ev => {
+    termH = Math.max(80, Math.min(400, start - (ev.clientY - startY)));
+    termPanel.style.height = termH + 'px';
+  };
+  const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+});
+
+// --- T3: open off-canvas via rail / overlay click to close ---
+rail.querySelector('.rail-btn').addEventListener('click', () => {
+  offCanvas.classList.add('open'); overlay.classList.add('show');
+});
+overlay.addEventListener('click', () => {
+  offCanvas.classList.remove('open'); overlay.classList.remove('show');
+});
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { offCanvas.classList.remove('open'); overlay.classList.remove('show'); }
+});
+
+// real window resize also re-evaluates (frame is max-width capped, so this works)
+new ResizeObserver(() => layout()).observe(row);
+layout();
+</script>
+</body>
+</html>

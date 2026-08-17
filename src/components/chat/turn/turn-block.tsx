@@ -17,17 +17,22 @@ export function langFromPath(path: string): string {
 
 /** TurnBlock: orchestrator for the canonical block-stream renderer. Renders header + BlockList + provides the permission surface via context. */
 export const TurnBlock = memo(function TurnBlock({
-  message, streaming, stopReason,
+  message, streaming, stopReason, sessionId,
   onApproveToolCalls, onRejectToolCalls,
 }: {
   message: Message;
   streaming: boolean;
   pendingToolCallIds?: string[];
   stopReason?: string | null;
+  /** Session owning this message. History lags behind activeSessionId during
+   *  a switch — followup popups and stream reads must key to the owner or they
+   *  land on the wrong session. Falls back to activeSessionId. */
+  sessionId?: string | null;
   onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
 }) {
   const activeSessionId = useUi(s => s.activeSessionId);
+  const ownerSessionId = sessionId ?? activeSessionId;
   const activeWorkspaceId = useUi(s => s.activeWorkspaceId);
   const openFile = useUi(s => s.openFile);
   const { data: sessions } = useSessions(activeWorkspaceId ?? null);
@@ -39,13 +44,13 @@ export const TurnBlock = memo(function TurnBlock({
   // render its own inline <PermissionCard> without prop-drilling. The zustand
   // subscription bypasses memo, so permission changes re-render this subtree.
   const permissionRequest = useUi((s) =>
-    activeSessionId ? s.streams[activeSessionId]?.permissionRequest : null,
+    ownerSessionId ? s.streams[ownerSessionId]?.permissionRequest : null,
   );
   // Whether autocompact is running for this turn — drives the in-stream
   // "Compacting context" indicator inside BlockList. Read from the same store
   // so it updates live without going through the memo comparator.
   const compacting = useUi((s) =>
-    activeSessionId ? Boolean(s.streams[activeSessionId]?.compacting) : false,
+    ownerSessionId ? Boolean(s.streams[ownerSessionId]?.compacting) : false,
   );
   // Pre-turn git HEAD sha — captured when the user sent the message that
   // started this turn. Used for per-file undo in FileChangesSummary.
@@ -106,7 +111,7 @@ export const TurnBlock = memo(function TurnBlock({
           streaming={streaming}
           stopped={stopped}
           stopReason={stopReason}
-          sessionId={activeSessionId}
+          sessionId={ownerSessionId}
           messageId={message.id}
           totalMs={message.totalMs}
           onViewFile={handleViewFile}
@@ -127,6 +132,7 @@ export const TurnBlock = memo(function TurnBlock({
   if (prev.streaming !== next.streaming) return false;
   if (prev.message !== next.message) return false;
   if (prev.stopReason !== next.stopReason) return false;
+  if (prev.sessionId !== next.sessionId) return false;
   const a = prev.pendingToolCallIds ?? [];
   const b = next.pendingToolCallIds ?? [];
   if (a.length !== b.length) return false;

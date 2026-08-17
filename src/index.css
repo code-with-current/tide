@@ -970,10 +970,17 @@ body {
   line-height: 1.6;
   border-radius: 0.5rem;
   overflow: hidden;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
 }
-/* Tight padding; room at the bottom for the language pill. */
+/* Tight padding; room at the bottom for the language pill. Wide code
+   scrolls horizontally inside the body — the pre must not wrap or clip. */
 .prose-chat [data-streamdown="code-block-body"] pre {
   padding: 0.5rem 0.75rem 1.75rem 0.25rem;
+  margin: 0;
+  overflow-x: visible;
+  white-space: pre;
 }
 
 /* ── Line numbers ─────────────────────────────────────────────────── */

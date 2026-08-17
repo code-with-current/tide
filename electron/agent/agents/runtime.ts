@@ -292,7 +292,6 @@ async function runMultiStepAgent(
       },
 
       // ── TOOL CALL REPAIR ──
-      // Strip XML artifacts that GLM/Gemini leak into JSON tool args.
       repairToolCall: async ({ toolCall }) => {
         const input = toolCall.input;
         if (typeof input !== 'string') return toolCall;

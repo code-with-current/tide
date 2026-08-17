@@ -613,12 +613,20 @@ export const useUi = create<UiState>()(
       set({ draftSessions: rest });
       return;
     }
-    set({
-      draftSessions: {
-        ...get().draftSessions,
-        [id]: { id, workspaceId, updatedAt: Date.now() },
-      },
-    });
+    // One draft per workspace: saving this draft drops any other entry
+    // belonging to the same workspace (their composer text goes with it —
+    // only one draft can exist, so older ones are stale by definition).
+    const draftSessions = { ...get().draftSessions };
+    const composerDrafts = { ...get().composerDrafts };
+    for (const other of Object.values(draftSessions)) {
+      if (other.id !== id && other.workspaceId === workspaceId) {
+        get().purgeDraftTerminals(other.id);
+        delete draftSessions[other.id];
+        delete composerDrafts[other.id];
+      }
+    }
+    draftSessions[id] = { id, workspaceId, updatedAt: Date.now() };
+    set({ draftSessions, composerDrafts });
   },
   selectDraft: (id) => {
     set({ activeDraftId: id, activeSessionId: null, mainView: 'new' });
@@ -1295,6 +1303,10 @@ export const useUi = create<UiState>()(
         ...current,
         ...(persistedState as Partial<UiState>),
         terminalOpen: {},
+        // Sessions can't still be running after a restart — the orchestrator
+        // died with the app. Force the running set empty so a stale persisted
+        // blob can't restore running indicators for dead turns.
+        runningSessionIds: [],
         // Strip 'default'-bucket terminals left by the pre-draft-keying bug:
         // they were draft-phase strays that leaked into every new-session
         // screen. Real buckets are session ids or 'draft:<id>' — never bare.

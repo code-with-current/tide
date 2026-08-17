@@ -39,6 +39,18 @@ const TERMINAL_THEMES: Record<string, { label: string; theme: Record<string, str
     label: 'One Dark',
     theme: { background: '#282c34', foreground: '#abb2bf', cursor: '#abb2bf', selectionBackground: '#3e4451' },
   },
+  'tide-light': {
+    label: 'Tide Light',
+    theme: { background: '#fafafa', foreground: '#38383a', cursor: '#38383a', selectionBackground: 'rgba(56,56,58,0.18)' },
+  },
+  'solarized-light': {
+    label: 'Solarized Light',
+    theme: { background: '#fdf6e3', foreground: '#657b83', cursor: '#586e75', selectionBackground: '#eee8d5' },
+  },
+  'github-light': {
+    label: 'GitHub Light',
+    theme: { background: '#ffffff', foreground: '#24292f', cursor: '#24292f', selectionBackground: '#ddf4ff' },
+  },
 };
 
 /** Export for TerminalPanel to consume. */
@@ -46,11 +58,15 @@ export function getTerminalTheme(themeId: string): Record<string, string> {
   return TERMINAL_THEMES[themeId]?.theme ?? TERMINAL_THEMES['tide-dark'].theme;
 }
 
-/** The content without the header — used by GeneralSection's right column. */
+/** The content without the header. */
 export function AppearanceContent() {
   const { fontScale, terminalTheme, terminalFontSize, appTheme, setAppearance } = useUi();
   const sidebarMode = useUi((s) => s.sidebarMode);
   const setSidebarMode = useUi((s) => s.setSidebarMode);
+  const reasoningView = useUi((s) => s.reasoningView);
+  const setReasoningView = useUi((s) => s.setReasoningView);
+  const chatView = useUi((s) => s.chatView);
+  const setChatView = useUi((s) => s.setChatView);
 
   return (
     <>
@@ -73,25 +89,6 @@ export function AppearanceContent() {
                   <span className="size-2 rounded-full" style={{ background: t.accent }} />
                 </button>
               ))}
-            </div>
-          </SettingsRow>
-        </Card>
-      </SettingsGroup>
-
-      <SettingsGroup title="Layout">
-        <Card>
-          <SettingsRow title="Sidebar" description="Choose how the sidebar displays." last>
-            <div className="flex items-center gap-1">
-              <Segmented
-                size="sm"
-                value={sidebarMode}
-                onChange={setSidebarMode}
-                options={[
-                  { value: 'dual', label: 'Dual' },
-                  { value: 'integrated', label: 'Integrated' },
-                ]}
-              />
-
             </div>
           </SettingsRow>
         </Card>
@@ -152,15 +149,61 @@ export function AppearanceContent() {
           </SettingsRow>
         </Card>
       </SettingsGroup>
+
+      <SettingsGroup title="Layout">
+        <Card>
+          <SettingsRow title="Sidebar" description="Choose how the sidebar displays.">
+            <div className="flex items-center gap-1">
+              <Segmented
+                size="sm"
+                value={sidebarMode}
+                onChange={setSidebarMode}
+                options={[
+                  { value: 'dual', label: 'Dual' },
+                  { value: 'integrated', label: 'Integrated' },
+                ]}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow
+            title="Turn view"
+            description="Compact groups thinking and process into collapsible sections. Stream shows every block inline in the order it was emitted."
+          >
+            <Segmented
+              size="sm"
+              value={chatView}
+              onChange={setChatView}
+              options={[
+                { value: 'compact', label: 'Compact' },
+                { value: 'stream', label: 'Stream' },
+              ]}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title="Thinking view"
+            description="Flat shows reasoning as one collapsible block. Phased groups it into Planning → Search → Coding → Verifying segments."
+            last
+          >
+            <Segmented
+              size="sm"
+              value={reasoningView}
+              onChange={setReasoningView}
+              options={[
+                { value: 'flat', label: 'Flat' },
+                { value: 'phased', label: 'Phased' },
+              ]}
+            />
+          </SettingsRow>
+        </Card>
+      </SettingsGroup>
     </>
   );
 }
 
-/** Full section with header — kept for backward compat. GeneralSection uses AppearanceContent directly. */
 export function AppearanceSection() {
   return (
     <>
-      <SettingsHeader title="Appearance" description="Theme, typography, and terminal. Changes apply instantly." />
+      <SettingsHeader title="Appearance" description="Theme, layout, chat, and terminal. Changes apply instantly." />
       <AppearanceContent />
     </>
   );

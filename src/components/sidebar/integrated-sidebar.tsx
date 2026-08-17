@@ -11,6 +11,7 @@ import {
   FolderLock,
   ArrowUp,
   X,
+  MessageCircleQuestion,
 } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { UpdatePill } from './update-pill';
@@ -167,13 +168,13 @@ function IntegratedSidebarImpl() {
       {/* Spacer clearing the native macOS traffic lights (top-left, 12,12).
           Collapses to zero while fullscreen — the buttons hide there. */}
       {isMac && (
-        <div className={cn('flex-shrink-0 drag-region', isFullScreen ? 'h-0' : 'h-8')} />
+        <div className={cn('flex-shrink-0 drag-region', isFullScreen ? 'h-0' : 'h-6')} />
       )}
       <UpdatePill />
-      <div className={cn("px-3 py-2.5 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
+      <div className={cn("px-3 py-4 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">Workspaces</div>
         <Tip label="New Session" side="bottom">
-          <Button variant="default" size="icon-sm" onClick={() => activeWorkspaceId ? newSession(activeWorkspaceId) : openDialog('addWorkspace')}><Plus /></Button>
+          <Button variant="default" size="icon-sm" className="z-50" onClick={() => activeWorkspaceId ? newSession(activeWorkspaceId) : openDialog('addWorkspace')}><Plus /></Button>
         </Tip>
       </div>
 
@@ -231,6 +232,7 @@ function WorkspaceTreeItem({
   onSelectSession: (sessionId: string) => void; onNewSession: () => void;
 }) {
   const { data: sessions } = useSessions(ws.id);
+  const pendingOptions = useUi((s) => s.pendingOptions);
 
   const draftSessions = useUi((s) => s.draftSessions);
   const composerDrafts = useUi((s) => s.composerDrafts);
@@ -277,7 +279,7 @@ function WorkspaceTreeItem({
                 onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') { setIsRenaming(false); setRenameValue(ws.name); } }}
                 autoFocus className="flex-1 h-6 text-[0.85rem]" />
             ) : (
-              <span className={cn('text-[0.9rem] truncate flex-1', isActive ? 'text-sidebar-foreground font-semibold' : 'text-muted-foreground')}>{ws.name}</span>
+              <span className={cn('text-[0.9rem] truncate flex-1 min-w-0', isActive ? 'text-sidebar-foreground font-semibold' : 'text-muted-foreground')}>{ws.name}</span>
             )}
             {status === 'in_progress' && (
               <ThinkingOrb
@@ -326,6 +328,7 @@ function WorkspaceTreeItem({
             <SessionTreeItem key={s.id} session={s} workspaceId={ws.id}
               isLast={idx === Math.min(sorted.length, 20) - 1}
               isActive={s.id === activeSessionId} isRunning={runningIds.includes(s.id)} isUnread={unreadIds.includes(s.id)} ports={sessionPorts.get(s.id)}
+              needsAttention={!!pendingOptions[s.id]}
               onSelect={() => onSelectSession(s.id)} />
           ))}
           {sorted.length > 20 && <div style={{ paddingLeft: '25px' }} className="py-0.5 text-[0.7rem] text-muted-foreground/40">+{sorted.length - 20} more</div>}
@@ -349,7 +352,7 @@ function DraftTreeItem({
       style={{ paddingLeft: '25px', paddingRight: '4px' }}>
       <div className="flex items-center py-1.5">
         <span className="text-muted-foreground/30 text-[0.7rem] font-mono select-none flex-shrink-0 leading-none mr-1.5">└─</span>
-        <span className={cn('text-[0.85rem] truncate flex-1 pr-2 italic', !isActive && 'text-muted-foreground/80')}>
+        <span className={cn('text-[0.85rem] truncate flex-1 min-w-0 pr-2 italic', !isActive && 'text-muted-foreground/80')}>
           <span className="text-muted-foreground/60 not-italic">(draft)</span>{' '}
           {firstLine}
         </span>
@@ -364,9 +367,9 @@ function DraftTreeItem({
 }
 
 function SessionTreeItem({
-  session, workspaceId, isLast, isActive, isRunning, isUnread, ports, onSelect,
+  session, workspaceId, isLast, isActive, isRunning, isUnread, ports, needsAttention, onSelect,
 }: {
-  session: SessionLite; workspaceId: string; isLast: boolean; isActive: boolean; isRunning: boolean; isUnread: boolean; ports?: { port: number; url: string }[]; onSelect: () => void;
+  session: SessionLite; workspaceId: string; isLast: boolean; isActive: boolean; isRunning: boolean; isUnread: boolean; ports?: { port: number; url: string }[]; needsAttention?: boolean; onSelect: () => void;
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(session.title);
@@ -391,9 +394,13 @@ function SessionTreeItem({
                 onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') { setIsRenaming(false); setRenameValue(session.title); } }}
                 autoFocus className="flex-1 h-5 text-[0.78rem] bg-input border border-input rounded px-1 py-1 outline-none focus:border-primary/60" />
             ) : (
-              <span className={cn('text-[0.85rem] truncate flex-1 pr-2', isActive && 'text-sidebar-foreground font-medium')}>{session.title || 'Untitled'}</span>
+              <span className={cn('text-[0.85rem] truncate flex-1 min-w-0 pr-2', isActive && 'text-sidebar-foreground font-medium')}>{session.title || 'Untitled'}</span>
             )}
-            {isRunning ? (
+            {needsAttention ? (
+              <Tip label="Needs your input" side="top">
+                <MessageCircleQuestion aria-label="Needs your input" className="size-4 text-warning flex-shrink-0 animate-pulse" />
+              </Tip>
+            ) : isRunning ? (
               <ElapsedBadge />
             ) : archiveConfirm.confirming ? (
               <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveSession.mutate(session.id); }} />
@@ -474,7 +481,7 @@ function ArchivedWorkspaceRow({ ws }: { ws: { id: string; name: string } }) {
       <ContextMenuTrigger asChild>
         <div className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors min-w-0 hover:bg-secondary/60">
           <FolderLock className="size-4 flex-shrink-0 text-muted-foreground" />
-          <span className="text-[0.9rem] truncate flex-1 text-muted-foreground">{ws.name}</span>
+          <span className="text-[0.9rem] truncate flex-1 min-w-0 text-muted-foreground">{ws.name}</span>
           {del.confirming ? (
             <InlineConfirmButton label="Delete" destructive onConfirm={() => { del.cancel(); deleteWs.mutate(ws.id); }} />
           ) : (
@@ -538,7 +545,7 @@ function ArchivedSessionRow({ session, workspaceId }: { session: { id: string; t
       <ContextMenuTrigger asChild>
         <div className="group/s flex items-center pr-1 py-2 rounded-md cursor-pointer transition-colors min-w-0 hover:bg-secondary/40 text-muted-foreground"
           style={{ paddingLeft: '15px' }}>
-          <span className="text-[0.8rem] truncate flex-1">{session.title || 'Untitled'}</span>
+          <span className="text-[0.8rem] truncate flex-1 min-w-0">{session.title || 'Untitled'}</span>
           {del.confirming ? (
             <InlineConfirmButton label="Delete" destructive onConfirm={() => { del.cancel(); deleteSession.mutate(session.id); }} />
           ) : (

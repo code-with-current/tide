@@ -117,7 +117,7 @@ export function EmptyChatState({
             <div className="flex items-center gap-2 min-w-0">
               <GitFork className="size-4 shrink-0 text-primary" />
               <h2 className="text-2xl font-semibold tracking-tight text-center truncate max-w-[34rem]">
-                Continue from “{pendingFork.sourceTitle}”
+                Forked from “{pendingFork.sourceTitle}”
               </h2>
             </div>
             <p className="text-xs text-muted-foreground text-center">
@@ -130,7 +130,7 @@ export function EmptyChatState({
               onClick={() => useUi.getState().setPendingFork(null)}
               className="text-[11px] text-muted-foreground/60 hover:text-foreground underline underline-offset-2 transition-colors"
             >
-              start a blank session instead
+              Start a blank session Instead
             </button>
           </div>
         ) : (
@@ -143,14 +143,14 @@ export function EmptyChatState({
 
         {/* Fork source strip — mirrors the workspace strip above, but names
             the session this fork continues from. */}
-        {pendingFork && (
+        {/*{pendingFork && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 -mt-3">
             <GitFork className="size-3" />
             <span className="truncate max-w-[24rem]">forked from “{pendingFork.sourceTitle}”</span>
             <span>·</span>
             <span className="font-mono truncate max-w-[14rem]">{pendingFork.sourceModelId}</span>
           </div>
-        )}
+        )}*/}
 
         {/* Composer */}
         <div className="w-full max-w-[40rem]">

@@ -454,7 +454,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   }));
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden border-t border-border">
+    <div className="flex h-full w-full flex-col border-t border-border">
       <ScrollTabs
         value={active ?? ''}
         onValueChange={(id) => setActiveTerminal(sessionId, id)}
@@ -602,7 +602,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
         </ScrollTabsList>
       </ScrollTabs>
 
-      <div className="flex-1 overflow-hidden w-full min-h-0 relative">
+      <div className="flex-1 min-w-0 min-h-0 relative">
         {terminals.length === 0 ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground/60 gap-2">
             <TerminalIcon className="size-5 opacity-50" />
@@ -612,8 +612,6 @@ export const TerminalPanel = memo(function TerminalPanel() {
             </Button>
           </div>
         ) : (
-          /* Mount point — terminal canvases are created imperatively
-             inside this div. React never manages the xterm DOM. */
           <div ref={mountRef} className="absolute inset-0" />
         )}
       </div>

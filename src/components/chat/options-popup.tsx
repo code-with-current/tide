@@ -118,8 +118,8 @@ export function OptionsPopup({
           <div className="flex-1 min-w-0">
             {/* Header — icon + "Tide is asking" label + question + dismiss */}
             <div className="px-3.5 pt-3 pb-2.5 flex items-start gap-2.5">
-              <div className="size-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-                <MessageCircleQuestion className="size-3.5 text-primary" />
+              <div className="size-9 rounded-lg bg-warning/10 border border-warning/20 flex items-center justify-center shrink-0 mt-0.5">
+                <MessageCircleQuestion className="size-5 text-warning" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-primary/70 mb-0.5">
@@ -160,7 +160,7 @@ export function OptionsPopup({
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 gap-1.5">
                   {opts.options.slice(0, 8).map((option, i) => {
                     const isSelected = selected.has(option);
                     const isFlashing = flashChip === option;

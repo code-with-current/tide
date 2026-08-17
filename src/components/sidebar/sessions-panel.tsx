@@ -319,7 +319,7 @@ function DraftItem({
       )}
     >
       <Dot tone="muted" />
-      <div className="text-[0.9rem] flex-1 truncate italic">
+      <div className="text-[0.9rem] flex-1 min-w-0 truncate italic">
         <span className="text-muted-foreground/70 not-italic">(draft)</span>{" "}
         {firstLine}
       </div>
@@ -476,7 +476,7 @@ function SessionItem({
             ) : (
               <div
                 className={cn(
-                  "text-[0.9rem] flex-1 truncate",
+                  "text-[0.9rem] flex-1 min-w-0 truncate",
                   active && "text-foreground",
                   archived && "text-muted-foreground/60",
                   titleGenerating && "animate-shimmer-title",

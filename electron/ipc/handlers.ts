@@ -90,7 +90,6 @@ function enrichFromOrCatalog(modelId: string): ProviderModelMeta | null {
   const lower = modelId.trim().toLowerCase();
   // Exact match.
   let hit = orCatalog.find((m) => m.id.toLowerCase() === lower);
-  // Suffix match: 'glm-5.2' → 'z-ai/glm-5.2'.
   if (!hit) {
     hit = orCatalog.find((m) => {
       const tail = m.id.toLowerCase().slice(m.id.lastIndexOf('/') + 1);

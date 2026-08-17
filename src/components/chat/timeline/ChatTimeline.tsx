@@ -15,6 +15,10 @@ export interface ChatTimelineProps {
   isStreaming: boolean;
   pendingToolCallIds?: string[];
   stopReason?: string | null;
+  /** Session that owns `messages` — on switch the history lags behind
+   *  activeSessionId, so followup popups must key to the owning session, not
+   *  the currently-viewed one. Undefined falls back to activeSessionId. */
+  sessionId?: string | null;
   sessionLoading?: boolean;
   onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
@@ -31,7 +35,7 @@ export interface ChatTimelineProps {
 
 function ChatTimelineImpl({
   messages, streamingMessage, isStreaming, pendingToolCallIds, stopReason,
-  sessionLoading, onApproveToolCalls, onRejectToolCalls,
+  sessionLoading, onApproveToolCalls, onRejectToolCalls, sessionId,
   loadingFallback, emptyState, errorBlock, className, retryActive,
 }: ChatTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -42,7 +46,7 @@ function ChatTimelineImpl({
   return (
     <div className="relative flex-1 min-h-0">
       <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll px-6 py-3', className)}>
-        <div className="max-w-4xl mx-auto flex flex-col">
+        <div className="w-[80%] max-w-3xl mx-auto flex flex-col">
           {sessionLoading && messages.length === 0 ? loadingFallback
             : isEmpty ? emptyState
             : (
@@ -50,6 +54,7 @@ function ChatTimelineImpl({
                 {messages.map((msg, i) => (
                   <div
                     key={msg.id}
+                    className="min-w-0 w-full"
                     style={{
                       // Skip layout/paint for off-screen messages — the browser
                       // restores real geometry on scroll-in via containIntrinsicSize.
@@ -65,7 +70,7 @@ function ChatTimelineImpl({
                         tokensAfter={msg.compactionInfo.tokensAfter}
                       />
                     )}
-                    <ChatMessage message={msg} stopReason={msg.stopReason} />
+                    <ChatMessage message={msg} stopReason={msg.stopReason} sessionId={sessionId} />
                   </div>
                 ))}
                 {streamingMessage && (

@@ -174,12 +174,12 @@ export function WorkspacesPanel() {
         <div
           className={cn(
             "flex-shrink-0 drag-region",
-            isFullScreen ? "h-0" : "h-8",
+            isFullScreen ? "h-0" : "h-6",
           )}
         />
       )}
       <UpdatePill />
-      <div className={cn("px-3 py-2.5 flex items-center justify-between border-accent-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
+      <div className={cn("px-3 py-4 flex items-center justify-between border-accent-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-accent-foreground font-bold font-stretch-semi-expanded">
           Workspaces
         </div>
@@ -187,6 +187,7 @@ export function WorkspacesPanel() {
           <Button
             variant="default"
             size="icon-sm"
+            className="z-50"
             onClick={() => openDialog("addWorkspace")}
           >
             <Plus />
@@ -360,7 +361,7 @@ function WorkspaceItem({
             ) : (
               <div
                 className={cn(
-                  "text-[0.9rem] flex-1 truncate",
+                  "text-[0.9rem] flex-1 min-w-0 truncate",
                   active && "text-accent-foreground",
                 )}
               >

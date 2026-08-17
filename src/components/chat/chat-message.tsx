@@ -96,14 +96,17 @@ function ChatMessageImpl({
   streaming = false,
   pendingToolCallIds = [],
   stopReason,
+  sessionId,
   onApproveToolCalls,
   onRejectToolCalls,
 }: {
   message: Message;
   streaming?: boolean;
   pendingToolCallIds?: string[];
-  /** Forwarded from SessionStream.stopReason — drives the stopped marker. */
   stopReason?: string | null;
+  /** Session owning this message — not necessarily the active one during a
+   *  session switch. Routes followup popups to the right session. */
+  sessionId?: string | null;
   onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
 }) {
@@ -221,6 +224,7 @@ function ChatMessageImpl({
       streaming={streaming}
       pendingToolCallIds={pendingToolCallIds}
       stopReason={stopReason}
+      sessionId={sessionId}
       onApproveToolCalls={onApproveToolCalls}
       onRejectToolCalls={onRejectToolCalls}
     />
@@ -231,6 +235,7 @@ export const ChatMessage = memo(ChatMessageImpl, (prev, next) => {
   if (prev.streaming !== next.streaming) return false;
   if (prev.message !== next.message) return false;
   if (prev.stopReason !== next.stopReason) return false;
+  if (prev.sessionId !== next.sessionId) return false;
   const a = prev.pendingToolCallIds ?? [];
   const b = next.pendingToolCallIds ?? [];
   if (a.length !== b.length) return false;

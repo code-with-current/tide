@@ -1,13 +1,9 @@
-/** Electron main process: window creation, lifecycle, and IPC registration (contextIsolation on, nodeIntegration off, custom frameless titleBar, external links in OS browser, navigation blocked). */
 
 import { app, BrowserWindow, shell, ipcMain, protocol } from 'electron';
 
-// Load .env before anything else reads process.env (system model + TIDE_DEBUG_SDK are read lazily via IPC, so this wins the race). Optional — its absence means system-model tasks no-op (title gen returns null). ESM hoists imports above this body but nothing below reads env at module-eval time.
 try {
   process.loadEnvFile();
 } catch {
-  // cwd isn't the project root (some launch paths): fall back to <project>/.env
-  // resolved from this module (dist-electron/main.mjs → ../.  env).
   try {
     process.loadEnvFile(`${import.meta.dirname}/../.env`);
   } catch {
@@ -15,14 +11,8 @@ try {
   }
 }
 
-// ── Suppress AI SDK warnings ─────────────────────────────────────────
-// Some OpenAI-compatible providers (z.ai GLM via Anthropic protocol) return reasoning metadata the AI SDK's Anthropic adapter doesn't recognize, producing "unsupported reasoning metadata" warnings on every tool-call step. Noise — the response is correct; the adapter just doesn't know about z.ai's extra fields. Suppress globally before the AI SDK loads.
 (globalThis as Record<string, unknown>).AI_SDK_LOG_WARNINGS = false;
 
-// ── GPU / Hardware Acceleration ──────────────────────────────────────
-// Ensure hardware acceleration is enabled (it's on by default, but some
-// environments disable it). These flags also help with the `transparent`
-// window mode by forcing GPU compositing instead of software fallback.
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
@@ -76,15 +66,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    // Minimum size that keeps the 3-panel shell usable: integrated sidebar
-    // (300–500px) + chat (min 30% of the card) + right/Git panel (min 20%) +
-    // composer. Below this the columns crush and the layout breaks.
-    minWidth: 1080,
+    minWidth: 1100,
     minHeight: 680,
-    // Frameless custom titlebar. macOS: keep the native traffic lights.
-    // Windows/Linux: render native caption buttons (min/max/close) via
-    // titleBarOverlay so the custom WindowTopBar has working controls.
-    // (frame:false would hide those caption buttons on Windows — don't use it.)
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin'
       ? { trafficLightPosition: { x: 12, y: 12 } }
@@ -95,15 +78,10 @@ function createWindow() {
             height: 40,                // matches WindowTopBar h-10
           },
         }),
-    // Non-transparent window — transparent:true disables GPU compositing
-    // on macOS (forces software rendering = slow streaming, slow scrolling).
-    // The dark background color matches the app's card bg. The rounded
-    // content card is handled in CSS — we don't need window-level transparency.
     transparent: false,
     backgroundColor: '#1a1a1a',
     show: false,
     webPreferences: {
-      // preload is relative to dist-electron/ (where this file lives after build)
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
@@ -128,10 +106,6 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Forward native fullscreen transitions so the renderer can collapse the
-  // macOS traffic-light spacer (the buttons hide while fullscreen). Send the
-  // literal value — 'leave-full-screen' fires before isFullScreen() flips
-  // back to false on macOS.
   mainWindow.on('enter-full-screen', () =>
     mainWindow?.webContents.send('tide:window:fullscreen', true));
   mainWindow.on('leave-full-screen', () =>
@@ -154,18 +128,11 @@ function createWindow() {
   }
 }
 
-// ── App lifecycle ─────────────────────────────────────────────
 
-// In dev, skip the single-instance lock so a dev server can run alongside the
-// installed Tide.app (which holds the prod lock). Prod still enforces one instance.
 const gotLock = isDev || app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  // Register open-url BEFORE whenReady — on macOS, an OAuth callback that
-  // launches the app fires open-url during launch, before ready. If we
-  // register inside whenReady, the event is missed and OAuth fails in dev.
-  // Queue any URLs that arrive before the handler is ready.
   const earlyOAuthUrls: string[] = [];
   app.on('open-url', (event, url) => {
     if (url.startsWith(OAUTH_CALLBACK)) {
@@ -176,10 +143,6 @@ if (!gotLock) {
   });
 
   app.on('second-instance', (_event, argv, _workingDirectory, _additionalData) => {
-    // On Windows/Linux the OS relaunches the app with the OAuth callback URL
-    // as the last argv arg (macOS uses `open-url` instead). Forward OAuth
-    // callbacks to the primary instance's handler; non-oauth second launches
-    // just focus the window.
     const lastArg = argv[argv.length - 1];
     if (lastArg?.startsWith(OAUTH_CALLBACK)) {
       log.info('second-instance: OAuth callback received', { url: lastArg.slice(0, 50) + '…' });
@@ -193,38 +156,23 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     const t0 = Date.now();
-    // Set userData to ~/.tide (~/.tide-dev in dev) before any handler
-    // registers — handlers create config/session stores that read
-    // getPath('userData') at registration time. Fresh start, no migration.
     setUserDataPath(isDev);
 
-    // Set the AppUserModelID so Windows notifications display with the correct
-    // app name + icon. Required for toast notifications to appear at all on
-    // Windows; harmless on macOS/Linux. electron-builder sets this for
-    // production installs, but we need it for dev/unsigned builds too.
     if (process.platform === 'win32') {
       app.setAppUserModelId('com.tide.app');
     }
 
-    // Claim the protocol for OAuth callbacks. In dev this registers
-    // `tide-dev://` — safe because it doesn't collide with the installed
-    // Tide.app's `tide://`. Prod registers `tide://`.
     app.setAsDefaultProtocolClient(PROTOCOL);
 
-    // Intercept the protocol at the protocol level — catches in-app navigations.
     protocol.handle(PROTOCOL, (request) => {
       log.info('protocol.handle: OAuth intercepted', { url: request.url.slice(0, 50) + '…' });
       handleOAuthCallback(request.url);
       return new Response('OK', { status: 200 });
     });
-    // Drain any OAuth callbacks that arrived before whenReady (macOS launches
-    // a new process → open-url fires during startup → the early handler above
-    // queued them).
     for (const url of earlyOAuthUrls) {
       handleOAuthCallback(url);
     }
     earlyOAuthUrls.length = 0;
-    // Subsequent open-url events (same-session) go directly to the handler.
     app.on('open-url', (event, url) => {
       if (url.startsWith(OAUTH_CALLBACK)) {
         event.preventDefault();
@@ -233,20 +181,13 @@ if (!gotLock) {
       }
     });
 
-    // Initialize logging AFTER userData is set (so log files land in
-    // ~/.tide/logs) but BEFORE handler registration. Sync file writes,
-    // global error capture — runs once.
     initLogger(path.join(appDataDir(), 'logs'));
     log.info('app ready', { dev: isDev, userData: appDataDir() });
 
     registerIpcHandlers();
     // Settings handlers MUST be ready before the window shows — the renderer
-    // hydrates shortcuts on mount via tide:settings:get. Deferring it would
-    // leave the user with hardcoded macOS defaults until a restart.
     registerSettingsHandlers();
     // Read-side companion to the fullscreen events sent from createWindow —
-    // the renderer needs the current state on mount (covers relaunch-while-
-    // fullscreen, where no transition event fires).
     ipcMain.handle('tide:window:isFullScreen', () => mainWindow?.isFullScreen() ?? false);
     log.info('core IPC handlers registered', { ms: Date.now() - t0 });
 

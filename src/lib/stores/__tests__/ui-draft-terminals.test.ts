@@ -27,6 +27,25 @@ describe('terminalScopeKey', () => {
 describe('draft terminal buckets', () => {
   beforeEach(reset);
 
+  it('keeps only one draft per workspace', () => {
+    useUi.setState({ activeDraftId: 'd1', draftSessions: { d1: { id: 'd1', workspaceId: 'ws1', updatedAt: 1 } }, composerDrafts: { d1: 'old text' } });
+    useUi.getState().touchDraft('ws1', 'new draft text');
+    const drafts = Object.values(useUi.getState().draftSessions);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].id).toBe('d1');
+    // Other workspaces keep their drafts.
+    const other = { id: 'd2', workspaceId: 'ws2', updatedAt: 2 };
+    useUi.setState({ draftSessions: { d1: drafts[0], d2: other } });
+    useUi.getState().touchDraft('ws1', 'more text');
+    expect(useUi.getState().draftSessions).toEqual({ d1: expect.anything(), d2: other });
+  });
+
+  it('drops the draft entry when text is emptied', () => {
+    useUi.setState({ activeDraftId: 'd1', draftSessions: { d1: { id: 'd1', workspaceId: 'ws1', updatedAt: 1 } } });
+    useUi.getState().touchDraft('ws1', '   ');
+    expect(useUi.getState().draftSessions).toEqual({});
+  });
+
   it('keys draft-phase terminals by draft id and adopts them on promotion', () => {
     useUi.getState().startNewDraft();
     const draftId = useUi.getState().activeDraftId!;

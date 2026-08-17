@@ -16,6 +16,7 @@ import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { TerminalPanel } from "@/components/terminal/terminal-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
+import { useRightPanelOverlay } from '@/lib/right-panel-layout';
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -41,6 +42,25 @@ export function MainScreen() {
   const leftPanelOpen = useUi((s) => s.leftPanelOpen);
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
   const sidebarMode = useUi((s) => s.sidebarMode);
+  const setSidebarMode = useUi((s) => s.setSidebarMode);
+  // Dual sidebar needs ~1024px of panels; below that fall back to integrated
+  // (and restore the user's choice when the window is wide again).
+  const autoSwitchedRef = useRef(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const apply = () => {
+      if (mq.matches && useUi.getState().sidebarMode === 'dual') {
+        autoSwitchedRef.current = true;
+        setSidebarMode('integrated');
+      } else if (!mq.matches && autoSwitchedRef.current) {
+        autoSwitchedRef.current = false;
+        setSidebarMode('dual');
+      }
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [setSidebarMode]);
   const sidebarWidth = useUi((s) => s.sidebarWidth);
   const setSidebarWidth = useUi((s) => s.setSidebarWidth);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
@@ -60,6 +80,30 @@ export function MainScreen() {
   const mainView = useUi((s) => s.mainView);
   // The right panel is hidden on the new-session screen — it shows session-specific data (Inspector, files, terminal) that doesn't exist before the first message creates a session. Derived locally (NOT written to the store) so the user's rightPanelOpen preference is preserved when they return to chat.
   const showRightPanel = rightPanelOpen && mainView !== "new";
+  // Narrow windows: the right panel becomes a Sheet overlay instead of competing
+  // with the chat column for in-flow space (t3code-style inline↔overlay switch).
+  const rightPanelOverlay = useRightPanelOverlay();
+  // When the window narrows, the inline panel swaps to an overlay Sheet; dismissing
+  // that Sheet closes the panel. Remember it was open before the switch so we can
+  // re-expand it once the window is wide enough for the inline layout again. A
+  // manual close at wide width is never overridden — the ref only holds "collapsed
+  // by the narrow-window switch", not user intent.
+  const openBeforeOverlayRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (rightPanelOverlay) {
+      if (openBeforeOverlayRef.current === null) {
+        openBeforeOverlayRef.current = rightPanelOpen;
+      } else if (openBeforeOverlayRef.current && !rightPanelOpen) {
+        // The only way to close it mid-overlay is the user (Sheet dismiss or
+        // toggle) — drop the restore so their close sticks.
+        openBeforeOverlayRef.current = false;
+      }
+    } else if (openBeforeOverlayRef.current !== null) {
+      const restore = openBeforeOverlayRef.current;
+      openBeforeOverlayRef.current = null;
+      if (restore && !rightPanelOpen) setRightPanelOpen();
+    }
+  }, [rightPanelOverlay, rightPanelOpen, setRightPanelOpen]);
   const terminalScope = useUi(terminalScopeKey);
   const terminalOpen = useUi((s) => !!s.terminalOpen[terminalScope]);
   const terminalHeight = useUi((s) => s.terminalHeight[terminalScope] ?? 220);
@@ -134,12 +178,16 @@ export function MainScreen() {
 
   // Store actions for stream management.
   const clearFinalMessage = useUi((s) => s.clearFinalMessage);
-  // Subscribe to "any stream has a finalMessage pending" so the freeze effect
-  // fires for sessions that finished while the user was viewing another one.
-  // Returns a derived boolean; only changes when the set of pending
-  // finalMessages changes, so the effect doesn't re-fire on every token.
-  const hasAnyFinalMessage = useUi((s) =>
-    Object.values(s.streams).some((st) => st.finalMessage),
+  // Subscribe to the list of sessions with a pending finalMessage (stable
+  // string key) so the freeze effect fires whenever a NEW session finishes —
+  // a boolean `.some()` would skip a turn_end that lands while another
+  // finalMessage is already pending, losing that session's unread dot.
+  const pendingFinalSessionIds = useUi((s) =>
+    Object.entries(s.streams)
+      .filter(([, st]) => st.finalMessage)
+      .map(([sid]) => sid)
+      .sort()
+      .join(","),
   );
   const streamsRef = useUi.getState;
   // Keep a ref so the freeze effect can read the latest streams without
@@ -150,6 +198,10 @@ export function MainScreen() {
 
   // Local chat state — mirrors the persisted session.
   const [chatHistory, setChatHistory] = useState<Message[]>([]);
+  // Session that owns `chatHistory`. On switch the old history keeps rendering
+  // while the new session loads — this id routes followup popups and stream
+  // reads to the owning session instead of the newly-active one.
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
   // True while a session's messages are loading from IPC (on session switch).
   // Drives a skeleton so switching sessions doesn't flash a blank/empty chat.
   const [sessionLoading, setSessionLoading] = useState(false);
@@ -183,6 +235,7 @@ export function MainScreen() {
     currentSessionRef.current = activeSessionId;
     if (!activeSessionId) {
       setChatHistory([]);
+      setHistorySessionId(null);
       setSessionLoading(false);
       return;
     }
@@ -197,6 +250,7 @@ export function MainScreen() {
       if (!s) {
         setActiveSession(null);
         setChatHistory([]);
+        setHistorySessionId(null);
         setSessionLoading(false);
         return;
       }
@@ -223,6 +277,7 @@ export function MainScreen() {
             })),
           ),
         );
+        setHistorySessionId(activeSessionId);
         applySessionSettings(activeSessionId, {
           modelId: s.modelId,
           providerId: s.providerId,
@@ -240,6 +295,7 @@ export function MainScreen() {
       // isn't stuck on a skeleton, and they can retry by re-selecting.
       setSessionLoading(false);
       setChatHistory([]);
+      setHistorySessionId(null);
     });
   }, [activeSessionId, markSessionRead, setActiveSession]);
 
@@ -441,10 +497,12 @@ export function MainScreen() {
         // them under the new session id BEFORE the draft pointer is dropped
         // (setActiveSession clears it; adoption reads it).
         useUi.getState().adoptDraftTerminals(newSession.id);
+        // Consume BEFORE setActiveSession — setActiveSession nulls
+        // activeDraftId, and consumeDraft keys off it, so the promoted draft
+        // would survive in the sidebar list.
+        useUi.getState().consumeDraft();
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
-        // The draft was promoted to a real session — drop it from the list.
-        useUi.getState().consumeDraft();
         // Title generation moved below — it must run AFTER addMessage persists
         // the first user message, otherwise the handler finds no user message.
 
@@ -648,7 +706,7 @@ export function MainScreen() {
 
   // When any session's stream finishes (finalMessage lands), freeze + persist that session's assistant message. Iterates over ALL streams rather than reading a single finalMessage slot — critical for parallel turns where two sessions may finish close together and would otherwise overwrite each other's slot before the effect processes them. Subscribes to `hasAnyFinalMessage` so the effect fires whenever any session's finalMessage becomes set, regardless of which is active.
   useEffect(() => {
-    if (!hasAnyFinalMessage) return;
+    if (!pendingFinalSessionIds) return;
 
     // Auto-drain queued messages after a turn finishes. Two paths:
     //  1. Force-send override ("Send now" was clicked) — aborts the current
@@ -741,7 +799,7 @@ export function MainScreen() {
       drainQueue(sid);
     }
   }, [
-    hasAnyFinalMessage,
+    pendingFinalSessionIds,
     activeSessionId,
     activeWorkspaceId,
     qc,
@@ -806,9 +864,9 @@ export function MainScreen() {
           <ResizablePanel
             id="sidebar"
             defaultSize={sidebarWidth}
-            minSize={240}
-            maxSize={300}
-            className="min-h-0"
+            minSize={260}
+            maxSize={260}
+            className="min-h-0 min-w-0 overflow-hidden"
             onResize={(size) => setSidebarWidth(size.inPixels)}
           >
             <IntegratedSidebar />
@@ -817,7 +875,7 @@ export function MainScreen() {
         </>
       ) : leftPanelOpen && sidebarMode === 'dual' ? (
         <>
-          <ResizablePanel id="workspaces" defaultSize={260} minSize={200} maxSize={400} className="min-h-0">
+          <ResizablePanel id="workspaces" defaultSize={200} minSize={200} maxSize={250} className="min-h-0">
             <WorkspacesPanel />
           </ResizablePanel>
           <ResizableHandle className="!bg-transparent" />
@@ -841,9 +899,7 @@ export function MainScreen() {
           {sessionsPanelOpen && sidebarMode === 'dual' && !workspaceMissing && (
             <ResizablePanel
               id="sessions"
-              defaultSize="15"
-              minSize="12"
-              maxSize="25"
+              defaultSize={200} minSize={200} maxSize={250}
               className="min-h-0"
             >
               <SessionsPanel />
@@ -853,8 +909,7 @@ export function MainScreen() {
 
           <ResizablePanel
             id="chat"
-            minSize="30"
-            className="h-full min-h-0"
+            className="h-full min-h-0 min-w-0"
           >
             <main className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden">
               {/* Body — vertical ResizablePanelGroup: chat body + collapsible
@@ -885,6 +940,7 @@ export function MainScreen() {
                       <TodoFloatingPanel sessionId={activeSessionId} />
                       <ChatTimeline
                         messages={chatHistory}
+                        sessionId={historySessionId}
                         streamingMessage={streamingMessage}
                         isStreaming={isStreaming}
                         pendingToolCallIds={pendingToolCallIds}
@@ -988,7 +1044,7 @@ export function MainScreen() {
                           </span>
                         </div>
                       )}
-                      <div className="max-w-5xl mx-auto relative">
+                      <div className="relative w-[80%] max-w-3xl mx-auto">
                         {/* Options popover — anchored above the composer, matches
                           its width via the relative parent. No backdrop; floats
                           over the chat scroll without blocking interaction. */}
@@ -1049,23 +1105,39 @@ export function MainScreen() {
             </main>
           </ResizablePanel>
 
-          {showRightPanel && !workspaceMissing && <ResizableHandle />}
-          {showRightPanel && !workspaceMissing && (
+          {showRightPanel && !workspaceMissing && !rightPanelOverlay && <ResizableHandle />}
+          {showRightPanel && !workspaceMissing && !rightPanelOverlay && (
             <ResizablePanel
               id="right"
               defaultSize="25"
-              minSize="20"
+              minSize="25"
               maxSize="30"
               className="h-full relative min-w-0"
             >
               <RightPanel />
-              {/* Floating permission card — anchored inside the right panel so
-                it inherits the panel's width. Sits above the panel content,
-                pinned to the bottom, only visible when there are pending prompts. */}
               <FloatingPermissionCard sessionId={activeSessionId} />
             </ResizablePanel>
           )}
         </ResizablePanelGroup>
+
+        {/* Right panel, narrow-window mode — same Sheet treatment as t3code:
+            below the media-query breakpoint the panel stops competing with the
+            chat column for in-flow space and overlays instead. Dismissing the
+            Sheet just closes the panel (same as the inline toggle). */}
+        <Sheet
+          open={rightPanelOverlay && showRightPanel && !workspaceMissing}
+            onOpenChange={(o) => { if (!o) setRightPanelOpen(); }}
+        >
+          <SheetContent
+            side="right"
+            showCloseButton={false}
+            className="gap-0 p-0 w-[42vw] sm:max-w-[28rem] sm:min-w-[20rem]"
+            style={{ top: '40px', height: 'auto' }}
+          >
+            <RightPanel />
+            <FloatingPermissionCard sessionId={activeSessionId} />
+          </SheetContent>
+        </Sheet>
 
         {/* File viewer — Sheet positioned below the topbar (top:40px). */}
         <Sheet open={fileViewerOpen} onOpenChange={(o) => { if (!o) useUi.setState({ fileViewerOpen: false }); }}>

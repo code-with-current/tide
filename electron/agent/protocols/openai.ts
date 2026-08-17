@@ -5,9 +5,7 @@
  *  - budget_tokens → derives effort via budgetToEffort (lossy but correct)
  *  - toggle → `reasoningEffort: 'medium'` (just enable thinking)
  *
- *  The key improvement over the old code: effort strings are sent directly
- *  instead of collapsing the entire range to just high|max. GLM-5.2 with
- *  effort contract now gets low/medium/high/max as discrete levels. */
+ *  The key improvement over the old code: effort strings are sent directly */
 import type { ProtocolCallOptions, ProtocolContext } from './types';
 import type { ReasoningInstruction } from './reasoning';
 import { budgetToEffort } from './reasoning';

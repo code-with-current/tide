@@ -11,7 +11,7 @@ import {
   GitPullRequestArrow, Check, Plus, Loader2,
 } from "lucide-react";
 // Square removed — replaced by animate-pulse span for the stop button.
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Tip } from "@/components/ui/quick-tooltip";
@@ -37,10 +37,24 @@ export function WindowTopBar() {
   // ── Scripts dropdown open state (controlled so we can close on action) ──
   const [scriptsOpen, setScriptsOpen] = useState(false);
 
-  // ── Compact mode: on narrow windows, auto-close the right panel and collapse
-  //    the secondary topbar group (ports + scripts) so the chat column and the
-  //    essential right-side buttons keep room. One resize listener drives both. ──
+  // ── Compact mode: measured on the BAR itself (ResizeObserver), not the
+  //    window — the bar lives inside the content card, so its real width is
+  //    window minus sidebar minus card margins. Below the floor, ports and
+  //    scripts collapse (Run/Stop stays); the essential right-side buttons
+  //    keep room. ──
+  const mainView = useUi((s) => s.mainView);
   const [compact, setCompact] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setCompact(el.clientWidth < 880));
+    ro.observe(el);
+    setCompact(el.clientWidth < 880);
+    return () => ro.disconnect();
+    // mainView gating: the bar renders null on the new-session screen, so the
+    // ref can be empty on first run — re-attach when it mounts.
+  }, [mainView]);
 
   // ── Panel toggles ──
   const toggleTerminal = useUi((s) => s.toggleTerminal);
@@ -53,7 +67,6 @@ export function WindowTopBar() {
   // ── Session context ──
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const activeSessionId = useUi((s) => s.activeSessionId);
-  const mainView = useUi((s) => s.mainView);
   const addTerminal = useUi((s) => s.addTerminal);
   const allTerminals = useUi((s) => s.terminals);
   const terminalPorts = useUi((s) => s.terminalPorts);
@@ -239,45 +252,30 @@ export function WindowTopBar() {
     }
   }, [activeWorkspaceId, isRunning, addTerminal]);
 
-  // Resize: enter compact mode below the threshold, and auto-close the right
-  // panel so the chat keeps room. We never force it back open — the user
-  // reopens via the toggle when they widen the window.
-  useEffect(() => {
-    const update = () => {
-      const w = window.innerWidth;
-      setCompact(w < 1200);
-      if (w < 1200 && useUi.getState().rightPanelOpen) {
-        useUi.setState({ rightPanelOpen: false });
-      }
-    };
-    setCompact(window.innerWidth < 1200);
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
   // New-session screen: hide the top bar entirely.
   if (mainView !== 'chat') return null;
 
   return (
     <div
-      className="drag-region flex items-center gap-2 border-b border-border flex-shrink-0"
+      ref={barRef}
+      className="drag-region flex items-center gap-2 border-b border-border flex-shrink-0 overflow-hidden"
       style={{ height: 40 }}
     >
       {/* ══ Far left: sessions toggle + breadcrumb ══ */}
       {sidebarMode === 'dual' && (
         <Tip label="Sessions Panel">
-          <Button variant="outline" size="sm" className="p-1.5 flex-shrink-0" onClick={toggleSessionsPanel}>
+          <Button variant="outline" size="sm" className="ml-2 p-1.5 flex-shrink-0" onClick={toggleSessionsPanel}>
             <PanelRightClose className={cn("size-3.5 transition-transform", { "rotate-180": sessionsPanelOpen })} />
           </Button>
         </Tip>
       )}
 
       {activeWorkspace && (
-        <div className="flex items-center gap-1 ml-3 text-xs text-muted-foreground/60 flex-shrink-0 min-w-0">
+        <div className="flex items-center gap-1 ml-2 text-xs text-muted-foreground/60 min-w-0">
           <FolderCode className="size-4 flex-shrink-0 text-muted-foreground " />
-          <span className="text-[0.8rem] text-muted-foreground truncate max-w-[120px]">{activeWorkspace.name}</span>
+          <span className="text-[0.8rem] text-muted-foreground truncate max-w-[120px] min-w-0">{activeWorkspace.name}</span>
           <ChevronRight className="size-4 flex-shrink-0" style={{ opacity: 0.6 }} />
-          <span className="text-[0.8rem] text-card-foreground truncate max-w-[200px]">{sessionTitle}</span>
+          <span className="text-[0.8rem] text-card-foreground truncate max-w-[200px] min-w-0">{sessionTitle}</span>
 
           {showSessionContent && gitBranch && (
             <DropdownMenu
@@ -287,7 +285,7 @@ export function WindowTopBar() {
               <DropdownMenuTrigger asChild>
                 <Badge variant="secondary" className="no-drag py-0.5 px-2 ml-2 cursor-pointer hover:bg-secondary/80 transition-colors select-none">
                   <GitBranch className="size-3.5" style={{ opacity: 0.6 }} />
-                  <span className="truncate text-[0.75rem] max-w-[250px]">{gitBranch}</span>
+                  <span className="truncate text-[0.75rem] max-w-[250px] min-w-0">{gitBranch}</span>
                 </Badge>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="min-w-[260px] p-0 overflow-hidden">
@@ -424,13 +422,14 @@ export function WindowTopBar() {
           Collapses (slides left + fades) in compact mode so the essential
           right-side buttons stay visible on narrow windows. */}
       {showSessionContent && (
-        <div
-          className={cn(
-            'flex items-center gap-1 flex-shrink-0 overflow-hidden transition-[max-width,opacity] duration-200 ease-out',
-            compact ? 'max-w-0 opacity-0' : 'max-w-[800px] opacity-100',
-          )}
-        >
-          {/* Port chips — compact glowing pills */}
+        <div className="flex flex-1 min-w-0 items-center gap-1 overflow-hidden">
+          {/* Port chips — compact glowing pills; collapse in compact mode */}
+          <div
+            className={cn(
+              'flex items-center gap-1 min-w-0 overflow-hidden transition-[max-width,opacity] duration-200 ease-out',
+              compact ? 'max-w-0 opacity-0' : 'max-w-[600px] opacity-100',
+            )}
+          >
           {aggregatedPorts.map((p) => (
             <Tip key={p.port} label={`${p.label}`}>
               <a href={p.url} target="_blank" rel="noreferrer"
@@ -440,8 +439,10 @@ export function WindowTopBar() {
               </a>
             </Tip>
           ))}
+          </div>
 
-          {/* Run/Stop + Scripts — unified control */}
+          {/* Run/Stop + Scripts — unified control. Run/Stop stays visible in
+              compact mode; only the scripts dropdown collapses. */}
           <div className="flex items-center gap-0.5">
             {primaryRun && (
               <Tip label={isPrimaryRunActive ? `Stop — ${primaryRun.command}` : `Run — ${primaryRun.command}`}>
@@ -468,8 +469,9 @@ export function WindowTopBar() {
                   type="button"
                   title="Scripts"
                   className={cn(
-                    'inline-flex items-center gap-1 h-7 px-2 text-[0.75rem] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 rounded-md transition-colors',
-                    primaryRun && 'ml-px',
+                    'inline-flex items-center gap-1 h-7 px-2 text-[0.75rem] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 rounded-md transition-all',
+                    compact && 'max-w-0 opacity-0 px-0 overflow-hidden pointer-events-none',
+                    primaryRun && !compact && 'ml-px',
                   )}
                 >
                   <Hammer className="size-3" />
@@ -563,11 +565,9 @@ export function WindowTopBar() {
           </div>
         </div>
       )}
-      <div className="flex-1 flex items-center justify-center relative">
 
-      </div>
       {/* ══ Far right: open-in-app + terminal + right panel ══ */}
-      <div className="flex items-center gap-1.5 flex-shrink-0 mr-2" style={{ paddingRight: CAPTION_PAD }}>
+      <div className="flex items-center gap-1.5 flex-shrink-0 mr-2  z-50" style={{ paddingRight: CAPTION_PAD }}>
         <OpenInAppMenu />
 
         <Tip label="Terminal Panel">
