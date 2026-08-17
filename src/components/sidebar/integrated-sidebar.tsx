@@ -1,7 +1,7 @@
 /** IntegratedSidebar — sessions nested inside workspace items.
  *  Full context menus (right-click + ⋯ dropdown) matching dual panel. */
 
-import { useState, useMemo, useEffect, useRef, createContext, useContext, useCallback, type ReactNode } from 'react';
+import { useState, useMemo, useEffect, createContext, useContext, useCallback, type ReactNode } from 'react';
 import {
   ChevronRight, FolderCode, Plus,
   Loader2, Settings as SettingsIcon, Archive as ArchiveIcon,
@@ -23,7 +23,7 @@ import {
 import { useExternalApps } from '@/lib/use-external-apps';
 import * as api from '@/lib/api/client';
 import { cn } from '@/lib/utils';
-import { Dot } from '@/components/primitives';
+import { ThinkingOrb } from 'thinking-orbs';
 import { Tip } from '@/components/ui/quick-tooltip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -94,18 +94,24 @@ function IntegratedSidebarImpl() {
   const unreadSessionIds = useUi((s) => s.unreadSessionIds);
   const terminalPorts = useUi((s) => s.terminalPorts);
   const allTerminals = useUi((s) => s.terminals);
+  const isFullScreen = useUi((s) => s.isFullScreen);
 
-  // Sessions → port numbers (dev servers running).
+  // Sessions → live ports (dev servers running). Same per-session scoping as
+  // the top bar's aggregatedPorts: only terminals keyed to that session count,
+  // and entries die with the process (main-process reaper clears terminal:ports).
   const sessionPorts = useMemo(() => {
-    const map = new Map<string, number[]>();
+    const map = new Map<string, { port: number; url: string }[]>();
     for (const [sid, terms] of Object.entries(allTerminals)) {
-      const ports: number[] = [];
+      const seen = new Set<number>();
+      const ports: { port: number; url: string }[] = [];
       for (const t of terms) {
         for (const p of terminalPorts[t.id] ?? []) {
-          if (!ports.includes(p.port)) ports.push(p.port);
+          if (seen.has(p.port)) continue;
+          seen.add(p.port);
+          ports.push({ port: p.port, url: p.url });
         }
       }
-      if (ports.length > 0) map.set(sid, ports.sort((a, b) => a - b));
+      if (ports.length > 0) map.set(sid, ports.sort((a, b) => a.port - b.port));
     }
     return map;
   }, [allTerminals, terminalPorts]);
@@ -158,7 +164,11 @@ function IntegratedSidebarImpl() {
   return (
     <InlineConfirmProvider>
     <aside className="flex flex-col h-full w-full overflow-hidden p-2">
-      {isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+      {/* Spacer clearing the native macOS traffic lights (top-left, 12,12).
+          Collapses to zero while fullscreen — the buttons hide there. */}
+      {isMac && (
+        <div className={cn('flex-shrink-0 drag-region', isFullScreen ? 'h-0' : 'h-8')} />
+      )}
       <UpdatePill />
       <div className={cn("px-3 py-2.5 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">Workspaces</div>
@@ -216,7 +226,7 @@ function WorkspaceTreeItem({
 }: {
   ws: { id: string; name: string; path: string };
   isActive: boolean; isExpanded: boolean; isSwitching: boolean;
-  activeSessionId: string | null; runningIds: string[]; unreadIds: string[]; sessionPorts: Map<string, number[]>;
+  activeSessionId: string | null; runningIds: string[]; unreadIds: string[]; sessionPorts: Map<string, { port: number; url: string }[]>;
   onToggle: () => void; onSelect: () => void;
   onSelectSession: (sessionId: string) => void; onNewSession: () => void;
 }) {
@@ -269,9 +279,18 @@ function WorkspaceTreeItem({
             ) : (
               <span className={cn('text-[0.9rem] truncate flex-1', isActive ? 'text-sidebar-foreground font-semibold' : 'text-muted-foreground')}>{ws.name}</span>
             )}
-            {status === 'in_progress' && <Dot tone="warn" pulse="heartbeat" />}
-            {status === 'unread' && <Dot tone="ok" />}
-            <div className="flex items-center flex-shrink-0">
+            {status === 'in_progress' && (
+              <ThinkingOrb
+                state="composing"
+                size={20}
+                speed={2}
+                aria-label="Running"
+                className="flex-shrink-0"
+                style={{ filter: 'sepia(1) saturate(4) brightness(0.95)' }}
+              />
+            )}
+            {/*{status === 'unread' && <Dot tone="ok" />}*/}
+             {(status !== 'in_progress' && status !== 'unread') && <div className="flex items-center flex-shrink-0">
               {archiveConfirm.confirming ? (
                 <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveWs.mutate(ws.id); }} />
               ) : (
@@ -283,7 +302,9 @@ function WorkspaceTreeItem({
                   </button>
                 </Tip>
               )}
+
             </div>
+             }
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">
@@ -345,7 +366,7 @@ function DraftTreeItem({
 function SessionTreeItem({
   session, workspaceId, isLast, isActive, isRunning, isUnread, ports, onSelect,
 }: {
-  session: SessionLite; workspaceId: string; isLast: boolean; isActive: boolean; isRunning: boolean; isUnread: boolean; ports?: number[]; onSelect: () => void;
+  session: SessionLite; workspaceId: string; isLast: boolean; isActive: boolean; isRunning: boolean; isUnread: boolean; ports?: { port: number; url: string }[]; onSelect: () => void;
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(session.title);
@@ -354,16 +375,6 @@ function SessionTreeItem({
   const archiveConfirm = useInlineConfirm(`s:${session.id}`);
   const { visibleApps, pickApp, renderAppIcon } = useExternalApps();
   const doRename = () => { if (renameValue.trim() && renameValue !== session.title) renameSession.mutate({ id: session.id, title: renameValue.trim() }); setIsRenaming(false); };
-
-  // Track when this session started running — resets when isRunning flips to true.
-  const runningSinceRef = useRef<number>(0);
-  useEffect(() => {
-    if (isRunning && runningSinceRef.current === 0) {
-      runningSinceRef.current = Date.now();
-    } else if (!isRunning) {
-      runningSinceRef.current = 0;
-    }
-  }, [isRunning]);
 
   return (
     <ContextMenu>
@@ -383,13 +394,18 @@ function SessionTreeItem({
               <span className={cn('text-[0.85rem] truncate flex-1 pr-2', isActive && 'text-sidebar-foreground font-medium')}>{session.title || 'Untitled'}</span>
             )}
             {isRunning ? (
-              <ElapsedBadge startedAt={runningSinceRef.current} />
+              <ElapsedBadge />
             ) : archiveConfirm.confirming ? (
               <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveSession.mutate(session.id); }} />
             ) : (
               <>
-                <span className="text-[0.7rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums group-hover/s:hidden">{formatLastChat(session.updatedAt)}</span>
-                {!(ports && ports.length > 0) && (
+                {isUnread && (
+                  <span aria-label="Unread" className="size-1.5 rounded-full bg-success flex-shrink-0" />
+                )}
+                {!isUnread && (
+                  <span className="text-[0.7rem] font-mono text-muted-foreground/40 flex-shrink-0 tabular-nums group-hover/s:hidden">{formatLastChat(session.updatedAt)}</span>
+                )}
+                {(!(ports && ports.length > 0) && !isUnread) && (
                   <Tip label="Archive" side="top">
                     <button type="button" aria-label="Archive session"
                       onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
@@ -407,24 +423,21 @@ function SessionTreeItem({
               {/* Normal: just dots. Hover: full port pills. */}
               <div className="flex items-center gap-1 group-hover/s:hidden">
                 {ports.map((p) => (
-                  <span key={p} className="size-1.5 rounded-full bg-success animate-pulse" />
+                  <span key={p.port} className="size-1.5 rounded-full bg-info animate-pulse" />
                 ))}
               </div>
               <div className="hidden group-hover/s:flex items-center gap-1">
                 {ports.map((p) => (
-                  <Tip key={p} label={`:${p}`} side="top">
-                    <span className="inline-flex items-center gap-1 h-4 px-1.5 rounded-full text-[0.6rem] font-mono font-medium text-success bg-success/10 border border-success/20">
-                      <span className="size-1 rounded-full bg-success" />
-                      :{p}
-                    </span>
+                  <Tip key={p.port} label={`:${p.port}`} side="top">
+                    <a href={p.url} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1 h-4 px-1.5 rounded-full text-[0.6rem] font-mono font-medium text-info bg-info/10 border border-info/20 hover:bg-info/20 hover:border-info/40 transition-all cursor-pointer">
+                      <span className="size-1 rounded-full bg-info" />
+                      :{p.port}
+                    </a>
                   </Tip>
                 ))}
               </div>
             </div>
-          )}
-          {/* ── Unread indicator (inline on top row, no ports) ── */}
-          {isUnread && !(ports && ports.length > 0) && !isRunning && !archiveConfirm.confirming && (
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 size-1.5 rounded-full bg-success group-hover/s:hidden" />
           )}
         </div>
       </ContextMenuTrigger>
@@ -570,7 +583,10 @@ function formatLastChat(iso: string): string {
   return `${d}d`;
 }
 
-function ElapsedBadge({ startedAt }: { startedAt: number }) {
+function ElapsedBadge() {
+  // Mounted only while isRunning — mount time ≈ turn start, so the clock
+  // begins at 0s instead of flashing an epoch-derived value.
+  const [startedAt] = useState(() => Date.now());
   const [, force] = useState(0);
   useEffect(() => { const i = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(i); }, []);
   const elapsed = Date.now() - startedAt;

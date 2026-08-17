@@ -12,6 +12,13 @@ const log = createLogger('ui');
  *  paste reads) is keyed by sessionId — or this when no session exists yet. */
 export const COMPOSER_NEW_KEY = '__new__';
 
+/** Attachment path that carries the forked session's last answer into the
+ *  new-session composer. Defined here (next to the composer keys it rides
+ *  in) so the store can keep `pendingFork` and its attachment paired: every
+ *  path that clears the intent also drops this attachment, so an abandoned
+ *  fork never leaks its context into the next plain new session. */
+export const FORK_ATTACHMENT_PATH = 'fork-result.md';
+
 export type ScreenName = 'splash' | 'onboarding' | 'consent' | 'main' | 'settings';
 
 // Re-export for back-compat — ThinkingLevel now lives in @/types (with 'off' added).
@@ -119,6 +126,16 @@ export const EMPTY_COMPOSER_ATTACHMENTS: ComposerAttachment[] = [];
  *  the message is sent (promoted to a real Session) or the text is cleared.
  *  The composer text itself lives in `composerDrafts[id]` — this record
  *  only holds list metadata. Runtime only — not persisted. */
+/** Fork intent shown on the new-session screen while the user hasn't sent
+ *  yet. `origin` distinguishes how the fork started so the screen can say
+ *  why the user landed there (model switch vs. explicit fork). */
+export interface PendingFork {
+  sourceSessionId: string;
+  sourceTitle: string;
+  sourceModelId: string;
+  origin: 'menu' | 'result' | 'model';
+}
+
 export interface DraftSession {
   id: string;
   workspaceId: string;
@@ -148,6 +165,18 @@ export const EMPTY_STREAM: SessionStream = Object.freeze({
   stopReason: null,
   finalMessage: null,
 });
+
+/** Terminal-panel bucket key. Real sessions key by sessionId; the
+ *  new-session draft screen keys by its draft id so terminals opened while
+ *  composing belong to THAT draft instead of a shared bucket every later
+ *  draft (and the next session's composer) would read; 'default' only when
+ *  neither exists (no workspace selected). Draft keys are prefixed so they
+ *  can never collide with a real session id. */
+export function terminalScopeKey(s: { activeSessionId: string | null; activeDraftId: string | null }): string {
+  if (s.activeSessionId) return s.activeSessionId;
+  if (s.activeDraftId) return `draft:${s.activeDraftId}`;
+  return 'default';
+}
 
 /** Make a terminal name unique within a session by appending a numbered suffix ("name (1)", "name (2)") when the base name is taken — Finder/VS Code convention. The (N) suffix counts toward comparison so re-adding "test" with "test (1)" present lands on "test (2)". */
 function dedupeTerminalName(base: string, existing: TerminalInstance[]): string {
@@ -190,8 +219,11 @@ interface UiState {
   activeWorkspaceId: string | null;
   activeSessionId: string | null;
 
-  /** Panel visibility. */
-  terminalOpen: boolean;
+  /** Panel visibility, keyed per terminal scope (session id / draft id) so each session remembers its own open state. */
+  terminalOpen: Record<string, boolean>;
+  /** Native window fullscreen state, bridged from main. The macOS
+   *  traffic-light spacer collapses to zero while fullscreen (buttons hide). */
+  isFullScreen: boolean;
   rightPanelOpen: boolean;
   /** Dedicated file-viewer panel (separate from the tabbed right panel). */
   fileViewerOpen: boolean;
@@ -218,8 +250,8 @@ interface UiState {
   sessionSearchFocus: number;
   focusSessionSearch: () => void;
 
-  /** Terminal panel height in pixels — draggable from its top edge. */
-  terminalHeight: number;
+  /** Terminal panel height in pixels per scope — draggable from its top edge. */
+  terminalHeight: Record<string, number>;
   setTerminalHeight: (h: number) => void;
 
   /** Modal visibility. */
@@ -237,6 +269,8 @@ interface UiState {
   selectedProviderId: string | null;
   autonomyMode: AutonomyMode;
   thinkingLevel: ThinkingLevel;
+  /** Per-session composer settings keyed by session id — the source of truth on session switch. The global fields mirror the ACTIVE session's entry (applied synchronously in setActiveSession) so existing selectors keep working. */
+  sessionSettings: Record<string, { modelId: string | null; providerId: string | null; autonomyMode: AutonomyMode; thinkingLevel: ThinkingLevel }>;
   /** Starred model IDs (modelId strings). Starred models pin to the top of the picker. */
   starredModels: string[];
   /** Sessions currently running a turn — drives the pulsing-dot indicator in SessionsPanel and disables switching mid-stream. */
@@ -298,6 +332,13 @@ interface UiState {
    *  chat screen or before any new-session screen has been shown). */
   activeDraftId: string | null;
 
+  /** Fork intent for the new-session screen — set by initiateFork (sidebar
+   *  "Fork…", an answer's Fork button, or clicking the locked model
+   *  selector). Drives the fork variant of EmptyChatState (hero + banner)
+   *  so a fork looks different from a plain new session. Transient: cleared
+   *  on send, dismissal, or any navigation that leaves the fork draft. */
+  pendingFork: PendingFork | null;
+
   /** Session ids whose title is currently being LLM-generated. Drives a
    *  shimmer animation on the sidebar title while the fire-and-forget
    *  generateSessionTitle call is in flight. */
@@ -324,6 +365,8 @@ interface UiState {
   consumeDraft: () => void;
   /** Permanently delete a draft by id. */
   deleteDraft: (id: string) => void;
+  /** Set/clear the fork intent shown on the new-session screen. */
+  setPendingFork: (fork: PendingFork | null) => void;
   /** Title-generation flag actions (shimmer on the sidebar title). */
   addTitleGenerating: (sessionId: string) => void;
   removeTitleGenerating: (sessionId: string) => void;
@@ -351,7 +394,7 @@ interface UiState {
   setSelectedModel: (providerId: string | null, modelId: string | null) => void;
   setAutonomyMode: (m: AutonomyMode) => void;
   /** Apply per-session settings from a loaded session. Called on session switch. */
-  applySessionSettings: (s: { modelId?: string | null; providerId?: string | null; autonomyMode?: AutonomyMode; thinkingLevel?: ThinkingLevel }) => void;
+  applySessionSettings: (sessionId: string, s: { modelId?: string | null; providerId?: string | null; autonomyMode?: AutonomyMode; thinkingLevel?: ThinkingLevel }) => void;
   /** Mark a session as running (or clear). Drives the indicator. */
   setSessionRunning: (sessionId: string, running: boolean) => void;
   /** Mark a session as having unread output (or clear on view). */
@@ -390,6 +433,13 @@ interface UiState {
 
   // Terminal actions
   addTerminal: (sessionId: string, name?: string, pendingCommand?: string) => void;
+  /** Move the ACTIVE draft's terminal bucket under the promoted session's
+   *  id. Called when the draft's first message creates the real session —
+   *  terminals opened while composing would otherwise die with the draft. */
+  adoptDraftTerminals: (sessionId: string) => void;
+  /** Kill PTYs for and drop a draft's terminal bucket (draft deleted or
+   *  abandoned without sending). */
+  purgeDraftTerminals: (draftId: string) => void;
   /** Mark a terminal's foreground script as stopped. The tab stays open
    *  (so the user can read tail output), but `scriptRunning` flips to
    *  false so the Run/Stop button in ChatSubBar resets. */
@@ -432,6 +482,12 @@ interface UiState {
   chatView: 'compact' | 'stream';
   setChatView: (mode: 'compact' | 'stream') => void;
 
+  // ─── Diff viewer ────────────────────────────────────────────
+  /** How diffs render. 'unified' = single column (default). 'split' =
+   *  side-by-side old/new with word-level highlights on paired lines. */
+  diffMode: 'unified' | 'split';
+  setDiffMode: (mode: 'unified' | 'split') => void;
+
   // ─── Keyboard shortcut overrides ────────────────────────────
   /** Per-action key overrides on top of the registry defaults (keyed by ShortcutDef.id). Persisted to settings.json so they survive restart and are shared across windows; hydrated by loadShortcuts() at startup, empty {} until then. */
   shortcutOverrides: Record<string, string[]>;
@@ -454,11 +510,12 @@ export const useUi = create<UiState>()(
   mainView: 'new',
   activeWorkspaceId: null,
   activeSessionId: null,
-  terminalOpen: false,
+  terminalOpen: {},
+  isFullScreen: false,
   // 220 matches the long-standing fixed height — first-run default before
   // the user drags. Clamped to [120, 720] on resize (see TerminalPanel).
-  terminalHeight: 220,
-  setTerminalHeight: (h) => set({ terminalHeight: h }),
+  terminalHeight: {},
+  setTerminalHeight: (h: number) => set((s) => ({ terminalHeight: { ...s.terminalHeight, [terminalScopeKey(s)]: h } })),
   rightPanelOpen: true,
   fileViewerOpen: false,
   fileViewerWidth: 50,
@@ -478,6 +535,7 @@ export const useUi = create<UiState>()(
   selectedProviderId: null,
   autonomyMode: 'ask',
   thinkingLevel: 'medium',
+  sessionSettings: {},
   starredModels: [],
   runningSessionIds: [],
   unreadSessionIds: [],
@@ -496,6 +554,7 @@ export const useUi = create<UiState>()(
   composerPendingReads: {},
   composerDrafts: {},
   draftSessions: {},
+  pendingFork: null,
   activeDraftId: null,
   titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
@@ -540,6 +599,7 @@ export const useUi = create<UiState>()(
       activeSessionId: null,
       mainView: 'new',
     });
+    get().setPendingFork(null);
   },
   touchDraft: (workspaceId, text) => {
     const id = get().activeDraftId;
@@ -562,24 +622,56 @@ export const useUi = create<UiState>()(
   },
   selectDraft: (id) => {
     set({ activeDraftId: id, activeSessionId: null, mainView: 'new' });
+    get().setPendingFork(null);
   },
   consumeDraft: () => {
     const id = get().activeDraftId;
     if (!id) return;
+    // After promotion adoptDraftTerminals already emptied the bucket, so
+    // this is a no-op then; for any other consume path it kills stray PTYs.
+    get().purgeDraftTerminals(id);
     const { [id]: _ds, ...restDrafts } = get().draftSessions;
     const { [id]: _cd, ...restComposer } = get().composerDrafts;
     set({ draftSessions: restDrafts, composerDrafts: restComposer, activeDraftId: null });
+    get().setPendingFork(null);
   },
   deleteDraft: (id) => {
+    get().purgeDraftTerminals(id);
     const { [id]: _ds, ...restDrafts } = get().draftSessions;
     const { [id]: _cd, ...restComposer } = get().composerDrafts;
     const patch: Partial<UiState> = {
       draftSessions: restDrafts,
       composerDrafts: restComposer,
     };
-    if (get().activeDraftId === id) patch.activeDraftId = null;
+    // Deleting the active draft keeps the user on the new-session screen —
+    // assign a fresh slot immediately rather than leaving the pointer null,
+    // where the terminal scope would fall through to the shared 'default'
+    // bucket until EmptyChatState's effect runs.
+    if (get().activeDraftId === id) {
+      const workspaceId = get().activeWorkspaceId;
+      patch.activeDraftId = workspaceId ? crypto.randomUUID() : null;
+      patch.activeSessionId = null;
+      patch.mainView = 'new';
+      // The fork draft is gone — the fresh slot is a plain new session.
+      get().setPendingFork(null);
+    }
     set(patch);
   },
+  setPendingFork: (pendingFork) =>
+    set((s) => {
+      const patch: Partial<UiState> = { pendingFork };
+      // Clearing fork intent drops its attachment — they travel together.
+      if (pendingFork === null) {
+        const list = s.composerAttachments[COMPOSER_NEW_KEY];
+        if (list?.some((a) => a.path === FORK_ATTACHMENT_PATH)) {
+          patch.composerAttachments = {
+            ...s.composerAttachments,
+            [COMPOSER_NEW_KEY]: list.filter((a) => a.path !== FORK_ATTACHMENT_PATH),
+          };
+        }
+      }
+      return patch;
+    }),
   // Set-based add/remove so the sidebar title re-renders (and starts/stops
   // shimmering) the instant the flag flips. New Set identity each update so
   // Zustand's shallow-equality subscribers detect the change.
@@ -596,7 +688,7 @@ export const useUi = create<UiState>()(
       return { titleGeneratingSessionIds: next };
     }),
   setActiveWorkspace: (activeWorkspaceId) =>
-    set({ activeWorkspaceId, activeSessionId: null, activeDraftId: null, mainView: 'new', sessionsPanelOpen: true }),
+    set({ activeWorkspaceId, activeSessionId: null, activeDraftId: null, mainView: 'new', sessionsPanelOpen: true, commitDetail: null }),
   setActiveSession: (activeSessionId) => {
     const now = Date.now();
     const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
@@ -621,7 +713,31 @@ export const useUi = create<UiState>()(
       ? { ...state.sessionLastActive, [activeSessionId]: now }
       : state.sessionLastActive;
 
-    set({ activeSessionId, mainView: 'chat', sessionLastActive });
+    // Clear the active-draft pointer: a stale one would leave the terminal
+    // panel scoped to an abandoned draft's bucket the next time the
+    // new-session screen appears (EmptyChatState only assigns a fresh draft
+    // when the pointer is null). The draft's own bucket survives —
+    // selectDraft can still return to it and find its terminals alive.
+    // Navigating to a real session also ends any fork intent.
+    set({
+      activeSessionId,
+      activeDraftId: null,
+      mainView: 'chat',
+      sessionLastActive,
+    });
+    if (activeSessionId) get().setPendingFork(null);
+
+    // Apply this session's cached composer settings synchronously. Without
+    // this, the PREVIOUS session's mode/model stays visible until the async
+    // session load resolves — and a mode change made in that window would
+    // persist to the wrong session. Uncached (first visit) falls back to
+    // defaults; applySessionSettings overwrites when the load lands.
+    if (activeSessionId) {
+      const cached = get().sessionSettings[activeSessionId];
+      set(cached
+        ? { selectedModelId: cached.modelId, selectedProviderId: cached.providerId, autonomyMode: cached.autonomyMode, thinkingLevel: cached.thinkingLevel }
+        : { selectedModelId: null, selectedProviderId: null, autonomyMode: 'ask', thinkingLevel: 'medium' });
+    }
   },
 
   clearSessionData: (sessionId) => {
@@ -641,8 +757,13 @@ export const useUi = create<UiState>()(
     const { [sessionId]: _ca, ...restComposerAttachments } = state.composerAttachments;
     const { [sessionId]: _cpr, ...restComposerPendingReads } = state.composerPendingReads;
     const { [sessionId]: _cd, ...restComposerDrafts } = state.composerDrafts;
+    const { [sessionId]: _ss, ...restSessionSettings } = state.sessionSettings;
+    const killedIds = new Set(terms.map((t) => t.id));
     set({
       terminals: restTerminals,
+      terminalPorts: Object.fromEntries(
+        Object.entries(state.terminalPorts).filter(([k]) => !killedIds.has(k)),
+      ),
       activeTerminal: restActiveTerminal,
       openFiles: restOpenFiles,
       activeOpenFile: restActiveOpenFile,
@@ -651,11 +772,13 @@ export const useUi = create<UiState>()(
       composerAttachments: restComposerAttachments,
       composerPendingReads: restComposerPendingReads,
       composerDrafts: restComposerDrafts,
+      sessionSettings: restSessionSettings,
     });
   },
   toggleTerminal: () =>
     set((s) => {
-      const turningOn = !s.terminalOpen;
+      const scope = terminalScopeKey(s);
+      const turningOn = !s.terminalOpen[scope];
       // Auto-seed a terminal for the active session the first time the panel
       // is opened with zero terminals — saves the user an extra click.
       if (turningOn && s.activeSessionId) {
@@ -663,7 +786,7 @@ export const useUi = create<UiState>()(
         if (list.length === 0) {
           const id = `t_${Math.random().toString(36).slice(2, 9)}`;
           return {
-            terminalOpen: true,
+            terminalOpen: { ...s.terminalOpen, [scope]: true },
             terminals: {
               ...s.terminals,
               [s.activeSessionId]: [{ id, name: 'Terminal 1', createdAt: Date.now() }],
@@ -672,7 +795,7 @@ export const useUi = create<UiState>()(
           };
         }
       }
-      return { terminalOpen: turningOn };
+      return { terminalOpen: { ...s.terminalOpen, [scope]: turningOn } };
     }),
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   setRightPanel: (open) => set({ rightPanelOpen: open }),
@@ -693,6 +816,7 @@ export const useUi = create<UiState>()(
     set({ autonomyMode });
     const sid = get().activeSessionId;
     if (sid) {
+      set((s) => ({ sessionSettings: { ...s.sessionSettings, [sid]: { modelId: s.selectedModelId, providerId: s.selectedProviderId, autonomyMode, thinkingLevel: s.thinkingLevel } } }));
       void persistSessionSettings(sid, { autonomyMode });
       // Push the change to the running turn so subsequent tool calls in the
       // SAME stream use the new mode (without waiting for the next turn).
@@ -702,7 +826,10 @@ export const useUi = create<UiState>()(
   setThinkingLevel: (thinkingLevel) => {
     set({ thinkingLevel });
     const sid = get().activeSessionId;
-    if (sid) void persistSessionSettings(sid, { thinkingLevel });
+    if (sid) {
+      set((s) => ({ sessionSettings: { ...s.sessionSettings, [sid]: { modelId: s.selectedModelId, providerId: s.selectedProviderId, autonomyMode: s.autonomyMode, thinkingLevel } } }));
+      void persistSessionSettings(sid, { thinkingLevel });
+    }
   },
   toggleStarredModel: (providerId, modelId) => {
     // Star by composite key — the same modelId can exist under multiple
@@ -717,15 +844,25 @@ export const useUi = create<UiState>()(
   },
 
   /** Apply per-session settings from a freshly loaded session (called when the active session changes — restores the model/autonomy/thinking last used in this session). */
-  applySessionSettings: (s) =>
-    set((state) => ({
-      selectedModelId: s.modelId !== undefined ? s.modelId : state.selectedModelId,
-      // Restore the provider half if the session persisted it; otherwise null
-      // (pre-migration session) and useModelOption falls back to first-match.
-      selectedProviderId: s.providerId !== undefined && s.providerId !== null ? s.providerId : null,
-      autonomyMode: s.autonomyMode ?? state.autonomyMode,
-      thinkingLevel: s.thinkingLevel ?? state.thinkingLevel,
-    })),
+  applySessionSettings: (sessionId, s) => {
+    const prev = get().sessionSettings[sessionId] ?? { modelId: null, providerId: null, autonomyMode: 'ask' as AutonomyMode, thinkingLevel: 'medium' as ThinkingLevel };
+    const merged = {
+      modelId: s.modelId !== undefined ? s.modelId : prev.modelId,
+      providerId: s.providerId !== undefined ? s.providerId : prev.providerId,
+      autonomyMode: s.autonomyMode ?? prev.autonomyMode,
+      thinkingLevel: s.thinkingLevel ?? prev.thinkingLevel,
+    };
+    set((state) => ({ sessionSettings: { ...state.sessionSettings, [sessionId]: merged } }));
+    // The load is async — only touch the globals if this session is still
+    // active; otherwise the values belong to a session the user left.
+    if (get().activeSessionId !== sessionId) return;
+    set({
+      selectedModelId: merged.modelId,
+      selectedProviderId: merged.providerId,
+      autonomyMode: merged.autonomyMode,
+      thinkingLevel: merged.thinkingLevel,
+    });
+  },
 
   /** Mark a session as running or idle. No-op if state already matches. */
   setSessionRunning: (sessionId, running) =>
@@ -933,11 +1070,51 @@ export const useUi = create<UiState>()(
         ...(s.terminalPorts[id]
           ? { terminalPorts: Object.fromEntries(Object.entries(s.terminalPorts).filter(([k]) => k !== id)) }
           : {}),
-        ...(collapsePanel ? { terminalOpen: false } : {}),
+        ...(collapsePanel ? { terminalOpen: { ...s.terminalOpen, [sessionId]: false } } : {}),
       };
     }),
   setActiveTerminal: (sessionId, id) =>
     set((s) => ({ activeTerminal: { ...s.activeTerminal, [sessionId]: id } })),
+  adoptDraftTerminals: (sessionId) => {
+    // MUST run before setActiveSession promotes the session — it reads
+    // activeDraftId to find the draft bucket, and selectSession clears it.
+    const draftId = get().activeDraftId;
+    if (!draftId) return;
+    const key = `draft:${draftId}`;
+    const list = get().terminals[key] ?? [];
+    if (list.length === 0) return;
+    set((s) => {
+      const { [key]: _moved, ...restTerminals } = s.terminals;
+      const { [key]: _active, ...restActiveTerminal } = s.activeTerminal;
+      return {
+        terminals: { ...restTerminals, [sessionId]: [...(restTerminals[sessionId] ?? []), ...list] },
+        activeTerminal: {
+          ...restActiveTerminal,
+          [sessionId]: s.activeTerminal[key] ?? restActiveTerminal[sessionId],
+        },
+      };
+    });
+  },
+  purgeDraftTerminals: (draftId) => {
+    const key = `draft:${draftId}`;
+    const list = get().terminals[key] ?? [];
+    if (list.length === 0) return;
+    const killedIds = new Set(list.map((t) => t.id));
+    for (const t of list) {
+      try { window.tideIpc?.terminalKill(t.id); } catch { /* dead */ }
+    }
+    set((s) => {
+      const { [key]: _dropped, ...restTerminals } = s.terminals;
+      const { [key]: _active, ...restActiveTerminal } = s.activeTerminal;
+      return {
+        terminals: restTerminals,
+        activeTerminal: restActiveTerminal,
+        terminalPorts: Object.fromEntries(
+          Object.entries(s.terminalPorts).filter(([k]) => !killedIds.has(k)),
+        ),
+      };
+    });
+  },
   setTerminalPorts: (terminalId, ports) =>
     set((s) => ({ terminalPorts: { ...s.terminalPorts, [terminalId]: ports } })),
   renameTerminal: (sessionId, id, name) =>
@@ -1028,6 +1205,8 @@ export const useUi = create<UiState>()(
   },
   setReasoningView: (mode) => set({ reasoningView: mode }),
   setChatView: (mode) => set({ chatView: mode }),
+  diffMode: 'split',
+  setDiffMode: (mode) => set({ diffMode: mode }),
 
   // ─── Keyboard shortcut overrides ────────────────────────────────────
   // Empty by default until loadShortcuts() hydrates from settings.json at startup. Actions update optimistically AND persist via IPC; the IPC response is authoritative, so we set again on resolve to converge with concurrent writers.
@@ -1088,7 +1267,7 @@ export const useUi = create<UiState>()(
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         fileViewerWidth: s.fileViewerWidth,
-        terminalHeight: s.terminalHeight,
+        terminalHeight: typeof s.terminalHeight === 'object' && s.terminalHeight !== null ? s.terminalHeight : {},
         terminals: s.terminals,
         fontScale: s.fontScale,
         reduceMotion: s.reduceMotion,
@@ -1097,6 +1276,7 @@ export const useUi = create<UiState>()(
         appTheme: s.appTheme,
         reasoningView: s.reasoningView,
         chatView: s.chatView,
+        diffMode: s.diffMode,
         activeTerminal: s.activeTerminal,
         // Draft sessions + their composer text persist across restarts so
         // unsent drafts survive. activeDraftId is runtime-only — the app
@@ -1114,7 +1294,15 @@ export const useUi = create<UiState>()(
       merge: (persistedState, current) => ({
         ...current,
         ...(persistedState as Partial<UiState>),
-        terminalOpen: false,
+        terminalOpen: {},
+        // Strip 'default'-bucket terminals left by the pre-draft-keying bug:
+        // they were draft-phase strays that leaked into every new-session
+        // screen. Real buckets are session ids or 'draft:<id>' — never bare.
+        terminals: Object.fromEntries(
+          Object.entries((persistedState as Partial<UiState>).terminals ?? {}).filter(
+            ([k]) => k !== 'default',
+          ),
+        ),
       }),
       version: 1,
     },

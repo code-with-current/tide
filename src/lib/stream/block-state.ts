@@ -100,15 +100,13 @@ export function buildProcessSummary(totals: {
 
 export function formatMs(ms?: number): string {
   // Treat null/undefined/0/negative as "no duration" — returning '' (not
-  // '0ms') so callers that force totalMs:0 (e.g. ProcessList builds its
+  // '0s') so callers that force totalMs:0 (e.g. ProcessList builds its
   // summary without time, then shows time separately via the clock) don't
-  // append a bogus "· 0ms".
+  // append a bogus "· 0s".
   if (ms == null || ms <= 0) return '';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.floor((ms % 60_000) / 1000);
-  return `${m}m${s}s`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m${s % 60}s`;
 }
 
 // ─── File-change summary ────────────────────────────────────────────────

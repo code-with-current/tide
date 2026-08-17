@@ -30,6 +30,12 @@ declare global {
         platform: string;
         userDataPath: string;
       }>;
+      getEnvInfo(): Promise<{
+        platform: string;
+        arch: string;
+        release: string;
+        shell: string;
+      }>;
       openInApp(
         target: import('./index').ExternalAppTarget,
         sessionId?: string,
@@ -155,6 +161,8 @@ declare global {
       onMcpStatusChanged(callback: () => void): void;
       removeAllMcpListeners(): void;
       onNavigateToSession(callback: (sessionId: string) => void): void;
+      isFullScreen(): Promise<boolean>;
+      onFullscreenChanged(callback: (fullscreen: boolean) => void): () => void;
       showItemInFolder(fullPath: string): void;
       /** Open an http(s) URL in the system browser. No-op for other schemes. */
       openExternal(url: string): void;
@@ -199,8 +207,8 @@ declare global {
       onTodosUpdated(callback: (data: { sessionId: string; todos: any[] }) => void): void;
       removeTodosListener(): void;
       getSession(id: string): Promise<any>;
-      createSession(workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }): Promise<any>;
-      updateSessionSettings(sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }): Promise<void>;
+      createSession(workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }): Promise<any>;
+      updateSessionSettings(sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }): Promise<void>;
       addMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }): Promise<void>;
       addAssistantMessage(
         sessionId: string,
@@ -235,7 +243,7 @@ declare global {
       forkSession(
         sourceId: string,
         newModelId: string,
-        opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+        opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
       ): Promise<import('./index').Session>;
       listBranches(workspaceId: string): Promise<string[]>;
       listConfigFiles(workspaceId: string): Promise<string[]>;
@@ -306,6 +314,11 @@ declare global {
             }>;
           };
         }>;
+
+        /** Splash-screen trigger: pull a fresh models.dev catalog in the
+         *  background. Resolves immediately; the fetch + re-enrichment
+         *  continue in the main process. */
+        refresh(): Promise<{ ok: boolean }>;
       };
 
       /** Forward a renderer log line to the central log file (via IPC → main). */

@@ -35,7 +35,7 @@ export type { StoredMessage, StoredSession, ArchivedHeader };
 
 export interface HydratedSession extends StoredSession {
   autonomyMode: 'ask' | 'plan' | 'edit' | 'full';
-  thinkingLevel: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
   status: 'idle' | 'active' | 'awaiting_permission' | 'error' | 'spend_capped';
   worktree?: { branch: string; path: string; baseCommit: string; baseBranch: string; ahead: number; behind: number };
   usage: { inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; reasoningTokens: number; calls: number; costUsd: number };
@@ -228,7 +228,7 @@ export function createSession(
   modelId: string,
   opts?: {
     autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-    thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+    thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
     providerId?: string;
   },
 ): HydratedSession {
@@ -244,7 +244,7 @@ export async function forkWithSummary(
   newModelId: string,
   opts?: {
     autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-    thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+    thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
     providerId?: string;
   },
 ): Promise<HydratedSession> {
@@ -282,7 +282,7 @@ export function updateSessionSettings(
   sessionId: string,
   patch: {
     autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-    thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+    thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
   },
 ): void {
   store().updateSessionSettings(sessionId, patch);

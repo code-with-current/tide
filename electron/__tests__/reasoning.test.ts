@@ -7,6 +7,32 @@ describe('resolveReasoning', () => {
     expect(resolveReasoning('off', [], 'openai', 8192)).toBeNull();
   });
 
+  it('emits explicit reasoning_effort=none when the model publishes "none"', () => {
+    const contracts: ReasoningOption[] = [
+      { type: 'effort', values: ['none', 'low', 'medium', 'high'] },
+    ];
+    // OpenAI protocol: 'none' is a real effort value — send it instead of
+    // omitting the param (omission leaves the provider default active).
+    const result = resolveReasoning('off', contracts, 'openai', 8192);
+    expect(result?.contract).toBe('effort');
+    expect(result?.effort).toBe('none');
+    // Anthropic protocol: 'none' is OpenAI vocabulary → plain disable.
+    expect(resolveReasoning('off', contracts, 'anthropic', 8192)).toBeNull();
+    // No 'none' published → plain disable everywhere.
+    expect(resolveReasoning('off', [{ type: 'effort', values: ['low', 'medium'] }], 'openai', 8192)).toBeNull();
+  });
+
+  it('supports the minimal tier end to end', () => {
+    const contracts: ReasoningOption[] = [
+      { type: 'effort', values: ['minimal', 'low', 'medium', 'high'] },
+    ];
+    expect(resolveReasoning('minimal', contracts, 'openai', 8192)?.effort).toBe('minimal');
+    // Legacy budget map (no contracts) gets a minimal entry below low.
+    expect(resolveReasoning('minimal', undefined, 'anthropic', 8192)?.budgetTokens).toBe(512);
+    // minimal on a high/max-only model snaps up to the lowest offered.
+    expect(resolveReasoning('minimal', [{ type: 'effort', values: ['high', 'max'] }], 'openai', 8192)?.effort).toBe('high');
+  });
+
   it('falls back to legacy budget map when no contracts', () => {
     const result = resolveReasoning('high', undefined, 'anthropic', 8192);
     expect(result?.contract).toBe('budget_tokens');

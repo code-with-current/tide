@@ -41,7 +41,7 @@ export function RagIndexProgress({ event }: { event: RagInitProgressEvent | null
   return (
     <div
       className={cn(
-        'rounded-lg border p-3 flex flex-col gap-2.5',
+        'rounded-lg border p-3 flex flex-col gap-2.5 mt-2',
         failed
           ? 'border-destructive/25 bg-destructive/5'
           : 'border-emerald-500/20 bg-emerald-500/[0.04]',

@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { useUi } from '@/lib/stores/ui';
 import { qk, useAddProvider, useRagDownloadProgress, useRagInitProgress } from '@/lib/queries';
 import { phaseLabel as phaseLabelLocal } from '@/components/rag/rag-index-progress';
-import { cn } from '@/lib/utils';
+import { cn, formatContext } from '@/lib/utils';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
@@ -347,7 +347,7 @@ function ProviderStep({
                         <TableCell className="py-1 pr-1">
                           {row.catalogId ? (
                             <div className="flex items-center gap-1 px-1 py-0.5" title={`Catalog: ${row.catalogId}`}>
-                              <span className="font-mono text-[11.5px] text-muted-foreground">{row.context || '—'}</span>
+                              <span className="font-mono text-[11.5px] text-muted-foreground">{row.context ? formatContext(parseInt(row.context, 10)) : '—'}</span>
                               <span className="text-[8px] px-1 py-0 uppercase tracking-wide text-success/80 bg-success/10 rounded">cat</span>
                             </div>
                           ) : (

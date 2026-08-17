@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   supportsThinking,
   contextWindowSize,
@@ -150,5 +153,55 @@ describe('enrichModelFromCatalog', () => {
     expect(result!.reasoning).toBe(false);
     // contextWindow is always authoritative from catalog (the whole point)
     expect(result!.contextWindow).toBe(1048576);
+  });
+});
+
+describe('refreshModelCatalog', () => {
+  // initModelCatalog/refreshModelCatalog hold module-level state (loader +
+  // once-per-session refresh guard), so this suite uses a single it() block.
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tide-catalog-refresh-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  });
+
+  it('no-ops before init, then fetches, injects, caches, and runs once per session', async () => {
+    const { initModelCatalog, refreshModelCatalog } = await import('../agent/model-capabilities.js');
+
+    // Before initModelCatalog the loader is null — refresh must resolve false,
+    // not throw, and must not consume the once-per-session guard.
+    expect(await refreshModelCatalog()).toBe(false);
+
+    // models.dev-shaped payload: one provider with >100 models (the loader's
+    // sanity floor) so the refresh isn't rejected as a tiny payload.
+    const models: Record<string, { limit?: { context?: number } }> = {};
+    for (let i = 0; i < 150; i++) models[`model-${i}`] = { limit: { context: 1000 + i } };
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ acme: { models } }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await initModelCatalog({ bundled: null, cacheDir: tmpDir });
+    expect(contextWindowSize('model-42')).toBeUndefined(); // nothing loaded yet
+
+    // First call performs the fetch, injects entries, and writes the cache.
+    expect(await refreshModelCatalog()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(contextWindowSize('model-42')).toBe(1042);
+
+    // Second call in the same session is a no-op — no extra fetch.
+    expect(await refreshModelCatalog()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The refreshed catalog was persisted for the next boot.
+    const cached = JSON.parse(fs.readFileSync(path.join(tmpDir, 'model-prices.json'), 'utf8'));
+    expect(cached.count).toBe(150);
   });
 });

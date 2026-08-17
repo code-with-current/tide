@@ -27,7 +27,8 @@ export function OptionsPopup({
 
   const isMultiple = opts?.multiple ?? false;
 
-  // Reset state when the popup opens for a new question.
+  // Reset state when the popup opens for a new question OR when the active
+  // session changes — draft text/selection must never bleed between sessions.
   useEffect(() => {
     if (opts) {
       setText('');
@@ -37,7 +38,8 @@ export function OptionsPopup({
       setFlashChip(null);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [opts?.messageId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts?.messageId, activeSessionId]);
 
   // Esc to dismiss.
   useEffect(() => {

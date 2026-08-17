@@ -208,7 +208,7 @@ export async function createSession(
   workspaceId: string,
   title: string,
   modelId: string,
-  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
 ): Promise<any> {
   if (ipc) return ipc.createSession(workspaceId, title, modelId, opts);
   await delay(200);
@@ -225,7 +225,7 @@ export async function createSession(
 
 export async function updateSessionSettings(
   sessionId: string,
-  patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' },
+  patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' },
 ): Promise<void> {
   if (ipc) return ipc.updateSessionSettings(sessionId, patch);
   await delay(50);
@@ -371,7 +371,7 @@ export async function removeWorktree(sessionId: string): Promise<void> {
 export async function forkSession(
   sourceId: string,
   newModelId: string,
-  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
 ): Promise<Session> {
   if (ipc) return ipc.forkSession(sourceId, newModelId, opts);
   throw new Error('forkSession requires Electron IPC');
@@ -455,6 +455,14 @@ export async function resolveModelCatalog(input: {
   return null;
 }
 
+/** Ask the main process to pull a fresh models.dev catalog in the background.
+ *  Fired by the splash screen at every app open; resolves immediately — the
+ *  fetch + re-enrichment continue in the main process. */
+export function refreshModelCatalog() {
+  if (ipc && ipc.modelCatalog?.refresh) return ipc.modelCatalog.refresh();
+  return Promise.resolve({ ok: false });
+}
+
 // ============================================================
 // File explorer
 // ============================================================
@@ -473,6 +481,21 @@ export async function getWorkspaceContext(workspaceId: string): Promise<string> 
   if (ipc) return ipc.getWorkspaceContext(workspaceId);
   await delay();
   return '';
+}
+
+export interface EnvInfo {
+  platform: string;
+  arch: string;
+  release: string;
+  /** Login shell the bash tool wraps commands in ($SHELL on Unix, ComSpec on Windows). */
+  shell: string;
+}
+
+/** Host platform/shell — injected into the system prompt so the model uses the
+ *  right shell dialect without guessing. Undefined outside Electron (mocks, tests). */
+export async function getEnvInfo(): Promise<EnvInfo | undefined> {
+  if (ipc && (ipc as any).getEnvInfo) return (ipc as any).getEnvInfo();
+  return undefined;
 }
 
 export type ReadFileResult =

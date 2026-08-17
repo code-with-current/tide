@@ -40,13 +40,19 @@ export function formatNumber(n: number | null | undefined): string {
   return n.toLocaleString('en-US');
 }
 
-/** Format a context-window token count compactly. >= 1M → "1M", "2M", etc.
- *  (these are the long-context models that deserve a badge). Otherwise the
- *  standard comma-formatted number. */
+/** Compact context-window size, 2 significant figures: 131072 → "130K",
+ *  1048576 → "1M", 65536 → "66K". Sub-1K values shown raw. Never throws. */
 export function formatContext(n: number | null | undefined): string {
   if (n == null || !isFinite(n)) return '0';
-  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M`;
-  return n.toLocaleString('en-US');
+  if (n >= 950_000) {
+    const m = Math.round(n / 100_000) / 10;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    const step = n >= 100_000 ? 10_000 : 1_000;
+    return `${Math.round(n / step) * (step / 1_000)}K`;
+  }
+  return String(n);
 }
 
 /** Format an ISO timestamp as e.g. "2:14 PM". */

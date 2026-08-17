@@ -94,7 +94,7 @@ export const AnswerBlock = memo(function AnswerBlock({
               {sessionId && (
                 <button
                   type="button"
-                  onClick={() => initiateFork(sessionId, text)}
+                  onClick={() => initiateFork(sessionId, text, 'result')}
                   aria-label="Fork from here"
                   title="Fork from here"
                   className={cn(

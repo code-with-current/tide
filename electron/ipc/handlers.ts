@@ -10,7 +10,7 @@ import * as store from '../store.js';
 import * as sessions from './sessions.js';
 import { BUILTIN_AGENTS } from '../agent/agents/registry';
 import { resolveModelMeta, matchModelToCatalog } from '../agent/model-catalog.js';
-import { getActiveCatalog } from '../agent/model-capabilities.js';
+import { getActiveCatalog, refreshModelCatalog } from '../agent/model-capabilities.js';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches } from './git.js';
@@ -228,6 +228,17 @@ export function registerIpcHandlers() {
     return result.filePaths[0];
   });
 
+  // Host environment for the system prompt — lets the model pick the right
+  // shell dialect (bash vs zsh vs cmd.exe) without probing first.
+  ipcMain.handle('tide:getEnvInfo', () => ({
+    platform: process.platform,
+    arch: process.arch,
+    release: os.release(),
+    shell: process.platform === 'win32'
+      ? (process.env.ComSpec || 'cmd.exe')
+      : (process.env.SHELL || '/bin/sh'),
+  }));
+
   // Diagnostics — live version/platform info for the About screen. Avoids
   // hardcoding versions that drift on every dep bump.
   ipcMain.handle('tide:getDiagnostics', () => ({
@@ -268,6 +279,14 @@ export function registerIpcHandlers() {
       return { meta: resolveModelMeta(ref, catalog), match: matchModelToCatalog(input.modelId, catalog) };
     },
   );
+
+  // Splash screen fires this at every app open — pull a fresh models.dev
+  // catalog in the background (fetch + re-enrich continue after the reply) so
+  // model metadata is current without delaying splash routing.
+  ipcMain.handle('tide:modelCatalog:refresh', () => {
+    void refreshModelCatalog();
+    return { ok: true };
+  });
 
   // External file picker — for the Attach button. Returns multiple file paths.
   ipcMain.handle('tide:pickFiles', async (e) => {
@@ -625,7 +644,7 @@ export function registerIpcHandlers() {
     // Project-level agent guidance (CLAUDE.md / AGENT.md at root) is always-on context so the model follows repo conventions without @-mention; capped at 8KB.
     const entries = scanProjectEntries(dirPath);
     for (const ctx of entries.contextFiles) {
-      lines.push(`---\n${ctx.path} (project agent guidance — always apply):\n${ctx.content}`);
+      lines.push(`---\n${ctx.path} (project agent guidance — always apply; where these rules conflict with your defaults, these rules win):\n${ctx.content}`);
       break; // one context file is enough; CLAUDE.md wins over AGENT.md
     }
 
@@ -743,14 +762,14 @@ export function registerIpcHandlers() {
     return sessions.getSession(id);
   });
 
-  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }) => {
+  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }) => {
     return sessions.createSession(workspaceId, title, modelId, opts);
   });
 
   handle('tide:updateSessionSettings', async (
     _e,
     sessionId: string,
-    patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' },
+    patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' },
   ) => {
     return sessions.updateSessionSettings(sessionId, patch);
   });
@@ -916,7 +935,7 @@ export function registerIpcHandlers() {
     _e,
     sourceId: string,
     newModelId: string,
-    opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+    opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
   ) => {
     return sessions.forkWithSummary(sourceId, newModelId, opts);
   });

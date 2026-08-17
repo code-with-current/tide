@@ -1,65 +1,95 @@
-import { Brain, ChevronDown, Sparkles } from 'lucide-react';
+import { Brain, Check, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useModelOption, supportsThinking } from '@/lib/queries';
-import { useUi, type ThinkingLevel } from '@/lib/stores/ui';
+import { useUi } from '@/lib/stores/ui';
+import type { ReasoningOption, ThinkingLevel } from '@/types';
 
-const LEVELS: { value: ThinkingLevel; label: string; hint: string }[] = [
-  { value: 'off',    label: 'Off',    hint: 'No reasoning budget — fastest, cheapest' },
-  { value: 'low',    label: 'Low',    hint: 'Brief reasoning · fast, fewest tokens' },
-  { value: 'medium', label: 'Medium', hint: 'Balanced — recommended default' },
-  { value: 'high',   label: 'High',   hint: 'Deeper reasoning · slower, more tokens' },
-  { value: 'extra',  label: 'Extra',  hint: 'Extended thinking · large token budget' },
-  { value: 'max',    label: 'Max',    hint: 'Maximum reasoning · slowest, highest cost' },
+interface LevelOption {
+  value: Exclude<ThinkingLevel, 'off'>;
+  label: string;
+  hint: string;
+}
+
+/** Canonical tiers — the fallback option list when the model publishes no
+ *  effort values (budget-token, toggle, or unenriched models). */
+const LEVELS: LevelOption[] = [
+  { value: 'minimal', label: 'Minimal', hint: 'Barely-any reasoning · fastest tier that reasons' },
+  { value: 'low',     label: 'Low',     hint: 'Brief reasoning · fast, fewest tokens' },
+  { value: 'medium',  label: 'Medium',  hint: 'Balanced — recommended default' },
+  { value: 'high',    label: 'High',    hint: 'Deeper reasoning · slower, more tokens' },
+  { value: 'extra',   label: 'Extra',   hint: 'Extended thinking · large token budget' },
+  { value: 'max',     label: 'Max',     hint: 'Maximum reasoning · slowest, highest cost' },
 ];
 
-/** Map a provider effort name (e.g. 'low','high') to our ThinkingLevel.
- *  'extra'/'max' have no provider equivalent → map to the highest offered. */
-const effortToLevel = (e: string): ThinkingLevel | undefined => {
-  const lower = e.toLowerCase();
-  if (lower === 'low') return 'low';
-  if (lower === 'medium') return 'medium';
-  if (lower === 'high') return 'high';
-  // Providers may offer 'max'/'xhigh' → collapse to our extra/max tiers.
-  if (lower === 'max' || lower === 'xhigh') return 'max';
-  return undefined;
+const RANK: Record<Exclude<ThinkingLevel, 'off'>, number> = {
+  minimal: 1, low: 2, medium: 3, high: 4, extra: 5, max: 6,
 };
+
+/** Provider effort vocabulary (models.dev `reasoning_options` values) in
+ *  intensity order, each mapped to the ThinkingLevel it round-trips through.
+ *  'none' is omitted — the header switch owns on/off. */
+const EFFORT_TIERS: { effort: string; option: LevelOption }[] = [
+  { effort: 'minimal', option: LEVELS[0] },
+  { effort: 'low',     option: LEVELS[1] },
+  { effort: 'medium',  option: LEVELS[2] },
+  { effort: 'high',    option: LEVELS[3] },
+  { effort: 'xhigh',   option: LEVELS[4] },
+  { effort: 'max',     option: LEVELS[5] },
+];
 
 /** Derive supported effort strings from either the provider response
  *  (supportedEfforts) or the catalog reasoning contracts (reasoningContracts).
  *  Returns undefined when neither source has data. */
-function effortsForModel(model: { supportedEfforts?: string[]; reasoningContracts?: import('@/types').ReasoningOption[] }): string[] | undefined {
+function effortsForModel(model: { supportedEfforts?: string[]; reasoningContracts?: ReasoningOption[] }): string[] | undefined {
   if (model.supportedEfforts && model.supportedEfforts.length > 0) return model.supportedEfforts;
   const effortContract = model.reasoningContracts?.find((c) => c.type === 'effort');
   return effortContract?.values;
 }
 
-/** Compute the visible levels for a model, honoring mandatory + supportedEfforts. */
-function visibleLevels(
-  mandatory: boolean | undefined,
-  efforts: string[] | undefined,
-): { value: ThinkingLevel; label: string; hint: string }[] {
-  let levels = [...LEVELS];
-  if (mandatory) levels = levels.filter((l) => l.value !== 'off');
+/** True when the model's only reasoning contract is a toggle — thinking is
+ *  on/off with no level distinction (mirrors resolveReasoning's toggleOnly). */
+function isToggleOnly(model: { reasoningContracts?: ReasoningOption[] } | undefined): boolean {
+  const contracts = model?.reasoningContracts;
+  if (!contracts || contracts.length === 0) return false;
+  return contracts.some((c) => c.type === 'toggle')
+    && !contracts.some((c) => c.type === 'effort')
+    && !contracts.some((c) => c.type === 'budget_tokens');
+}
+
+/** Build the dropdown options from the model's published effort values,
+ *  falling back to the canonical tiers when none are published. On/off is
+ *  owned by the header switch, so only level tiers are listed. */
+function buildOptions(efforts: string[] | undefined): LevelOption[] {
   if (efforts && efforts.length > 0) {
-    // Keep 'off' only if reasoning isn't mandatory, then map provider efforts.
-    const allowed = new Set(efforts.map(effortToLevel).filter((v): v is ThinkingLevel => !!v));
-    levels = levels.filter((l) => l.value === 'off' ? !mandatory : allowed.has(l.value));
-    // Always include at least the highest offered level if filtering dropped everything.
-    if (levels.filter((l) => l.value !== 'off').length === 0) {
-      const highest = [...allowed].sort().pop();
-      if (highest) levels = LEVELS.filter((l) => l.value === highest || (l.value === 'off' && !mandatory));
+    const published = new Set(efforts.map((e) => e.toLowerCase()));
+    const options: LevelOption[] = [];
+    for (const tier of EFFORT_TIERS) {
+      if (!published.has(tier.effort)) continue;
+      if (options.some((o) => o.value === tier.option.value)) continue;
+      options.push(tier.option);
     }
+    if (options.length > 0) return options;
   }
-  return levels.length > 0 ? levels : LEVELS;
+  return LEVELS;
+}
+
+/** The option the UI marks active for a stored level: exact match, else the
+ *  next stronger offered option, else the strongest. */
+function snapToOptions(level: ThinkingLevel, options: LevelOption[]): LevelOption {
+  const exact = options.find((o) => o.value === level);
+  if (exact) return exact;
+  const target = level === 'off' ? RANK.medium : RANK[level];
+  return options.find((o) => RANK[o.value] >= target) ?? options[options.length - 1] ?? LEVELS[2];
 }
 
 export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }) {
@@ -70,16 +100,11 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
   const model = useModelOption(selectedProviderId, selectedModelId);
   const supported = model ? (model.reasoning ?? supportsThinking(model.modelId, model)) : false;
   const mandatory = model?.reasoningMandatory;
-  const efforts = effortsForModel(model ?? {});
+  const toggleOnly = isToggleOnly(model);
+  const isOn = level !== 'off';
 
-  const levels = visibleLevels(mandatory, efforts);
-  const levelToIndex = (l: ThinkingLevel): number => levels.findIndex((x) => x.value === l);
-  const indexToLevel = (i: number): ThinkingLevel => levels[i]?.value ?? levels[Math.min(1, levels.length - 1)]?.value ?? 'medium';
-
-  // If the current level is no longer valid (e.g. 'off' for a mandatory model),
-  // clamp to the lowest visible non-off level.
-  const currentIndex = Math.max(0, levelToIndex(level));
-  const current = levels[currentIndex];
+  const options = toggleOnly ? [] : buildOptions(effortsForModel(model ?? {}));
+  const current = snapToOptions(level, options);
   // A mandatory-reasoning model IS supported — it always reasons.
   const effectivelySupported = supported || !!mandatory;
 
@@ -96,64 +121,48 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
           )}
           disabled={!effectivelySupported}
           title={effectivelySupported
-            ? (mandatory ? 'Reasoning always on (model mandatory)' : 'Thinking level')
+            ? (mandatory ? 'Reasoning always on (model mandatory)' : toggleOnly ? 'Thinking on/off' : 'Thinking level')
             : `${model?.alias ?? 'This model'} does not support reasoning`}
         >
-          <Brain className="size-4 text-reasoning" />
-          {!compact && <span>{mandatory ? 'Always' : (current?.label ?? 'Thinking')}</span>}
+          <Brain className={cn('size-4', isOn ? 'text-reasoning' : 'text-muted-foreground/50')} />
+          {!compact && <span>{!isOn ? 'Off' : toggleOnly ? 'On' : current.label}</span>}
           <ChevronDown className="size-4 text-input-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top"  className="w-[300px] p-0 overflow-hidden">
+      <DropdownMenuContent align="start" side="top" className="w-56 p-0 overflow-hidden">
         <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
-          <Brain className="size-3 text-reasoning" /> Thinking level
-          {mandatory && (
-            <span className="ml-auto text-[9px] text-reasoning/70 normal-case">always on</span>
-          )}
+          <Brain className={cn('size-3', isOn ? 'text-reasoning' : 'text-muted-foreground/50')} /> Thinking
+          <Switch
+            size="sm"
+            className="ml-auto"
+            checked={isOn}
+            disabled={!!mandatory}
+            onCheckedChange={(v) => setLevel(v ? (toggleOnly ? 'medium' : current.value) : 'off')}
+            title={mandatory ? 'Reasoning always on (model mandatory)' : isOn ? 'Turn thinking off' : 'Turn thinking on'}
+          />
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
-        <div className="px-3 py-2.5">
-          <div className="text-base font-semibold text-reasoning">{current?.label}</div>
-          <div className="text-[11px] text-muted-foreground/60 mt-0.5">
-            {current?.hint}
-            {mandatory && ' · this model always reasons'}
-          </div>
-        </div>
-
-        <div className="px-3 py-2">
-          <Slider
-            value={[currentIndex]}
-            min={0}
-            max={levels.length - 1}
-            step={1}
-            onValueChange={(v) => setLevel(indexToLevel(v[0]))}
-            aria-label="Thinking level"
-          />
-          <div className="flex justify-between mt-2 px-0.5">
-            {levels.map((l, i) => (
-              <span
-                role="button"
-                key={l.value}
-                onClick={() => setLevel(l.value)}
+        {options.length > 0 && (
+          <div className={cn('px-2 py-1.5 flex flex-col gap-0.5', !isOn && 'pointer-events-none opacity-50')}>
+            {options.map((o) => (
+              <DropdownMenuItem
+                key={o.value}
+                onSelect={() => setLevel(o.value)}
                 className={cn(
-                  'text-[10px] font-medium transition-colors leading-none pt-1 flex-1 first:text-left last:text-right text-center',
-                  i === currentIndex ? 'text-reasoning' : 'text-muted-foreground/60 hover:text-primary-foreground',
+                  'justify-between rounded-md px-2.5 py-1.5 text-[0.85rem]',
+                  isOn && o.value === current.value
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground',
                 )}
-                title={l.hint}
+                title={o.hint}
               >
-                {l.label}
-              </span>
+                {o.label}
+                {isOn && o.value === current.value && <Check className="size-3.5 text-reasoning" />}
+              </DropdownMenuItem>
             ))}
           </div>
-        </div>
-
-        <DropdownMenuSeparator />
-
-        <div className="px-3 py-2 text-[10px] text-muted-foreground/60 flex items-start gap-1.5">
-          <Sparkles className="size-3 text-reasoning flex-shrink-0 mt-px" />
-          <span>Higher levels allocate more reasoning tokens. Cost scales accordingly.</span>
-        </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

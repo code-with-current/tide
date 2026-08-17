@@ -18,7 +18,7 @@ import { Avatar } from '@/components/primitives';
 import { RagIndexProgress } from '@/components/rag/rag-index-progress';
 import { Badge } from '@/components/ui/badge';
 import { LoadingRows } from '@/components/ui/loading-rows';
-import { formatNumber, formatRelative, cn } from '@/lib/utils';
+import { formatContext, formatNumber, formatRelative, cn } from '@/lib/utils';
 import {
   useModelOption,
   useModels,
@@ -196,7 +196,7 @@ export function InspectorTab({ session }: { session: Session }) {
                   className="flex items-center gap-2 hover:underline"
                 >
                   <span className="flex-1 text-muted-foreground">{p.label}</span>
-                  <code className="font-mono">:{p.port}</code>
+                  <code className="font-mono text-info">:{p.port}</code>
                 </a>
               ))}
             </div>
@@ -405,11 +405,11 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
         <div className="flex items-baseline justify-between text-[0.65rem] mb-1.5">
           <span className="font-semibold uppercase tracking-wider text-muted-foreground">Context fill</span>
           <span className="font-mono text-muted-foreground">
-            <span className={cn('text-foreground text-[0.75rem] font-semibold', isLive && 'live-counter')}>{formatNumber(liveContext)}</span> / {formatNumber(usableInput)}{maxOutput > 0 && <span className="text-muted-foreground/60"> (−{formatNumber(maxOutput)} out)</span>} ·{' '}
+            <span className={cn('text-foreground text-[0.75rem] font-semibold', isLive && 'live-counter')}>{formatContext(liveContext)}</span> / {formatContext(usableInput)}{maxOutput > 0 && <span className="text-muted-foreground/60"> (−{formatContext(maxOutput)} out)</span>} ·{' '}
             <span className={cn(pctUsed >= CONTEXT_WARN_PCT && 'text-amber-300', 'text-[0.75rem]', isLive && 'live-counter')}>{pctUsed.toFixed(1)}%</span>
             {streamFields?.compactedTokens && (
               <span className="ml-1.5 text-emerald-400/80 text-[0.7rem] font-normal" title={`Compacted from ${formatNumber(streamFields.compactedTokens.before)} to ${formatNumber(streamFields.compactedTokens.after)} tokens`}>
-                · ↓{formatNumber(streamFields.compactedTokens.before - streamFields.compactedTokens.after)}
+                · ↓{formatContext(streamFields.compactedTokens.before - streamFields.compactedTokens.after)}
               </span>
             )}
           </span>

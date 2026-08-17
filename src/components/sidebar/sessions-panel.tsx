@@ -434,19 +434,23 @@ function SessionItem({
           )}
         >
           <div className="flex items-center gap-2">
-            {/* Precedence: running > unread > idle. The green dot is an unread
-            badge that clears when the user views the session — not a
-            permanent "has messages" marker. */}
-            {!archived &&
-              (isRunning ? (
-                <Dot tone="warn" pulse="heartbeat" />
-              ) : hasPort ? (
-                <Dot tone="ok" pulse="heartbeat" />
-              ) : isUnread ? (
-                <Dot tone="ok" />
-              ) : (
-                <Dot tone="muted" />
-              ))}
+            {/* Status dots: running (amber) / port (blue) take the top slot;
+            the green unread badge always renders beneath — it clears when the
+            user views the session, not a permanent "has messages" marker. */}
+            {!archived && (
+              <div className="flex flex-col items-center gap-0.5">
+                {isRunning ? (
+                  <Dot tone="warn" pulse="heartbeat" />
+                ) : hasPort ? (
+                  <Dot tone="info" pulse="heartbeat" />
+                ) : null}
+                {isUnread ? (
+                  <Dot tone="ok" />
+                ) : !isRunning && !hasPort ? (
+                  <Dot tone="muted" />
+                ) : null}
+              </div>
+            )}
             {archived && (
               <Archive className="size-3 text-muted-foreground/60 flex-shrink-0" />
             )}
@@ -559,7 +563,7 @@ function SessionItem({
                       target="_blank"
                       rel="noreferrer"
                       onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-0.5 text-success hover:underline font-mono"
+                      className="inline-flex items-center gap-0.5 text-info hover:underline font-mono"
                       title={`${p.label} — ${p.url}`}
                     >
                       :{p.port}

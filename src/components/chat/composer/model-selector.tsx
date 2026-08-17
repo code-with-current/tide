@@ -1,21 +1,30 @@
-import { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ChevronDown, Check, Brain, Star, Search, Loader2, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuGroup,
-} from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ProviderLogo } from '@/components/primitives/provider-logo';
 import { cn, formatContext } from '@/lib/utils';
 import { useModels } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import type { ModelOption } from '@/lib/queries';
+import { Kbd } from '@/components/ui/kbd';
 
-/** Model picker. When `locked`, renders a static label (the session's model is immutable); clicking it opens the Fork dialog instead of a dropdown. */
+/** Pseudo-rail id for the pinned Starred section. */
+const STARRED_RAIL = '__starred__';
+
+/** One rail entry: a provider with its (filtered) models. */
+interface RailEntry {
+  id: string;
+  name: string;
+  apiStyle: 'openai' | 'anthropic';
+  models: ModelOption[];
+}
+
+/** Model picker — two-pane layout: provider rail (left) + model list (right).
+ *  Every provider is one click away, no scrolling past other providers' models.
+ *  When `locked`, renders a static label (the session's model is immutable); clicking it
+ *  forks into the new-session screen with the fork intent set — the user picks a
+ *  new model there and the first send creates the forked session. */
 export function ModelSelector({ compact = false, locked = false, onLockedClick }: { compact?: boolean; locked?: boolean; onLockedClick?: () => void }) {
   const selectedProviderId = useUi((s) => s.selectedProviderId);
   const selectedId = useUi((s) => s.selectedModelId);
@@ -23,11 +32,18 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
   const starred = useUi((s) => s.starredModels);
   const toggleStar = useUi((s) => s.toggleStarredModel);
   const { models, isLoading } = useModels();
+
+  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [rail, setRail] = useState<string>(STARRED_RAIL);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const selected =
     models.find((m) => m.providerId === selectedProviderId && m.modelId === selectedId) ??
     models.find((m) => m.modelId === selectedId);
+
+  const isStarredModel = (m: ModelOption) => starred.includes(`${m.providerId}:${m.modelId}`);
 
   // ── Locked mode: static label, click opens Fork dialog ──
   if (locked) {
@@ -56,20 +72,65 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
       )
     : models;
 
-  // Starred models (filtered) — pinned section at top.
-  const starredModels = filtered.filter((m) => starred.includes(`${m.providerId}:${m.modelId}`));
-
-  // Group ALL filtered models by provider (starred ones stay in their group).
-  const byProvider = new Map<string, ModelOption[]>();
+  // Rail entries in provider-query order; counts reflect the active search.
+  const entries: RailEntry[] = [];
   for (const m of filtered) {
-    const list = byProvider.get(m.providerName) ?? [];
-    list.push(m);
-    byProvider.set(m.providerName, list);
+    let e = entries.find((x) => x.id === m.providerId);
+    if (!e) {
+      e = { id: m.providerId, name: m.providerName, apiStyle: m.apiStyle, models: [] };
+      entries.push(e);
+    }
+    e.models.push(m);
   }
+  const allStarred = models.filter(isStarredModel);
+
+  const searching = q.length > 0;
+  const visible: ModelOption[] = searching
+    ? filtered
+    : rail === STARRED_RAIL
+      ? allStarred
+      : (entries.find((e) => e.id === rail)?.models ?? models.filter((m) => m.providerId === rail));
+
+  // Cross-provider lists (search / starred) need the provider name in the sub-line.
+  const showProviderInRow = searching || rail === STARRED_RAIL;
+
+  const pick = (m: ModelOption) => {
+    setSelected(m.providerId, m.modelId);
+    setOpen(false);
+  };
+
+  const moveActive = (delta: number) => {
+    const next = Math.max(0, Math.min(visible.length - 1, activeIdx + delta));
+    setActiveIdx(next);
+    rowRefs.current[next]?.scrollIntoView({ block: 'nearest' });
+  };
+
+  // ←/→ cycle the rail; only when not typing (caret arrows must keep working).
+  const railIds = [STARRED_RAIL, ...entries.map((e) => e.id)];
+  const cycleRail = (delta: number) => {
+    const i = railIds.indexOf(rail);
+    const next = railIds[(i + delta + railIds.length) % railIds.length] ?? railIds[0];
+    setRail(next);
+    setActiveIdx(0);
+  };
+
+  const railCount = (id: string) =>
+    id === STARRED_RAIL ? allStarred.length : entries.find((e) => e.id === id)?.models.length ?? 0;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setQuery('');
+          setActiveIdx(0);
+          const sid = selected?.providerId;
+          setRail(sid && models.some((m) => m.providerId === sid) ? sid : STARRED_RAIL);
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
@@ -81,18 +142,49 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
           )}
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top"  className="w-[300px] p-0 overflow-hidden">
-        {/* ── Search box ── */}
-        <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 sticky top-0 bg-popover z-10">
-          <Search className="size-4 text-muted-foreground/50 shrink-0" />
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" sideOffset={6} className="w-[350px] h-[250px] p-0 overflow-hidden flex flex-col">
+        {/* ── Search — spans both panes ── */}
+        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60">
+          <Search className="size-3.5 text-muted-foreground/50 shrink-0" />
           <input
             autoFocus
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search…"
-            className="w-full bg-transparent border-0 outline-none text-[0.8rem] text-foreground placeholder:text-muted-foreground/50"
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActiveIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveActive(1);
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveActive(-1);
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const m = visible[activeIdx];
+                if (m) pick(m);
+              } else if (!q && e.key === 'ArrowRight') {
+                e.preventDefault();
+                cycleRail(1);
+              } else if (!q && e.key === 'ArrowLeft') {
+                e.preventDefault();
+                cycleRail(-1);
+              } else if (e.key === 'Escape' && q) {
+                e.stopPropagation();
+                setQuery('');
+                setActiveIdx(0);
+              }
+            }}
+            placeholder="Search models…"
+            className="w-full bg-transparent border-0 outline-none text-[0.75rem] text-foreground placeholder:text-muted-foreground/50"
           />
+          {searching && (
+            <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
+              {filtered.length} match{filtered.length === 1 ? '' : 'es'}
+            </span>
+          )}
           {query && (
             <button
               type="button"
@@ -104,113 +196,195 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
           )}
         </div>
 
-        <div className="max-h-[340px] overflow-y-auto overflow-x-hidden">
-          {/* ── Starred section ── */}
-          {starredModels.length > 0 && (
-            <>
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1">
-                <Star className="size-3 fill-current text-warning" />
-                Starred
-              </DropdownMenuLabel>
-              {starredModels.map((m) => (
-                <ModelRow
-                  key={`star-${m.providerId}:${m.modelId}`}
-                  model={m}
-                  priceLabel={m.priceLabel}
-                  selected={m === selected}
-                  isStarred
-                  onSelect={() => setSelected(m.providerId, m.modelId)}
-                  onToggleStar={() => toggleStar(m.providerId, m.modelId)}
-                />
-              ))}
-              <DropdownMenuSeparator />
-            </>
-          )}
+        <div className="flex flex-1 min-h-0">
+          {/* ── Provider rail — fixed, never scrolls with the list ── */}
+          <div className="w-[100px] shrink-0 border-r border-border/60 overflow-y-auto overflow-x-hidden py-1">
+            {allStarred.length > 0 && (
+              <RailItem
+                active={rail === STARRED_RAIL}
+                dim={searching && railCount(STARRED_RAIL) === 0}
+                count={railCount(STARRED_RAIL)}
+                onClick={() => {
+                  setRail(STARRED_RAIL);
+                  setActiveIdx(0);
+                }}
+                tile={
+                  <span className="size-4 rounded flex items-center justify-center bg-warning/15 text-warning shrink-0">
+                    <Star className="size-2.5 fill-current" />
+                  </span>
+                }
+                name="Starred"
+              />
+            )}
+            {entries.map((e) => (
+              <RailItem
+                key={e.id}
+                active={rail === e.id && !searching}
+                dim={searching && e.models.length === 0}
+                count={e.models.length}
+                onClick={() => {
+                  setRail(e.id);
+                  setActiveIdx(0);
+                }}
+                tile={
+                  <span
+                    className="size-4 rounded flex items-center justify-center text-white shrink-0"
+                    style={
+                      e.apiStyle === 'anthropic'
+                        ? { background: 'linear-gradient(135deg,#d97757,#b8553f)' }
+                        : { background: '#10a37f' }
+                    }
+                  >
+                    <ProviderLogo apiStyle={e.apiStyle} className="size-2.5" />
+                  </span>
+                }
+                name={e.name}
+              />
+            ))}
+          </div>
 
-          {/* ── Grouped by provider (starred models remain here too) ── */}
-          {[...byProvider.entries()].map(([providerName, providerModels]) => (
-            <DropdownMenuGroup key={providerName}>
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider">
-                {providerName}
-              </DropdownMenuLabel>
-              {providerModels.map((m) => (
-                <ModelRow
-                  key={`${m.providerId}:${m.modelId}`}
-                  model={m}
-                  priceLabel={m.priceLabel}
-                  selected={m === selected}
-                  isStarred={starred.includes(`${m.providerId}:${m.modelId}`)}
-                  onSelect={() => setSelected(m.providerId, m.modelId)}
-                  onToggleStar={() => toggleStar(m.providerId, m.modelId)}
-                />
-              ))}
-            </DropdownMenuGroup>
-          ))}
+          {/* ── Model list — the only scrolling pane ── */}
+          <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden py-0.5">
+            {visible.map((m, i) => (
+              <ModelRow
+                key={`${m.providerId}:${m.modelId}`}
+                ref={(el) => {
+                  rowRefs.current[i] = el;
+                }}
+                model={m}
+                active={i === activeIdx}
+                showProvider={showProviderInRow}
+                selected={m === selected}
+                isStarred={isStarredModel(m)}
+                onSelect={() => pick(m)}
+                onToggleStar={() => toggleStar(m.providerId, m.modelId)}
+                onHover={() => setActiveIdx(i)}
+              />
+            ))}
 
-          {/* ── Empty states ── */}
-          {filtered.length === 0 && q && !isLoading && (
-            <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center">
-              No models match "{query}".
-            </div>
-          )}
-          {isLoading && models.length === 0 && (
-            <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center flex items-center justify-center gap-1.5">
-              <Loader2 className="size-3 animate-spin" /> Loading models…
-            </div>
-          )}
-          {!isLoading && models.length === 0 && (
-            <div className="px-2 py-3 text-[11px] text-muted-foreground/60 text-center">
-              No models configured.
-              <br />
-              Add a provider in Onboarding or Settings.
-            </div>
-          )}
+            {/* ── Empty states ── */}
+            {visible.length === 0 && q && !isLoading && (
+              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center">
+                No models match &quot;{query}&quot;.
+              </div>
+            )}
+            {isLoading && models.length === 0 && (
+              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center flex items-center justify-center gap-1.5">
+                <Loader2 className="size-3 animate-spin" /> Loading models…
+              </div>
+            )}
+            {!isLoading && models.length === 0 && (
+              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center">
+                No models configured.
+                <br />
+                Add a provider in Onboarding or Settings.
+              </div>
+            )}
+          </div>
         </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+
+        <div className="shrink-0 px-2 py-1 border-t border-border/60 text-[10px] text-muted-foreground/60 flex items-center gap-3">
+          <span><Kbd className='py-0.5'>←→</Kbd> Provider</span>
+          <span><Kbd>↑↓</Kbd> Navigate</span>
+          <span><Kbd>↵</Kbd> Select</span>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** One rail row: brand tile, provider name, live match count. */
+function RailItem({
+  active,
+  dim,
+  count,
+  onClick,
+  tile,
+  name,
+}: {
+  active: boolean;
+  dim: boolean;
+  count: number;
+  onClick: () => void;
+  tile: React.ReactNode;
+  name: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={name}
+      className={cn(
+        'w-full flex items-center gap-1.5 px-2 py-1 text-left transition-colors',
+        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+        dim && 'opacity-40',
+      )}
+    >
+      {tile}
+      <span className="flex-1 min-w-0 truncate text-[10.5px] font-medium">{name}</span>
+      <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">{count}</span>
+    </button>
   );
 }
 
 /** A single model row — star toggle, alias, brain icon, context, check mark. */
 function ModelRow({
   model,
-  priceLabel,
+  active,
+  showProvider,
   selected,
   isStarred,
   onSelect,
   onToggleStar,
+  onHover,
+  ref,
 }: {
   model: ModelOption;
-  /** Catalog price rate, e.g. "$3 / $15 per Mtok". Undefined = no catalog data. */
-  priceLabel?: string;
+  active: boolean;
+  /** Show provider name in the sub-line (search / starred lists span providers). */
+  showProvider: boolean;
   selected: boolean;
   isStarred: boolean;
   onSelect: () => void;
   onToggleStar: () => void;
+  onHover: () => void;
+  ref: (el: HTMLDivElement | null) => void;
 }) {
   return (
-    <DropdownMenuItem
+    <div
+      ref={ref}
+      role="button"
+      tabIndex={-1}
       onClick={onSelect}
-      className="gap-2 py-2 cursor-pointer overflow-hidden"
+      onMouseEnter={onHover}
+      className={cn(
+        'flex items-center gap-1.5 px-2 py-1 cursor-pointer overflow-hidden transition-colors',
+        active ? 'bg-accent/60' : 'hover:bg-accent/40',
+      )}
     >
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); onToggleStar(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleStar();
+        }}
         className="text-muted-foreground/40 hover:text-warning shrink-0"
         title={isStarred ? 'Unstar' : 'Star'}
       >
-        <Star className={cn('size-4', isStarred && 'fill-current text-warning')} />
+        <Star className={cn('size-3.5', isStarred && 'fill-current text-warning')} />
       </button>
       <div className="flex-1 min-w-0">
-        <div className="text-[0.9rem] font-medium flex items-center gap-1.5 truncate">
+        <div className="text-[0.8rem] font-medium flex items-center gap-1.5 truncate">
+          {model.reasoning && <Brain className="size-2.5 text-reasoning" />}
+
           <span className="truncate">{model.alias}</span>
-          {model.reasoning && <Brain className="size-3 text-reasoning" />}
         </div>
-        <div className="text-[0.75rem] text-muted-foreground/60 truncate">
-          {formatContext(model.contextWindow)} ctx{priceLabel ? ` · ${priceLabel}` : ''}
+        <div className="text-[0.7rem] text-muted-foreground/60 truncate">
+          {showProvider && <span className="text-muted-foreground/80">{model.providerName} · </span>}
+          {formatContext(model.contextWindow)} ctx{model.priceLabel ? ` · ${model.priceLabel}` : ''}
         </div>
       </div>
-      {selected && <Check className="size-5 text-primary shrink-0" />}
-    </DropdownMenuItem>
+      {selected && <Check className="size-4 text-primary shrink-0" />}
+    </div>
   );
 }

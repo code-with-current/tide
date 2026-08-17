@@ -5,7 +5,8 @@
 
 import { createRequire } from 'module';
 import * as fs from 'fs';
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
+import * as net from 'node:net';
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
 import { createLogger } from '../logger.js';
@@ -64,11 +65,22 @@ interface TerminalEntry {
   /** Disposable subscriptions — disposed BEFORE kill to prevent
    *  stale exit events from reaching the renderer. */
   disposables: Array<{ dispose: () => void }>;
-  /** Ports observed in this terminal's output. Tracked so we only
-   *  emit `terminal:ports` when the set actually changes — otherwise
-   *  every output chunk would re-fire the event for a listening dev
-   *  server's banner. */
-  detectedPorts: Set<number>;
+  /** Ports observed in this terminal's output, mapped to the process that
+   *  owns them. Tracked so we only emit `terminal:ports` when the set
+   *  actually changes — otherwise every output chunk would re-fire the
+   *  event for a listening dev server's banner — and so the reaper can
+   *  verify the owning process is still alive. */
+  detectedPorts: Map<number, TrackedPort>;
+}
+
+interface TrackedPort {
+  /** Pid of the process listening on the port, resolved via lsof/netstat
+   *  when the port was detected. Null when resolution failed — liveness
+   *  then relies on the TCP probe alone. */
+  pid: number | null;
+  /** Consecutive failed liveness probes. A port is only reaped after two
+   *  misses so a dev server mid-restart (port briefly closed) keeps its chip. */
+  misses: number;
 }
 
 /** Check whether a process (by pid) is alive: kill(pid, 0) on Unix, tasklist on Windows. */
@@ -105,6 +117,121 @@ function scanPorts(data: string): number[] {
     if (port >= 10 && port <= 65535) out.add(port);
   }
   return [...out];
+}
+
+function portsSnapshot(detectedPorts: Map<number, TrackedPort>): { port: number; url: string; label: string }[] {
+  return [...detectedPorts.keys()].sort((a, b) => a - b).map((port) => ({
+    port,
+    url: `http://localhost:${port}`,
+    label: 'Dev server',
+  }));
+}
+
+/** Resolve which process is listening on a port (lsof on macOS/Linux,
+ *  netstat on Windows). Best-effort — resolves null on timeout/absence. */
+function resolvePortPid(port: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    const parse = (out: string): number | null => {
+      if (process.platform === 'win32') {
+        for (const line of out.split('\n')) {
+          const t = line.trim().split(/\s+/);
+          if (t.length >= 5 && /^TCP$/i.test(t[0]) && /LISTENING/i.test(t[3])) {
+            const localPort = parseInt(t[1].slice(t[1].lastIndexOf(':') + 1), 10);
+            const pid = parseInt(t[t.length - 1], 10);
+            if (localPort === port && Number.isFinite(pid) && pid > 0) return pid;
+          }
+        }
+        return null;
+      }
+      const pid = parseInt(out.split('\n')[0]?.trim() ?? '', 10);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    };
+    const cmd = process.platform === 'win32' ? 'netstat' : 'lsof';
+    const args = process.platform === 'win32' ? ['-ano'] : ['-nP', '-ti', `tcp:${port}`, '-sTCP:LISTEN'];
+    execFile(cmd, args, { timeout: 1500 }, (err, stdout) => {
+      resolve(err ? null : parse(String(stdout ?? '')));
+    });
+  });
+}
+
+/** Probe whether anything still accepts connections on the port. Tries IPv4
+ *  first, then IPv6 — a server bound to ::1 only must not read as dead. */
+function isPortOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => { if (!settled) { settled = true; resolve(ok); } };
+    const probe = (host: string, fallback?: () => void) => {
+      const socket = net.connect({ host, port });
+      socket.setTimeout(750);
+      socket.once('connect', () => { socket.destroy(); done(true); });
+      socket.once('timeout', () => { socket.destroy(); done(false); });
+      socket.once('error', () => {
+        socket.destroy();
+        if (fallback) fallback();
+        else done(false);
+      });
+    };
+    probe('127.0.0.1', () => probe('::1'));
+  });
+}
+
+// ── Port liveness reaper ─────────────────────────────────────────
+// The shell outlives the foreground dev server, so output scanning alone
+// never learns that the server died (Ctrl+C typed manually, external kill,
+// crash). This periodic check ties each port chip to its owning process:
+// when the pid is gone or nothing accepts connections, the port is dropped
+// from `terminal:ports` and the renderer's indicator disappears.
+const PORT_REAP_AFTER_MISSES = 2;
+let portReaper: NodeJS.Timeout | null = null;
+let reaperBusy = false;
+
+function startPortReaperIfNeeded(): void {
+  if (portReaper) return;
+  portReaper = setInterval(() => reapDeadPorts(), 2000);
+}
+
+function stopPortReaperIfIdle(): void {
+  if (!portReaper) return;
+  for (const entry of terminals.values()) {
+    if (entry.detectedPorts.size > 0) return;
+  }
+  clearInterval(portReaper);
+  portReaper = null;
+}
+
+async function reapDeadPorts(): Promise<void> {
+  if (reaperBusy) return;
+  reaperBusy = true;
+  try {
+    for (const [terminalId, entry] of terminals) {
+      if (entry.detectedPorts.size === 0) continue;
+      let changed = false;
+      for (const [port, tracked] of entry.detectedPorts) {
+        // A resolved pid gives a free dead-process signal, but pid liveness
+        // can't prove the listener still exists (and isProcessAlive is a
+        // blind `true` on Windows) — so the TCP probe stays authoritative.
+        const alive = (tracked.pid === null || isProcessAlive(tracked.pid)) && (await isPortOpen(port));
+        if (alive) {
+          if (tracked.misses > 0) entry.detectedPorts.set(port, { ...tracked, misses: 0 });
+          continue;
+        }
+        const misses = tracked.misses + 1;
+        if (misses >= PORT_REAP_AFTER_MISSES) {
+          log.info('port owner gone — clearing indicator', { terminalId, port, pid: tracked.pid });
+          entry.detectedPorts.delete(port);
+          changed = true;
+        } else {
+          entry.detectedPorts.set(port, { ...tracked, misses });
+        }
+      }
+      if (changed && !entry.wc.isDestroyed()) {
+        entry.wc.send('terminal:ports', { terminalId, ports: portsSnapshot(entry.detectedPorts) });
+      }
+    }
+  } finally {
+    reaperBusy = false;
+    stopPortReaperIfIdle();
+  }
 }
 
 function getShell(): { cmd: string; args: string[] } {
@@ -156,7 +283,7 @@ export function startTerminal(
   const { cmd, args } = getShell();
   const env = { ...process.env };
 
-  const detectedPorts = new Set<number>();
+  const detectedPorts = new Map<number, TrackedPort>();
 
   const sendOutput = (data: string) => {
     if (!wc.isDestroyed()) {
@@ -167,15 +294,22 @@ export function startTerminal(
     // subsequent log lines mentioning it stay silent.
     const fresh = scanPorts(data).filter((p) => !detectedPorts.has(p));
     if (fresh.length > 0) {
-      for (const p of fresh) detectedPorts.add(p);
+      for (const p of fresh) {
+        detectedPorts.set(p, { pid: null, misses: 0 });
+        // Resolve the owning pid async — the chip renders immediately, the
+        // association lands when lsof/netstat answers.
+        void resolvePortPid(p).then((pid) => {
+          const tracked = detectedPorts.get(p);
+          if (tracked && tracked.pid === null && pid !== null) {
+            detectedPorts.set(p, { ...tracked, pid });
+          }
+        });
+      }
+      startPortReaperIfNeeded();
       if (!wc.isDestroyed()) {
         wc.send('terminal:ports', {
           terminalId,
-          ports: [...detectedPorts].sort((a, b) => a - b).map((port) => ({
-            port,
-            url: `http://localhost:${port}`,
-            label: 'Dev server',
-          })),
+          ports: portsSnapshot(detectedPorts),
         });
       }
     }
@@ -204,6 +338,7 @@ export function startTerminal(
       wc.send('terminal:ports', { terminalId, ports: [] });
     }
     terminals.delete(terminalId);
+    stopPortReaperIfIdle();
   }));
 
   terminals.set(terminalId, { ptyProc, pid, sessionId, cwd, wc, disposables, detectedPorts });
@@ -261,8 +396,15 @@ export function killTerminal(terminalId: string): void {
     try { d.dispose(); } catch { /* already disposed */ }
   }
 
+  // Killed PTYs get no natural exit event, so clear the port indicator here —
+  // otherwise idle-reaped terminals keep their chips/dots in the renderer forever.
+  if (entry.detectedPorts.size > 0 && !entry.wc.isDestroyed()) {
+    entry.wc.send('terminal:ports', { terminalId, ports: [] });
+  }
+
   try { entry.ptyProc.kill(); } catch { /* already dead */ }
   terminals.delete(terminalId);
+  stopPortReaperIfIdle();
 }
 
 export function killAllTerminals(): void {

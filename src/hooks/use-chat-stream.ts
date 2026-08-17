@@ -57,7 +57,7 @@ export function useChatStream(): {
         useUi.getState().setSessionRunning(args.sessionId, false);
         // Also ensure isStreaming clears if no turn_end event arrived.
         if (useUi.getState().streams[args.sessionId]?.isStreaming) {
-          useUi.getState().patchStream(args.sessionId, { isStreaming: false });
+          useUi.getState().patchStream(args.sessionId, { isStreaming: false, retry: null });
         }
       }
     },
@@ -182,16 +182,18 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
     case 'delta': {
       // Append to legacy `text` + maintain the timeline's last text entry.
       // Clear the compacting flag — compaction finished, the model is now
-      // streaming the next step.
+      // streaming the next step. Content also dismisses the retry indicator —
+      // the retried request is producing output again, so it succeeded.
       const timeline = appendTextToTimeline(state.timeline, event.text);
-      return { ...state, text: state.text + event.text, timeline, compacting: false };
+      return { ...state, text: state.text + event.text, timeline, compacting: false, retry: null };
     }
     case 'reasoning':
-      return { ...state, reasoning: state.reasoning + event.delta };
+      return { ...state, reasoning: state.reasoning + event.delta, retry: null };
     case 'tool_call_start': {
       const toolIndex = state.toolCalls.length;
       return {
         ...state,
+        retry: null,
         toolCalls: [
           ...state.toolCalls,
           {

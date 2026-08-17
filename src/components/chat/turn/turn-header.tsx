@@ -3,15 +3,14 @@ import { Check, X, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { isFailedStatus } from '@/lib/stream/block-state';
+import { ThinkingOrb } from 'thinking-orbs';
 
-/** Format ms as e.g. "14s" or "1m30s" or "230ms". */
+/** Format ms as whole seconds: "14s", "1m30s". No sub-second/ms precision. */
 function formatDuration(ms?: number): string {
   if (ms == null) return '';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.round((ms % 60_000) / 1000);
-  return `${m}m${s}s`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m${s % 60}s`;
 }
 
 /** Pixel-grid "Working" loader + shimmer label + live wall-clock timer, shown
@@ -19,40 +18,33 @@ function formatDuration(ms?: number): string {
  *  wall-clock — from `startedAt` (the assistant message's creation time, ≈ when
  *  the turn started) — not component-mount time, so it matches the persisted
  *  totalMs that appears in the answer once the turn completes. */
-const PIXEL_DELAYS = Array.from({ length: 9 }, (_, i) => {
-  const r = Math.floor(i / 3), c = i % 3;
-  return (c + Math.abs(r - 1)) * 90;
-});
-
 function useWallClock(startedAt?: string): string {
-  const tenths = (s?: string) => {
+  const secondsOf = (s?: string) => {
     if (!s) return 0;
     const t = new Date(s).getTime();
-    return Number.isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / 100)) : 0;
+    return Number.isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / 1000)) : 0;
   };
-  const [ds, setDs] = useState(() => tenths(startedAt));
+  const [sec, setSec] = useState(() => secondsOf(startedAt));
   useEffect(() => {
-    const id = setInterval(() => setDs(tenths(startedAt)), 100);
+    const id = setInterval(() => setSec(secondsOf(startedAt)), 1000);
     return () => clearInterval(id);
   }, [startedAt]);
-  const total = ds / 10;
-  if (total < 60) return `${total.toFixed(1)}s`;
-  return `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 
 export function TurnWorkingFooter({ startedAt }: { startedAt?: string }) {
   const elapsed = useWallClock(startedAt);
   return (
     <div className="flex w-fit items-center gap-2.5 py-0.5">
-      <span aria-hidden className="grid grid-cols-[repeat(3,4px)] gap-[1.5px]">
-        {PIXEL_DELAYS.map((d, i) => (
-          <span
-            key={i}
-            className="size-[4px] rounded-full bg-muted-foreground"
-            style={{ opacity: 0.15, animation: `pixel-on 650ms ease-in-out ${d}ms infinite` }}
-          />
-        ))}
-      </span>
+      <ThinkingOrb
+        state="composing"
+        size={20}
+        speed={2}
+        aria-label="Running"
+        className="flex-shrink-0"
+
+      />
       <span className="animate-shimmer-title text-[13px] font-medium">Working</span>
       <span className="font-mono text-[12px] text-muted-foreground/50 tabular-nums">{elapsed}</span>
     </div>

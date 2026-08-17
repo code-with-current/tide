@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import * as api from './api/client';
-import { useUi, COMPOSER_NEW_KEY } from './stores/ui';
+import { useUi, COMPOSER_NEW_KEY, FORK_ATTACHMENT_PATH } from './stores/ui';
 import { toast } from './toast';
-import type { RagDownloadProgressEvent, RagInitProgressEvent, WorkspaceProgressEvent } from '@/types';
+import type { RagDownloadProgressEvent, RagInitProgressEvent, ReasoningOption, WorkspaceProgressEvent } from '@/types';
 
 /** Module-level QueryClient singleton. Exported so non-React code (e.g. shortcutActions.ts) can read cached query data without a hook context. */
 export const queryClient = new QueryClient({
@@ -120,6 +120,10 @@ export interface ModelOption {
   reasoningMandatory?: boolean;
   /** Valid reasoning effort levels the model accepts, e.g. ['high','medium','low'] (live provider data). */
   supportedEfforts?: string[];
+  /** Reasoning contracts (effort / budget_tokens / toggle) from models.dev
+   *  catalog enrichment — drives the resolver's wire format and the
+   *  toggle-only UI in the thinking-level selector. */
+  reasoningContracts?: ReasoningOption[];
   /** Max output tokens per response — subtracted from contextWindow to show
    *  the real usable input budget in the context meter. */
   maxCompletionTokens?: number;
@@ -150,6 +154,7 @@ export function useModels(): { models: ModelOption[]; isLoading: boolean } {
         reasoning: m.reasoning,
         reasoningMandatory: m.reasoningMandatory,
         supportedEfforts: m.supportedEfforts,
+        reasoningContracts: m.reasoningContracts,
         priceLabel: m.priceLabel,
         maxCompletionTokens: m.max_completion_tokens,
       });
@@ -246,33 +251,57 @@ export function useDeleteSession(workspaceId: string) {
   });
 }
 
+/** Attachment path that carries the forked session's last answer into the
+ *  new-session composer. Re-exported from the ui store, which pairs it with
+ *  `pendingFork` — clearing the intent also drops this attachment. */
+export { FORK_ATTACHMENT_PATH };
+
 /** Initiate a fork: grab the source session's last answer text, add it as a
- *  composer attachment, and redirect to the new-session screen. No session is
- *  created until the user sends — the attachment rides along on the first
- *  message. `resultText` is used directly when the caller already has it
- *  (AnswerBlock); otherwise fetched from the session. Text only — no blocks. */
-export async function initiateFork(sourceSessionId: string, resultText?: string): Promise<void> {
+ *  composer attachment, mark the fork intent, and redirect to the
+ *  new-session screen — which renders its fork variant (hero + banner) from
+ *  `pendingFork`. No session is created until the user sends — the
+ *  attachment rides along on the first message. `resultText` is used directly
+ *  when the caller already has it (AnswerBlock); otherwise fetched from the
+ *  session. `origin` records how the fork started so the screen can explain
+ *  itself (model switch vs. explicit fork). Text only — no blocks. */
+export async function initiateFork(
+  sourceSessionId: string,
+  resultText?: string,
+  origin: 'menu' | 'result' | 'model' = 'menu',
+): Promise<void> {
+  const session = await api.getSession(sourceSessionId);
   let text = resultText?.trim();
   if (!text) {
-    const session = await api.getSession(sourceSessionId);
     const lastAnswer = session?.messages
       ?.slice().reverse()
       .find((m: { role: string; content?: string }) => m.role === 'assistant' && m.content?.trim());
     text = lastAnswer?.content?.trim();
   }
-  if (!text) return;
+  if (!text || !session) {
+    toast.error('Nothing to fork', {
+      description: 'That session has no answer to carry over yet.',
+    });
+    return;
+  }
 
   const ui = useUi.getState();
-  // Fork seeds the NEW-session composer (no session id yet) — target the
-  // COMPOSER_NEW_KEY slot so the attachment shows up in the empty-state
-  // composer and doesn't leak into an existing session's draft.
+  // A fork always starts from a clean draft — whatever the user was typing
+  // stays in its own draft entry in the sidebar. startNewDraft clears any
+  // prior fork intent; setPendingFork re-arms it for THIS fork afterwards.
+  ui.startNewDraft();
   ui.clearComposerAttachments(COMPOSER_NEW_KEY);
   ui.addComposerAttachment(COMPOSER_NEW_KEY, {
-    path: 'fork-result.md',
+    path: FORK_ATTACHMENT_PATH,
     kind: 'paste',
     content: text,
   });
-  useUi.setState({ activeSessionId: null, mainView: 'new', sessionsPanelOpen: false });
+  ui.setPendingFork({
+    sourceSessionId,
+    sourceTitle: session.title,
+    sourceModelId: session.modelId,
+    origin,
+  });
+  useUi.setState({ sessionsPanelOpen: false });
 }
 
 // ===== Workspace lifecycle: archive/unarchive/delete + rename (uses api.updateWorkspace; invalidates session queries too because cascades move/remove sessions).

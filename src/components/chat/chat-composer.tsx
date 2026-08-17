@@ -109,8 +109,11 @@ export function ChatComposer({
 
   const { data: sessions } = useSessions(useUi((s) => s.activeWorkspaceId) ?? '');
   const activeSession = sessionId ? sessions?.find((s) => s.id === sessionId) : undefined;
-  // Locked when an existing session has messages (model is immutable post-creation).
-  const modelLocked = !!(sessionId && activeSession && activeSession.messages.length > 0);
+  // Locked when an existing session has messages (model is immutable post-creation),
+  // or while a turn is in flight — the persisted history may not yet include the
+  // just-submitted message, so isStreaming covers the gap before first persistence.
+  const modelLocked =
+    !!sessionId && (!!inProgress || !!(activeSession && activeSession.messages.length > 0));
 
   // Thinking support — hide the selector entirely when the model doesn't support reasoning.
   const selectedModelId = useUi((s) => s.selectedModelId);
@@ -970,7 +973,7 @@ export function ChatComposer({
           {/* Bottom row — selectors, counters, send/stop */}
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
             <PermissionModeSelector />
-            <ModelSelector locked={modelLocked} onLockedClick={() => { if (sessionId) initiateFork(sessionId); }} />
+            <ModelSelector locked={modelLocked} onLockedClick={() => { if (sessionId) void initiateFork(sessionId, undefined, 'model'); }} />
             {thinkingSupported && <ThinkingLevelSelector />}
 
             {!compact && attachments.length > 0 && (

@@ -41,6 +41,18 @@ function App() {
     });
   }, []);
 
+  // Native fullscreen state — collapses the macOS traffic-light spacer in the
+  // sidebars/settings. Invoke covers the initial state (relaunch-while-
+  // fullscreen, where no transition event fires); events cover transitions.
+  useEffect(() => {
+    window.tideIpc?.isFullScreen()
+      ?.then((v) => useUi.setState({ isFullScreen: v }))
+      .catch(() => { /* bridge unavailable (plain browser dev) */ });
+    return window.tideIpc?.onFullscreenChanged((v) =>
+      useUi.setState({ isFullScreen: v }),
+    );
+  }, []);
+
   // Global keyboard shortcuts: on match (user override → platform default → hardcoded fallback), dispatch the action. Reads overrides fresh per-event; field-typed inputs are skipped (Esc/⌘-combos still get through).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

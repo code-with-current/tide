@@ -73,6 +73,7 @@ export function WorkspacesPanel() {
   const setScreen = useUi((s) => s.setScreen);
   const runningSessionIds = useUi((s) => s.runningSessionIds);
   const unreadSessionIds = useUi((s) => s.unreadSessionIds);
+  const isFullScreen = useUi((s) => s.isFullScreen);
 
   const active = workspaces?.filter((w) => !w.archivedAt) ?? [];
   const archived = workspaces?.filter((w) => w.archivedAt) ?? [];
@@ -167,8 +168,16 @@ export function WorkspacesPanel() {
       {/* Top spacer — clears the native macOS traffic lights, which render at
           the top-LEFT (over this sidebar) at (12, 12). On Windows/Linux the
           caption buttons sit at the top-RIGHT, so this sidebar needs no
-          clearance and the spacer is omitted to avoid a wasted gap. */}
-      {isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+          clearance and the spacer is omitted to avoid a wasted gap. Collapses
+          to zero while fullscreen — the traffic lights hide there. */}
+      {isMac && (
+        <div
+          className={cn(
+            "flex-shrink-0 drag-region",
+            isFullScreen ? "h-0" : "h-8",
+          )}
+        />
+      )}
       <UpdatePill />
       <div className={cn("px-3 py-2.5 flex items-center justify-between border-accent-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
         <div className="text-[1rem] uppercase tracking-wider text-accent-foreground font-bold font-stretch-semi-expanded">
