@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { GitBranch, FolderGit2, ChevronDown, ChevronRight, Settings2, X } from 'lucide-react';
+import { GitBranch, GitFork, FolderGit2, ChevronDown, ChevronRight, Settings2, X } from 'lucide-react';
 import { ChatComposer } from './chat-composer';
 import { useWorkspaces } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
+import { Kbd } from '../ui/kbd';
 
 /** New-session screen: composer + worktree panel that auto-suggests a branch name, picks a base branch, and toggles per-session isolation. */
 export function EmptyChatState({
@@ -22,8 +23,22 @@ export function EmptyChatState({
   isStreaming?: boolean;
 }) {
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
+  const activeDraftId = useUi((s) => s.activeDraftId);
+  const pendingFork = useUi((s) => s.pendingFork);
+  const startNewDraft = useUi((s) => s.startNewDraft);
+  const touchDraft = useUi((s) => s.touchDraft);
   const { data: workspaces } = useWorkspaces();
   const workspace = workspaces?.find((w) => w.id === activeWorkspaceId);
+
+  // Ensure the new-session composer always has a draft slot bound to the
+  // active workspace (so typed text shows as a draft in the session list).
+  // Re-runs when the workspace changes — startNewDraft needs activeWorkspaceId
+  // to assign a slot, and on startup the workspace may not be set yet when
+  // this component first mounts (splash-screen IPC restore is async).
+  useEffect(() => {
+    if (!activeDraftId) startNewDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId]);
 
   // ── Worktree config state ──
   // Disabled by default — worktree isolation is opt-in per session. The user
@@ -73,7 +88,10 @@ export function EmptyChatState({
   }, [showSettings, activeWorkspaceId]);
 
   return (
-    <div className="flex-1 overflow-y-auto scroll">
+    <div className="flex-1 overflow-y-auto scroll relative">
+      {/* Invisible drag region — keeps the window movable on macOS
+          now that the top bar is hidden on this screen. */}
+      <div className="drag-region absolute inset-x-0 top-0 h-10 z-10" />
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 gap-6 min-h-full">
         {/* Workspace context strip */}
         {workspace && (
@@ -92,19 +110,59 @@ export function EmptyChatState({
           </div>
         )}
 
-        {/* Hero */}
-        <div className="flex flex-col items-center gap-1.5">
-          <h2 className="text-2xl font-semibold tracking-tight">Start a new session</h2>
-          <p className="text-sm text-muted-foreground">What do you want to work on?</p>
-        </div>
+        {/* Hero — fork variant when landing here via initiateFork, so a
+            fork never looks identical to a plain new session. */}
+        {pendingFork ? (
+          <div className="flex flex-col items-center gap-1.5 max-w-[40rem]">
+            <div className="flex items-center gap-2 min-w-0">
+              <GitFork className="size-4 shrink-0 text-primary" />
+              <h2 className="text-2xl font-semibold tracking-tight text-center truncate max-w-[34rem]">
+                Continue from “{pendingFork.sourceTitle}”
+              </h2>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">
+              {pendingFork.origin === 'model'
+                ? 'The model is locked once a session has messages — pick a new model below, then send.'
+                : 'The last answer is attached as context — take the thread in a new direction.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => useUi.getState().setPendingFork(null)}
+              className="text-[11px] text-muted-foreground/60 hover:text-foreground underline underline-offset-2 transition-colors"
+            >
+              start a blank session instead
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-1.5">
+            <h2 className="text-2xl font-semibold tracking-tight text-center">
+              Let's build something great{workspace ? <> on <span className="pl-2 text-primary italic">"{workspace.name}"</span></> : ' — what are we working on?'}
+            </h2>
+          </div>
+        )}
+
+        {/* Fork source strip — mirrors the workspace strip above, but names
+            the session this fork continues from. */}
+        {pendingFork && (
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 -mt-3">
+            <GitFork className="size-3" />
+            <span className="truncate max-w-[24rem]">forked from “{pendingFork.sourceTitle}”</span>
+            <span>·</span>
+            <span className="font-mono truncate max-w-[14rem]">{pendingFork.sourceModelId}</span>
+          </div>
+        )}
 
         {/* Composer */}
         <div className="w-full max-w-[40rem]">
           <ChatComposer
+            key={activeDraftId ?? '__new__'}
             compact={false}
             placeholder="Describe what you want to build, fix, or explain…"
             inProgress={isStreaming}
-            onChange={setComposerText}
+            onChange={(text) => {
+              setComposerText(text);
+              touchDraft(activeWorkspaceId ?? '', text);
+            }}
             onSubmit={(payload) => {
               if (!payload.text.trim()) return;
               onSend?.({
@@ -142,12 +200,10 @@ export function EmptyChatState({
         />
 
         {/* Keyboard hint */}
-        <div className="text-[11px] text-muted-foreground/60 flex items-center gap-3">
-          <span><kbd className="font-mono">↵</kbd> to send</span>
-          <span>·</span>
-          <span><kbd className="font-mono">/</kbd> for skills</span>
-          <span>·</span>
-          <span><kbd className="font-mono">@</kbd> for agents</span>
+        <div className="text-[0.80rem] text-muted-foreground/60 flex items-center gap-3">
+          <span className='border border-foreground pr-1 rounded-lg'><Kbd className="font-mono">/</Kbd> Skills</span>
+          <span className='border border-foreground pr-1 rounded-lg'><Kbd className="font-mono">@</Kbd> Context</span>
+          <span className='border border-foreground pr-1 rounded-lg'><Kbd className="font-mono">↵</Kbd> Send</span>
         </div>
       </div>
     </div>

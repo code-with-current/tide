@@ -21,6 +21,13 @@ export function SplashScreen() {
     window.tideIpc?.getDiagnostics().then((d) => setVersion(d.appVersion)).catch(() => {});
   }, []);
 
+  // Pull a fresh models.dev catalog in the background while splash shows —
+  // the main process fetches + re-enriches provider models and never blocks
+  // splash routing (the IPC reply returns before the fetch completes).
+  useEffect(() => {
+    api.refreshModelCatalog().catch(() => {});
+  }, []);
+
   // Whether the last-session restore IPC has resolved (success OR failure). Routing to MainScreen is gated on this so it never mounts with stale null state (a slow IPC could otherwise land after the 800ms timeout, leaving the restored session invisible/overwritten).
   const [restored, setRestored] = useState(false);
 

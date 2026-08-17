@@ -17,7 +17,10 @@ export function useSessionTodos(sessionId: string | null | undefined): TodoItem[
   const [todos, setTodos] = useState<TodoItem[]>([]);
 
   useEffect(() => {
-    if (!sessionId) { setTodos([]); return; }
+    // Clear immediately on session change — otherwise the previous session's
+    // list stays visible until the new fetch resolves (reads as a leak).
+    setTodos([]);
+    if (!sessionId) return;
     let cancelled = false;
     api.listTodos(sessionId).then((list) => {
       if (!cancelled) setTodos(list as TodoItem[]);

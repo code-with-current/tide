@@ -95,6 +95,14 @@ contextBridge.exposeInMainWorld('tideIpc', {
   onNavigateToSession: (callback: (sessionId: string) => void) => {
     ipcRenderer.on('tide:navigateToSession', (_e, sessionId: string) => callback(sessionId));
   },
+  // Native window fullscreen state (macOS green button / Ctrl+Cmd+F). The
+  // renderer collapses its traffic-light spacer while fullscreen.
+  isFullScreen: () => ipcRenderer.invoke('tide:window:isFullScreen'),
+  onFullscreenChanged: (callback: (fullscreen: boolean) => void) => {
+    const listener = (_e: unknown, fullscreen: boolean) => callback(fullscreen);
+    ipcRenderer.on('tide:window:fullscreen', listener);
+    return () => ipcRenderer.off('tide:window:fullscreen', listener);
+  },
   // Reveal a file/folder in the OS file manager (Finder/Explorer).
   showItemInFolder: (fullPath: string) => {
     const { shell } = require('electron');
@@ -133,9 +141,9 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.on('todos:updated', (_e, data) => callback(data)),
   removeTodosListener: () => ipcRenderer.removeAllListeners('todos:updated'),
   getSession: (id: string) => ipcRenderer.invoke('tide:getSession', id),
-  createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
+  createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:createSession', workspaceId, title, modelId, opts),
-  updateSessionSettings: (sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
+  updateSessionSettings: (sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:updateSessionSettings', sessionId, patch),
   addMessage: (sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }) =>
     ipcRenderer.invoke('tide:addMessage', sessionId, role, content, extra),
@@ -194,7 +202,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   forkSession: (
     sourceId: string,
     newModelId: string,
-    opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+    opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
   ) =>
     ipcRenderer.invoke('tide:session:fork', sourceId, newModelId, opts),
   listBranches: (workspaceId: string) =>
@@ -229,6 +237,9 @@ contextBridge.exposeInMainWorld('tideIpc', {
   modelCatalog: {
     resolve: (input: { catalogId?: string; modelId: string; contextWindow: number }) =>
       ipcRenderer.invoke('tide:modelCatalog:resolve', input),
+    // Splash-screen trigger: pull a fresh models.dev catalog in the background.
+    // Resolves immediately; the fetch continues in the main process.
+    refresh: () => ipcRenderer.invoke('tide:modelCatalog:refresh'),
   },
 
   // ── Logging (renderer → main file) ──
@@ -244,6 +255,9 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // ── Workspace context for the system prompt ──
   getWorkspaceContext: (workspaceId: string) =>
     ipcRenderer.invoke('tide:getWorkspaceContext', workspaceId),
+
+  // ── Host environment for the system prompt (platform/shell dialect) ──
+  getEnvInfo: () => ipcRenderer.invoke('tide:getEnvInfo'),
 
   // ── Read a file from a workspace (sandboxed to root) ──
   readFileInWorkspace: (workspaceId: string, relPath: string) =>

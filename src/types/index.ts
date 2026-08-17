@@ -166,8 +166,10 @@ export interface Workspace {
 
 export type AutonomyMode = 'plan' | 'ask' | 'edit' | 'full';
 
-/** Reasoning budget level. `'off'` disables thinking entirely. */
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+/** Reasoning budget level. `'off'` disables thinking entirely. `'extra'`
+ *  maps to the provider effort `xhigh`; `'minimal'` to `minimal` (gpt-5.0+
+ *  vocabulary). Provider-native tiers round-trip through these levels. */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
 
 export type SessionStatus = 'active' | 'idle' | 'awaiting_permission' | 'error' | 'spend_capped';
 

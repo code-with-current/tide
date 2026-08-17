@@ -30,6 +30,7 @@ export interface ReasoningInstruction {
 
 /** ThinkingLevel → effort_ratio, matching OpenRouter's published formula. */
 const EFFORT_RATIOS: Record<Exclude<ThinkingLevel, 'off'>, number> = {
+  minimal: 0.1,
   low: 0.2,
   medium: 0.5,
   high: 0.8,
@@ -40,6 +41,7 @@ const EFFORT_RATIOS: Record<Exclude<ThinkingLevel, 'off'>, number> = {
 /** Legacy fixed budget map — used when the model has no contracts (backward
  *  compat for pre-enrichment or manually-entered models). */
 const LEGACY_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
+  minimal: 512,
   low: 1_024,
   medium: 8_000,
   high: 24_000,
@@ -55,6 +57,7 @@ function levelToEffort(
   supportedValues?: string[],
 ): string {
   const canonical: Record<Exclude<ThinkingLevel, 'off'>, string> = {
+    minimal: 'minimal',
     low: 'low',
     medium: 'medium',
     high: 'high',
@@ -156,7 +159,16 @@ export function resolveReasoning(
   apiStyle: ApiStyle,
   maxOutputTokens: number,
 ): ReasoningInstruction | null {
-  if (thinkingLevel === 'off') return null;
+  if (thinkingLevel === 'off') {
+    // Models that publish 'none' as an effort value (gpt-5.1+) expect an
+    // explicit reasoning_effort='none' — omitting the param leaves the
+    // provider default active, so 'off' would silently still reason.
+    const noneContract = contracts?.find((c) => c.type === 'effort');
+    if (apiStyle === 'openai' && noneContract?.values?.some((v) => v.toLowerCase() === 'none')) {
+      return { contract: 'effort', effort: 'none', label: 'reasoning_effort=none (explicit off)' };
+    }
+    return null;
+  }
 
   const level = thinkingLevel;
 

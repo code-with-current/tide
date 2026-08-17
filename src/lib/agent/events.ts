@@ -263,7 +263,7 @@ export interface RunTurnPayload {
   modelId: string;
   providerId: string;
   autonomyMode: 'plan' | 'ask' | 'edit' | 'full';
-  thinkingLevel: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
 }
 
 /** Message shape the orchestrator accepts — richer than the old chat path's `{role, content: string}`: content can be plain text or an array of Anthropic-shape content blocks. */

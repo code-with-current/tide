@@ -34,7 +34,7 @@ export interface StoredSession {
   createdAt: string;
   updatedAt: string;
   autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-  thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
   archivedAt?: string;
   /** Per-session git worktree isolation. Populated by setWorktree()
    *  when the user starts a session with worktree enabled. Tools run
@@ -134,7 +134,7 @@ export interface SessionStore {
     modelId: string,
     opts?: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
     },
   ): StoredSession;
@@ -144,7 +144,7 @@ export interface SessionStore {
     newModelId: string,
     opts?: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
     },
   ): StoredSession;
@@ -153,7 +153,7 @@ export interface SessionStore {
     sessionId: string,
     patch: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
     },
   ): void;
   addMessage(sessionId: string, role: StoredMessage['role'], content: string, extra?: { attachments?: any[]; mentions?: any[] }): void;
@@ -290,7 +290,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     modelId: string,
     opts?: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
     },
   ): StoredSession {
@@ -318,7 +318,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     newModelId: string,
     opts?: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
     },
   ): StoredSession {
@@ -434,7 +434,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     sessionId: string,
     patch: {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
-      thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'extra' | 'max';
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
     },
   ): void {
     ensureLoaded();

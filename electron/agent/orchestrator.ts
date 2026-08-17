@@ -34,6 +34,7 @@ import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agen
 import type { AutonomyMode, Provider, ToolCall, ToolName, Usage } from '../../src/types/index.js';
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
 import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
+import { recordEditTurn } from '../rag/edit-journal.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
 
@@ -55,12 +56,18 @@ const RESUME_MESSAGE =
   'Output token limit hit. Resume directly — no apology, no recap of what you ' +
   'were doing. Pick up mid-thought if that is where the cut happened. Break ' +
   'remaining work into smaller pieces.';
+/** Loop-guard thresholds: the same tool+arguments repeated this many times in
+ *  one turn, or this many total tool calls, triggers a corrective reminder. */
+const LOOP_DUPLICATE_THRESHOLD = 3;
+const LOOP_BUDGET_WARNING = 40;
 
 type TimelineEntry = { type: 'text'; text: string } | { type: 'tool'; toolIndex: number };
 type StopReason = 'end_turn' | 'max_tokens' | 'content_filter' | 'iteration_limit' | 'aborted' | 'refusal';
 
 interface Turn {
   sessionId: string;
+  /** Workspace the session is bound to — used by the turn-end edit journal. */
+  workspaceId: string;
   messageId: string;
   controller: AbortController;
   autonomyMode: AutonomyMode;
@@ -78,10 +85,15 @@ interface Turn {
   maxSteps: number;
   permissionTimeoutMs: number;
   errored: string | null;
+  /** Last provider error this turn — unlike `errored`, survives retry resets
+   * so an aborted-during-retries turn can still surface why it was failing. */
+  lastError: string | null;
   finishReason: string | null;
   currentTextEntry: { type: 'text'; text: string } | null;
   responseMessages: ModelMessage[];
   stepHadToolCalls: boolean;
+  /** Signatures that already fired a loop-guard reminder — each fires once. */
+  loopGuardFired: Set<string>;
   /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
    *  the turn_end time to compute the persisted `totalMs` (send → result). */
   startedAt: number;
@@ -123,6 +135,14 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
       send(e.sender, payload.sessionId, {
         type: 'error', sessionId: payload.sessionId, seq: nextSeq(payload.sessionId),
         message: err?.message || 'Turn failed',
+      });
+      // Follow with turn_end so the renderer flips isStreaming — an error
+      // event alone leaves the composer locked (error UI is gated on
+      // !isStreaming, which only turn_end clears).
+      send(e.sender, payload.sessionId, {
+        type: 'turn_end', sessionId: payload.sessionId, seq: nextSeq(payload.sessionId),
+        messageId: `m_${Date.now().toString(36)}`, stopReason: 'refusal',
+        content: '', timeline: [], blocks: [], totalMs: 0,
       });
     }
   });
@@ -214,15 +234,16 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const effectivePermissionTimeout = (agentSettings.permissionTimeoutMin || 10) * 60 * 1000;
 
   const turn: Turn = {
-    sessionId, messageId, controller, autonomyMode,
+    sessionId, workspaceId, messageId, controller, autonomyMode,
     blocks: [], currentTextBlockId: null, reasoningBlockId: null,
     toolBlockIndex: {}, finalText: '', finalReasoning: '',
     toolCalls: [], timeline: [],
     usage: emptyUsage(), lastStepUsage: null,
     stepsCompleted: 0, maxSteps: effectiveMaxSteps,
     permissionTimeoutMs: effectivePermissionTimeout,
-    errored: null, finishReason: null, currentTextEntry: null,
+    errored: null, lastError: null, finishReason: null, currentTextEntry: null,
     responseMessages: [], stepHadToolCalls: false,
+    loopGuardFired: new Set(),
     startedAt: Date.now(),
   };
   activeTurns.set(sessionId, turn);
@@ -346,7 +367,10 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
             return null;
           },
 
-          onError: ({ error }) => { turn.errored = errMessage(error); },
+          onError: ({ error }) => {
+            turn.errored = providerErrorMessage(error);
+            turn.lastError = turn.errored;
+          },
         });
 
         turn.stepHadToolCalls = false;
@@ -358,7 +382,8 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
         } catch (streamErr: any) {
           if (!(streamErr?.name === 'AbortError' && controller.signal.aborted)) {
             log.warn('stream interrupted', { err: streamErr?.message ?? streamErr });
-            turn.errored = turn.errored ?? errMessage(streamErr);
+            turn.errored = turn.errored ?? providerErrorMessage(streamErr);
+            turn.lastError = turn.lastError ?? turn.errored;
           }
         }
 
@@ -367,6 +392,14 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
         if (responseMsgs.length > 0) {
           currentConvo = [...currentConvo, ...responseMsgs];
           turn.responseMessages.push(...responseMsgs);
+        }
+
+        // Loop guards: after a step that used tools, steer the model out of
+        // repeat/budget spirals with a one-shot reminder (same mechanism as
+        // RESUME_MESSAGE — a user-role nudge appended to the conversation).
+        if (turn.stepHadToolCalls) {
+          const guard = loopGuardReminder(turn);
+          if (guard) currentConvo = [...currentConvo, { role: 'user' as const, content: guard }];
         }
 
         const finishReason = turn.finishReason || '';
@@ -425,6 +458,13 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
           emitTurnEnd(wc, turn, 'refusal'); break;
         }
 
+        // Step completed cleanly — a retry budget consumed by earlier steps
+        // shouldn't doom later ones, so re-earn the full budget each step. The
+        // step recovered, so a stale retry error must not resurface if the
+        // user aborts later in the turn.
+        retryCount = 0;
+        turn.lastError = null;
+
         if (turn.stepsCompleted >= turn.maxSteps) { emitTurnEnd(wc, turn, 'iteration_limit'); break; }
         if (turn.stepHadToolCalls) continue;
         emitTurnEnd(wc, turn, 'end_turn'); break;
@@ -441,6 +481,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
           continue;
         }
         turn.errored = err?.message || String(err);
+        turn.lastError = turn.errored;
         emitTurnEnd(wc, turn, 'refusal'); break;
       }
     }
@@ -577,9 +618,10 @@ function translatePart(
     case 'abort': turn.controller.abort(); break;
 
     case 'error': {
-      let msg = errMessage(p.error) || 'Stream error';
+      let msg = providerErrorMessage(p.error) || 'Stream error';
       if (/no output generated/i.test(msg)) msg += ' (provider returned an empty stream — usually a rejected option like `thinking` or an unknown model id.)';
       turn.errored = msg;
+      turn.lastError = msg;
       send(wc, sessionId, { type: 'error', sessionId, seq: nextSeq(sessionId), message: msg });
       break;
     }
@@ -607,8 +649,11 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
   // Sent BEFORE turn_end so the reducer records the error, then turn_end flips
   // isStreaming — the error UI (gated on !isStreaming) appears exactly once, at
   // the end. Covers stream-throw errors that never emitted an `error` part.
-  if (stopReason === 'refusal' && turn.errored) {
-    send(wc, turn.sessionId, { type: 'error', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), message: turn.errored });
+  // Aborted turns surface the failure too: a user stopping out of a retry
+  // spiral still deserves to know why the turn was failing.
+  const failureMsg = stopReason === 'aborted' ? (turn.errored ?? turn.lastError) : turn.errored;
+  if ((stopReason === 'refusal' || stopReason === 'aborted') && failureMsg) {
+    send(wc, turn.sessionId, { type: 'error', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), message: failureMsg });
   }
   send(wc, turn.sessionId, {
     type: 'turn_end', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId),
@@ -620,7 +665,29 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
     toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
     usage: turn.usage, lastStepUsage: turn.lastStepUsage ?? undefined,
   });
+  journalEditTurn(turn);
   fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+/** Edit-tool calls whose file argument names a workspace file. */
+const EDIT_TOOLS = new Set(['edit_file', 'multi_edit', 'write_file']);
+
+/** After a turn that edited files, write an episodic record into the
+ *  workspace RAG index (see rag/edit-journal.ts). Fire-and-forget —
+ * recordEditTurn swallows its own errors. */
+function journalEditTurn(turn: Turn): void {
+  const editCalls = turn.toolCalls.filter(
+    (tc) => EDIT_TOOLS.has(tc.toolName) && tc.status === 'executed' && typeof tc.arguments?.path === 'string',
+  );
+  if (editCalls.length === 0) return;
+  void recordEditTurn(turn.workspaceId, {
+    sessionId: turn.sessionId,
+    messageId: turn.messageId,
+    files: [...new Set(editCalls.map((tc) => tc.arguments.path as string))],
+    operations: editCalls.map((tc) => `${tc.toolName} ${tc.argPreview}`),
+    summary: turn.finalText,
+    createdAt: Date.now(),
+  });
 }
 
 function finalizeBlocks(turn: Turn, stopReason: StopReason): Block[] {
@@ -637,6 +704,30 @@ function finalizeBlocks(turn: Turn, stopReason: StopReason): Block[] {
     if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
   }
   return blocks;
+}
+
+/** Detect tool-loop spirals across the turn's accumulated calls — the same
+ *  tool+arguments repeated, or an excessive total call count — and return a
+ *  reminder to steer the model out. Each trigger fires once per turn. */
+function loopGuardReminder(turn: Turn): string | null {
+  const counts = new Map<string, number>();
+  for (const tc of turn.toolCalls) {
+    let sig: string;
+    try { sig = `${tc.toolName}:${JSON.stringify(tc.arguments ?? {})}`; } catch { sig = tc.toolName; }
+    counts.set(sig, (counts.get(sig) ?? 0) + 1);
+  }
+  for (const [sig, n] of counts) {
+    if (n >= LOOP_DUPLICATE_THRESHOLD && !turn.loopGuardFired.has(sig)) {
+      turn.loopGuardFired.add(sig);
+      const name = sig.slice(0, sig.indexOf(':'));
+      return `<system-reminder>Loop guard: you have called ${name} with the same arguments ${n} times this turn. Retrying the identical call will return the identical result — reread the earlier outputs, change your approach, or ask the user how to proceed.</system-reminder>`;
+    }
+  }
+  if (turn.toolCalls.length >= LOOP_BUDGET_WARNING && !turn.loopGuardFired.has('__budget__')) {
+    turn.loopGuardFired.add('__budget__');
+    return `<system-reminder>Loop guard: this turn has made ${turn.toolCalls.length} tool calls. If progress has stalled, stop calling tools reflexively — reassess the approach, finish with what you have, or stop and explain what is blocking you.</system-reminder>`;
+  }
+  return null;
 }
 
 function patchToolBlock(turn: Turn, toolCallId: string, patch: Partial<ToolBlock>): void {
@@ -812,6 +903,17 @@ function errMessage(err: unknown): string {
   if (typeof err === 'string') return err;
   if (err instanceof Error) return err.message;
   try { return JSON.stringify(err); } catch { return String(err); }
+}
+
+/** Provider-facing errors keep the HTTP status in the message text. The SDK's
+ * APICallError carries the status only as a field, so a 403 whose body says
+ * "This is a premium model..." otherwise classifies as transient (the message
+ * contains no status keyword) and the turn burns its retry budget on a
+ * permanently denied request. */
+function providerErrorMessage(err: unknown): string {
+  const base = errMessage(err);
+  const status = (err as { statusCode?: number } | null)?.statusCode;
+  return status ? `${base} (HTTP ${status})` : base;
 }
 
 function isTimeoutError(err: unknown): boolean {

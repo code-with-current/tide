@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tide — Model Selector: Two-Pane Proposal</title>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --card: #141416;
+    --popover: #17171a;
+    --border: #1e1e22;
+    --border-soft: #1e1e2288;
+    --input: #2a2a30;
+    --fg: #e4e4e7;
+    --muted: #71717a;
+    --muted-dim: #71717a88;
+    --primary: #e4e4e7;
+    --accent: #3b82f6;
+    --reasoning: #a78bfa;
+    --warning: #f59e0b;
+    --success: #22c55e;
+    --anthropic: #d97757;
+    --openai: #10a37f;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 28px; }
+  .label { font-size: 11px; color: var(--muted); margin: 28px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .label:first-child { margin-top: 0; }
+  .note { font-size: 12px; color: var(--muted); margin: 6px 0 0; max-width: 720px; line-height: 1.5; }
+  .wrapper { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  svg { flex-shrink: 0; }
+
+  /* ── Fake composer strip for context ── */
+  .composer { background: var(--card); padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .composer-input { flex: 1; height: 34px; border-radius: 8px; background: var(--input); border: 1px solid transparent; color: var(--muted); font-size: 13px; display: flex; align-items: center; padding: 0 12px; }
+  .trigger { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; border-radius: 7px; background: var(--input); border: 1px solid var(--border); color: var(--fg); font-size: 12.5px; cursor: pointer; }
+  .trigger:hover { border-color: var(--muted-dim); }
+  .trigger .dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--anthropic); }
+  .trigger .caret { color: var(--muted); }
+
+  /* ── The panel ── */
+  .panel { width: 560px; background: var(--popover); border-top: 1px solid var(--border); display: flex; flex-direction: column; }
+
+  .search-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  .search-row input { flex: 1; background: transparent; border: 0; outline: none; color: var(--fg); font-size: 13px; }
+  .search-row input::placeholder { color: var(--muted-dim); }
+  .kbd { font-family: inherit; font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; background: var(--input); }
+
+  .pane { display: flex; min-height: 0; }
+
+  /* Left rail — providers */
+  .rail { width: 158px; border-right: 1px solid var(--border); padding: 6px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; flex-shrink: 0; }
+  .rail-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-dim); padding: 6px 8px 4px; }
+  .rail-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; border: 1px solid transparent; text-align: left; background: transparent; width: 100%; }
+  .rail-item:hover { background: var(--input); color: var(--fg); }
+  .rail-item.active { background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--fg); border-color: color-mix(in srgb, var(--primary) 18%, transparent); }
+  .rail-item .brand { width: 16px; height: 16px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 8.5px; font-weight: 700; flex-shrink: 0; }
+  .rail-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-item .count { font-size: 10px; color: var(--muted-dim); font-variant-numeric: tabular-nums; }
+  .rail-item.starred-item .brand { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+
+  /* Right pane — models */
+  .models { flex: 1; min-width: 0; overflow-y: auto; padding: 6px; }
+  .group-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-dim); padding: 8px 8px 4px; display: flex; align-items: center; gap: 6px; }
+  .model-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+  .model-row:hover { background: var(--input); }
+  .model-row .star { color: var(--muted-dim); opacity: 0; display: flex; }
+  .model-row:hover .star, .model-row .star.on { opacity: 1; }
+  .model-row .star.on { color: var(--warning); }
+  .model-row .body { flex: 1; min-width: 0; }
+  .model-row .alias { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+  .model-row .alias span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model-row .meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .model-row .check { color: var(--fg); opacity: 0; }
+  .model-row.selected .check { opacity: 1; }
+  .model-row.selected { background: color-mix(in srgb, var(--primary) 7%, transparent); }
+  .model-row .brain { color: var(--reasoning); }
+
+  /* ── Alternative: provider chips ── */
+  .chips { display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 9999px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+  .chip:hover { color: var(--fg); background: var(--input); }
+  .chip.active { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--fg); border-color: color-mix(in srgb, var(--primary) 20%, transparent); }
+  .chip .brand { width: 12px; height: 12px; border-radius: 4px; }
+
+  .legend { display: flex; gap: 18px; margin-top: 10px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+  .legend b { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="label">Proposal — Two-pane: provider rail (left) + model list (right)</div>
+<div class="note">
+  Interactive mock. Click a provider on the left rail — the right pane swaps instantly, no scrolling past other providers' models.
+  Search spans every provider; matching models stay grouped under their provider head. The rail is the 8px-tinted brand color used across Tide's provider UI.
+</div>
+<div class="wrapper" style="width:560px">
+  <div class="composer">
+    <div class="composer-input">Ask Tide to do anything…</div>
+    <button class="trigger"><span class="dot"></span> Claude Opus 4.6 <svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+  </div>
+  <div class="panel">
+    <div class="search-row">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--muted-dim)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="search" placeholder="Search models…" />
+      <span class="kbd">Esc to close</span>
+    </div>
+    <div class="pane" style="height:316px">
+      <div class="rail" id="rail"></div>
+      <div class="models" id="models"></div>
+    </div>
+  </div>
+</div>
+<div class="legend">
+  <span><b>←→ / Tab</b> rail focus</span>
+  <span><b>↑↓</b> model list</span>
+  <span><b>Enter</b> select</span>
+  <span><b>⌘K</b> open picker</span>
+</div>
+
+<div class="label">Search active — results across providers, grouped</div>
+<div class="note">Typing keeps the rail (counts update, empty providers dim) and the right pane becomes a cross-provider result list with provider group heads. Exact-match aliases rank first.</div>
+<div class="wrapper" style="width:560px">
+  <div class="panel">
+    <div class="search-row">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--muted-dim)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input value="4.6" style="color:var(--fg)" />
+    </div>
+    <div class="pane" style="height:316px">
+      <div class="rail">
+        <div class="rail-head">Providers</div>
+        <button class="rail-item"><span class="brand" style="background:color-mix(in srgb,var(--warning) 18%,transparent);color:var(--warning)">★</span><span class="name">Starred</span><span class="count">2</span></button>
+        <button class="rail-item active"><span class="brand" style="background:var(--anthropic)">A</span><span class="name">Anthropic</span><span class="count">2</span></button>
+        <button class="rail-item" style="opacity:.4"><span class="brand" style="background:var(--openai)">O</span><span class="name">OpenAI</span><span class="count">0</span></button>
+        <button class="rail-item"><span class="brand" style="background:#8b5cf6">O</span><span class="name">OpenRouter</span><span class="count">3</span></button>
+        <button class="rail-item" style="opacity:.4"><span class="brand" style="background:#525259">LS</span><span class="name">LM Studio</span><span class="count">0</span></button>
+      </div>
+      <div class="models">
+        <div class="group-head" style="color:var(--warning)">★ Starred</div>
+        <div class="model-row"><span class="star on">★</span><div class="body"><div class="alias"><span>Claude Opus 4.6</span><svg class="brain" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M15 13a4 4 0 0 0 4-4c0-1.53-.86-2.86-2.12-3.54"/><path d="M12 5a3 3 0 1 1 5.997.125"/><path d="M12 5v13"/></svg></div><div class="meta">200K ctx · $15 / $75 per Mtok</div></div><span class="check">✓</span></div>
+        <div class="group-head">Anthropic</div>
+        <div class="model-row"><span class="star">☆</span><div class="body"><div class="alias"><span>Claude Sonnet 4.6</span></div><div class="meta">200K ctx · $3 / $15 per Mtok</div></div><span class="check">✓</span></div>
+        <div class="group-head">OpenRouter</div>
+        <div class="model-row"><span class="star">☆</span><div class="body"><div class="alias"><span>anthropic/claude-opus-4.6</span></div><div class="meta">200K ctx · $15 / $75 per Mtok</div></div><span class="check">✓</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="label">Alternative (lighter) — provider chips above a single list</div>
+<div class="note">Keeps the current 300px-wide popover; adds a horizontal chip row. Cheaper, but chips overflow into horizontal scrolling once you have 4+ providers — the two-pane above is the one I'd ship.</div>
+<div class="wrapper" style="width:340px">
+  <div class="panel" style="width:340px">
+    <div class="search-row">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--muted-dim)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input placeholder="Search…" />
+    </div>
+    <div class="chips">
+      <button class="chip active"><span class="brand" style="background:var(--anthropic)"></span>Anthropic</button>
+      <button class="chip"><span class="brand" style="background:var(--openai)"></span>OpenAI</button>
+      <button class="chip"><span class="brand" style="background:#8b5cf6"></span>OpenRouter</button>
+      <button class="chip"><span class="brand" style="background:#525259"></span>LM Studio</button>
+      <button class="chip">+2</button>
+    </div>
+    <div class="models" style="height:240px">
+      <div class="model-row selected"><span class="star on">★</span><div class="body"><div class="alias"><span>Claude Opus 4.6</span></div><div class="meta">200K ctx · $15 / $75 per Mtok</div></div><span class="check">✓</span></div>
+      <div class="model-row"><span class="star">☆</span><div class="body"><div class="alias"><span>Claude Sonnet 4.6</span></div><div class="meta">200K ctx · $3 / $15 per Mtok</div></div><span class="check">✓</span></div>
+      <div class="model-row"><span class="star">☆</span><div class="body"><div class="alias"><span>Claude Haiku 4.6</span></div><div class="meta">200K ctx · $1 / $5 per Mtok</div></div><span class="check">✓</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const brainSvg = '<svg class="brain" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M15 13a4 4 0 0 0 4-4c0-1.53-.86-2.86-2.12-3.54"/><path d="M12 5a3 3 0 1 1 5.997.125"/><path d="M12 5v13"/></svg>';
+
+  const providers = [
+    { id: 'starred', name: 'Starred', brand: '★', tint: 'color-mix(in srgb,var(--warning) 18%,transparent)', color: 'var(--warning)', starredOnly: true },
+    { id: 'anthropic', name: 'Anthropic', brand: 'A', tint: 'var(--anthropic)', color: '#fff' },
+    { id: 'openai', name: 'OpenAI', brand: 'O', tint: 'var(--openai)', color: '#fff' },
+    { id: 'openrouter', name: 'OpenRouter', brand: 'O', tint: '#8b5cf6', color: '#fff' },
+    { id: 'lmstudio', name: 'LM Studio', brand: 'LS', tint: '#525259', color: '#fff' },
+    { id: 'vertex', name: 'Google Vertex', brand: 'G', tint: '#4285f4', color: '#fff' },
+  ];
+
+  const M = (providerId, alias, id, ctx, price, reasoning = false) => ({ providerId, alias, id, ctx, price, reasoning, starred: false });
+  const models = [
+    M('anthropic', 'Claude Opus 4.6', 'claude-opus-4-6', '200K', '$15 / $75 per Mtok', true),
+    M('anthropic', 'Claude Sonnet 4.6', 'claude-sonnet-4-6', '200K', '$3 / $15 per Mtok', true),
+    M('anthropic', 'Claude Haiku 4.6', 'claude-haiku-4-6', '200K', '$1 / $5 per Mtok', true),
+    M('anthropic', 'Claude Sonnet 4.5', 'claude-sonnet-4-5', '200K', '$3 / $15 per Mtok', true),
+    M('openai', 'GPT-5.6', 'gpt-5.6', '400K', '$1.25 / $10 per Mtok', true),
+    M('openai', 'GPT-5.6 Codex', 'gpt-5.6-codex', '400K', '$1.25 / $10 per Mtok', true),
+    M('openai', 'GPT-5.1', 'gpt-5.1', '400K', '$1.25 / $10 per Mtok', true),
+    M('openai', 'GPT-5.1 Chat', 'gpt-5.1-chat-latest', '128K', '—', true),
+    M('openai', 'o4-mini', 'o4-mini', '200K', '$1.10 / $4.40 per Mtok', true),
+    M('openai', 'GPT-Image 1', 'gpt-image-1', '—', '—'),
+    M('openrouter', 'anthropic/claude-opus-4.6', 'anthropic/claude-opus-4.6', '200K', '$15 / $75 per Mtok', true),
+    M('openrouter', 'openai/gpt-5.6', 'openai/gpt-5.6', '400K', '$1.25 / $10 per Mtok', true),
+    M('openrouter', 'qwen/qwen3.5-coder', 'qwen/qwen3.5-coder', '262K', '$0.12 / $0.48 per Mtok', true),
+    M('openrouter', 'z-ai/glm-5.3', 'z-ai/glm-5.3', '200K', '$0.50 / $2 per Mtok', true),
+    M('openrouter', 'deepseek/deepseek-v4', 'deepseek/deepseek-v4', '164K', '$0.28 / $1.10 per Mtok', true),
+    M('lmstudio', 'Qwen3-Coder-30B', 'qwen3-coder-30b-a3b', '262K', 'local', true),
+    M('lmstudio', 'Llama-4-Maverick', 'llama-4-maverick-17b', '128K', 'local'),
+    M('vertex', 'claude-opus-4-6@vertex', 'claude-opus-4-6', '200K', '$15 / $75 per Mtok', true),
+    M('vertex', 'gemini-3-pro', 'gemini-3-pro', '1M', '$2 / $12 per Mtok', true),
+  ];
+  models[0].starred = true;
+  models[4].starred = true;
+
+  let activeId = 'anthropic';
+  let query = '';
+  let selectedKey = 'anthropic:claude-opus-4-6';
+
+  const railEl = document.getElementById('rail');
+  const modelsEl = document.getElementById('models');
+  const searchEl = document.getElementById('search');
+
+  function brandStyle(p) { return `background:${p.tint};color:${p.color}`; }
+
+  function renderRail() {
+    railEl.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'rail-head';
+    head.textContent = 'Providers';
+    railEl.appendChild(head);
+    for (const p of providers) {
+      const pool = p.starredOnly ? models.filter((m) => m.starred) : models.filter((m) => m.providerId === p.id);
+      const matches = query ? pool.filter(matchModel) : pool;
+      const btn = document.createElement('button');
+      btn.className = 'rail-item' + (p.id === activeId ? ' active' : '') + (p.starredOnly ? ' starred-item' : '');
+      if (query && matches.length === 0) btn.style.opacity = '0.4';
+      btn.innerHTML = `<span class="brand" style="${brandStyle(p)}">${p.brand}</span><span class="name">${p.name}</span><span class="count">${matches.length}</span>`;
+      btn.onclick = () => { activeId = p.id; render(); };
+      railEl.appendChild(btn);
+    }
+  }
+
+  function matchModel(m) {
+    const q = query.trim().toLowerCase();
+    return !q || m.alias.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
+  }
+
+  function rowHtml(m, showProvider) {
+    const p = providers.find((x) => x.id === m.providerId);
+    const selected = `${m.providerId}:${m.id}` === selectedKey;
+    return `
+      <div class="model-row${selected ? ' selected' : ''}" data-key="${m.providerId}:${m.id}">
+        <span class="star${m.starred ? ' on' : ''}">${m.starred ? '★' : '☆'}</span>
+        <div class="body">
+          <div class="alias"><span>${m.alias}</span>${m.reasoning ? brainSvg : ''}</div>
+          <div class="meta">${showProvider ? `<b style="color:var(--muted);font-weight:500">${p.name} · </b>` : ''}${m.ctx} ctx${m.price !== '—' ? ` · ${m.price}` : ''}</div>
+        </div>
+        <span class="check">✓</span>
+      </div>`;
+  }
+
+  function renderModels() {
+    modelsEl.innerHTML = '';
+    if (query) {
+      const groups = providers
+        .map((p) => ({ p, list: models.filter((m) => m.providerId === p.id && matchModel(m) && (!p.starredOnly || m.starred)) }))
+        .filter((g) => g.list.length > 0);
+      if (groups.length === 0) {
+        modelsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">No models match "' + query + '".</div>';
+        return;
+      }
+      for (const g of groups) {
+        const h = document.createElement('div');
+        h.className = 'group-head';
+        h.innerHTML = g.p.starredOnly ? '<span style="color:var(--warning)">★ Starred</span>' : g.p.name;
+        modelsEl.appendChild(h);
+        g.list.forEach((m) => modelsEl.insertAdjacentHTML('beforeend', rowHtml(m, false)));
+      }
+    } else if (activeId === 'starred') {
+      const list = models.filter((m) => m.starred);
+      const h = document.createElement('div');
+      h.className = 'group-head';
+      h.innerHTML = '<span style="color:var(--warning)">★ Starred</span>';
+      modelsEl.appendChild(h);
+      list.forEach((m) => modelsEl.insertAdjacentHTML('beforeend', rowHtml(m, true)));
+    } else {
+      const p = providers.find((x) => x.id === activeId);
+      const h = document.createElement('div');
+      h.className = 'group-head';
+      h.textContent = p.name;
+      modelsEl.appendChild(h);
+      models.filter((m) => m.providerId === activeId).forEach((m) => modelsEl.insertAdjacentHTML('beforeend', rowHtml(m, false)));
+    }
+  }
+
+  function render() { renderRail(); renderModels(); }
+
+  modelsEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.model-row');
+    if (!row) return;
+    if (e.target.classList.contains('star')) {
+      const m = models.find((x) => `${x.providerId}:${x.id}` === row.dataset.key);
+      m.starred = !m.starred;
+      render();
+      return;
+    }
+    document.querySelectorAll('.model-row').forEach((r) => r.classList.remove('selected'));
+    row.classList.add('selected');
+    selectedKey = row.dataset.key;
+  });
+
+  searchEl.addEventListener('input', (e) => { query = e.target.value; render(); });
+
+  render();
+</script>
+</body>
+</html>

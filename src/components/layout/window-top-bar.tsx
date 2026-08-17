@@ -18,7 +18,7 @@ import { Tip } from "@/components/ui/quick-tooltip";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
 } from "@/components/ui/dropdown-menu";
-import { useUi } from "@/lib/stores/ui";
+import { useUi, terminalScopeKey } from "@/lib/stores/ui";
 import { useTabs } from "@/lib/stores/tabs";
 import { useWorkspaces, useSession, useGitBranchInfo, useGitRecentBranches } from "@/lib/queries";
 import * as api from "@/lib/api/client";
@@ -55,7 +55,6 @@ export function WindowTopBar() {
   const activeSessionId = useUi((s) => s.activeSessionId);
   const mainView = useUi((s) => s.mainView);
   const addTerminal = useUi((s) => s.addTerminal);
-  const toggleTerminalOpen = useUi((s) => s.toggleTerminal);
   const allTerminals = useUi((s) => s.terminals);
   const terminalPorts = useUi((s) => s.terminalPorts);
 
@@ -144,14 +143,17 @@ export function WindowTopBar() {
   const runScripts = scripts.filter((s) => s.kind === 'run' && s.command);
   const primaryRunName = primaryRun?.command.slice(0, 40);
 
+  // Same key Run-script terminals are stored under (activeSessionId falls
+  // back to workspaceId before any session exists) — keeps the Run/Stop state
+  // and port chips scoped to THIS session, not every session in the workspace.
+  const sessionKey = activeSessionId ?? activeWorkspaceId;
+
   const runTerminal = useMemo(() => {
-    if (!primaryRunName) return undefined;
-    for (const list of Object.values(allTerminals)) {
-      const found = list.find((t) => stripTermSuffix(t.name) === primaryRunName && t.scriptRunning);
-      if (found) return found;
-    }
-    return undefined;
-  }, [allTerminals, primaryRunName]);
+    if (!primaryRunName || !sessionKey) return undefined;
+    return (allTerminals[sessionKey] ?? []).find(
+      (t) => stripTermSuffix(t.name) === primaryRunName && t.scriptRunning,
+    );
+  }, [allTerminals, primaryRunName, sessionKey]);
   const isPrimaryRunActive = !!runTerminal;
 
   useEffect(() => {
@@ -173,13 +175,14 @@ export function WindowTopBar() {
   }, [runTerminal?.id]);
 
   const aggregatedPorts = useMemo(() => {
-    const activeTids = new Set<string>();
-    for (const t of allTerminals[activeSessionId ?? ''] ?? []) activeTids.add(t.id);
+    if (!sessionKey) return [];
+    const sessionTerminals = allTerminals[sessionKey] ?? [];
+    const activeTids = new Set<string>(sessionTerminals.map((t) => t.id));
     const seen = new Set<number>();
     const out: { port: number; url: string; label: string }[] = [];
     for (const [tid, ports] of Object.entries(terminalPorts)) {
       if (!activeTids.has(tid)) continue;
-      const tname = (allTerminals[activeSessionId ?? ''] ?? []).find((t) => t.id === tid)?.name;
+      const tname = sessionTerminals.find((t) => t.id === tid)?.name;
       for (const p of ports ?? []) {
         if (seen.has(p.port)) continue;
         seen.add(p.port);
@@ -187,7 +190,7 @@ export function WindowTopBar() {
       }
     }
     return out.sort((a, b) => a.port - b.port);
-  }, [terminalPorts, allTerminals, activeSessionId]);
+  }, [terminalPorts, allTerminals, sessionKey]);
 
   const stopRunTerminal = useCallback(() => {
     if (!runTerminal) return;
@@ -211,11 +214,9 @@ export function WindowTopBar() {
   const isRunning = useCallback((cmd: string) => runningCommands.has(cmd), [runningCommands]);
 
   const runScriptInTerminal = useCallback((cmd: string) => {
-    const sid = activeSessionId ?? activeWorkspaceId;
-    if (!sid) return;
+    const sid = terminalScopeKey(useUi.getState());
     addTerminal(sid, cmd.slice(0, 40), cmd);
-    if (!useUi.getState().terminalOpen) toggleTerminalOpen();
-  }, [activeSessionId, activeWorkspaceId, addTerminal, toggleTerminalOpen]);
+  }, [addTerminal]);
 
   const toggleScript = useCallback(async (cmd: string) => {
     if (!activeWorkspaceId) return;
@@ -234,10 +235,9 @@ export function WindowTopBar() {
         setRunningCommands((prev) => { const n = new Set(prev); n.delete(cmd); return n; });
         return;
       }
-      addTerminal(activeSessionId ?? activeWorkspaceId, `Run: ${cmd.slice(0, 30)}`);
-      toggleTerminalOpen();
+      addTerminal(terminalScopeKey(useUi.getState()), `Run: ${cmd.slice(0, 30)}`);
     }
-  }, [activeWorkspaceId, activeSessionId, isRunning, addTerminal, toggleTerminalOpen]);
+  }, [activeWorkspaceId, isRunning, addTerminal]);
 
   // Resize: enter compact mode below the threshold, and auto-close the right
   // panel so the chat keeps room. We never force it back open — the user
@@ -254,6 +254,9 @@ export function WindowTopBar() {
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
+
+  // New-session screen: hide the top bar entirely.
+  if (mainView !== 'chat') return null;
 
   return (
     <div
@@ -431,8 +434,8 @@ export function WindowTopBar() {
           {aggregatedPorts.map((p) => (
             <Tip key={p.port} label={`${p.label}`}>
               <a href={p.url} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1 h-6 px-1.5 text-[0.65rem] font-mono font-medium rounded-full text-success bg-success/10 border border-success/20 hover:bg-success/20 hover:border-success/40 transition-all">
-                <span className="size-1 rounded-full bg-success animate-pulse" />
+                className="inline-flex items-center gap-1 h-6 px-1.5 text-[0.65rem] font-mono font-medium rounded-full text-info bg-info/10 border border-info/20 hover:bg-info/20 hover:border-info/40 transition-all">
+                <span className="size-1 rounded-full bg-info animate-pulse" />
                 {p.port}
               </a>
             </Tip>

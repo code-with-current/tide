@@ -98,9 +98,9 @@ function accentClass(call: ToolCall): string {
 
 function formatMs(ms?: number): string {
   if (ms == null) return '';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m${s % 60}s`;
 }
 
 /** Pull a short identifier out of the args — path, command, pattern, etc. */

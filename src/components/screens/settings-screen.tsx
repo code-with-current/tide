@@ -101,6 +101,7 @@ function getSavedSection(): SectionId {
 export function SettingsScreen() {
   const [section, setSection] = useState<SectionId>(getSavedSection);
   const setScreen = useUi((s) => s.setScreen);
+  const isFullScreen = useUi((s) => s.isFullScreen);
 
   const handleSelect = useCallback((id: SectionId) => {
     setSection(id);
@@ -121,7 +122,16 @@ export function SettingsScreen() {
 
       {/* Sidebar */}
       <aside className="flex flex-col flex-shrink-0 p-2" style={{ width: 300 }}>
-{isMac && <div className="h-8 flex-shrink-0 drag-region" />}
+        {/* Spacer clearing the native macOS traffic lights (top-left, 12,12).
+            Collapses to zero while fullscreen — the buttons hide there. */}
+        {isMac && (
+          <div
+            className={cn(
+              "flex-shrink-0 drag-region",
+              isFullScreen ? "h-0" : "h-8",
+            )}
+          />
+        )}
 <div className={cn("px-3 py-2.5 flex items-center justify-between border-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
           <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">
             Settings

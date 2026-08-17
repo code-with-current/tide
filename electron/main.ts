@@ -38,8 +38,7 @@ import { killAllBackgroundShells } from './agent/tools/background-shell.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
 import { registerSettingsHandlers } from './ipc/settings.js';
 import { registerExtensionsHandlers } from './ipc/extensions.js';
-import { initModelCatalog, enrichModelFromCatalog, getActiveCatalog } from './agent/model-capabilities.js';
-import { listProviders, updateProvider } from './store.js';
+import { initModelCatalog, enrichExistingModels } from './agent/model-capabilities.js';
 // Inlined bundled models.dev catalog — Vite bundles this JSON into main.mjs so
 // the baseline ships with the app (electron/data isn't included in the build).
 import bundledModelCatalog from './data/model-prices.json';
@@ -129,6 +128,15 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // Forward native fullscreen transitions so the renderer can collapse the
+  // macOS traffic-light spacer (the buttons hide while fullscreen). Send the
+  // literal value — 'leave-full-screen' fires before isFullScreen() flips
+  // back to false on macOS.
+  mainWindow.on('enter-full-screen', () =>
+    mainWindow?.webContents.send('tide:window:fullscreen', true));
+  mainWindow.on('leave-full-screen', () =>
+    mainWindow?.webContents.send('tide:window:fullscreen', false));
+
   // Block navigation away from the app — except OAuth callbacks.
   mainWindow.webContents.on('will-navigate', (e, url) => {
     if (url.startsWith(OAUTH_CALLBACK)) {
@@ -183,26 +191,6 @@ if (!gotLock) {
     }
   });
 
-  /** One-time migration: enrich existing provider-config models with
-   *  authoritative contextWindow, max output, reasoning, and pricing from the
-   *  models.dev catalog. Runs after initModelCatalog() at boot. Idempotent —
-   *  models with a catalogId are skipped, so user edits are preserved. */
-  async function enrichExistingModels() {
-    const catalog = getActiveCatalog();
-    if (!catalog || catalog.size === 0) return;
-    let enriched = 0;
-    for (const p of listProviders()) {
-      let changed = false;
-      const models = p.models.map((m) => {
-        const e = enrichModelFromCatalog(m, catalog);
-        if (e) { changed = true; enriched++; return e; }
-        return m;
-      });
-      if (changed) updateProvider(p.id, { models });
-    }
-    if (enriched > 0) log.info('enriched models from catalog', { count: enriched });
-  }
-
   app.whenReady().then(() => {
     const t0 = Date.now();
     // Set userData to ~/.tide (~/.tide-dev in dev) before any handler
@@ -256,6 +244,10 @@ if (!gotLock) {
     // hydrates shortcuts on mount via tide:settings:get. Deferring it would
     // leave the user with hardcoded macOS defaults until a restart.
     registerSettingsHandlers();
+    // Read-side companion to the fullscreen events sent from createWindow —
+    // the renderer needs the current state on mount (covers relaunch-while-
+    // fullscreen, where no transition event fires).
+    ipcMain.handle('tide:window:isFullScreen', () => mainWindow?.isFullScreen() ?? false);
     log.info('core IPC handlers registered', { ms: Date.now() - t0 });
 
     // Sync co-author hooks for all workspaces (settings may have changed

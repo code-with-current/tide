@@ -40,7 +40,7 @@ export function Chip({
   );
 }
 
-type DotTone = 'ok' | 'warn' | 'bad' | 'muted' | 'accent';
+type DotTone = 'ok' | 'warn' | 'bad' | 'muted' | 'accent' | 'info';
 
 const dotToneClass: Record<DotTone, string> = {
   ok: 'bg-success shadow-[0_0_8px_rgba(74,222,128,0.6)]',
@@ -48,6 +48,7 @@ const dotToneClass: Record<DotTone, string> = {
   bad: 'bg-destructive',
   muted: 'bg-muted-foreground/60',
   accent: 'bg-primary',
+  info: 'bg-info shadow-[0_0_8px_rgba(96,165,250,0.6)]',
 };
 
 /** Status dot. `pulse="heartbeat"` = scale+glow for in-progress; `pulse="soft"` = opacity pulse. */

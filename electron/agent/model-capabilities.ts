@@ -13,6 +13,8 @@ const log = createLogger('model-catalog');
 // initModelCatalog() runs at app start.
 let activeCatalog: CatalogMap | null = null;
 let loader: ReturnType<typeof createModelPricesLoader> | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
+let refreshedThisSession = false;
 
 /** Inject the loaded catalog so capability lookups can fall back to it. */
 export function setCatalog(map: CatalogMap | null) {
@@ -25,9 +27,9 @@ export function getActiveCatalog(): CatalogMap | null {
 }
 
 /** Load the models.dev catalog once at app start, inject it via setCatalog,
- *  and refresh it in the background when stale. Never throws — on any failure
- *  activeCatalog stays null and capability lookups fall back to provider config
- *  + conservative defaults. */
+ *  and kick off a background refresh via refreshModelCatalog() when stale.
+ *  Never throws — on any failure activeCatalog stays null and capability
+ *  lookups fall back to provider config + conservative defaults. */
 export async function initModelCatalog(config: LoaderConfig): Promise<void> {
   if (loader) return; // idempotent
   loader = createModelPricesLoader(config);
@@ -35,17 +37,48 @@ export async function initModelCatalog(config: LoaderConfig): Promise<void> {
     const { entries, version } = await loader.load();
     setCatalog(entries.size ? entries : null);
     log.info('catalog loaded', { count: entries.size, fetchedAt: version?.fetchedAt ?? 'unknown' });
-    if (loader.isStale()) {
-      void loader.refresh().then((fresh) => {
-        if (fresh && fresh.entries.size) {
-          setCatalog(fresh.entries);
-          log.info('catalog refreshed', { count: fresh.entries.size });
-        }
-      });
-    }
+    // Boot-time fallback for the rare launch where the renderer never fires
+    // the splash refresh; shares the dedupe with refreshModelCatalog().
+    if (loader.isStale()) void refreshModelCatalog();
   } catch (e) {
     log.warn('catalog load failed', { err: e instanceof Error ? e.message : String(e) });
   }
+}
+
+/** Pull a fresh models.dev catalog and re-inject it. The splash screen fires
+ *  this at every app open (tide:modelCatalog:refresh) so the fetch runs in the
+ *  background while the user is still on splash. Deduped: concurrent callers
+ *  join the in-flight fetch, and at most one refresh runs per session.
+ *  Returns true when the catalog was replaced. */
+export function refreshModelCatalog(): Promise<boolean> {
+  // In-flight join must be checked before the session guard — a caller that
+  // arrives mid-refresh (boot stale-refresh vs splash IPC race) gets the
+  // pending result, not a false "already done".
+  if (refreshInFlight) return refreshInFlight;
+  if (refreshedThisSession) return Promise.resolve(false);
+  const active = loader;
+  if (!active) return Promise.resolve(false); // not initialized — boot init handles loading
+  refreshedThisSession = true;
+  refreshInFlight = (async () => {
+    try {
+      const fresh = await active.refresh();
+      if (!fresh || !fresh.entries.size) return false;
+      setCatalog(fresh.entries);
+      log.info('catalog refreshed', { count: fresh.entries.size });
+      try {
+        await enrichExistingModels();
+      } catch (e) {
+        log.warn('post-refresh enrichment failed', { err: e instanceof Error ? e.message : String(e) });
+      }
+      return true;
+    } catch (e) {
+      log.warn('catalog refresh failed', { err: e instanceof Error ? e.message : String(e) });
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 /** Does this model support extended thinking / reasoning? Reads `model.reasoning` from provider config; falls back to catalog; defaults false. */
@@ -118,6 +151,29 @@ export function enrichModelFromCatalog(model: Model, catalog: CatalogMap): Model
     outputCostPerToken: model.outputCostPerToken ?? meta.pricing?.outputPerToken,
     reasoningContracts: meta.reasoningOptions as ReasoningOption[] | undefined,
   };
+}
+
+/** One-time migration: enrich existing provider-config models with
+ *  authoritative contextWindow, max output, reasoning, and pricing from the
+ *  models.dev catalog. Runs after initModelCatalog() at boot and after every
+ *  successful catalog refresh. Idempotent — models with a catalogId are
+ *  skipped, so user edits are preserved. Store is imported dynamically to
+ *  keep electron out of this module's static import graph (tests). */
+export async function enrichExistingModels(): Promise<void> {
+  const catalog = getActiveCatalog();
+  if (!catalog || catalog.size === 0) return;
+  const { listProviders, updateProvider } = await import('../store.js');
+  let enriched = 0;
+  for (const p of listProviders()) {
+    let changed = false;
+    const models = p.models.map((m) => {
+      const e = enrichModelFromCatalog(m, catalog);
+      if (e) { changed = true; enriched++; return e; }
+      return m;
+    });
+    if (changed) updateProvider(p.id, { models });
+  }
+  if (enriched > 0) log.info('enriched models from catalog', { count: enriched });
 }
 
 // Re-export for callers that want full metadata.

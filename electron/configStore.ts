@@ -94,7 +94,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   notifications: true,
   gitCoAuthored: true,
   gitCoAuthorName: 'Tide',
-  gitCoAuthorEmail: '314188112+tide-code@users.noreply.github.com',
+  gitCoAuthorEmail: '314188112+tide-codes@users.noreply.github.com',
   autoUpdateCheck: true,
 };
 

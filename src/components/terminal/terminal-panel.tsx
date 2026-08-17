@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
 import { init, Terminal, FitAddon } from 'ghostty-web';
 import type { ILink } from 'ghostty-web';
-import { useUi } from '@/lib/stores/ui';
+import { useUi, terminalScopeKey } from '@/lib/stores/ui';
 import { getTerminalTheme } from '@/components/screens/settings/appearance';
 import { Button } from '@/components/ui/button';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
@@ -139,8 +139,12 @@ class UrlLinkProvider {
 }
 
 export const TerminalPanel = memo(function TerminalPanel() {
-  const sessionId = useUi((s) => s.activeSessionId ?? 'default');
-  const terminalOpen = useUi((s) => s.terminalOpen);
+  // Draft-aware bucket key: terminals opened while composing belong to the
+  // draft, and follow it into the session on promotion (adoptDraftTerminals).
+  // Keying everything by session id here but 'default' there let one session's
+  // draft-phase terminals reappear in every later new-session screen.
+  const sessionId = useUi(terminalScopeKey);
+  const terminalOpen = useUi((s) => !!s.terminalOpen[sessionId]);
   // MainScreen is always-mounted now; the panel survives Settings visits but
   // its box measures zero-size while hidden. This flag re-fits on return.
   const screenActive = useUi((s) => s.screen === "main");

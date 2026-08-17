@@ -29,10 +29,8 @@ const commandPalette: Action = () => {
 };
 
 const newSession: Action = () => {
-  // Clear active session and show the new-session view.
-  const ui = useUi.getState();
-  ui.setActiveSession(null);
-  ui.setMainView('new');
+  // Clear active session and show a fresh new-session composer.
+  useUi.getState().startNewDraft();
   return true;
 };
 
@@ -159,9 +157,11 @@ const deleteSession: Action = () => {
       useUi.getState().clearSessionData(sid);
       useTabs.getState().clearSessionTabs(sid);
       if (wsId) queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
-      // Reset active session so the chat area shows the empty state.
-      useUi.getState().setActiveSession(null);
-      useUi.getState().setMainView('new');
+      // Reset to a fresh draft slot so the chat area shows the empty state.
+      // startNewDraft (not setActiveSession(null)+setMainView) — it atomically
+      // clears the session AND assigns a new draft id, so the terminal panel
+      // can't be left scoped to a stale draft's or shared 'default' bucket.
+      useUi.getState().startNewDraft();
     }).catch((e) => log.warn('deleteSession failed', e));
   });
   return true;

@@ -20,7 +20,7 @@ import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
-import { useUi } from "@/lib/stores/ui";
+import { useUi, terminalScopeKey } from "@/lib/stores/ui";
 import { useModelOption, useWorkspaces, useSessions } from "@/lib/queries";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import * as api from "@/lib/api/client";
@@ -60,9 +60,11 @@ export function MainScreen() {
   const mainView = useUi((s) => s.mainView);
   // The right panel is hidden on the new-session screen — it shows session-specific data (Inspector, files, terminal) that doesn't exist before the first message creates a session. Derived locally (NOT written to the store) so the user's rightPanelOpen preference is preserved when they return to chat.
   const showRightPanel = rightPanelOpen && mainView !== "new";
-  const terminalOpen = useUi((s) => s.terminalOpen);
-  const terminalHeight = useUi((s) => s.terminalHeight);
+  const terminalScope = useUi(terminalScopeKey);
+  const terminalOpen = useUi((s) => !!s.terminalOpen[terminalScope]);
+  const terminalHeight = useUi((s) => s.terminalHeight[terminalScope] ?? 220);
   const setTerminalHeight = useUi((s) => s.setTerminalHeight);
+  const screen = useUi((s) => s.screen);
   // Imperative ref on the terminal ResizablePanel — collapse/expand it from
   // the terminal toggle (which still just flips the persisted `terminalOpen`).
   const terminalPanelRef = useRef<PanelImperativeHandle>(null);
@@ -71,7 +73,7 @@ export function MainScreen() {
     if (!ref) return;
     if (terminalOpen) ref.expand();
     else ref.collapse();
-  }, [terminalOpen]);
+  }, [terminalOpen, screen]);
 
   const activeSessionId = useUi((s) => s.activeSessionId);
   const selectedModelId = useUi((s) => s.selectedModelId);
@@ -168,7 +170,12 @@ export function MainScreen() {
   // True during the pre-stream window (session create + worktree + message
   // add + context build) — closes the dead window between clicking send and
   // the first token, where the app otherwise looks frozen.
-  const [submitting, setSubmitting] = useState(false);
+  // Which session is in the pre-stream window ("Preparing…") — keyed by
+  // session id (null = the no-session draft) so one session preparing never
+  // blocks another session's composer. false = idle.
+  const [submittingSession, setSubmittingSession] = useState<
+    string | null | false
+  >(false);
   const currentSessionRef = useRef<string | null>(activeSessionId);
 
   // Load session messages when activeSessionId changes.
@@ -216,17 +223,15 @@ export function MainScreen() {
             })),
           ),
         );
-        applySessionSettings({
+        applySessionSettings(activeSessionId, {
           modelId: s.modelId,
           providerId: s.providerId,
-          // Preserve the live autonomy mode if the user escalated mid-turn
-          // (e.g. switched from 'plan' to 'edit' via permission card). The
-          // persisted record may not have the update yet (race between
-          // updateSessionSettings and the session re-fetch).
-          autonomyMode: useUi.getState().autonomyMode !== 'ask'
-            ? useUi.getState().autonomyMode
-            : (s.autonomyMode ?? undefined),
-          thinkingLevel: s.thinkingLevel,
+          // Prefer the cached settings for autonomy mode — setAutonomyMode
+          // writes the cache synchronously, so a mid-turn escalation (e.g.
+          // 'plan' → 'edit' via permission card) survives this re-fetch even
+          // though the persisted record hasn't caught up yet.
+          autonomyMode: undefined,
+          thinkingLevel: undefined,
         });
       }
       setSessionLoading(false);
@@ -405,7 +410,7 @@ export function MainScreen() {
       // Pre-stream window begins: session create + worktree + message add +
       // context build all run before the first token. Flip submitting so the
       // send button shows "Preparing…" instead of looking frozen.
-      setSubmitting(true);
+      setSubmittingSession(activeSessionId);
 
       let sessionId = activeSessionId;
       let isNewSession = false;
@@ -429,8 +434,17 @@ export function MainScreen() {
         );
         sessionId = newSession.id;
         isNewSession = true;
+        // Re-key the submitting flag to the newly created session so the
+        // composer stays in "Preparing…" across the draft→session promotion.
+        setSubmittingSession(newSession.id);
+        // Terminals opened while composing were keyed by the draft id — move
+        // them under the new session id BEFORE the draft pointer is dropped
+        // (setActiveSession clears it; adoption reads it).
+        useUi.getState().adoptDraftTerminals(newSession.id);
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
+        // The draft was promoted to a real session — drop it from the list.
+        useUi.getState().consumeDraft();
         // Title generation moved below — it must run AFTER addMessage persists
         // the first user message, otherwise the handler finds no user message.
 
@@ -512,13 +526,24 @@ export function MainScreen() {
 
       // Resolve workspace context for the system prompt.
       const workspace = workspaces?.find((w) => w.id === activeWorkspaceId);
-      const [workspaceContext, referencedFiles] = await Promise.all([
+      const [workspaceContext, referencedFiles, envInfo, git] = await Promise.all([
         activeWorkspaceId
           ? api.getWorkspaceContext(activeWorkspaceId).catch(() => "")
           : Promise.resolve(""),
         activeWorkspaceId
           ? buildReferencedFilesBlock(activeWorkspaceId, text)
           : Promise.resolve(""),
+        api.getEnvInfo().catch(() => undefined),
+        // Turn-start git snapshot (worktree-aware when a session exists) —
+        // branch/HEAD, dirty files, recent commits. Saves the model a
+        // `git status` probe at the start of every task.
+        activeWorkspaceId
+          ? Promise.all([
+              api.gitBranchInfo(activeWorkspaceId, sessionId ?? undefined).catch(() => ({ branch: null, headCommit: null })),
+              api.gitStatus(activeWorkspaceId, sessionId ?? undefined).catch(() => [] as api.GitFileChange[]),
+              api.gitLog(activeWorkspaceId, sessionId ?? undefined, 5).catch(() => [] as api.GitCommit[]),
+            ])
+          : Promise.resolve(null),
       ]);
       const systemPrompt = buildSystemPrompt({
         workspacePath: workspace?.path,
@@ -526,6 +551,10 @@ export function MainScreen() {
         modelAlias: modelOption?.alias,
         workspaceContext,
         referencedFiles,
+        envInfo,
+        gitSnapshot: git
+          ? { branch: git[0].branch, headCommit: git[0].headCommit, status: git[1], log: git[2] }
+          : undefined,
         // Tell the model when it's working inside an isolated worktree so
         // it understands edits don't land on the user's main checkout.
         worktree: payload.worktree?.enabled
@@ -556,11 +585,11 @@ export function MainScreen() {
       ];
 
       if (!sessionId) {
-        setSubmitting(false);
+        setSubmittingSession(false);
         return;
       }
       setSessionRunning(sessionId, true);
-      setSubmitting(false);
+      setSubmittingSession(false);
       // Capture the git HEAD sha before the turn starts — used by per-file
       // undo in FileChangesSummary to revert edits to pre-turn state.
       if (activeWorkspaceId) {
@@ -725,7 +754,11 @@ export function MainScreen() {
   // Persist the active session/workspace to the main-process config so the
   // app reopens to the same session on restart. Independent of localStorage
   // (which is scoped to the dev server port and may change between runs).
+  // Guarded: MainScreen is always-mounted, so on a fresh start (before the
+  // splash restore resolves) both values are null — persisting that would
+  // clobber the saved last-session and break the next restart's restore.
   useEffect(() => {
+    if (!activeWorkspaceId) return;
     api.setLastSession(activeSessionId, activeWorkspaceId);
   }, [activeSessionId, activeWorkspaceId]);
 
@@ -971,7 +1004,11 @@ export function MainScreen() {
                                 ? "Stop to abort, or queue a message…"
                                 : "Send a message…"
                           }
-                          inProgress={isStreaming || !!pendingOptions || submitting}
+                          inProgress={
+                            isStreaming ||
+                            !!pendingOptions ||
+                            submittingSession === (activeSessionId ?? null)
+                          }
                           onSubmit={handleSend}
                           onSendNow={onSendNow}
                           onStop={() => {
@@ -999,7 +1036,7 @@ export function MainScreen() {
                   id="terminal"
                   collapsible
                   collapsedSize={0}
-                  defaultSize={terminalHeight}
+                  defaultSize={terminalOpen ? terminalHeight : 0}
                   minSize={120}
                   maxSize={720}
                   panelRef={terminalPanelRef}

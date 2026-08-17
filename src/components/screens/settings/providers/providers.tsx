@@ -577,7 +577,7 @@ function ProviderFormDialog({
                               title={`Catalog: ${row.catalogId}`}
                             >
                               <span className="font-mono text-[11.5px] text-muted-foreground">
-                                {row.context || "—"}
+                                {row.context ? formatContext(parseInt(row.context, 10)) : "—"}
                               </span>
                               <Badge
                                 variant="secondary"
@@ -1011,7 +1011,7 @@ function ProviderDetail({
                               title={`Catalog: ${row.catalogId}`}
                             >
                               <span className="font-mono text-[11.5px] text-muted-foreground">
-                                {row.context || "—"}
+                                {row.context ? formatContext(parseInt(row.context, 10)) : "—"}
                               </span>
                               <Badge
                                 variant="secondary"

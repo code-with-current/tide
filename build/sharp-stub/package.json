@@ -1,0 +1,8 @@
+{
+  "name": "sharp",
+  "version": "0.0.0-stub",
+  "description": "No-op stub for sharp. @xenova/transformers statically imports sharp for image preprocessing that Tide never performs (text embeddings only). Replaces the 24 MB native binary via pnpm overrides — see package.json. The default export throws if ever invoked; Tide's text-only feature-extraction never reaches the image code paths.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js"
+}
