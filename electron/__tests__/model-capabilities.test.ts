@@ -62,7 +62,6 @@ describe('model-capabilities delegation', () => {
   it('returns defaults for model not in catalog (no heuristic fallback)', () => {
     const catalog: CatalogMap = new Map([['anthropic/claude-sonnet-4-5', entry('anthropic/claude-sonnet-4-5')]]);
     setCatalog(catalog);
-    // glm-5 is not in this catalog, and there are no heuristic prefixes.
     expect(supportsThinking('glm-5-air')).toBe(false);
     expect(contextWindowSize('glm-5-air')).toBeUndefined();
   });

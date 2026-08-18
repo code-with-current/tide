@@ -658,17 +658,6 @@ body {
   .live-counter { animation: none; }
 }
 
-/* Braille ASCII spinner. Pair with the <AsciiSpinner /> component which
-   swaps characters on a timer. This class just colors it. */
-.ascii-spinner {
-  font-family: var(--font-mono);
-  color: var(--primary);
-  display: inline-block;
-  width: 1ch;
-  text-align: center;
-  line-height: 1;
-}
-
 .cursor-blink::after {
   content: '▋';
   color: var(--primary);
@@ -934,7 +923,8 @@ body {
 .prose-chat table     { margin: 0 0 0.85em; border-collapse: collapse; width: 100%; font-size: 0.85rem; }
 .prose-chat table:last-child { margin-bottom: 0.85em; }
 .prose-chat th,
-.prose-chat td        { border: 1px solid var(--border); padding: 0.4em 0.7em; text-align: left; }
+.prose-chat td        { border: 1px solid var(--border); padding: 0.4em 0.7em; text-align: left; overflow-wrap: anywhere; }
+.prose-chat td code   { overflow-wrap: anywhere; }
 .prose-chat th        { background: var(--muted); font-weight: 600; }
 
 /* Inline code — small pill, distinct from the chat surface. */
@@ -970,10 +960,17 @@ body {
   line-height: 1.6;
   border-radius: 0.5rem;
   overflow: hidden;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
 }
-/* Tight padding; room at the bottom for the language pill. */
+/* Tight padding; room at the bottom for the language pill. Wide code
+   scrolls horizontally inside the body — the pre must not wrap or clip. */
 .prose-chat [data-streamdown="code-block-body"] pre {
   padding: 0.5rem 0.75rem 1.75rem 0.25rem;
+  margin: 0;
+  overflow-x: visible;
+  white-space: pre;
 }
 
 /* ── Line numbers ─────────────────────────────────────────────────── */

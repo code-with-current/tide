@@ -762,7 +762,7 @@ function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
   }
 
   if (e.type === 'followup') {
-    send(wc, sessionId, { type: 'followup_required', sessionId, seq: nextSeq(sessionId), toolCallId: (e.toolCallId as string) ?? '', question: (e.question as string) ?? '', options: (e.options as string[]) ?? [], multiple: (e.multiple as boolean) ?? false });
+    send(wc, sessionId, { type: 'followup_required', sessionId, seq: nextSeq(sessionId), toolCallId: (e.toolCallId as string) ?? '', question: (e.question as string) ?? '', options: (e.options as string[]) ?? [], optionDescriptions: (e.optionDescriptions as (string | undefined)[] | undefined) ?? undefined, multiple: (e.multiple as boolean) ?? false });
   }
 }
 

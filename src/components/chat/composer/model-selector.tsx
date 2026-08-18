@@ -143,7 +143,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" side="top" sideOffset={6} className="w-[350px] h-[250px] p-0 overflow-hidden flex flex-col">
+      <PopoverContent align="start" side="top" sideOffset={6} className="w-[350px] max-w-[calc(100vw-2rem)] h-[250px] p-0 overflow-hidden flex flex-col">
         {/* ── Search — spans both panes ── */}
         <div className="shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60">
           <Search className="size-3.5 text-muted-foreground/50 shrink-0" />

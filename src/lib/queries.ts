@@ -377,6 +377,17 @@ export function useGitStatus(workspaceId: string | null, sessionId?: string | nu
   // Include sessionId in the key so a workspace + worktree session don't
   // share cached results — they have different dirty files.
   const key = sessionId ? ['gitStatus', workspaceId, sessionId] : workspaceId ? qk.gitStatus(workspaceId) : ['gitStatus', 'none'];
+  const qc = useQueryClient();
+  // Main-process watcher pushes `tide:gitChanged` when the working tree
+  // changes on disk (editor, terminal, other apps) — refetch immediately.
+  useEffect(() => {
+    if (!workspaceId) return;
+    const onGitChanged = ({ workspaceId: wsId }: { workspaceId: string }) => {
+      if (wsId === workspaceId) qc.invalidateQueries({ queryKey: ['gitStatus', workspaceId] });
+    };
+    const off = window.tideIpc?.onGitChanged?.(onGitChanged);
+    return () => { off?.(); };
+  }, [workspaceId, qc]);
   return useQuery({
     queryKey: key,
     queryFn: () => (workspaceId ? api.gitStatus(workspaceId, sessionId ?? undefined) : Promise.resolve([])),

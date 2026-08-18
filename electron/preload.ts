@@ -317,6 +317,11 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // main checkout. Git Panel + Inspector both pass it through.
   gitStatus: (workspaceId: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStatus', workspaceId, sessionId),
+  onGitChanged: (callback: (payload: { workspaceId: string }) => void) => {
+    const listener = (_e: unknown, payload: { workspaceId: string }) => callback(payload);
+    ipcRenderer.on('tide:gitChanged', listener);
+    return () => ipcRenderer.off('tide:gitChanged', listener);
+  },
   gitLog: (workspaceId: string, sessionId?: string, limit?: number) =>
     ipcRenderer.invoke('tide:gitLog', workspaceId, sessionId, limit),
   gitCommitFiles: (workspaceId: string, sha: string, sessionId?: string) =>

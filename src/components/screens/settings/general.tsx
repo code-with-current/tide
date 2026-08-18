@@ -1,11 +1,10 @@
-/** GeneralSection: dual-column settings — General (left: Startup/Notifications/Git Attribution) + Appearance (right, reuses AppearanceContent). */
+/** GeneralSection: startup, notifications, and git attribution. */
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, User } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
-import { AppearanceContent } from './appearance';
 import { cn } from '@/lib/utils';
 
 type GeneralSettingsState = {
@@ -51,12 +50,10 @@ export function GeneralSection() {
     <>
       <SettingsHeader
         title="General"
-        description="Startup, notifications, and appearance preferences."
+        description="Startup, notifications, and git attribution."
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ── Left column: General settings ── */}
-        <div className="space-y-5">
+      <div className="max-w-xl space-y-5">
           <SettingsGroup title="Startup">
             <Card>
               <SettingsRow
@@ -149,12 +146,6 @@ export function GeneralSection() {
               )}
             </Card>
           </SettingsGroup>
-        </div>
-
-        {/* ── Right column: Appearance ── */}
-        <div className="space-y-5">
-          <AppearanceContent />
-        </div>
       </div>
     </>
   );

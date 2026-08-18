@@ -290,6 +290,7 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
         question: event.question,
         multiple: event.multiple,
         options: event.options,
+        optionDescriptions: event.optionDescriptions,
         messageId: event.toolCallId,
         toolCallId: event.toolCallId,
       });

@@ -10,7 +10,7 @@ import {
   Sparkles,
   Plug,
   FolderCode,
-  MessageSquare,
+  Palette,
   DownloadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,6 @@ import { ProvidersSection } from "./settings/providers/providers";
 import { AutonomyCapsSection } from "./settings/permissions";
 import { AppearanceSection } from "./settings/appearance";
 import { GeneralSection } from "./settings/general";
-import { ChatSection } from "./settings/chat";
 import { ShortcutsSection } from "./settings/shortcuts";
 import { AboutSection } from "./settings/about";
 import { UpdatesSection } from "./settings/updates";
@@ -35,11 +34,9 @@ type SectionId =
   | "autonomy"
   | "workspace"
   | "general"
-  | "chat"
   | "appearance"
   | "shortcuts"
   | "updates"
-  | "advanced"
   | "agents"
   | "skills"
   | "mcp"
@@ -52,7 +49,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     items: [
       { id: "general", label: "General", icon: Settings },
-      { id: "chat", label: "Chat", icon: MessageSquare },
+      { id: "appearance", label: "Appearance", icon: Palette },
       { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
     ],
   },
@@ -128,11 +125,11 @@ export function SettingsScreen() {
           <div
             className={cn(
               "flex-shrink-0 drag-region",
-              isFullScreen ? "h-0" : "h-8",
+              isFullScreen ? "h-0" : "h-6",
             )}
           />
         )}
-<div className={cn("px-3 py-2.5 flex items-center justify-between border-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
+<div className={cn("px-3 py-4 flex items-center justify-between border-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
           <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">
             Settings
           </div>
@@ -141,6 +138,7 @@ export function SettingsScreen() {
             <Button
               variant="default"
               size="icon-sm"
+              className="z-50"
               onClick={() => setScreen("main")}
 
             >
@@ -184,7 +182,7 @@ export function SettingsScreen() {
 
       </aside>
 
-      <main className={cn("flex-1 overflow-y-auto scroll rounded-xl bg-background border", isMac ? "my-2 mr-2":'')}>
+      <main className={cn("flex-1 overflow-y-auto scroll bg-background border border-l")}>
         {section === "workspace" || section === "providers" ? (
           <div className="h-full">
             {section === "workspace" && <WorkspaceSettingsSection />}
@@ -194,7 +192,6 @@ export function SettingsScreen() {
           <div className="max-w-5xl mx-auto px-8 py-6">
             {section === "autonomy" && <AutonomyCapsSection />}
             {section === "general" && <GeneralSection />}
-            {section === "chat" && <ChatSection />}
             {section === "appearance" && <AppearanceSection />}
             {section === "shortcuts" && <ShortcutsSection />}
             {section === "agents" && <AgentsSection />}

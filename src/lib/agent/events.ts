@@ -117,6 +117,8 @@ export interface FollowupRequiredEvent extends AgentEventBase {
    *  is asking an open-ended question (Mode 2) — renderer shows composer
    *  prompt instead of a picker. */
   options: string[];
+  /** Optional one-line description per option, parallel to `options`. */
+  optionDescriptions?: (string | undefined)[];
   /** True if the user can pick multiple options. */
   multiple: boolean;
 }

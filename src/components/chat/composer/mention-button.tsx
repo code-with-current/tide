@@ -221,7 +221,7 @@ export function MentionButton({
         side="right"
         align="start"
         sideOffset={8}
-        className="w-[320px] p-0"
+        className="w-[320px] max-w-[calc(100vw-2rem)] p-0"
       >
         {/* Tabs */}
         <div className="flex items-center justify-around border-b border-border px-1.5">

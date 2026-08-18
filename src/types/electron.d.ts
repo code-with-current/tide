@@ -376,6 +376,7 @@ declare global {
 
       // ── Git ──
       gitStatus: (workspaceId: string, sessionId?: string) => Promise<any[]>;
+      onGitChanged: (callback: (payload: { workspaceId: string }) => void) => (() => void) | undefined;
       gitLog: (workspaceId: string, sessionId?: string, limit?: number) => Promise<any[]>;
       gitCommitFiles: (workspaceId: string, sha: string, sessionId?: string) => Promise<any[]>;
       gitCommitFileDiff: (workspaceId: string, sha: string, filePath: string, sessionId?: string) => Promise<any[]>;

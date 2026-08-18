@@ -136,13 +136,13 @@ export function createAskFollowupTool(ctx: ToolContext) {
     }),
     execute: async ({ question, options, multiple }, { toolCallId }) =>
       withPermission(ctx, 'ask_followup_question', { question, options, multiple }, async () => {
-        // Normalize options to label strings for the popup.
-        const labels = (options ?? []).map((o) => o.label);
+        const opts = options ?? [];
         ctx.emit({
           type: 'followup',
           toolCallId,
           question,
-          options: labels,
+          options: opts.map((o) => o.label),
+          optionDescriptions: opts.map((o) => o.description),
           multiple: Boolean(multiple),
         });
         const pick = await waitForFollowupPick(ctx.sessionId, toolCallId);
