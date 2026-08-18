@@ -50,6 +50,7 @@ export function usePinnedTimelineScroll(
   isStreaming: boolean,
   messageCount: number,
   lastRole?: 'user' | 'assistant',
+  sessionKey?: string | null,
 ) {
   const [atBottom, setAtBottom] = useState(true);
   const [unread, setUnread] = useState(false);
@@ -64,8 +65,13 @@ export function usePinnedTimelineScroll(
   const appendWait = useRef<number | null>(null);
   const rafId = useRef<number | null>(null);
   const animTarget = useRef<number | null>(null);
+  // Set when a send establishes the pin: the first scroll to the pin
+  // position must land before the browser paints — an eased sweep here
+  // reads as a delay between send and the jump to the pinned view.
+  const pinFresh = useRef(false);
   const onArrive = useRef<(() => void) | null>(null);
   const lastFrame = useRef(0);
+  const prevSessionKey = useRef(sessionKey);
 
   const cancelSettle = useCallback(() => {
     settling.current = false;
@@ -283,6 +289,25 @@ export function usePinnedTimelineScroll(
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Session switch: every piece of scroll state is stale — the pin points
+    // at detached DOM, prevMessageCount belongs to the old chat (a count
+    // that happens to grow by one user message would pin falsely), and the
+    // viewport must land at the new chat's bottom before paint. Runs before
+    // the grewBy bookkeeping so the switch commit is never read as a send.
+    if (sessionKey !== prevSessionKey.current) {
+      prevSessionKey.current = sessionKey;
+      cancelSettle();
+      cancelAppendWait();
+      stopAnim();
+      pinEl.current = null;
+      pinFresh.current = false;
+      prevMessageCount.current = messageCount;
+      setPinned(false);
+      setAtBottom(true);
+      setUnread(false);
+      el.scrollTop = contentMaxScroll(el);
+      return;
+    }
     if (pinEl.current && !pinEl.current.isConnected) {
       pinEl.current = null;
       cancelAppendWait();
@@ -299,6 +324,7 @@ export function usePinnedTimelineScroll(
         cancelSettle();
         cancelAppendWait();
         pinEl.current = last;
+        pinFresh.current = true;
         setPinned(true);
         setAtBottom(false);
         setUnread(false);
@@ -327,7 +353,15 @@ export function usePinnedTimelineScroll(
       : atBottom || animTarget.current !== null
         ? contentMaxScroll(el)
         : null;
-    if (target !== null) animateTo(target);
+    if (target !== null) {
+      if (pinEl.current && pinFresh.current) {
+        stopAnim();
+        el.scrollTop = target;
+        pinFresh.current = false;
+      } else {
+        animateTo(target);
+      }
+    }
     // After the follow so the collapse decision reads the final tail
     // position, not the pre-append one.
     if (finalizeLanded) endTurn(el);

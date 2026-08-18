@@ -41,7 +41,7 @@ function ChatTimelineImpl({
   const scrollRef = useRef<HTMLDivElement>(null);
   const totalCount = messages.length + (streamingMessage ? 1 : 0);
   const lastRole = (streamingMessage ?? messages[messages.length - 1])?.role;
-  const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole);
+  const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole, sessionId);
   const isEmpty = messages.length === 0 && !streamingMessage && !sessionLoading;
 
   return (
