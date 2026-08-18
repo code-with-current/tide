@@ -37,7 +37,6 @@ type SectionId =
   | "appearance"
   | "shortcuts"
   | "updates"
-  | "advanced"
   | "agents"
   | "skills"
   | "mcp"

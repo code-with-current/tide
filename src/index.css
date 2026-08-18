@@ -658,17 +658,6 @@ body {
   .live-counter { animation: none; }
 }
 
-/* Braille ASCII spinner. Pair with the <AsciiSpinner /> component which
-   swaps characters on a timer. This class just colors it. */
-.ascii-spinner {
-  font-family: var(--font-mono);
-  color: var(--primary);
-  display: inline-block;
-  width: 1ch;
-  text-align: center;
-  line-height: 1;
-}
-
 .cursor-blink::after {
   content: '▋';
   color: var(--primary);
