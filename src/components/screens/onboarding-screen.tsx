@@ -611,8 +611,11 @@ function WorkspaceStep({
     setTimeout(() => onComplete(ws.id), 600);
   };
 
-  const canOpen = (source === 'local' ? !!localPath : !!cloneDir && !!remoteUrl)
-    && (!enableRag || dlState === 'done');
+  // Folder-in-place gate for the Script/RAG cards — deliberately NOT canOpen:
+  // canOpen additionally requires the model when RAG is on, which would hide
+  // the RAG card (and its download button) exactly when it's needed.
+  const hasProject = source === 'local' ? !!localPath : !!cloneDir && !!remoteUrl;
+  const canOpen = hasProject && (!enableRag || dlState === 'done');
 
   // Loading states
   if (phase !== 'form') {
@@ -801,7 +804,7 @@ function WorkspaceStep({
           )}
 
           {/* Script + RAG cards appear only once a project folder is in place. */}
-          {canOpen && (
+          {hasProject && (
             <>
               {/* Add script toggle */}
               <div className="rounded-xl p-4 border border-border bg-card flex items-start gap-3">
