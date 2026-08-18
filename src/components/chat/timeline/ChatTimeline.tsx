@@ -6,7 +6,7 @@ import { ChevronDown } from 'lucide-react';
 import type { Message } from '@/types';
 import { ChatMessage } from '../chat-message';
 import { CompactedDivider } from '../blocks/compacted-divider';
-import { useTimelineScroll } from './useTimelineScroll';
+import { usePinnedTimelineScroll } from './usePinnedTimelineScroll';
 import { cn } from '@/lib/utils';
 
 export interface ChatTimelineProps {
@@ -40,12 +40,13 @@ function ChatTimelineImpl({
 }: ChatTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const totalCount = messages.length + (streamingMessage ? 1 : 0);
-  const { unread, scrollToBottom } = useTimelineScroll(scrollRef, isStreaming, totalCount);
+  const lastRole = (streamingMessage ?? messages[messages.length - 1])?.role;
+  const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole);
   const isEmpty = messages.length === 0 && !streamingMessage && !sessionLoading;
 
   return (
     <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll px-6 py-3', className)}>
+      <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll [scrollbar-gutter:stable] px-6 py-3', className)}>
         <div className="w-[80%] max-w-3xl mx-auto flex flex-col">
           {sessionLoading && messages.length === 0 ? loadingFallback
             : isEmpty ? emptyState
@@ -55,6 +56,7 @@ function ChatTimelineImpl({
                   <div
                     key={msg.id}
                     className="min-w-0 w-full"
+                    data-user-message={msg.role === 'user' ? 'true' : undefined}
                     style={{
                       // Skip layout/paint for off-screen messages — the browser
                       // restores real geometry on scroll-in via containIntrinsicSize.
@@ -85,7 +87,13 @@ function ChatTimelineImpl({
                   />
                 )}
                 {errorBlock}
-                <div style={{ height: 1 }} aria-hidden="true" />
+                {/* Marks the real content end for usePinnedTimelineScroll —
+                    must stay below every message and above the spacer. */}
+                <div data-timeline-end="true" style={{ height: 1 }} aria-hidden="true" />
+                {/* Scroll room that lets the pinned user message reach the
+                    viewport top; mounted for the whole turn so a mid-stream
+                    unpin doesn't collapse it under the user. */}
+                  {(pinned || isStreaming) && <div style={{ height: '100vh' }} aria-hidden="true" />}
               </>
             )}
         </div>

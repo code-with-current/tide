@@ -590,7 +590,7 @@ export const ToolRow = memo(function ToolRow({
         {isSubagent
           ? <Bot className="size-3 text-primary/80" />
           : ICON[call.toolName]}
-        <span className={cn(isSubagent ? 'text-primary/80 font-medium' : 'text-muted-foreground')}>
+        <span className={cn('truncate flex-shrink min-w-0', isSubagent ? 'text-primary/80 font-medium' : 'text-muted-foreground')}>
           {isSubagent
             ? (call.display?.kind === 'agent'
                 ? call.display.agentName
@@ -601,7 +601,7 @@ export const ToolRow = memo(function ToolRow({
             agent from a direct tool call. Renders after the label, before the
             target, mirroring how status tags sit on other rows. */}
         {isSubagent && (
-          <span className="inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9.5px] uppercase tracking-wider text-primary/70">
+          <span className="inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9.5px] uppercase tracking-wider text-primary/70 flex-shrink-0">
             subagent
           </span>
         )}
@@ -619,11 +619,11 @@ export const ToolRow = memo(function ToolRow({
         {/* Meta (orchestrator-supplied): "25 entries", "12 hits", etc.
          *  Skip for bash/git — their meta ("exit 0 · 26314ms") is already
          *  split into the statusLabel (exit code) + ms (duration) below. */}
-        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[11px]">{call.meta}</span>}
+        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[11px] truncate flex-shrink-0 max-w-[40%]">{call.meta}</span>}
         {/* Status label: "exit 0", "end_turn", "12 hits", "failed", etc. */}
         {statusLabel && (
           <span className={cn(
-            'text-[11px] tabular-nums',
+            'text-[11px] tabular-nums flex-shrink-0',
             call.status === 'failed' || call.status === 'rejected' || call.status === 'timeout' || call.status === 'aborted'
               ? 'text-destructive/80'
               : call.status === 'executed'
@@ -633,7 +633,7 @@ export const ToolRow = memo(function ToolRow({
             {statusLabel}
           </span>
         )}
-        {ms && <span className="text-muted-foreground/60 text-[11px] tabular-nums">{ms}</span>}
+        {ms && <span className="text-muted-foreground/60 text-[11px] tabular-nums flex-shrink-0">{ms}</span>}
         {expandable && (
           <ChevronRight className={cn('size-3 text-muted-foreground/60 transition-transform', open && 'rotate-90')} />
         )}

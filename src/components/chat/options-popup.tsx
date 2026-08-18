@@ -198,7 +198,14 @@ export function OptionsPopup({
                             <div className="size-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
                           )
                         )}
-                        <span className="truncate">{option}</span>
+                        <div className="flex-1 min-w-0 pt-px">
+                          <span className="block truncate">{option}</span>
+                          {opts.optionDescriptions?.[i] && (
+                            <span className="block truncate text-[11px] font-normal text-muted-foreground/70">
+                              {opts.optionDescriptions[i]}
+                            </span>
+                          )}
+                        </div>
                       </button>
                     );
                   })}

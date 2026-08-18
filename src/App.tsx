@@ -84,7 +84,7 @@ function App() {
           {/* Drag strip for non-main screens. On main, the WindowTopBar
               inside MainScreen provides the drag region. */}
 
-          <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
             {screen === 'splash' && <SplashScreen />}
             {screen === 'onboarding' && <OnboardingScreen />}
             {screen === 'consent' && <ConsentScreen />}
@@ -94,7 +94,7 @@ function App() {
                 state, scrollback, and input wiring, causing "can't type" and
                 "state lost" jank. display:none keeps it alive; the guards in
                 MainScreen no-op its effects while hidden to avoid wasted work. */}
-            <div className={`flex-1 flex min-h-0 ${screen === 'main' ? '' : 'hidden'}`}>
+            <div className={`flex-1 flex min-h-0 min-w-0 overflow-hidden ${screen === 'main' ? '' : 'hidden'}`}>
               <MainScreen />
             </div>
             {screen === 'settings' && <SettingsScreen />}

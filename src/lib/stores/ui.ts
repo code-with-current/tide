@@ -206,6 +206,8 @@ export interface PendingOptions {
   question: string;
   multiple: boolean;
   options: string[];
+  /** Optional per-option one-liners, parallel to `options` (same index). Undefined entries = no description. */
+  optionDescriptions?: (string | undefined)[];
   messageId: string;
   /** The ask_followup_question tool call id — required for live pause-and-resume (submitFollowup resolves the awaiting tool); undefined for the legacy persisted-followup path. */
   toolCallId?: string;
@@ -227,9 +229,9 @@ interface UiState {
   rightPanelOpen: boolean;
   /** Dedicated file-viewer panel (separate from the tabbed right panel). */
   fileViewerOpen: boolean;
-  /** File-viewer panel width as a percentage of the card (25–70). Persisted. */
-  fileViewerWidth: number;
-  setFileViewerWidth: (w: number) => void;
+  /** Right-sheet (file viewer / commit details) width as a viewport percentage (25–70). Persisted. */
+  sheetWidth: number;
+  setSheetWidth: (w: number) => void;
   /** Commit shown in the floating commit-details panel; null while closed.
    *  Set from the Git Panel → History tab on row click. */
   commitDetail: { sha: string; author: string; date: string; subject: string } | null;
@@ -518,8 +520,8 @@ export const useUi = create<UiState>()(
   setTerminalHeight: (h: number) => set((s) => ({ terminalHeight: { ...s.terminalHeight, [terminalScopeKey(s)]: h } })),
   rightPanelOpen: true,
   fileViewerOpen: false,
-  fileViewerWidth: 50,
-  setFileViewerWidth: (w) => set({ fileViewerWidth: Math.max(25, Math.min(70, w)) }),
+  sheetWidth: 40,
+  setSheetWidth: (w) => set({ sheetWidth: Math.max(25, Math.min(70, w)) }),
   commitDetail: null,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
@@ -1274,7 +1276,7 @@ export const useUi = create<UiState>()(
         sidebarWidth: s.sidebarWidth,
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
-        fileViewerWidth: s.fileViewerWidth,
+        sheetWidth: s.sheetWidth,
         terminalHeight: typeof s.terminalHeight === 'object' && s.terminalHeight !== null ? s.terminalHeight : {},
         terminals: s.terminals,
         fontScale: s.fontScale,

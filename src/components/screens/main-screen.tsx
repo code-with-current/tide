@@ -20,6 +20,7 @@ import { useRightPanelOverlay } from '@/lib/right-panel-layout';
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { SheetResizeHandle } from "@/components/ui/sheet-resize-handle";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
 import { useUi, terminalScopeKey } from "@/lib/stores/ui";
 import { useModelOption, useWorkspaces, useSessions } from "@/lib/queries";
@@ -67,6 +68,7 @@ export function MainScreen() {
   const fileViewerOpen = useUi((s) => s.fileViewerOpen);
   const commitDetail = useUi((s) => s.commitDetail);
   const setCommitDetail = useUi((s) => s.setCommitDetail);
+  const sheetWidth = useUi((s) => s.sheetWidth);
   // Only one overlay Sheet at a time — if both are open the later-rendered
   // Sheet's overlay (z-50 fixed inset-0) blocks clicks on the other's content.
   useEffect(() => { if (fileViewerOpen && commitDetail) setCommitDetail(null); }, [fileViewerOpen]);
@@ -855,7 +857,7 @@ export function MainScreen() {
   );
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 bg-sidebar">
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 min-w-0 overflow-hidden bg-sidebar border-none">
       {/* Sidebar — integrated (resizable) or dual (fixed workspace panel).
           Integrated panel uses leftPanelOpen (workspace toggle), not
           sessionsPanelOpen — it replaces the workspace panel, not the sessions panel. */}
@@ -888,7 +890,7 @@ export function MainScreen() {
           The transparent window shows the desktop around this card. */}
       <ResizablePanel id="card" minSize={600} className={cn("min-h-0", isMac && "py-0 pr-0")}>
         <div
-          className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden bg-background border relative"
+          className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden bg-background border-l relative"
         >
         <WindowTopBar />
         <ResizablePanelGroup
@@ -1044,7 +1046,7 @@ export function MainScreen() {
                           </span>
                         </div>
                       )}
-                      <div className="relative w-[80%] max-w-3xl mx-auto">
+                      <div className="relative w-[90%] max-w-4xl mx-auto">
                         {/* Options popover — anchored above the composer, matches
                           its width via the relative parent. No backdrop; floats
                           over the chat scroll without blocking interaction. */}
@@ -1141,14 +1143,16 @@ export function MainScreen() {
 
         {/* File viewer — Sheet positioned below the topbar (top:40px). */}
         <Sheet open={fileViewerOpen} onOpenChange={(o) => { if (!o) useUi.setState({ fileViewerOpen: false }); }}>
-          <SheetContent side="right" showCloseButton={false} className="w-[40%] sm:max-w-[70%] gap-0 p-0" style={{ top: '40px', height: 'auto' }}>
+          <SheetContent side="right" showCloseButton={false} className="gap-0 p-0" style={{ top: '40px', height: 'auto', width: `${sheetWidth}vw` }}>
+            <SheetResizeHandle />
             <FileViewerPanel />
           </SheetContent>
         </Sheet>
 
         {/* Commit details — Sheet positioned below the topbar. */}
         <Sheet open={!!commitDetail} onOpenChange={(o) => { if (!o) setCommitDetail(null); }}>
-          <SheetContent side="right" showCloseButton={false} className="w-[40%] sm:max-w-[70%] gap-0 p-0" style={{ top: '40px', height: 'auto' }}>
+          <SheetContent side="right" showCloseButton={false} className="gap-0 p-0" style={{ top: '40px', height: 'auto', width: `${sheetWidth}vw` }}>
+            <SheetResizeHandle />
             {commitDetail && <CommitDetailsPanel commit={commitDetail} />}
           </SheetContent>
         </Sheet>

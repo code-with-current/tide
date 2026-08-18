@@ -934,7 +934,8 @@ body {
 .prose-chat table     { margin: 0 0 0.85em; border-collapse: collapse; width: 100%; font-size: 0.85rem; }
 .prose-chat table:last-child { margin-bottom: 0.85em; }
 .prose-chat th,
-.prose-chat td        { border: 1px solid var(--border); padding: 0.4em 0.7em; text-align: left; }
+.prose-chat td        { border: 1px solid var(--border); padding: 0.4em 0.7em; text-align: left; overflow-wrap: anywhere; }
+.prose-chat td code   { overflow-wrap: anywhere; }
 .prose-chat th        { background: var(--muted); font-weight: 600; }
 
 /* Inline code — small pill, distinct from the chat surface. */
