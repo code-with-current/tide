@@ -1,4 +1,4 @@
-import { utilityProcess, app, type UtilityProcess } from 'electron';
+import { utilityProcess, type UtilityProcess } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -70,12 +70,7 @@ export class LocalOnnxEmbedder implements Embedder {
 }
 
 export function localModelExists(): boolean {
-  // Check the downloaded copy first (production — lazy-downloaded to userData).
   const modelsDir = process.env.TIDE_MODELS_DIR ?? path.join(appDataDir(), 'models');
-  const downloadedPath = path.join(modelsDir, MODEL_ID, 'onnx', 'model_quantized.onnx');
-  if (fs.existsSync(downloadedPath)) return true;
-  // Fallback: bundled copy (dev builds where electron/rag/models/ is staged
-  // to dist-electron/models/). Production builds no longer ship the model.
-  const bundledPath = path.join(__dirname, 'models', MODEL_ID, 'onnx', 'model_quantized.onnx');
-  return fs.existsSync(bundledPath);
+  const modelPath = path.join(modelsDir, MODEL_ID, 'onnx', 'model_quantized.onnx');
+  return fs.existsSync(modelPath);
 }

@@ -1,11 +1,6 @@
 /** Local ONNX embedder — child side, runs in a utilityProcess spawned by local-onnx-embedder.ts. Pure handleMessage is unit-testable; the bottom of the file is the thin process shell. Model: all-MiniLM-L6-v2-code-search-512 (22MB quantized ONNX). */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Embedder } from './embedder.js';
-
-// ESM has no global __dirname.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Polyfill `self` BEFORE any dynamic import of @xenova/transformers.
 if (typeof (globalThis as { self?: unknown }).self === 'undefined') {
@@ -25,29 +20,15 @@ async function getExtractor(): Promise<Extractor> {
   if (!pipelinePromise) {
     const { pipeline, env } = await import('@xenova/transformers');
 
-    // ── Model location: lazy-downloaded to userData/models/ (TIDE_MODELS_DIR) in prod; dev uses the bundled copy at electron/rag/models/.
-    const BUNDLED_DIR = path.join(__dirname, 'models');
-    const hasBundled = fs.existsSync(
-      path.join(BUNDLED_DIR, MODEL_ID, 'onnx', 'model_quantized.onnx'),
-    );
+    // ── Model location: lazy-downloaded to userData/models/ (TIDE_MODELS_DIR).
     const downloadDir = process.env.TIDE_MODELS_DIR;
-    const hasDownloaded = downloadDir &&
-      fs.existsSync(path.join(downloadDir, MODEL_ID, 'onnx', 'model_quantized.onnx'));
-
-    if (hasDownloaded && downloadDir) {
-      // Downloaded copy in userData (production) — the primary path.
+    if (downloadDir) {
+      const hasDownloaded = fs.existsSync(
+        path.join(downloadDir, MODEL_ID, 'onnx', 'model_quantized.onnx'),
+      );
       env.cacheDir = downloadDir;
       env.allowRemoteModels = false;
-      env.allowLocalModels = true;
-    } else if (hasBundled) {
-      // Bundled copy (dev builds where the source model is staged).
-      env.cacheDir = BUNDLED_DIR;
-      env.allowRemoteModels = false;
-      env.allowLocalModels = true;
-    } else if (downloadDir) {
-      // Download dir exists but model isn't there yet — point cacheDir
-      // at it so a post-download load finds the files without restart.
-      env.cacheDir = downloadDir;
+      env.allowLocalModels = hasDownloaded;
     }
 
     pipelinePromise = pipeline('feature-extraction', MODEL_ID, {
