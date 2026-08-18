@@ -1,5 +1,6 @@
 /** Local ONNX embedder — child side, runs in a utilityProcess spawned by local-onnx-embedder.ts. Pure handleMessage is unit-testable; the bottom of the file is the thin process shell. Model: all-MiniLM-L6-v2-code-search-512 (22MB quantized ONNX). */
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { Embedder } from './embedder.js';
 
 // Polyfill `self` BEFORE any dynamic import of @xenova/transformers.
