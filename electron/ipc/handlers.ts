@@ -14,6 +14,7 @@ import { getActiveCatalog, refreshModelCatalog } from '../agent/model-capabiliti
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches } from './git.js';
+import { startGitWatcher } from './git-watcher.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
@@ -1228,6 +1229,7 @@ export function registerIpcHandlers() {
   ipcMain.handle('tide:gitStatus', async (_e, workspaceId: string, sessionId?: string) => {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return [];
+    startGitWatcher(workspaceId, root);
     try { return await getGitStatus(root); } catch { return []; }
   });
 
