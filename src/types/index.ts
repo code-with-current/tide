@@ -381,6 +381,7 @@ export type ToolName =
   | 'kill_shell'
   | 'grep'
   | 'git'
+  | 'git_repo'
   | 'dispatch_agent'
   | 'todo_write'
   | 'web_fetch'
@@ -393,6 +394,7 @@ export type ToolName =
   | 'load_skill'
   | 'mcp'
   | 'memory'
+  | 'read_media_file'
   | 'init';
 
 export type ToolCallStatus =
@@ -441,6 +443,9 @@ export interface ToolCall {
   gateDecision?: 'ask' | 'blocked';
   /** Short, model-facing summary. */
   output?: string;
+  /** Live sub-agent report for dispatch_agent — streams into the block
+   *  while the dispatch runs (see stream-reducer applyToolDelta). */
+  report?: string;
   /** Richer UI-facing payload, e.g. a diff. */
   display?: ToolDisplay;
   durationMs?: number;
@@ -461,7 +466,7 @@ export type ToolDisplay =
   | { kind: 'command'; command: string }
   | { kind: 'file_list'; paths: string[] }
   | { kind: 'text'; text: string }
-  | { kind: 'agent'; agentName: string; title?: string; task: string; report: string; usage?: Usage; reasoning?: string }
+  | { kind: 'agent'; agentName: string; title?: string; task: string; report: string; usage?: Usage; reasoning?: string; dispatchId?: string; background?: boolean; backgroundState?: 'completed' | 'error' | 'interrupted' }
   | { kind: 'file_loaded'; path: string; lines: number; bytes: number; description?: string; body: string };
 
 /** Per-session streaming state, keyed by sessionId so sessions stream independently without overwriting each other. */

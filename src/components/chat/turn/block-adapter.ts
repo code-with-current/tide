@@ -12,6 +12,7 @@ export function toolBlockToToolCall(block: ToolBlock): ToolCall {
     status: block.status,
     riskTier: block.riskTier,
     output: block.output,
+    report: block.report,
     display: block.display,
     durationMs: block.durationMs,
     meta: block.meta,

@@ -27,6 +27,7 @@ type AgentSettingsState = {
   compactionEnabled: boolean;
   compactionThreshold: number;
   compactionKeepTurns: number;
+  experimentalBackgroundDispatch: boolean;
 };
 
 // Risk-tier metadata drives both the visual accent and the helper copy.
@@ -98,6 +99,7 @@ export function AutonomyCapsSection() {
         compactionEnabled: (raw.compactionEnabled as boolean) ?? true,
         compactionThreshold: (raw.compactionThreshold as number) ?? 0.75,
         compactionKeepTurns: (raw.compactionKeepTurns as number) ?? 3,
+        experimentalBackgroundDispatch: (raw.experimentalBackgroundDispatch as boolean) ?? false,
       });
     });
   }, []);
@@ -295,6 +297,25 @@ export function AutonomyCapsSection() {
               <Switch
                 checked={settings.auditShellCommands}
                 onCheckedChange={(v) => update('auditShellCommands', v)}
+              />
+            </div>
+          </SettingsRow>
+        </Card>
+      </SettingsGroup>
+
+      {/* ── Experimental ── */}
+      <SettingsGroup title="Experimental">
+        <Card>
+          <SettingsRow
+            title="Background sub-agent dispatch (experimental)"
+            description="Lets the model run dispatches that keep working after the turn moves on. You'll be notified when they finish."
+            last
+          >
+            <div className="flex items-center gap-2">
+              {savingKey === 'experimentalBackgroundDispatch' && <SavedDot />}
+              <Switch
+                checked={settings.experimentalBackgroundDispatch}
+                onCheckedChange={(v) => update('experimentalBackgroundDispatch', v)}
               />
             </div>
           </SettingsRow>

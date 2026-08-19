@@ -14,7 +14,7 @@ import { buildToolset, formatArgPreview, resolveToolName } from './tools/registr
 import { mcpToolsetForWorkspace } from './mcp/toolset.js';
 import { getToolMeta } from './tools/tool-meta.js';
 import { runLoadSkill } from './tools/load-skill.js';
-import { getSessionTodos } from './tools/todo-write.js';
+import { getSessionTodos, renderTodoPlanLines } from './tools/todo-write.js';
 import { scanProjectEntries } from './project-context.js';
 import { createExtensionsStore } from '../extensionsStore.js';
 import { createConfigStore } from '../configStore.js';
@@ -31,7 +31,7 @@ import type { ReasoningInstruction } from './protocols/index.js';
 import type { CompactionSettings } from '../../src/types/compaction.js';
 import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events.js';
 import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agent/events.js';
-import type { AutonomyMode, Provider, ToolCall, ToolName, Usage } from '../../src/types/index.js';
+import type { AutonomyMode, Provider, ToolCall, ToolDisplay, ToolName, Usage } from '../../src/types/index.js';
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
 import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
 import { recordEditTurn } from '../rag/edit-journal.js';
@@ -275,9 +275,17 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
 
   const skillResult = await processSkillPipeline(wc, turn, convo, root, priorSkillRef, turnController);
   systemPrompt = injectSkillBodies(systemPrompt, skillResult.skillBodies);
-  systemPrompt = injectSkillDiscoveryIndex(systemPrompt, root, skillResult.activeSkillRef?.path, skillResult.disabledSkills);
   systemPrompt = injectTodoPlan(systemPrompt, sessionId);
   systemPrompt = injectRagDirective(systemPrompt, workspaceId);
+
+  // Skill discovery catalog — rendered into the load_skill tool description
+  // (OpenCode pattern), not the system prompt. Disabled skills are excluded.
+  let skillIndex: import('./tools/tool-context.js').SkillSummary[] = [];
+  try {
+    skillIndex = scanProjectEntries(root).skills
+      .filter((s) => !skillResult.disabledSkills.includes(s.name))
+      .map((s) => ({ name: s.name, description: s.description, absPath: s.absPath }));
+  } catch {}
 
   const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
   const modelSupportsThinking = supportsThinking(modelId, modelEntry);
@@ -293,12 +301,18 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const ctx: ToolContext = {
     sessionId, workspaceRoot: root, workspaceId, autonomyMode,
     permissionRules: loadPermissionRules(root), modelId, provider,
+    skills: skillIndex,
     compactionSettings: { enabled: compactionEnabled, threshold: compactionThreshold, keepRecentTurns: compactionKeepTurns, onFailure: 'truncate' } satisfies CompactionSettings,
     onUsage: (u) => accumulateUsage(turn, u),
     abortSignal: controller.signal,
     thinkingLevel,
     emit: (raw) => bridgeToolEmit(wc, turn, raw),
-    emitToolEvent: (e) => send(wc, sessionId, { ...e, sessionId, seq: nextSeq(sessionId), messageId: turn.messageId } as any),
+    emitToolEvent: (e) => {
+      // Sub-agent tool events ride this channel (not ctx.emit) — mirror them
+      // into turn.blocks so the nested calls persist with the message.
+      mirrorSubagentToolEvent(turn, e as { type?: string; [k: string]: unknown });
+      send(wc, sessionId, { ...e, sessionId, seq: nextSeq(sessionId), messageId: turn.messageId } as any);
+    },
   };
   activeCtxs.set(sessionId, ctx);
 
@@ -746,10 +760,36 @@ function flushPartial(wc: WebContents, turn: Turn) {
   } catch {}
 }
 
+/** Mirror a sub-agent tool lifecycle event (parentToolCallId set) into the
+ *  turn's block state so finalizeBlocks persists the nested calls. The
+ *  renderer nests them live from the streamed events, but the stored message
+ *  drops them without this — the dispatch row's children vanish as soon as
+ *  the turn freezes to the persisted message. */
+function mirrorSubagentToolEvent(turn: Turn, e: { type?: string; [k: string]: unknown }): void {
+  if (typeof e.parentToolCallId !== 'string' || !e.parentToolCallId) return;
+  const toolCallId = e.toolCallId as string;
+  if (!toolCallId) return;
+  const toolName = resolveToolName((e.toolName as string) ?? 'unknown') as ToolName;
+  const meta = safeMeta(toolName);
+  if (e.type === 'tool_call_start') {
+    turn.toolBlockIndex[toolCallId] = turn.blocks.length;
+    turn.blocks.push({ id: toolCallId, kind: 'tool', toolCallId, toolName, category: categorizeTool(toolName), status: 'pending', arguments: {}, argPreview: '', riskTier: meta?.riskTier ?? 'read_only', createdAtSeq: 0, modifiedAtSeq: 0, parentToolCallId: e.parentToolCallId });
+  } else if (e.type === 'tool_call') {
+    patchToolBlock(turn, toolCallId, { arguments: (e.arguments ?? {}) as Record<string, unknown>, argPreview: (e.argPreview as string) ?? '', riskTier: meta?.riskTier ?? 'read_only', status: 'running' });
+  } else if (e.type === 'tool_result') {
+    patchToolBlock(turn, toolCallId, { status: normalizeStatus(e.status as ToolResult['status']), output: (e.output as string) ?? '', display: e.display as ToolDisplay | undefined, durationMs: e.durationMs as number | undefined, meta: e.meta as string | undefined });
+  }
+}
+
 function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
   if (!raw || typeof raw !== 'object') return;
   const e = raw as { type?: string; [k: string]: unknown };
   const { sessionId } = turn;
+
+  if (e.parentToolCallId) {
+    mirrorSubagentToolEvent(turn, e);
+    return;
+  }
 
   if (e.type === 'permission') {
     const toolName = resolveToolName((e.toolName as string) ?? 'unknown') as ToolName;
@@ -758,6 +798,17 @@ function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
     const toolCallId = (typeof e.toolCallId === 'string' && e.toolCallId) || `perm_${toolName}_${nextSeq(sessionId)}`;
     const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask' };
     send(wc, sessionId, { type: 'permission_required', sessionId, seq: nextSeq(sessionId), toolCalls: [tc], timeoutAt: Date.now() + turn.permissionTimeoutMs });
+    return;
+  }
+
+  if (e.type === 'dispatch_result') {
+    send(wc, sessionId, {
+      type: 'dispatch_result', sessionId, seq: nextSeq(sessionId),
+      dispatchId: (e.dispatchId as string) ?? '',
+      title: typeof e.title === 'string' ? e.title : undefined,
+      state: e.state === 'error' ? 'error' : 'completed',
+      report: (e.report as string) ?? '',
+    });
     return;
   }
 
@@ -796,25 +847,48 @@ async function processSkillPipeline(
       const content = typeof m.content === 'string' ? m.content : '';
       return [...content.matchAll(/\[\[LOAD_SKILL:([^\]|]+)(?:\|([^\]]+))?\]\]/g)];
     });
-    for (const match of markers) {
+    // Load first, then consume the markers with an outcome-accurate note — a
+    // blanket "(skill loaded)" on a failed load tells the model instructions
+    // exist when they don't. The body is injected under "# Active Skills" and
+    // the synthesized load_skill card records the load in the timeline; the
+    // raw marker must go or the model re-invokes load_skill itself,
+    // duplicating the card.
+    const consumed = new Map<string, string>();
+    for (const [idx, match] of markers.entries()) {
       const path = match[1].trim();
       const name = match[2]?.trim();
+      const label = name ?? path;
+      let body = '';
       try {
-        const body = await runLoadSkill(path, root);
-        if (body) {
-          skillBodies += body + '\n\n';
-          if (name) { activeSkillRef = { path }; sessions.setActiveSkillRef(turn.sessionId, { name, path, loadedAt: new Date().toISOString() }); }
-          const skillId = `skill_${Date.now()}`;
-          send(wc, turn.sessionId, { type: 'tool_call_start', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), messageId: turn.messageId, toolCallId: skillId, toolName: 'load_skill', blockId: skillId });
-          send(wc, turn.sessionId, { type: 'tool_result', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), toolCallId: skillId, status: 'executed', output: `Skill "${name ?? path}" loaded.`, meta: name ?? path });
-        }
+        // runLoadSkill returns a ToolResult; the SKILL.md text lives in
+        // display.body (output is just the summary line).
+        const res = await runLoadSkill(path, root);
+        body = res.display?.kind === 'file_loaded' ? res.display.body : '';
       } catch {}
+      consumed.set(match[0], body
+        ? `(skill "${label}" loaded)`
+        : `(skill "${label}" failed to load — not found at ${path})`);
+      if (!body) continue;
+      skillBodies += body + '\n\n';
+      if (name) { activeSkillRef = { path }; sessions.setActiveSkillRef(turn.sessionId, { name, path, loadedAt: new Date().toISOString() }); }
+      const skillId = `skill_${Date.now()}_${idx}`;
+      send(wc, turn.sessionId, { type: 'tool_call_start', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), messageId: turn.messageId, toolCallId: skillId, toolName: 'load_skill', blockId: skillId });
+      send(wc, turn.sessionId, { type: 'tool_result', sessionId: turn.sessionId, seq: nextSeq(turn.sessionId), toolCallId: skillId, status: 'executed', output: `Skill "${label}" loaded.`, meta: label });
+    }
+    for (const m of convo) {
+      if (typeof m.content === 'string' && m.content.includes('[[LOAD_SKILL:')) {
+        m.content = m.content.replace(
+          /\[\[LOAD_SKILL:[^\]|]+(?:\|[^\]]+)?\]\]/g,
+          (all) => consumed.get(all) ?? '(skill failed to load)',
+        );
+      }
     }
   } catch {}
 
   if (priorSkillRef && !activeSkillRef) {
     try {
-      const body = await runLoadSkill(priorSkillRef.path, root);
+      const res = await runLoadSkill(priorSkillRef.path, root);
+      const body = res.display?.kind === 'file_loaded' ? res.display.body : '';
       if (body) { skillBodies += body + '\n\n'; activeSkillRef = { path: priorSkillRef.path }; }
     } catch {}
   }
@@ -825,22 +899,20 @@ async function processSkillPipeline(
 }
 
 function injectSkillBodies(sp: string, bodies: string): string {
-  return bodies.trim() ? sp + '\n\n# Active Skills\n\n' + bodies.trim() : sp;
-}
-
-function injectSkillDiscoveryIndex(sp: string, root: string, activePath: string | undefined, disabled: string[]): string {
-  try {
-    const entries = scanProjectEntries(root).filter(e => !disabled.includes(e.name) && e.path !== activePath);
-    if (!entries.length) return sp;
-    return sp + '\n\n# Available Skills\n' + entries.slice(0, 20).map(e => `- **${e.name}**: ${e.description}`).join('\n');
-  } catch { return sp; }
+  // The header doubles as the dedup guard: skills listed here are already
+  // loaded, so re-invoking load_skill/slash_command for them is wasted work.
+  return bodies.trim()
+    ? sp + '\n\n# Active Skills\nAlready loaded this session — do NOT call `load_skill` or `slash_command` for these again.\n\n' + bodies.trim()
+    : sp;
 }
 
 function injectTodoPlan(sp: string, sessionId: string): string {
   try {
     const todos = getSessionTodos(sessionId);
     if (!todos?.length) return sp;
-    return sp + '\n\n# Current Plan\n' + todos.map((t, i) => `${i + 1}. [${t.status === 'completed' ? 'x' : ' '}] ${t.content}`).join('\n');
+    // Collapsing cancelled/in_progress to an open checkbox invites redoing
+    // cancelled work — renderTodoPlanLines keeps the 4 distinct states.
+    return sp + '\n\n# Current Plan\nKeep this list accurate — call todo_write to mark items completed or cancelled the moment their work finishes, never leave an item open after moving to other work.\n' + renderTodoPlanLines(todos).join('\n');
   } catch { return sp; }
 }
 

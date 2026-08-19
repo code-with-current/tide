@@ -134,20 +134,23 @@ export async function listSessions(workspaceId: string): Promise<any[]> {
   return clone(sessionsByWorkspace[workspaceId] ?? []);
 }
 
+export async function listDispatches(parentId: string): Promise<any[]> {
+  if (ipc) return ipc.listDispatches(parentId);
+  await delay();
+  return [];
+}
+
 /** Built-in sub-agents for the @mention picker + dispatch_agent catalog. */
 export async function listAgents(): Promise<{ name: string; description: string; whenToUse: string }[]> {
   if (ipc && (ipc as any).listAgents) return (ipc as any).listAgents();
-  // Mock fallback (dev without Electron) — keep the 8 catalog names in sync
-  // with electron/agent/agents/registry.ts.
+  // Mock fallback (dev without Electron) — keep the catalog names in sync
+  // with src/lib/prompts/agents/.
   return [
-    { name: 'general-purpose', description: 'General-purpose analyst for research and synthesis.', whenToUse: 'Multi-step research or analysis.' },
-    { name: 'explore', description: 'Read-only code locator.', whenToUse: 'Finding files, symbols, or call sites.' },
-    { name: 'workflow-orchestrator', description: 'State-machine workflow design.', whenToUse: 'Designing business-process workflows with failure recovery.' },
-    { name: 'task-distributor', description: 'Queue + scheduling design.', whenToUse: 'Designing task queues, worker pools, scheduling.' },
-    { name: 'multi-agent-coordinator', description: 'Multi-agent coordination design.', whenToUse: 'Coordinating many agents with dependencies.' },
-    { name: 'agent-organizer', description: 'Team assembly + sequencing.', whenToUse: 'Planning which agents to use for which subtask.' },
+    { name: 'general-purpose', description: 'Broad-spectrum investigator with direct tool access.', whenToUse: 'Multi-step research, analysis, or execution.' },
+    { name: 'explore', description: 'Read-only code locator and search strategist.', whenToUse: 'Finding files, symbols, or call sites.' },
+    { name: 'code-reviewer', description: 'Finds correctness bugs in a diff with verification.', whenToUse: 'Reviewing changes for runtime-correctness bugs.' },
+    { name: 'simplifier', description: 'Applies reuse/simplification/efficiency/altitude cleanups.', whenToUse: 'Cleaning up changed code and applying fixes.' },
     { name: 'codebase-orchestrator', description: 'Refactor governance with approval gates.', whenToUse: 'Repo-wide refactor planning.' },
-    { name: 'context-manager', description: 'Shared-state system design.', whenToUse: 'Designing shared context/state storage and retrieval.' },
   ];
 }
 

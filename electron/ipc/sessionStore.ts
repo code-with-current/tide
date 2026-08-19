@@ -47,6 +47,13 @@ export interface StoredSession {
     ahead: number;
     behind: number;
   };
+  /** Sub-agent linkage — set when this session was created by a
+   *  dispatch_agent call. Absent on all legacy sessions (= main). */
+  parentId?: string;
+  kind?: 'main' | 'subagent';
+  dispatch?: { agentName: string; title?: string; task: string; status?: 'running' | 'completed' | 'error' | 'interrupted' };
+  /** Lossless ModelMessage[] transcript for resume — subagent sessions only. */
+  modelMessages?: unknown[];
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -123,10 +130,39 @@ export interface ArchivedHeader {
   updatedAt: string;
 }
 
+/** Lightweight list entry persisted in sessions/_index.json. The sidebar and
+ *  session switchers only need these fields; full bodies load lazily via
+ *  getSession. Kept in sync by writeSession on every mutation. */
+export interface SessionHeader {
+  id: string;
+  workspaceId: string;
+  title: string;
+  modelId: string;
+  providerId?: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  /** Sub-agent linkage — present only on dispatch-created sessions. */
+  kind?: 'main' | 'subagent';
+  parentId?: string;
+}
+
 export interface SessionStore {
   // Populated lazily on first access (or explicitly via loadAll()).
   loadAll(): void;
-  listSessions(workspaceId: string): StoredSession[];
+  listSessions(workspaceId: string): SessionHeader[];
+  /** Subagent dispatch headers for a parent session, newest first. */
+  listDispatches(parentId: string): SessionHeader[];
+  /** All subagent dispatch sessions (any parent), full bodies. Used by
+   *  quit-time cleanup to mark still-running background dispatches
+   *  interrupted. */
+  listAllDispatches(): StoredSession[];
+  /** Update a dispatch child's lifecycle status (running/completed/error/
+   *  interrupted). Best-effort: unknown id is a no-op. */
+  setDispatchStatus(id: string, status: 'running' | 'completed' | 'error' | 'interrupted'): void;
+  /** Overwrite a dispatch child's transcript — chat messages plus the
+   *  lossless ModelMessage[] needed for resume. */
+  saveDispatchTranscript(id: string, messages: StoredMessage[], modelMessages: unknown[]): void;
   getSession(id: string): StoredSession | undefined;
   createSession(
     workspaceId: string,
@@ -136,6 +172,9 @@ export interface SessionStore {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
+      parentId?: string;
+      kind?: 'main' | 'subagent';
+      dispatch?: StoredSession['dispatch'];
     },
   ): StoredSession;
   /** Fork a session into a new session with a different model. Copies workspaceId/autonomy/thinking; starts with empty messages (the summary is added separately). Sets forkedFrom lineage. */
@@ -241,13 +280,71 @@ export interface SessionStore {
 export function createSessionStore(rootDir: string): SessionStore {
   const sessionsDir = path.join(rootDir, 'sessions');
   const cache = new Map<string, StoredSession>();
+  const headers = new Map<string, SessionHeader>();
   const archivedCache = new Map<string, ArchivedHeader>();
   const manifestPath = path.join(sessionsDir, '_archived.json');
+  const indexPath = path.join(sessionsDir, '_index.json');
   let loaded = false;
 
   function ensureLoaded(): void {
     if (loaded) return;
     loadAll();
+  }
+
+  function headerOf(s: StoredSession): SessionHeader {
+    return {
+      id: s.id,
+      workspaceId: s.workspaceId,
+      title: s.title,
+      modelId: s.modelId,
+      providerId: s.providerId,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messageCount: s.messages.length,
+      ...(s.kind ? { kind: s.kind } : {}),
+      ...(s.parentId ? { parentId: s.parentId } : {}),
+    };
+  }
+
+  function writeIndex(): void {
+    if (!fs.existsSync(sessionsDir)) {
+      fs.mkdirSync(sessionsDir, { recursive: true });
+    }
+    const tmp = `${indexPath}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ entries: Array.from(headers.values()) }, null, 2), 'utf-8');
+    fs.renameSync(tmp, indexPath);
+  }
+
+  function readIndex(): void {
+    headers.clear();
+    if (!fs.existsSync(indexPath)) return;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      if (parsed && Array.isArray(parsed.entries)) {
+        for (const h of parsed.entries) {
+          if (h && typeof h.id === 'string') headers.set(h.id, h);
+        }
+      }
+    } catch (e) {
+      log.warn('failed to parse _index.json', { err: e });
+    }
+  }
+
+  /** Lazy body load: headers are always resident; full session JSON parses
+   *  on first access only. Mutation paths must go through this, not cache.get. */
+  function getOrLoad(id: string): StoredSession | undefined {
+    const cached = cache.get(id);
+    if (cached) return cached;
+    if (!headers.has(id)) return undefined;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(sessionsDir, `${id}.json`), 'utf-8')) as StoredSession;
+      if (!parsed || typeof parsed.id !== 'string') return undefined;
+      cache.set(parsed.id, parsed);
+      return parsed;
+    } catch (e) {
+      log.warn('failed to lazy-load session', { id, err: e });
+      return undefined;
+    }
   }
 
   function writeSession(session: StoredSession): void {
@@ -258,6 +355,8 @@ export function createSessionStore(rootDir: string): SessionStore {
     const tmp = `${target}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(session, null, 2), 'utf-8');
     fs.renameSync(tmp, target);
+    headers.set(session.id, headerOf(session));
+    writeIndex();
   }
 
   function writeManifest(): void {
@@ -292,6 +391,9 @@ export function createSessionStore(rootDir: string): SessionStore {
       autonomyMode?: 'ask' | 'plan' | 'edit' | 'full';
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max';
       providerId?: string;
+      parentId?: string;
+      kind?: 'main' | 'subagent';
+      dispatch?: StoredSession['dispatch'];
     },
   ): StoredSession {
     ensureLoaded();
@@ -307,9 +409,13 @@ export function createSessionStore(rootDir: string): SessionStore {
       updatedAt: now,
       autonomyMode: opts?.autonomyMode ?? 'ask',
       thinkingLevel: opts?.thinkingLevel ?? 'medium',
+      ...(opts?.parentId ? { parentId: opts.parentId } : {}),
+      ...(opts?.kind ? { kind: opts.kind } : {}),
+      ...(opts?.dispatch ? { dispatch: opts.dispatch } : {}),
     };
     writeSession(session);
     cache.set(session.id, session);
+    if (opts?.kind === 'subagent' && opts?.parentId) pruneDispatchTranscript(opts.parentId, session.id);
     return session;
   }
 
@@ -323,7 +429,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     },
   ): StoredSession {
     ensureLoaded();
-    const source = cache.get(sourceId);
+    const source = getOrLoad(sourceId);
     if (!source) throw new Error(`forkSession: source session ${sourceId} not found`);
     const now = new Date().toISOString();
     const forked: StoredSession = {
@@ -390,43 +496,105 @@ export function createSessionStore(rootDir: string): SessionStore {
     cache.clear();
     migrateLegacy(); // no-op if already migrated or no legacy file
     readManifest();
+    readIndex();
 
     if (!fs.existsSync(sessionsDir)) {
       fs.mkdirSync(sessionsDir, { recursive: true });
       return;
     }
 
+    // Reconcile the index with the directory: parse ONLY files the index
+    // doesn't know about (normally zero), drop entries whose file is gone.
+    // Session bodies are never parsed here — they lazy-load via getOrLoad.
+    let indexDirty = false;
+    const onDisk = new Set<string>();
     for (const entry of fs.readdirSync(sessionsDir)) {
       // Skip tmp orphans from interrupted writes (cleaned up here, not during write).
       if (!entry.endsWith('.json')) continue;
-      if (entry.startsWith('_')) continue; // _archived.json manifest
+      if (entry.startsWith('_')) continue; // _archived.json / _index.json manifests
       const idFromName = entry.replace(/\.json$/, '');
       if (archivedCache.has(idFromName)) continue; // skip archived — don't load full body
-      const fullPath = path.join(sessionsDir, entry);
+      onDisk.add(idFromName);
+      if (headers.has(idFromName)) continue;
       try {
-        const raw = fs.readFileSync(fullPath, 'utf-8');
+        const raw = fs.readFileSync(path.join(sessionsDir, entry), 'utf-8');
         const parsed = JSON.parse(raw) as StoredSession;
         if (!parsed || typeof parsed.id !== 'string') {
           log.warn('skipping malformed session file', { file: entry });
           continue;
         }
-        cache.set(parsed.id, parsed);
+        headers.set(parsed.id, headerOf(parsed));
+        indexDirty = true;
       } catch (e) {
         log.warn('failed to parse session file', { file: entry, err: e });
-        // Don't surface to renderer here — Phase 5 error handling will
-        // emit a sessionFileCorrupted event. For now, log + skip.
       }
+    }
+    for (const id of Array.from(headers.keys())) {
+      if (!onDisk.has(id)) {
+        headers.delete(id);
+        indexDirty = true;
+      }
+    }
+    if (indexDirty) writeIndex();
+  }
+
+  function listSessions(workspaceId: string): SessionHeader[] {
+    ensureLoaded();
+    return Array.from(headers.values()).filter((h) => h.workspaceId === workspaceId && h.kind !== 'subagent');
+  }
+
+  function listDispatches(parentId: string): SessionHeader[] {
+    ensureLoaded();
+    return Array.from(headers.values())
+      .filter((h) => h.kind === 'subagent' && h.parentId === parentId)
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }
+
+  function listAllDispatches(): StoredSession[] {
+    ensureLoaded();
+    return Array.from(headers.values())
+      .filter((h) => h.kind === 'subagent')
+      .map((h) => getOrLoad(h.id))
+      .filter((s): s is StoredSession => Boolean(s));
+  }
+
+  function setDispatchStatus(id: string, status: 'running' | 'completed' | 'error' | 'interrupted'): void {
+    ensureLoaded();
+    const s = getOrLoad(id);
+    if (!s?.dispatch) return;
+    s.dispatch.status = status;
+    s.updatedAt = new Date().toISOString();
+    writeSession(s);
+  }
+
+  const DISPATCH_CAP = 20;
+
+  /** deleteSession requires the two-step archive→delete flow — calling it on
+   *  an active session throws. keepId shields a just-created child: the
+   *  updatedAt sort is unstable on timestamp ties, and without it a burst of
+   *  dispatches created within the same millisecond could evict the child
+   *  whose id createSession is about to return. */
+  function pruneDispatchTranscript(parentId: string, keepId?: string): void {
+    for (const child of listDispatches(parentId).slice(DISPATCH_CAP)) {
+      if (child.id === keepId) continue;
+      archiveSession(child.id);
+      deleteSession(child.id);
     }
   }
 
-  function listSessions(workspaceId: string): StoredSession[] {
+  function saveDispatchTranscript(id: string, messages: StoredMessage[], modelMessages: unknown[]): void {
     ensureLoaded();
-    return Array.from(cache.values()).filter((s) => s.workspaceId === workspaceId);
+    const s = getOrLoad(id);
+    if (!s) return;
+    s.messages = messages;
+    s.modelMessages = modelMessages;
+    s.updatedAt = new Date().toISOString();
+    writeSession(s);
   }
 
   function getSession(id: string): StoredSession | undefined {
     ensureLoaded();
-    return cache.get(id);
+    return getOrLoad(id);
   }
 
   /** Model is locked: only autonomy/thinking are mutable on an existing session. To change the model, fork (see forkSession). */
@@ -438,7 +606,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     },
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     if (patch.autonomyMode !== undefined) s.autonomyMode = patch.autonomyMode;
     if (patch.thinkingLevel !== undefined) s.thinkingLevel = patch.thinkingLevel;
@@ -453,7 +621,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     extra?: { attachments?: any[]; mentions?: any[] },
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     const now = new Date().toISOString();
     s.messages.push({
@@ -489,7 +657,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     },
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     const now = new Date().toISOString();
     s.messages.push({
@@ -532,7 +700,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     },
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     const now = new Date().toISOString();
     const existing = s.messages.find((m) => m.id === messageId && m.role === 'assistant');
@@ -593,7 +761,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     },
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     const cur = s.usage ?? {
       inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0,
@@ -631,7 +799,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     event: Omit<ActivityRecord, 'id' | 'at'>,
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     if (!Array.isArray(s.activity)) s.activity = [];
     // Newest-first (matches the Inspector's render order). Cap to keep the
@@ -649,10 +817,10 @@ export function createSessionStore(rootDir: string): SessionStore {
   function deleteSession(id: string): void {
     ensureLoaded();
     // Unknown id: silent no-op (matches existing patterns).
-    if (!cache.has(id) && !archivedCache.has(id)) return;
+    if (!headers.has(id) && !archivedCache.has(id)) return;
 
     // Two-step flow: must be archived first.
-    if (cache.has(id)) {
+    if (headers.has(id)) {
       throw new Error('Session must be archived before deletion');
     }
 
@@ -667,6 +835,8 @@ export function createSessionStore(rootDir: string): SessionStore {
     // Archived — proceed with delete.
     archivedCache.delete(id);
     writeManifest();
+    headers.delete(id);
+    writeIndex();
     try {
       fs.unlinkSync(file);
     } catch (e) {
@@ -691,7 +861,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     },
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     s.worktree = worktree;
     s.updatedAt = new Date().toISOString();
@@ -703,7 +873,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     ref: { name: string; path: string; loadedAt: string } | undefined,
   ): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     if (ref) s.activeSkillRef = ref;
     else delete s.activeSkillRef;
@@ -719,7 +889,7 @@ export function createSessionStore(rootDir: string): SessionStore {
 
   function setTodos(sessionId: string, todos: Array<{ content: string; status: string; priority?: string }>): void {
     ensureLoaded();
-    const s = cache.get(sessionId);
+    const s = getOrLoad(sessionId);
     if (!s) return;
     s.todos = todos as any;
     s.updatedAt = new Date().toISOString();
@@ -729,6 +899,7 @@ export function createSessionStore(rootDir: string): SessionStore {
   function clearAllSessions(): void {
     // Wipe in-memory state.
     cache.clear();
+    headers.clear();
     archivedCache.clear();
     loaded = true;
 
@@ -755,7 +926,7 @@ export function createSessionStore(rootDir: string): SessionStore {
 
   function archiveSession(id: string): void {
     ensureLoaded();
-    const s = cache.get(id);
+    const s = getOrLoad(id);
     if (!s) return; // already archived or unknown — idempotent
     const header: ArchivedHeader = {
       id: s.id,
@@ -766,6 +937,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       updatedAt: s.updatedAt,
     };
     cache.delete(id);
+    headers.delete(id);
     archivedCache.set(id, header);
     writeManifest();
     // Full session file on disk is intentionally left untouched.
@@ -791,7 +963,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     cache.set(id, session);
     archivedCache.delete(id);
     writeManifest();
-    writeSession(session); // persist the cleared archivedAt
+    writeSession(session); // persist the cleared archivedAt (also restores its header)
   }
 
   function listArchived(workspaceId: string): ArchivedHeader[] {
@@ -801,7 +973,7 @@ export function createSessionStore(rootDir: string): SessionStore {
 
   function renameSession(id: string, title: string): void {
     ensureLoaded();
-    const active = cache.get(id);
+    const active = getOrLoad(id);
     if (active) {
       active.title = title;
       active.updatedAt = new Date().toISOString();
@@ -820,6 +992,10 @@ export function createSessionStore(rootDir: string): SessionStore {
   return {
     loadAll,
     listSessions,
+    listDispatches,
+    listAllDispatches,
+    setDispatchStatus,
+    saveDispatchTranscript,
     getSession,
     createSession,
     forkSession,

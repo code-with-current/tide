@@ -56,8 +56,26 @@ function normalizeOption(o: unknown): string {
   return String(o);
 }
 
+/** Some models (seen with GLM) mis-split the tool args so the entire JSON
+ * after `{"question": "` lands inside the question string. Detect and
+ * re-parse it so the popup gets real options. */
+function unwrapEmbeddedArgs(args: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(args.options) && args.options.length > 0) return args;
+  const q = typeof args.question === 'string' ? args.question.trim() : '';
+  if (!q || !q.includes('"options"')) return args;
+  const candidates = q.startsWith('{') ? [q, q + '}'] : ['{"question": "' + q + '}'];
+  for (const c of candidates) {
+    try {
+      const parsed = JSON.parse(c) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.options)) return parsed;
+    } catch {}
+  }
+  return args;
+}
+
 /** Derive a FollowupMode from ask_followup_question args (options / question / null). 'blank' mode is decided earlier by the reducer on tool_call_start; this runs only once args have landed. */
-export function deriveFollowupMode(args: Record<string, unknown>): FollowupMode | null {
+export function deriveFollowupMode(rawArgs: Record<string, unknown>): FollowupMode | null {
+  const args = unwrapEmbeddedArgs(rawArgs);
   if (Array.isArray(args.options) && args.options.length > 0) {
     return {
       kind: 'options',

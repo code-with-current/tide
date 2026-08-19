@@ -712,10 +712,17 @@ export function registerIpcHandlers() {
     return sessions.listSessions(workspaceId);
   });
 
+  ipcMain.handle('tide:listDispatches', async (_e, parentId: string) => {
+    return sessions.listDispatches(parentId);
+  });
+
   // ── Built-in sub-agents (single source of truth for the @mention picker
   //    and any future settings UI). Returns name/description/whenToUse.
+  //    hidden agents stay dispatchable but disappear from the catalog.
   ipcMain.handle('tide:listAgents', async () => {
-    return BUILTIN_AGENTS.map((a) => ({ name: a.name, description: a.description, whenToUse: a.whenToUse }));
+    return BUILTIN_AGENTS
+      .filter((a) => !a.hidden)
+      .map((a) => ({ name: a.name, description: a.description, whenToUse: a.whenToUse }));
   });
 
   // ── Project-level entries (CLAUDE.md / AGENT.md + .claude|.agent/) ────

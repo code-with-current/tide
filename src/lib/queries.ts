@@ -94,6 +94,16 @@ export function useArchivedSessions(workspaceId: string | null) {
   });
 }
 
+/** Sub-agent dispatch child sessions for a parent session. */
+export function useDispatches(sessionId: string | null) {
+  return useQuery({
+    queryKey: sessionId ? ['dispatches', sessionId] : ['dispatches', 'none'],
+    queryFn: () => (sessionId ? api.listDispatches(sessionId) : Promise.resolve([])),
+    enabled: !!sessionId,
+    staleTime: 30_000,
+  });
+}
+
 // ============================================================
 // Providers & Models
 // ============================================================

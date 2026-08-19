@@ -158,7 +158,8 @@ export function useChatStream(): {
                   || event.type === 'retry'
                   || event.type === 'compacting'
                   || event.type === 'permission_required'
-                  || event.type === 'followup_required';
+                  || event.type === 'followup_required'
+                  || event.type === 'dispatch_result';
       const arr = queues.get(sid) ?? [];
       arr.push(event);
       queues.set(sid, arr);
@@ -269,6 +270,33 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
             : c,
         ),
       };
+    case 'dispatch_result': {
+      // A background dispatch finished. Fold the terminal state onto the
+      // matching dispatch row, then inject the report as a synthetic queued
+      // message (friendly display text; the model receives the XML wrapper
+      // as promptText) so the parent turn picks it up via the queue drain.
+      const tag = event.state === 'error' ? 'task_error' : 'task_result';
+      const xml = [
+        `<task id="${event.dispatchId}" state="${event.state}">`,
+        `<summary>Background task ${event.state}: ${event.title ?? event.dispatchId}</summary>`,
+        `<${tag}>`,
+        event.report,
+        `</${tag}>`,
+        '</task>',
+      ].join('\n');
+      const display = `↻ ${event.title ?? 'background task'} — ${event.state}`;
+      useUi.getState().enqueueMessage(event.sessionId, display, xml, true);
+      return {
+        ...state,
+        toolCalls: state.toolCalls.map((c) => {
+          const d = c.display;
+          if (d?.kind === 'agent' && d.dispatchId === event.dispatchId) {
+            return { ...c, display: { ...d, backgroundState: event.state } };
+          }
+          return c;
+        }),
+      };
+    }
     case 'usage':
       return {
         ...state,

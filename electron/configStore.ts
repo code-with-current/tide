@@ -52,6 +52,9 @@ export interface AgentSettings {
   compactionThreshold: number;
   /** Number of user/assistant pairs preserved verbatim at the tail. */
   compactionKeepTurns: number;
+  /** Experimental: allow dispatch_agent to run sub-agents in the background,
+   *  detached from the turn (results arrive as synthetic queued messages). */
+  experimentalBackgroundDispatch: boolean;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -63,6 +66,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   compactionEnabled: true,
   compactionThreshold: 0.75,
   compactionKeepTurns: 3,
+  experimentalBackgroundDispatch: false,
 };
 
 export const DEFAULT_CONFIG: Config = {

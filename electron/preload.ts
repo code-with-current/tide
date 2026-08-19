@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
 
   // ── Sessions ──
   listSessions: (workspaceId: string) => ipcRenderer.invoke('tide:listSessions', workspaceId),
+  listDispatches: (parentId: string) => ipcRenderer.invoke('tide:listDispatches', parentId),
   listAgents: () => ipcRenderer.invoke('tide:listAgents'),
   // Project-level entries (CLAUDE.md / AGENT.md + .claude|.agent/skills|agents).
   listProjectEntries: (workspaceId: string) => ipcRenderer.invoke('tide:listProjectEntries', workspaceId),
