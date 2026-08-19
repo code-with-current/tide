@@ -134,8 +134,30 @@ export function createAskFollowupTool(ctx: ToolContext) {
       ),
       multiple: z.boolean().optional().describe('True if the user can pick multiple options. Default false.'),
     }),
-    execute: async ({ question, options, multiple }, { toolCallId }) =>
-      withPermission(ctx, 'ask_followup_question', { question, options, multiple }, async () => {
+    execute: async (rawArgs, { toolCallId }) =>
+      withPermission(ctx, 'ask_followup_question', rawArgs, async () => {
+        // Some models (seen with GLM) mis-split the args JSON so everything
+        // after `{"question": "` lands in the question string. Repair it.
+        let { question, options, multiple } = rawArgs as {
+          question: string;
+          options?: { label: string; description?: string }[];
+          multiple?: boolean;
+        };
+        if ((!options || options.length === 0) && question.includes('"options"')) {
+          for (const c of question.trim().startsWith('{')
+            ? [question, question + '}']
+            : ['{"question": "' + question + '}']) {
+            try {
+              const p = JSON.parse(c) as { question?: string; options?: typeof options; multiple?: boolean };
+              if (Array.isArray(p.options)) {
+                question = p.question ?? question;
+                options = p.options;
+                multiple = p.multiple ?? multiple;
+                break;
+              }
+            } catch {}
+          }
+        }
         const opts = options ?? [];
         ctx.emit({
           type: 'followup',
