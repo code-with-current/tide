@@ -4,8 +4,9 @@
  *  - effort → adaptive thinking: `thinking: { type: 'adaptive' }, effort`
  *  - toggle → `thinking: { type: 'enabled', budgetTokens: 1024 }`
  *
- *  Non-native Anthropic endpoints (z.ai proxy, etc.) strip the native thinking
- *  block + cacheControl — detected via ctx.providerBaseUrl. */
+ *  Non-allowlisted endpoints (OpenRouter-style aggregators) strip the native
+ *  thinking block + cacheControl — detected via ctx.providerBaseUrl.
+ */
 import type { ProtocolCallOptions, ProtocolContext } from './types';
 import type { ReasoningInstruction } from './reasoning';
 
@@ -19,13 +20,17 @@ const DEFAULT_MAX_TOKENS = 8192;
  *  complete tool calls without mid-stream truncation. */
 const TOOL_OUTPUT_FLOOR = 16_384;
 
-/** Detect non-native Anthropic endpoints (z.ai proxy, OpenRouter, etc.) that
- *  don't support the native `thinking` block or `cacheControl`. */
+/** Hosts that accept the native Anthropic thinking block. api.z.ai's
+ *  Anthropic-compatible endpoint accepts `thinking` + `budget_tokens`
+ *  (verified empirically: its 400s cite only the max_tokens range, never
+ *  the thinking field). Aggregators like OpenRouter reject it. */
+const THINKING_CAPABLE_HOSTS = new Set(['api.anthropic.com', 'api.z.ai']);
+
+/** Detect endpoints that accept the native Anthropic thinking block. */
 function isNativeAnthropic(baseUrl?: string): boolean {
   if (!baseUrl) return true; // assume native when unknown
   try {
-    const host = new URL(baseUrl).hostname;
-    return host === 'api.anthropic.com';
+    return THINKING_CAPABLE_HOSTS.has(new URL(baseUrl).hostname);
   } catch {
     return true;
   }
@@ -51,8 +56,8 @@ export function anthropicCallOptions(
 
   const native = isNativeAnthropic(ctx?.providerBaseUrl);
 
-  // Non-native endpoint: strip the native thinking block entirely. These
-  // proxies (z.ai, OpenRouter) reject `thinking` and `cacheControl` with 400.
+  // Endpoint outside the allowlist (OpenRouter-style aggregators): strip the
+  // native thinking block — these reject `thinking` and `cacheControl` with 400.
   if (!native) {
     return {
       providerOptions: undefined,
@@ -63,12 +68,14 @@ export function anthropicCallOptions(
 
   if (reasoning.contract === 'budget_tokens') {
     const requestedBudget = reasoning.budgetTokens ?? 1024;
-    // Clamp the thinking budget so it can't starve the output. The Anthropic
-    // API requires max_tokens > budget_tokens. The wire max_tokens = maxBase +
-    // budget (the SDK adds them), so budget can be up to the provider's hard
-    // cap minus maxBase. Cap budget at 4× maxBase — generous for deep reasoning
-    // while keeping output ≥ 20% of total.
-    const budgetTokens = Math.min(requestedBudget, maxBase * 4);
+    // @ai-sdk/anthropic stacks budgetTokens ON TOP of maxOutputTokens for
+    // the wire max_tokens, and providers cap the wire total — often at the
+    // same value as our maxBase (z.ai: 131072). Stacking anything would
+    // blow the cap (128k + 121k = 249k → 400), so carve the budget out of
+    // a fixed total instead: budget ≤ 80% keeps the answer pool usable at
+    // every level, and the −1024 reserves output room per the API rule
+    // max_tokens > budget_tokens.
+    const budgetTokens = Math.max(1024, Math.min(requestedBudget, Math.floor(maxBase * 0.8), maxBase - 1024));
 
     return {
       providerOptions: {
@@ -77,17 +84,16 @@ export function anthropicCallOptions(
           cacheControl: { type: 'ephemeral' },
         },
       },
-      // `maxOutputTokens` is the ANSWER budget only — @ai-sdk/anthropic adds
-      // `thinking.budgetTokens` on top for the wire `max_tokens`.
-      maxOutputTokens: maxBase,
+      maxOutputTokens: maxBase - budgetTokens,
       label: budgetTokens < requestedBudget
-        ? `thinking.budget_tokens=${requestedBudget}→${budgetTokens} (clamped)`
-        : `thinking.budget_tokens=${budgetTokens}`,
+        ? `thinking.budget_tokens=${requestedBudget}→${budgetTokens} (carved from ${maxBase}, output=${maxBase - budgetTokens})`
+        : `thinking.budget_tokens=${budgetTokens}, output=${maxBase - budgetTokens}`,
     };
   }
 
   if (reasoning.contract === 'effort') {
     // Adaptive thinking: Claude 4.7+ accepts effort alongside adaptive thinking.
+    // No budgetTokens → the SDK doesn't stack anything; maxBase is the total.
     return {
       providerOptions: {
         anthropic: {
@@ -109,7 +115,8 @@ export function anthropicCallOptions(
         cacheControl: { type: 'ephemeral' },
       },
     },
-    maxOutputTokens: maxBase,
+    // The SDK stacks this 1024 on top — carve it so the wire total stays maxBase.
+    maxOutputTokens: maxBase - 1024,
     label: reasoning.label,
   };
 }

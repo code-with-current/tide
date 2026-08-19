@@ -63,14 +63,16 @@ export function openaiCallOptions(
     // Toggle: just enable thinking at a medium level.
     effort = 'medium';
   }
+  // The wire contract allows minimal|low|medium|high (+ none/xhigh on the
+  // newest models) — 'max' is not a value any endpoint accepts, so the top
+  // levels clamp down to 'high'.
+  if (effort === 'max' || effort === 'extra') effort = 'high';
 
-  // Compute maxOutputTokens. For effort-based reasoning, we no longer add
-  // a budget to maxBase — the effort string controls thinking depth, and
-  // maxOutputTokens is the total output pool. For budget-derived effort,
-  // preserve the old behavior of budget + maxBase (capped).
-  const computed = reasoning.budgetTokens != null
-    ? Math.min(reasoning.budgetTokens + maxBase, MAX_OUTPUT_TOKENS_CAP)
-    : Math.min(maxBase, MAX_OUTPUT_TOKENS_CAP);
+  // maxOutputTokens is the TOTAL output pool — reasoning tokens are spent
+  // inside it server-side (the effort string carries no token count, so
+  // budget+maxBase stacking reserved room for thinking that never travels
+  // on the wire). The 65535 cap only exists for Gemini-backed endpoints.
+  const computed = isGemini ? Math.min(maxBase, MAX_OUTPUT_TOKENS_CAP) : maxBase;
 
   return {
     providerOptions: {
