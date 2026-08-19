@@ -1,58 +1,18 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Brain, ChevronRight } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
-import type { Block, TextBlock, ToolBlock } from '@/types';
+import type { Block, TextBlock, ToolBlock, ToolCall } from '@/types';
 import { deriveLayout } from './block-layout';
 import { TurnHeader } from './turn-header';
 import { summarizeFileChanges } from '@/lib/stream/block-state';
-import { ReasoningView } from '@/components/chat/blocks/reasoning-view';
-import { ProcessList } from '@/components/chat/blocks/process-list';
-import { ToolRow } from '@/components/chat/blocks/tool-row';
+import { ToolChips } from '@/components/chat-v2/tool-chips';
+import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 import { FollowupPrompt } from '@/components/chat/blocks/followup-prompt';
 import { FileChanges } from '../blocks/file-changes';
 import { CompactingIndicator } from '@/components/chat/blocks/compacting-indicator';
 import { toolBlockToToolCall } from '@/components/chat/turn/block-adapter';
 import { useUi } from '@/lib/stores/ui';
-import { cn } from '@/lib/utils';
-
-/** Inline thinking for Stream view — renders reasoning as part of the stream
- *  flow (like narration) but visually categorized as thinking (reasoning tint,
- *  a small label, and a left accent), instead of the standalone ReasoningView
- *  card. Compact view is unaffected.
- *
- *  Collapsed by default; the block actively being streamed (last block during a
- *  streaming turn) opens so live thinking stays visible, then collapses when
- *  the turn ends — mirroring the flat/phased reasoning views. */
-function StreamThinking({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(streaming);
-  useEffect(() => {
-    if (!streaming) setOpen(false);
-  }, [streaming]);
-  return (
-    <div className="my-1 border-l-2 border-reasoning/40">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1 px-3 py-1.5 text-[0.7rem] font-mono uppercase tracking-wider text-reasoning/80 hover:text-reasoning transition-colors"
-      >
-        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
-        <Brain className={cn("size-3", streaming && "animate-pulse")} />
-        Thinking
-      </button>
-      {open && (
-        <div className='border-l border-card-foreground ml-4'>
-        <div className="px-3 pb-2 text-[0.85rem] leading-relaxed text-card-foreground/80 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]">
-          <Streamdown mode="static" remarkPlugins={[remarkGfm]} controls={false} animated={false}>
-            {text.trim()}
-          </Streamdown>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** Look up the tool block for a followup and check if it has terminal status.
  *  Used to suppress popup re-firing on persisted messages that were already
@@ -121,6 +81,20 @@ export const BlockList = memo(function BlockList({
     return map;
   }, [blocks]);
 
+  // v2 ToolChips input: process tool calls with dispatch_agent children
+  // flattened directly after their parent row.
+  const chipCalls = useMemo(() => {
+    const out: ToolCall[] = [];
+    for (const b of layout.process) {
+      if (b.kind !== 'tool') continue;
+      out.push(toolBlockToToolCall(b));
+      for (const child of childrenByParent.get(b.toolCallId) ?? []) {
+        out.push(toolBlockToToolCall(child));
+      }
+    }
+    return out;
+  }, [layout.process, childrenByParent]);
+
   // Refs for scroll-preservation math during the streaming → completed transition.
   const thinkingRef = useRef<HTMLDivElement>(null);
   const processRef = useRef<HTMLDivElement>(null);
@@ -186,15 +160,15 @@ export const BlockList = memo(function BlockList({
         {(blocks ?? []).map((b, idx) => {
           switch (b.kind) {
             case 'reasoning':
-              // Stream view: render thinking inline like narration, but with a
-              // distinct "thinking" category (reasoning tint + label + accent).
-              // Compact view still uses the collapsible ReasoningView card.
-              // The actively-streaming (last) block is passed streaming= so it
-              // auto-expands to show live deltas; all others stay collapsed.
+              // Stream view: inline thinking rendered with the v2 ThinkingBlock
+              // (same row anatomy as the v2 tool chips). The actively-streaming
+              // (last) block auto-expands to show live deltas; others stay
+              // collapsed and collapse on turn end.
               if (!b.text.trim()) return null;
               return (
-                <StreamThinking
+                <ThinkingBlock
                   key={b.id}
+                  bare
                   text={b.text}
                   streaming={streaming && !!blocks && b.id === blocks[blocks.length - 1]?.id}
                 />
@@ -203,14 +177,13 @@ export const BlockList = memo(function BlockList({
               // Children nest under their dispatch_agent parent — skip at top level.
               if (b.parentToolCallId) return null;
               return (
-                <div key={b.id} className="py-0.5">
-                  <ToolRow
-                    call={toolBlockToToolCall(b)}
-                    streaming={streaming}
-                    onViewFile={onViewFile}
-                    childToolCalls={childrenByParent.get(b.toolCallId)?.map(toolBlockToToolCall)}
-                  />
-                </div>
+                <ToolChips
+                  key={b.id}
+                  bare
+                  calls={[toolBlockToToolCall(b), ...(childrenByParent.get(b.toolCallId)?.map(toolBlockToToolCall) ?? [])]}
+                  streaming={streaming}
+                  onViewFile={onViewFile}
+                />
               );
             case 'text':
               if (!b.text.trim()) return null;
@@ -241,7 +214,7 @@ export const BlockList = memo(function BlockList({
               return (
                 <div
                   key={b.id}
-                  className="text-[0.85rem] text-card-foreground/80 leading-relaxed py-1 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]"
+                  className="text-[0.85rem] text-card-foreground/80 leading-relaxed mt-[5px] [&_p]:my-0.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-0.5 [&_ul:first-child]:mt-0 [&_ul:last-child]:mb-0 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]"
                 >
                   <Streamdown mode="static" remarkPlugins={[remarkGfm]} controls={false} animated={false}>
                     {b.text.trim()}
@@ -281,7 +254,7 @@ export const BlockList = memo(function BlockList({
     <>
       {layout.thinking && (
         <div ref={thinkingRef}>
-          <ReasoningView
+          <ThinkingBlock
             text={layout.thinking.text}
             tokens={layout.thinking.tokens}
             ms={layout.thinking.ms}
@@ -290,14 +263,13 @@ export const BlockList = memo(function BlockList({
         </div>
       )}
 
-      {layout.process.length > 0 && (
+      {chipCalls.length > 0 && (
         <div ref={processRef}>
-          <ProcessList
-            blocks={layout.process}
-            totals={layout.totals}
+          <ToolChips
+            calls={chipCalls}
+            changes={fileChanges}
             streaming={streaming}
             onViewFile={onViewFile}
-            childrenByParent={childrenByParent}
           />
         </div>
       )}
@@ -326,15 +298,8 @@ export const BlockList = memo(function BlockList({
         />
       </div>
 
-      {fileChanges.length > 0 && (
-        <FileChanges
-          changes={fileChanges}
-          streaming={streaming}
-          onViewFile={onViewFileDiff}
-          onUndoFile={onUndoFile}
-        />
-      )}
-
+      {/* Compact view: file changes render as chips inside ToolChips —
+          no separate FileChanges block here (stream view keeps it). */}
       {layout.followup && (
         <FollowupPrompt
           mode={layout.followup.mode}

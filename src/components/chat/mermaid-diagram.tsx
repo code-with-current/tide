@@ -34,6 +34,18 @@ async function loadMermaid() {
 
 let diagramId = 0;
 
+/** Live-preview cadence: at most one mermaid render per interval, trailing edge. */
+const LIVE_THROTTLE_MS = 350;
+
+/** Cheap candidates for live renders — just the raw source and its line-trimmed variant (no full sanitize chain per tick). */
+function streamingCandidates(raw: string): string[] {
+  const trimmed = raw
+    .split('\n')
+    .map((l) => l.replace(/[ \t]+$/g, ''))
+    .join('\n');
+  return trimmed === raw ? [raw] : [raw, trimmed];
+}
+
 /**
  * Minimal zoomable overlay — transparent dim background, floating controls.
  * No dialog chrome, no title bar. Just the diagram and two floating buttons.
@@ -266,57 +278,95 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const lastRenderAtRef = useRef(0);
+  const lastRenderedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (streaming) return;
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    // Already rendered this exact source — nothing to do (covers the
+    // streaming → done transition after a successful live render).
+    if (lastRenderedRef.current === trimmed) return;
 
-    let cancelled = false;
-    (async () => {
-      const mermaid = await loadMermaid();
-      if (cancelled) return;
+    // Final render (fence closed or stream ended): authoritative, with the
+    // full sanitize fallback chain.
+    if (!streaming) {
+      let cancelled = false;
+      (async () => {
+        const mermaid = await loadMermaid();
+        if (cancelled) return;
 
-      // Try the original source, then progressively sanitized variants.
-      const candidates = sanitizeMermaid(code.trim());
-      for (const candidate of candidates) {
-        try {
-          const renderId = `mermaid-${++diagramId}`;
-          const { svg: rendered } = await mermaid.render(renderId, candidate);
-          if (!cancelled) {
-            // Clean up DOM artifacts mermaid leaves after a failed render.
-            document.querySelectorAll(
-              '[id^="dmermaid"], .mermaid-error, #mermaid-error',
-            ).forEach((el) => {
-              if (el.id !== renderId) el.remove();
-            });
-            setSvg(rendered);
-            setError(null);
+        // Try the original source, then progressively sanitized variants.
+        const candidates = sanitizeMermaid(trimmed);
+        for (const candidate of candidates) {
+          try {
+            const renderId = `mermaid-${++diagramId}`;
+            const { svg: rendered } = await mermaid.render(renderId, candidate);
+            if (!cancelled) {
+              // Clean up DOM artifacts mermaid leaves after a failed render.
+              document.querySelectorAll(
+                '[id^="dmermaid"], .mermaid-error, #mermaid-error',
+              ).forEach((el) => {
+                if (el.id !== renderId) el.remove();
+              });
+              setSvg(rendered);
+              setError(null);
+              if (candidate === trimmed) lastRenderedRef.current = trimmed;
+            }
+            return; // success — stop trying
+          } catch {
+            // Try next candidate; if this was the last, fall through to error.
           }
-          return; // success — stop trying
-        } catch {
-          // Try next candidate; if this was the last, fall through to error.
         }
-      }
 
-      // All candidates failed.
-      if (!cancelled) {
-        const firstErr = candidates[0];
-        setError(
-          firstErr
-            ? `Could not render diagram after ${candidates.length} attempt${candidates.length > 1 ? 's' : ''}`
-            : 'Empty diagram source',
-        );
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [code, streaming]);
+        // All candidates failed.
+        if (!cancelled) {
+          const firstErr = candidates[0];
+          setError(
+            firstErr
+              ? `Could not render diagram after ${candidates.length} attempt${candidates.length > 1 ? 's' : ''}`
+              : 'Empty diagram source',
+          );
+        }
+      })();
+      return () => { cancelled = true; };
+    }
 
-  if (streaming) {
-    return (
-      <div className={cn('flex items-center justify-center py-8 text-[11px] text-muted-foreground/50', className)}>
-        rendering diagram…
-      </div>
+    // Live preview while the fence is still open: throttled, parse-gated
+    // renders that only ever swap forward — a failed parse just skips the
+    // tick and keeps the last good SVG on screen.
+    let cancelled = false;
+    const timer = setTimeout(
+      () => {
+        (async () => {
+          const mermaid = await loadMermaid();
+          if (cancelled) return;
+          for (const candidate of streamingCandidates(trimmed)) {
+            let valid = false;
+            try {
+              valid = (await mermaid.parse(candidate, { suppressErrors: true })) !== false;
+            } catch {
+              valid = false;
+            }
+            if (!valid) continue;
+            try {
+              const { svg: rendered } = await mermaid.render(`mermaid-${++diagramId}`, candidate);
+              if (cancelled) return;
+              lastRenderAtRef.current = Date.now();
+              if (candidate === trimmed) lastRenderedRef.current = trimmed;
+              setSvg(rendered);
+              setError(null);
+            } catch {
+              // keep the last good preview
+            }
+            return;
+          }
+        })();
+      },
+      Math.max(0, LIVE_THROTTLE_MS - (Date.now() - lastRenderAtRef.current)),
     );
-  }
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [code, streaming]);
 
   if (error) {
     return (
@@ -347,10 +397,16 @@ export const MermaidDiagram = memo(function MermaidDiagram({
           'cursor-zoom-in hover:bg-secondary/30 transition-colors',
           className,
         )}
-        dangerouslySetInnerHTML={{ __html: svg }}
         onClick={() => setZoomOpen(true)}
         title="Click to zoom"
-      />
+      >
+        <div className="mermaid-svg-host" dangerouslySetInnerHTML={{ __html: svg }} />
+        {streaming && (
+          <span className="pointer-events-none absolute bottom-1.5 right-2 rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">
+            rendering…
+          </span>
+        )}
+      </div>
       {zoomOpen && (
         <DiagramZoomOverlay svg={svg} onClose={() => setZoomOpen(false)} />
       )}

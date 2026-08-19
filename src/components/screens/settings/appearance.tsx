@@ -1,5 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
+import { useShallow } from 'zustand/react/shallow';
 import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
 import { Segmented } from '@/components/ui/segmented';
@@ -60,11 +61,17 @@ export function getTerminalTheme(themeId: string): Record<string, string> {
 
 /** The content without the header. */
 export function AppearanceContent() {
-  const { fontScale, terminalTheme, terminalFontSize, appTheme, setAppearance } = useUi();
+  const { fontScale, terminalTheme, terminalFontSize, appTheme, setAppearance } = useUi(
+    useShallow((s) => ({
+      fontScale: s.fontScale,
+      terminalTheme: s.terminalTheme,
+      terminalFontSize: s.terminalFontSize,
+      appTheme: s.appTheme,
+      setAppearance: s.setAppearance,
+    })),
+  );
   const sidebarMode = useUi((s) => s.sidebarMode);
   const setSidebarMode = useUi((s) => s.setSidebarMode);
-  const reasoningView = useUi((s) => s.reasoningView);
-  const setReasoningView = useUi((s) => s.setReasoningView);
   const chatView = useUi((s) => s.chatView);
   const setChatView = useUi((s) => s.setChatView);
 
@@ -168,6 +175,7 @@ export function AppearanceContent() {
           <SettingsRow
             title="Turn view"
             description="Compact groups thinking and process into collapsible sections. Stream shows every block inline in the order it was emitted."
+            last
           >
             <Segmented
               size="sm"
@@ -176,21 +184,6 @@ export function AppearanceContent() {
               options={[
                 { value: 'compact', label: 'Compact' },
                 { value: 'stream', label: 'Stream' },
-              ]}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title="Thinking view"
-            description="Flat shows reasoning as one collapsible block. Phased groups it into Planning → Search → Coding → Verifying segments."
-            last
-          >
-            <Segmented
-              size="sm"
-              value={reasoningView}
-              onChange={setReasoningView}
-              options={[
-                { value: 'flat', label: 'Flat' },
-                { value: 'phased', label: 'Phased' },
               ]}
             />
           </SettingsRow>

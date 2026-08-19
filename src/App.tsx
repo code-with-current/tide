@@ -17,7 +17,9 @@ function App() {
   const screen = useUi((s) => s.screen);
 
   // Apply persisted appearance settings on mount.
-  const { fontScale, reduceMotion, appTheme } = useUi();
+  const fontScale = useUi((s) => s.fontScale);
+  const reduceMotion = useUi((s) => s.reduceMotion);
+  const appTheme = useUi((s) => s.appTheme);
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontScale}px`;
     document.documentElement.setAttribute('data-theme', appTheme);

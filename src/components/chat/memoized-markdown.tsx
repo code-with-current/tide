@@ -66,7 +66,11 @@ const MarkdownBlock = memo(
         // and re-surfaces the language as a floating badge). Line numbers on.
         controls={{ code: { copy: true, download: false } }}
         lineNumbers
-        animated={!isStreamingBlock}
+        animated={
+          isStreamingBlock
+            ? { animation: 'blurIn', duration: 420, easing: 'cubic-bezier(0.22,0.61,0.25,1)', sep: 'word' }
+            : { animation: 'fadeIn', duration: 300 }
+        }
         className={className}
       >
         {text}
@@ -115,14 +119,15 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
         // directly instead of passing it to Streamdown (which would
         // render it as a syntax-highlighted code block).
         if (mermaid) {
-          // Render as streaming (placeholder) when:
-          //  - the fence is still open (closing ``` not yet received), OR
-          //  - this is the last block and the whole message is still streaming.
-          const isStreaming =
-            !mermaid.closed || (streaming && i === lastIndex);
+          // Live-preview while the fence is open. Once closed the source is
+          // final, so render immediately even if the message is still streaming.
+          const isStreaming = streaming && !mermaid.closed;
           return (
             <MermaidDiagram
-              key={entry.key}
+              // Stable key while the fence is open: the content hash changes
+              // with every delta, and a remount would reset the live-render
+              // throttle. Switch to the content hash once closed.
+              key={mermaid.closed ? entry.key : `mermaid-open-${i}`}
               code={mermaid.code}
               streaming={isStreaming}
             />

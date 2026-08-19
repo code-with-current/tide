@@ -280,15 +280,17 @@ export function MainScreen() {
           ),
         );
         setHistorySessionId(activeSessionId);
+        // First load of a session (nothing cached): hydrate autonomy/thinking
+        // from the persisted record. On re-fetches prefer the cache —
+        // setAutonomyMode/setThinkingLevel write it synchronously, so a
+        // mid-turn escalation (e.g. 'plan' → 'edit' via permission card)
+        // survives even though the persisted record hasn't caught up yet.
+        const hasCachedSettings = !!useUi.getState().sessionSettings[activeSessionId];
         applySessionSettings(activeSessionId, {
           modelId: s.modelId,
           providerId: s.providerId,
-          // Prefer the cached settings for autonomy mode — setAutonomyMode
-          // writes the cache synchronously, so a mid-turn escalation (e.g.
-          // 'plan' → 'edit' via permission card) survives this re-fetch even
-          // though the persisted record hasn't caught up yet.
-          autonomyMode: undefined,
-          thinkingLevel: undefined,
+          autonomyMode: hasCachedSettings ? undefined : s.autonomyMode,
+          thinkingLevel: hasCachedSettings ? undefined : s.thinkingLevel,
         });
       }
       setSessionLoading(false);
@@ -503,6 +505,16 @@ export function MainScreen() {
         // activeDraftId, and consumeDraft keys off it, so the promoted draft
         // would survive in the sidebar list.
         useUi.getState().consumeDraft();
+        // Seed the per-session settings cache with what createSession just
+        // persisted. Without this, setActiveSession's cache-miss branch resets
+        // the composer to defaults (ask/medium) — losing the thinking level
+        // (and autonomy mode) picked on the new-session screen.
+        useUi.getState().applySessionSettings(newSession.id, {
+          modelId: selectedModelId,
+          providerId: selectedProviderId,
+          autonomyMode,
+          thinkingLevel,
+        });
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
         // Title generation moved below — it must run AFTER addMessage persists
@@ -810,6 +822,39 @@ export function MainScreen() {
     markSessionUnread,
     markSessionRead,
   ]);
+
+  // Idle-session drain — a synthetic queued message (background dispatch
+  // result) can land AFTER the turn already ended, so the freeze effect
+  // above never fires for it. Send it through the same handleSend path the
+  // freeze effect's drainQueue uses. Only the active session: handleSend
+  // persists + streams into the session it's called on, so draining another
+  // session's synthetic message here would misroute it. Non-active sessions
+  // keep theirs queued until that session's next turn ends (normal drain).
+  // The busy flag serializes parallel dispatch results — without it, two
+  // results completing together would race two handleSend calls into one
+  // session; the runner-up synthetics drain when the started turn ends.
+  const syntheticDrainBusyRef = useRef(false);
+  const drainSyntheticRef = useRef<() => void>(() => {});
+  drainSyntheticRef.current = () => {
+    const sid = activeSessionId;
+    if (!sid || syntheticDrainBusyRef.current) return;
+    if (useUi.getState().streams[sid]?.isStreaming) return;
+    const next = useUi.getState().queue[sid]?.find((m) => m.synthetic);
+    if (!next) return;
+    syntheticDrainBusyRef.current = true;
+    useUi.getState().removeQueuedMessage(sid, next.id);
+    void handleSendRef.current({ text: next.text, promptText: next.promptText, attachments: [] })
+      .finally(() => {
+        syntheticDrainBusyRef.current = false;
+        drainSyntheticRef.current();
+      });
+  };
+  const pendingSyntheticCount = useUi((s) =>
+    activeSessionId ? (s.queue[activeSessionId] ?? []).filter((m) => m.synthetic).length : 0,
+  );
+  useEffect(() => {
+    if (pendingSyntheticCount) drainSyntheticRef.current();
+  }, [pendingSyntheticCount]);
 
   // Persist the active session/workspace to the main-process config so the
   // app reopens to the same session on restart. Independent of localStorage

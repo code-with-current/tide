@@ -113,7 +113,7 @@ export function ChatComposer({
   // or while a turn is in flight — the persisted history may not yet include the
   // just-submitted message, so isStreaming covers the gap before first persistence.
   const modelLocked =
-    !!sessionId && (!!inProgress || !!(activeSession && activeSession.messages.length > 0));
+    !!sessionId && (!!inProgress || !!(activeSession && (activeSession.messageCount ?? 0) > 0));
 
   // Thinking support — hide the selector entirely when the model doesn't support reasoning.
   const selectedModelId = useUi((s) => s.selectedModelId);
