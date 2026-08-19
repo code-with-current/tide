@@ -2,7 +2,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { ToolResult, ToolRegistration } from './types';
-import type { ToolContext } from './tool-context';
+import type { ToolContext, SkillSummary } from './tool-context';
 import { withPermission } from '../permission-wrapper';
 import { runReadFile } from './read-file';
 
@@ -61,14 +61,59 @@ export const loadSkillTool: ToolRegistration = {
 
 // ─── SDK factory (Phase 3+) ─────────────────────────────────────────────
 
+/** Char budget for full (name + path + description) catalog lines. Past it,
+ *  entries degrade to name + path only — matching Claude Code's policy of
+ *  dropping descriptions first rather than omitting skills outright. */
+const CATALOG_FULL_BUDGET = 4_000;
+/** Hard entry cap. Beyond this the catalog ends with an omission count — the
+ *  model can't load what it can't name, so names are kept as far as possible. */
+const CATALOG_MAX_ENTRIES = 120;
+/** Per-description clamp. Descriptions are the file's first line and usually
+ *  short, but a stray heading-less paragraph must not eat the whole budget. */
+const CATALOG_DESC_CLAMP = 160;
+
+/** Render the skill catalog for the load_skill tool description, budgeted:
+ *  full lines while under CATALOG_FULL_BUDGET, name+path lines after, and an
+ *  omission note past CATALOG_MAX_ENTRIES. Pure and deterministic. */
+export function buildSkillCatalogMd(skills: SkillSummary[]): string {
+  const lines: string[] = [];
+  let used = 0;
+  let full = true;
+  for (let i = 0; i < skills.length; i++) {
+    if (i >= CATALOG_MAX_ENTRIES) {
+      lines.push(`(+${skills.length - CATALOG_MAX_ENTRIES} more skills not listed)`);
+      break;
+    }
+    const s = skills[i];
+    const desc = s.description.replace(/\s+/g, ' ').trim().slice(0, CATALOG_DESC_CLAMP);
+    const fullLine = desc ? `- **${s.name}** (${s.absPath}): ${desc}` : `- **${s.name}** (${s.absPath})`;
+    if (full && used + fullLine.length > CATALOG_FULL_BUDGET) full = false;
+    const line = full ? fullLine : `- **${s.name}** (${s.absPath})`;
+    used += line.length + 1;
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
 export function createLoadSkillTool(ctx: ToolContext) {
+  const base =
+    'Load and activate a skill by reading its SKILL.md file. Call this when the user ' +
+    'invokes a skill via /name, or when a skill listed below matches the task — BEFORE ' +
+    'falling back to your default approach. Returns the skill\'s full instructions — ' +
+    'read and follow them before proceeding with any other action.';
+  const catalog = ctx.skills?.length ? buildSkillCatalogMd(ctx.skills) : '';
+  const description =
+    base +
+    (catalog
+      ? '\n\n# Available skills\n' + catalog +
+        '\n\nOnly use skills from this list — never invent or guess skill names or paths. ' +
+        'If a skill\'s instructions already appear under "# Active Skills" in the system ' +
+        'prompt, it is loaded: do NOT call this tool for it again.'
+      : ' No skills are installed for this workspace.');
   return tool({
-    description:
-      'Load and activate a skill by reading its SKILL.md file. Call this when the user ' +
-      'invokes a skill via /name, or when a skill matches the task. Returns the skill\'s ' +
-      'full instructions — read and follow them before proceeding with any other action.',
+    description,
     inputSchema: z.object({
-      path: z.string().describe('Absolute path to the skill\'s SKILL.md file.'),
+      path: z.string().describe('Absolute path to the skill\'s SKILL.md file, from the Available skills list.'),
     }),
     execute: async ({ path }) =>
       withPermission(ctx, 'load_skill', { path }, () => runLoadSkill(path, ctx.workspaceRoot)),

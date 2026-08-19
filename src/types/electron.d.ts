@@ -189,6 +189,8 @@ declare global {
 
       // Sessions
       listSessions(workspaceId: string): Promise<any[]>;
+      /** Sub-agent dispatch child headers for a parent session, newest first. */
+      listDispatches(parentId: string): Promise<any[]>;
       /** Built-in sub-agents for the @mention picker + dispatch_agent tool catalog. */
       listAgents(): Promise<{ name: string; description: string; whenToUse: string }[]>;
       /** Project-level entries (CLAUDE.md / AGENT.md + .claude|.agent/skills|agents).
@@ -228,8 +230,8 @@ declare global {
       clearAllSessions: () => Promise<{ ok: boolean }>;
       renameSession(sessionId: string, title: string): Promise<void>;
       generateSessionTitle(sessionId: string): Promise<string | null>;
-      getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean }>;
-      updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean }>;
+      getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
+      updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
       getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
       updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
       archiveSession(sessionId: string): Promise<void>;

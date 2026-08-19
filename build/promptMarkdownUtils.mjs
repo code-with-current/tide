@@ -93,6 +93,8 @@ function buildAgentBundle() {
     const allowedToolsMatch = raw.match(/allowedTools:\s*"([^"]+)"/);
     const maxStepsMatch = raw.match(/maxSteps:\s*(\d+)/);
     const thinkingLevelMatch = raw.match(/thinkingLevel:\s*"([^"]+)"/);
+    const canDispatchMatch = raw.match(/canDispatch:\s*"([^"]+)"/);
+    const hiddenMatch = raw.match(/hidden:\s*(true|false)/);
     // Strip frontmatter for the prompt content.
     const content = raw.replace(/^<!--[\s\S]*?-->\s*/, '').trim();
 
@@ -104,6 +106,12 @@ function buildAgentBundle() {
       allowedTools: allowedToolsMatch ? allowedToolsMatch[1].split(',').map(s => s.trim()) : undefined,
       maxSteps: maxStepsMatch ? parseInt(maxStepsMatch[1]) : undefined,
       thinkingLevel: thinkingLevelMatch ? thinkingLevelMatch[1] : undefined,
+      canDispatch: canDispatchMatch
+        ? (canDispatchMatch[1].trim() === '*'
+            ? 'all'
+            : canDispatchMatch[1].split(',').map((s) => s.trim()).filter(Boolean))
+        : undefined,
+      hidden: hiddenMatch ? hiddenMatch[1] === 'true' : undefined,
     });
   }
 
@@ -124,29 +132,29 @@ export interface BundledAgent {
   allowedTools?: string[];
   maxSteps?: number;
   thinkingLevel?: string;
+  canDispatch?: string[] | 'all';
+  hidden?: boolean;
 }
 
 export const BUNDLED_AGENTS: BundledAgent[] = ${JSON.stringify(agents, null, 2)};
 
-/** Pre-assembled agent list for the system prompt (dispatch ordering + descriptions). */
+/** Pre-assembled agent list for the system prompt (dispatch triggers + descriptions). */
 export const AGENT_LIST_MD = ${JSON.stringify(
-  '# Sub-agents — dispatch for multi-step work\n' +
-  'Sub-agents run one focused LLM call with a role-tuned prompt and return a report. You stay responsible for acting on findings.\n\n' +
-  '**Dispatch order:**\n' +
-  '1. \`general-purpose\` FIRST — analyze task, break into subtasks, produce execution plan\n' +
-  '2. \`explore\` SECOND — locate files, symbols, call sites\n' +
-  '3. Specialists THIRD — domain experts as needed\n' +
-  '4. Act LAST — make edits yourself using the reports\n\n' +
-  '**When NOT to dispatch:**\n' +
-  '- You already know the answer from prior context\n' +
-  '- Single targeted lookup (one read_file, one grep)\n' +
-  '- User explicitly wants you to do it directly\n\n' +
+  '# Sub-agents — dispatch them\n' +
+  'Sub-agents are multi-step specialists with their own tool loop — they investigate in their own context window and return a report, keeping yours small. Dispatch is cheap: issue it, keep working, read the report when it lands.\n\n' +
+  '**Dispatch when:**\n' +
+  '- The work is a multi-step investigation across many files (broad question, unknown locations)\n' +
+  '- A specialty matches the job — \`code-reviewer\` for reviewing a diff, \`simplifier\` for a cleanup pass, \`explore\` for locating code, \`general-purpose\` when nothing narrower fits\n' +
+  '- Several independent subtasks could run at once — dispatch them together in one response; they run in parallel\n' +
+  '- The research would flood your context but only the conclusions matter\n\n' +
+  '**Skip dispatch when:** you already know the answer, it is one targeted read/grep, or the user asked you to do it directly.\n\n' +
   '**Available agents:**\n' +
   agents.map((a) => '- **' + a.name + '** — ' + a.whenToUse).join('\n') + '\n\n' +
   '**How to dispatch well:**\n' +
   '- Pass a self-contained \`task\` — the agent sees only that string, not prior conversation\n' +
-  '- Use the report as input to your next step; if incomplete, dispatch again with sharper instructions\n' +
-  '- You may dispatch multiple agents in parallel for independent subtasks'
+  '- Prefer the specialist over general-purpose when one fits; dispatch several specialists in parallel rather than one generic agent sequentially\n' +
+  '- Use the report as input to your next step; if incomplete, resume the same agent with \`resumeFrom\` and sharper instructions\n' +
+  '- You make the edits yourself from the reports — except \`simplifier\`, which applies its own fixes'
 )};
 `;
 

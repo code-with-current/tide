@@ -535,6 +535,55 @@ body {
   50% { opacity: 1; }
 }
 
+/* Globe loader — pixel rings orbit around the center. */
+@keyframes pixel-spin {
+  from { transform: rotate(0deg) scaleY(var(--pixel-spin-y, 1)); }
+  to { transform: rotate(360deg) scaleY(var(--pixel-spin-y, 1)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="pixel-spin"] { animation: none !important; }
+}
+
+/* chat-v2 tool-chips entrance animations */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="fade-up"], [style*="pop-in"], [style*="fade-in"] { animation: none !important; }
+}
+
+/* Streamdown word-level streaming animation. Streamdown's animate plugin emits
+   inline `animation: sd-<name>` plus --sd-duration/--sd-easing/--sd-delay vars;
+   the inline shorthand forces 0s duration, so the longhands must !important
+   past it. `both` fill keeps words hidden through their stagger delay. */
+[data-sd-animate] {
+  animation-duration: var(--sd-duration, 420ms) !important;
+  animation-timing-function: var(--sd-easing, ease) !important;
+  animation-delay: var(--sd-delay, 0ms) !important;
+  animation-fill-mode: both;
+  will-change: filter, opacity;
+}
+@keyframes sd-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sd-blurIn {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sd-animate] { animation: none !important; }
+}
+
 /* Title shimmer — applied to a session title while its LLM-generated name is
    in flight. A muted→ink→muted gradient sweeps across clipped text so the
    title reads as "thinking" without a spinner. */
@@ -1191,6 +1240,13 @@ body {
   background: var(--color-surface-2);
   font-weight: 600;
 }
+/* Each markdown block renders in its own Streamdown root div whose wrapper
+   margin (0.6em) is the uniform inter-block gap. Element-level margins at the
+   edges of a block (table 0.85em, hr 1.2em, heading 1.4em…) collapse through
+   the wrapper and override it — making gaps differ block-to-block and shift
+   mid-stream as the last block settles. Neutralize them at the wrapper. */
+.prose-chat > div > :first-child { margin-top: 0; }
+.prose-chat > div > :last-child { margin-bottom: 0; }
 
 :root {
     --sidebar: hsl(0 0% 98%);

@@ -13,6 +13,7 @@ import { multiEditTool } from './multi-edit';
 import { writeFileTool } from './write-file';
 import { globTool } from './glob';
 import { gitTool } from './git';
+import { gitRepoTool } from './git-repo';
 import { bashOutputTool, killShellTool } from './background-shell';
 import { dispatchAgentTool } from './dispatch-agent';
 import { todoWriteTool } from './todo-write';
@@ -41,6 +42,7 @@ import { createWebSearchTool } from './web-search';
 import { createMultiEditTool } from './multi-edit';
 import { createNotebookEditTool } from './notebook-edit';
 import { createGitTool } from './git';
+import { createGitRepoTool } from './git-repo';
 import { createBashOutputTool, createKillShellTool } from './background-shell';
 import { createTodoWriteTool } from './todo-write';
 import { createExitPlanModeTool } from './exit-plan-mode';
@@ -77,7 +79,7 @@ const REGISTRY: Record<string, ToolRegistration> = {
   bash_output: bashOutputTool,
   kill_shell: killShellTool,
   git: gitTool,
-  // Web
+  git_repo: gitRepoTool,
   web_fetch: webFetchTool,
   web_search: webSearchTool,
   // Agent system
@@ -164,6 +166,7 @@ const FACTORIES = {
   multi_edit: createMultiEditTool,
   notebook_edit: createNotebookEditTool,
   git: createGitTool,
+  git_repo: createGitRepoTool,
   bash_output: createBashOutputTool,
   kill_shell: createKillShellTool,
   todo_write: createTodoWriteTool,

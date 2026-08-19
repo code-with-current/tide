@@ -23,6 +23,7 @@ import { initLogger, createLogger } from './logger.js';
 import { registerIpcHandlers, bootstrapCatalog } from './ipc/handlers.js';
 import { registerChatHandlers } from './ipc/chat.js';
 import { registerAgentSdkHandlers, abortAllTurns } from './agent/orchestrator.js';
+import { getSessionStore } from './ipc/sessions.js';
 import { registerScriptHandlers, killAllScripts } from './ipc/scripts.js';
 import { killAllBackgroundShells } from './agent/tools/background-shell.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
@@ -285,4 +286,14 @@ app.on('before-quit', () => {
   abortAllTurns();
   killAllScripts();
   killAllBackgroundShells();
+  // Background dispatches outlive their turn — mark still-running ones
+  // interrupted so their rows don't read "running" after restart. They are
+  // NOT resumed; interrupted dispatches inject nothing on next launch.
+  try {
+    for (const s of getSessionStore().listAllDispatches()) {
+      if (s.kind === 'subagent' && s.dispatch?.status === 'running') {
+        getSessionStore().setDispatchStatus(s.id, 'interrupted');
+      }
+    }
+  } catch { /* store unavailable — nothing to mark */ }
 });

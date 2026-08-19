@@ -11,9 +11,9 @@ export function CompactingIndicator() {
     <div
       role="status"
       aria-live="polite"
-      className="group relative pl-3 py-2 animate-slide-up"
+      className="group relative pl-3 py-[5px] animate-slide-up"
     >
-      <div className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-primary/40" />
+      <div className="absolute left-0 top-[5px] bottom-[5px] w-[2px] rounded-full bg-primary/40" />
 
       <div className="flex items-center gap-3">
         {/* Animated compaction bars */}

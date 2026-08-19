@@ -54,6 +54,9 @@ export interface QueuedMessage {
    *  to the orchestrator when the queue drains. Undefined when there are no
    *  attachments (falls back to `text`). */
   promptText?: string;
+  /** System-generated (background dispatch result), not user-typed: no drag/
+   *  edit/send-now affordances, rendered with a ↻ glyph. */
+  synthetic?: boolean;
   createdAt: number;
 }
 
@@ -427,7 +430,7 @@ interface UiState {
   removeStream: (sessionId: string) => void;
 
   // Queue actions
-  enqueueMessage: (sessionId: string, text: string, promptText?: string) => void;
+  enqueueMessage: (sessionId: string, text: string, promptText?: string, synthetic?: boolean) => void;
   removeQueuedMessage: (sessionId: string, id: string) => void;
   editQueuedMessage: (sessionId: string, id: string, text: string) => void;
   reorderQueuedMessages: (sessionId: string, ids: string[]) => void;
@@ -962,11 +965,11 @@ export const useUi = create<UiState>()(
       return { streams: next };
     }),
 
-  enqueueMessage: (sessionId, text, promptText) =>
+  enqueueMessage: (sessionId, text, promptText, synthetic) =>
     set((s) => {
       const next: QueuedMessage[] = [
         ...(s.queue[sessionId] ?? []),
-        { id: `q_${Math.random().toString(36).slice(2, 9)}`, text, promptText, createdAt: Date.now() },
+        { id: `q_${Math.random().toString(36).slice(2, 9)}`, text, promptText, ...(synthetic ? { synthetic } : {}), createdAt: Date.now() },
       ];
       return { queue: { ...s.queue, [sessionId]: next } };
     }),
@@ -1198,7 +1201,7 @@ export const useUi = create<UiState>()(
   appTheme: 'tide',
 
   // ─── Chat stream ──────────────────────────────────────────────
-  reasoningView: 'flat',
+  reasoningView: 'phased',
   chatView: 'compact',
   setAppearance: (patch) => {
     set(patch);
@@ -1284,7 +1287,6 @@ export const useUi = create<UiState>()(
         terminalTheme: s.terminalTheme,
         terminalFontSize: s.terminalFontSize,
         appTheme: s.appTheme,
-        reasoningView: s.reasoningView,
         chatView: s.chatView,
         diffMode: s.diffMode,
         activeTerminal: s.activeTerminal,

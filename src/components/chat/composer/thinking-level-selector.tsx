@@ -92,6 +92,18 @@ function snapToOptions(level: ThinkingLevel, options: LevelOption[]): LevelOptio
   return options.find((o) => RANK[o.value] >= target) ?? options[options.length - 1] ?? LEVELS[2];
 }
 
+/** Highest tier the model supports — the level pre-selected for each new
+ *  session. Falls back through the canonical tiers when the model publishes
+ *  no effort values. Null when the model can't reason at all. */
+export function highestThinkingLevelForModel(
+  model: { supportedEfforts?: string[]; reasoningContracts?: ReasoningOption[] } | undefined,
+): Exclude<ThinkingLevel, 'off'> | null {
+  if (!model) return null;
+  if (isToggleOnly(model)) return 'medium';
+  const options = buildOptions(effortsForModel(model));
+  return options[options.length - 1]?.value ?? null;
+}
+
 export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }) {
   const level = useUi((s) => s.thinkingLevel);
   const setLevel = useUi((s) => s.setThinkingLevel);

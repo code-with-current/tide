@@ -3,10 +3,13 @@
  *
  * The protocol builders (anthropic.ts / openai.ts) read
  * `ProtocolContext.maxOutputTokens` as the base output cap instead of a
- * hardcoded 8192. The arithmetic semantics are unchanged:
- *   - Anthropic: `maxOutputTokens` is the ANSWER budget only; the SDK adds
- *     `thinking.budgetTokens` on top. We do NOT add the budget here.
- *   - OpenAI: `budgetTokens + maxBase`, capped at MAX_OUTPUT_TOKENS_CAP.
+ * hardcoded 8192. The arithmetic semantics:
+ *   - Anthropic: maxBase is the WIRE TOTAL; the thinking budget is carved
+ *     out of it (the SDK stacks budgetTokens on top of maxOutputTokens, so
+ *     answer + budget must equal maxBase to respect provider caps).
+ *   - OpenAI: maxBase is the total output pool (reasoning is spent inside
+ *     it server-side via reasoning_effort); the 65535 cap applies to
+ *     Gemini-backed endpoints only.
  * The builders stay pure (no catalog import) — the caller resolves the cap
  * and threads it in via ctx.
  */
@@ -25,23 +28,22 @@ describe('protocol maxOutputTokens from catalog context', () => {
     const r = anthropicCallOptions(null);
     expect(r.maxOutputTokens).toBe(8192);
   });
-  it('openai uses ctx.maxOutputTokens as the base (thinking on, under cap)', () => {
+  it('openai uses ctx.maxOutputTokens as the total (thinking on, non-gemini)', () => {
     const ctx: ProtocolContext = { hasTools: false, maxOutputTokens: 64000 };
     const r = openaiCallOptions({ budgetTokens: 8000 }, ctx);
-    // budgetTokens + maxBase, capped at 65535
-    expect(r.maxOutputTokens).toBe(Math.min(8000 + 64000, 65535));
+    // The effort string carries no token count — no stacking, no universal cap.
+    expect(r.maxOutputTokens).toBe(64000);
   });
   it('openai falls back to 8192 base when ctx has no maxOutputTokens', () => {
     const r = openaiCallOptions({ budgetTokens: 8000 });
-    expect(r.maxOutputTokens).toBe(Math.min(8000 + 8192, 65535));
+    expect(r.maxOutputTokens).toBe(8192);
   });
-  it('openai tools-present branch still respects ctx.maxOutputTokens and cap', () => {
+  it('openai tools-present branch still respects ctx.maxOutputTokens', () => {
     // The hasTools branch raises the output floor (16K) for tool-call args
-    // but still applies reasoning_effort for non-Gemini models, min'd
-    // against MAX_OUTPUT_TOKENS_CAP.
+    // but still applies reasoning_effort for non-Gemini models.
     const ctx: ProtocolContext = { hasTools: true, maxOutputTokens: 70000 };
     const r = openaiCallOptions({ budgetTokens: 8000 }, ctx);
-    expect(r.maxOutputTokens).toBe(Math.min(8000 + 70000, 65535)); // = 65535
+    expect(r.maxOutputTokens).toBe(70000);
     expect(r.label).toContain('reasoning_effort');
   });
 });

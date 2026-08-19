@@ -17,6 +17,7 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
     case 'tool_call':          return applyToolArgs(state, event);
     case 'tool_executing':     return applyToolStatus(state, event, 'running');
     case 'tool_result':        return applyToolResult(state, event);
+    case 'dispatch_result':    return applyDispatchResult(state, event);
     case 'usage':              return { ...state, usage: event.tokens, iteration: event.iteration };
     // permission_required is owned by applyLegacyEvent (useChatStream) — it's a
     // legacy field, not part of the block model. Handling it here too meant
@@ -180,6 +181,38 @@ function applyToolResult(state: SessionStream, e: Extract<AgentEvent, { type: 't
     meta: e.meta,
     modifiedAtSeq: e.seq,
   };
+  return { ...state, blocks: next };
+}
+
+// ─── Background dispatch finished: fold the terminal state onto its row ──
+
+function applyDispatchResult(state: SessionStream, e: Extract<AgentEvent, { type: 'dispatch_result' }>): SessionStream {
+  const blocks = state.blocks ?? [];
+  let touched = false;
+  const next = blocks.map((b) => {
+    if (b.kind !== 'tool') return b;
+    const d = b.display;
+    if (d?.kind !== 'agent' || d.dispatchId !== e.dispatchId || d.backgroundState === e.state) return b;
+    touched = true;
+    return { ...b, display: { ...d, backgroundState: e.state }, modifiedAtSeq: e.seq };
+  });
+  if (touched) return { ...state, blocks: next };
+  // A background row returns before its child session exists, so its display
+  // never carries the dispatchId the event matches on — fall back to the
+  // session's single id-less still-running background row. More than one
+  // candidate is ambiguous; leave them untouched rather than guess.
+  const candidateIdxs = next
+    .map((b, i) => {
+      if (b.kind !== 'tool' || b.display?.kind !== 'agent') return -1;
+      const d = b.display;
+      return d.background === true && !d.dispatchId && !d.backgroundState ? i : -1;
+    })
+    .filter((i) => i >= 0);
+  if (candidateIdxs.length !== 1) return state;
+  const i = candidateIdxs[0];
+  const b = next[i];
+  if (b.kind !== 'tool' || b.display?.kind !== 'agent') return state;
+  next[i] = { ...b, display: { ...b.display, backgroundState: e.state }, modifiedAtSeq: e.seq };
   return { ...state, blocks: next };
 }
 

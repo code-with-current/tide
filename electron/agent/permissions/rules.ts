@@ -57,10 +57,14 @@ export function loadPermissionRules(workspaceRoot: string): RuleSet {
 
 /** The primary arg used for argPattern matching, per tool. */
 export function primaryArg(toolName: string, args: Record<string, unknown>): string | null {
-  const a = args as { command?: string; args?: string[]; url?: string; query?: string; path?: string; pattern?: string };
+  const a = args as { command?: string; args?: string[]; url?: string; query?: string; path?: string; pattern?: string; name?: string; repo?: string };
   switch (toolName) {
     case 'bash':
       return typeof a.command === 'string' ? a.command : null;
+    case 'dispatch_agent':
+      return typeof a.name === 'string' ? a.name : null;
+    case 'git_repo':
+      return typeof a.repo === 'string' ? a.repo : null;
     case 'git':
       return Array.isArray(a.args) ? a.args.join(' ') : null;
     case 'web_fetch':

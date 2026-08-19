@@ -9,6 +9,7 @@ import {
   type SessionStore,
   type StoredMessage,
   type StoredSession,
+  type SessionHeader,
   type ArchivedHeader,
 } from './sessionStore.js';
 
@@ -26,12 +27,13 @@ import {
 // these agent modules do not import ipc/sessions.
 import { clearSessionRules } from '../agent/permissions/rules.js';
 import { clearSession as clearPermissionSession } from '../agent/permission-resolver.js';
+import { abortSession, abortAllSessions } from '../agent/session-abort.js';
 import type { Block } from '../../src/types/block.js';
 import type { ActivityEvent } from '../../src/types/index.js';
 import { appDataDir } from '../appPaths.js';
 
 // Re-export types so existing callers don't break.
-export type { StoredMessage, StoredSession, ArchivedHeader };
+export type { StoredMessage, StoredSession, SessionHeader, ArchivedHeader };
 
 export interface HydratedSession extends StoredSession {
   autonomyMode: 'ask' | 'plan' | 'edit' | 'full';
@@ -213,8 +215,15 @@ export async function removeWorktree(sessionId: string): Promise<void> {
 
 // ── Public API (identical to the pre-rewrite signatures) ──
 
-export function listSessions(workspaceId: string): HydratedSession[] {
-  return store().listSessions(workspaceId).map(hydrate);
+/** Headers only — no message bodies cross the IPC boundary for lists.
+ *  Full sessions come from getSession on demand. */
+export function listSessions(workspaceId: string): SessionHeader[] {
+  return store().listSessions(workspaceId);
+}
+
+/** Sub-agent dispatch child headers for a parent session, newest first. */
+export function listDispatches(parentId: string): SessionHeader[] {
+  return store().listDispatches(parentId);
 }
 
 export function getSession(id: string): HydratedSession | undefined {
@@ -295,17 +304,20 @@ export function addMessage(sessionId: string, role: StoredMessage['role'], conte
 export function deleteSession(id: string): void {
   store().deleteSession(id);
   // Real session end: drop session-scoped "always allow" rules + any stale
-  // permission-resolver state. Reachable from the delete button, ⌘⌫, and the
+  // permission-resolver state, and kill background dispatches bound to this
+  // session's signal. Reachable from the delete button, ⌘⌫, and the
   // workspace-delete cascade. Best-effort — never fail the deletion over this.
   try {
     clearSessionRules(id);
     clearPermissionSession(id);
+    abortSession(id);
   } catch {
     /* agent layer optional/unavailable — deletion already succeeded */
   }
 }
 
 export function clearAllSessions(): void {
+  abortAllSessions();
   store().clearAllSessions();
 }
 

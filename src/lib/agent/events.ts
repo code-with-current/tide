@@ -132,6 +132,20 @@ export interface PermissionRequiredEvent extends AgentEventBase {
   timeoutAt: number;
 }
 
+/** A background dispatch finished. The renderer turns this into a queued
+ *  synthetic message so the parent turn picks it up via the queue drain. */
+export interface DispatchResultEvent extends AgentEventBase {
+  type: 'dispatch_result';
+  /** The child dispatch session id (matches the ToolDisplay agent payload). */
+  dispatchId: string;
+  /** Dispatch title, when the model provided one. */
+  title?: string;
+  /** Terminal state — 'error' injects a task_error report, 'completed' a task_result. */
+  state: 'completed' | 'error';
+  /** The sub-agent's report (already redacted). */
+  report: string;
+}
+
 /** Per-call usage by token class + running totals. */
 export interface UsageEvent extends AgentEventBase {
   type: 'usage';
@@ -239,6 +253,7 @@ export type AgentEvent =
   | ToolResultEvent
   | FollowupRequiredEvent
   | PermissionRequiredEvent
+  | DispatchResultEvent
   | UsageEvent
   | TurnEndEvent
   | RetryEvent

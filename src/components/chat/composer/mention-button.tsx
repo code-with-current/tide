@@ -6,9 +6,6 @@ import { cn } from '@/lib/utils';
 import * as api from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
 import { Button } from '@/components/ui/button';
-import { createLogger } from '@/lib/logger';
-
-const log = createLogger('useMentionCatalog');
 
 type MentionKind = 'agent' | 'skill' | 'mcp' | 'context';
 
@@ -92,18 +89,6 @@ export function useMentionCatalog(activeWorkspaceId: string | null): Mention[] {
     api.listProjectEntries(activeWorkspaceId)
       .then((entries) => {
         if (cancelled) return;
-        // DIAGNOSTIC: log source breakdown so we can verify project
-        // skills are reaching the renderer. Remove once verified.
-        const projectSkills = entries.skills.filter(s => s.source === 'project');
-        const userSkills = entries.skills.filter(s => s.source === 'user');
-        log.debug('catalog', {
-          workspace: activeWorkspaceId,
-          contextFiles: entries.contextFiles.length,
-          projectSkills: projectSkills.length,
-          userSkills: userSkills.length,
-          projectSkillNames: projectSkills.map(s => s.name),
-          agents: entries.agents.length,
-        });
         setProjectEntries(entries);
       })
       .catch(() => {});

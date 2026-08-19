@@ -25,6 +25,15 @@ Include:
 - Repo etiquette (branch conventions, commit message format, PR process)
 - Gotchas (e.g. "don't edit files in X directory", "the DB must be running for tests")
 
+Handling existing rule files:
+- If .cursorrules, CLAUDE.md, .github/copilot-instructions.md, or similar AI rule files exist, fold their still-relevant rules INTO AGENTS.md instead of leaving parallel instruction sources — one canonical file the agent actually reads. Note what you consolidated.
+- When creating AGENTS.md fresh, incorporate the content of those existing rule files rather than starting from zero.
+- If AGENTS.md already exists, improve it in place: verify each existing rule against the codebase, add what's missing from your exploration, and flag stale entries to the user — don't rewrite from scratch.
+
+Grounding:
+- Never invent rules. Every rule must trace to something observed: a manifest script, a config value, a CI step, a README statement, or an existing rule file. If you can't cite the origin, don't write the rule.
+- Omit license, security-policy, and governance boilerplate unless the user asks for it.
+
 Exclude:
 - Generic advice ("write clean code", "handle errors properly")
 - File-by-file structure listings (the agent can read the code)

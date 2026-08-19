@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { HelpCircle, Loader2, MessageCircleReply } from 'lucide-react';
+import { MessageCircleQuestionMark, Loader2, MessageCircleReply, List } from 'lucide-react';
 import type { FollowupMode } from '@/types';
 import { useUi } from '@/lib/stores/ui';
 
@@ -74,7 +74,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
     return (
       <div className="flex items-center gap-2 py-1 text-[12px] font-mono text-muted-foreground/60">
         <Loader2 className="size-3 animate-spin" />
-        <HelpCircle className="size-3" />
+        <MessageCircleQuestionMark className="size-3" />
         <span>preparing question…</span>
       </div>
     );
@@ -107,7 +107,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
         }}
         className="flex items-center gap-2 py-1.5 px-2.5 w-full text-left bg-primary/5 border border-accent/20 rounded-md hover:bg-primary/10 transition-colors group"
       >
-        <HelpCircle className="size-3 text-primary flex-shrink-0" />
+        <MessageCircleQuestionMark className="size-3 text-primary flex-shrink-0" />
         <span className="text-xs text-muted-foreground flex-1 truncate">
           {question}
         </span>
@@ -122,7 +122,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
   // Active (popup is showing or about to show)
   if (mode.kind === 'question') {
     return (
-      <div className="text-[11px] text-muted-foreground/60 italic py-1">
+      <div className="text-[11px] text-muted-foreground/60 italic pt-[5px]">
         awaiting your reply ↓
       </div>
     );
@@ -130,10 +130,10 @@ export const FollowupPrompt = memo(function FollowupPrompt({
 
   // Mode 'options' active
   return (
-    <div className="flex items-center gap-2 py-1.5 px-2 bg-primary/5 border border-accent/20 text-[12px] font-mono text-primary">
-      <HelpCircle className="size-3" />
+    <div className="flex items-center gap-2 py-1.5 px-2 text-[0.80rem] font-mono text-primary rounded-lg w-fit">
+      <List className="size-3.5 text-warning" />
       <span>
-        {mode.options.length} options · awaiting your choice
+        {mode.options.length} Options · Awaiting your Choice
       </span>
       {mode.multiple && <span className="text-muted-foreground/60">(pick any)</span>}
     </div>

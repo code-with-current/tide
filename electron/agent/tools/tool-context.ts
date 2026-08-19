@@ -27,6 +27,13 @@ export type EmitToolEvent = (event: {
   meta?: string;
 }) => void;
 
+/** One skill from the workspace scan, for the load_skill tool-description catalog. */
+export interface SkillSummary {
+  name: string;
+  description: string;
+  absPath: string;
+}
+
 export interface ToolContext {
   sessionId: string;
   workspaceRoot: string;
@@ -56,4 +63,12 @@ export interface ToolContext {
   /** Recursion depth for sub-agent dispatch. 0 = main orchestrator, 1+ = nested.
    *  Used to prevent infinite agent-spawns-agent chains. */
   _depth?: number;
+  /** Set on sub-agent contexts: the AgentDef of the running sub-agent.
+   *  Lets dispatch_agent enforce the parent's canDispatch list. */
+  _agentDef?: import('../agents/types.js').AgentDef;
+  /** Enabled skills for this workspace (project + user, disabled filtered out).
+   *  Rendered into the load_skill tool-description catalog so the model can
+   *  discover and reach for skills autonomously. Undefined on sub-agent
+   *  contexts — sub-agents don't get the catalog. */
+  skills?: SkillSummary[];
 }

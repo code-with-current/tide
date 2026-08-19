@@ -24,7 +24,7 @@ import {
 import { useExternalApps } from '@/lib/use-external-apps';
 import * as api from '@/lib/api/client';
 import { cn } from '@/lib/utils';
-import { ThinkingOrb } from 'thinking-orbs';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 import { Tip } from '@/components/ui/quick-tooltip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -256,6 +256,7 @@ function WorkspaceTreeItem({
     [sessions],
   );
   const status = workspaceStatus(sessions, runningIds, unreadIds);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(ws.name);
   const renameWs = useRenameWorkspace();
@@ -282,14 +283,7 @@ function WorkspaceTreeItem({
               <span className={cn('text-[0.9rem] truncate flex-1 min-w-0', isActive ? 'text-sidebar-foreground font-semibold' : 'text-muted-foreground')}>{ws.name}</span>
             )}
             {status === 'in_progress' && (
-              <ThinkingOrb
-                state="composing"
-                size={20}
-                speed={2}
-                aria-label="Running"
-                className="flex-shrink-0"
-                style={{ filter: 'sepia(1) saturate(4) brightness(0.95)' }}
-              />
+              <PixelLoader variant="globe" size="xs" className="text-warning"/>
             )}
             {/*{status === 'unread' && <Dot tone="ok" />}*/}
              {(status !== 'in_progress' && status !== 'unread') && <div className="flex items-center flex-shrink-0">
@@ -324,14 +318,20 @@ function WorkspaceTreeItem({
               onSelectDraft={() => selectDraft(d.id)}
               onDelete={() => deleteDraft(d.id)} />
           ))}
-          {sorted.slice(0, 20).map((s, idx) => (
+          {(showAllSessions ? sorted : sorted.slice(0, 5)).map((s, idx, arr) => (
             <SessionTreeItem key={s.id} session={s} workspaceId={ws.id}
-              isLast={idx === Math.min(sorted.length, 20) - 1}
+              isLast={idx === arr.length - 1}
               isActive={s.id === activeSessionId} isRunning={runningIds.includes(s.id)} isUnread={unreadIds.includes(s.id)} ports={sessionPorts.get(s.id)}
               needsAttention={!!pendingOptions[s.id]}
               onSelect={() => onSelectSession(s.id)} />
           ))}
-          {sorted.length > 20 && <div style={{ paddingLeft: '25px' }} className="py-0.5 text-[0.7rem] text-muted-foreground/40">+{sorted.length - 20} more</div>}
+          {sorted.length > 5 && (
+            <button type="button" style={{ paddingLeft: '25px' }}
+              onClick={() => setShowAllSessions((v) => !v)}
+              className="py-0.5 text-[0.7rem] text-muted-foreground/60 hover:text-muted-foreground cursor-pointer">
+              {showAllSessions ? 'Show less' : `Show more (${sorted.length - 5} hidden)`}
+            </button>
+          )}
           <ArchivedSessionsSection workspaceId={ws.id} />
         </div>
       )}

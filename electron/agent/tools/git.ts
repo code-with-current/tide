@@ -107,12 +107,21 @@ export async function runGit(
   });
 }
 
+const GIT_DESCRIPTION = [
+  'Run any git subcommand in the workspace. Pass args as an array of strings.',
+  'Git safety protocol:',
+  '- Never amend after a failed pre-commit hook — the commit did not happen, so amend would modify the PREVIOUS commit. Fix the issue, re-stage, create a NEW commit.',
+  '- Stage specific files by name; never `git add -A` / `git add .` (risks secrets and large binaries).',
+  '- Never skip hooks (`--no-verify`), never force-push (especially main/master), never update git config, unless the user explicitly asks.',
+  '- Never use `-i` flags (interactive) — they hang.',
+  '- Never push unless the user explicitly asks. Do not commit files that look like secrets (.env, credentials) — warn instead.',
+].join('\n');
+
 export const gitTool: ToolRegistration = {
   name: 'git',
   definition: {
     name: 'git',
-    description:
-'Run any git subcommand in the workspace. Pass args as an array of strings.',
+    description: GIT_DESCRIPTION,
     input_schema: {
       type: 'object',
       properties: {
@@ -139,8 +148,7 @@ export const gitTool: ToolRegistration = {
 
 export function createGitTool(ctx: ToolContext) {
   return tool({
-    description:
-'Run any git subcommand in the workspace. Pass args as an array of strings.',
+    description: GIT_DESCRIPTION,
     inputSchema: z.object({
       args: z.array(z.string()).describe('Subcommand + flags, e.g. ["status", "--short"] or ["log", "-n", "5"].'),
     }),

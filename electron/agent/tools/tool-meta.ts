@@ -22,6 +22,7 @@ export const toolMeta: Record<ToolName, ToolMeta> = {
   bash_output:   { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 5_000,   category: 'commands' },
   kill_shell:    { riskTier: 'write',       autoApproveIn: WRITE_MODES, timeoutMs: 5_000, category: 'commands' },
   git:           { riskTier: 'destructive', autoApproveIn: FULL_ONLY, timeoutMs: 15_000,  category: 'commands' },
+  git_repo:      { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 120_000, category: 'exploration' },
 
   // ─── Edits ──────────────────────────────────────────────────────────
   edit_file:     { riskTier: 'write',       autoApproveIn: WRITE_MODES, timeoutMs: 30_000, category: 'edits' },
@@ -35,6 +36,7 @@ export const toolMeta: Record<ToolName, ToolMeta> = {
   directory_tree:{ riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   glob:          { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   grep:          { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
+  read_media_file:{ riskTier: 'read_only', autoApproveIn: ALL_MODES, timeoutMs: 10_000,  category: 'exploration' },
   web_fetch:     { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 15_000,  category: 'exploration' },
   web_search:    { riskTier: 'read_only',   autoApproveIn: ALL_MODES, timeoutMs: 12_000,  category: 'exploration' },
 

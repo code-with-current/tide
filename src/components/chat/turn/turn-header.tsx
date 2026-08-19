@@ -3,7 +3,7 @@ import { Check, X, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { isFailedStatus } from '@/lib/stream/block-state';
-import { ThinkingOrb } from 'thinking-orbs';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 
 /** Format ms as whole seconds: "14s", "1m30s". No sub-second/ms precision. */
 function formatDuration(ms?: number): string {
@@ -36,18 +36,7 @@ function useWallClock(startedAt?: string): string {
 export function TurnWorkingFooter({ startedAt }: { startedAt?: string }) {
   const elapsed = useWallClock(startedAt);
   return (
-    <div className="flex w-fit items-center gap-2.5 py-0.5">
-      <ThinkingOrb
-        state="composing"
-        size={20}
-        speed={2}
-        aria-label="Running"
-        className="flex-shrink-0"
-
-      />
-      <span className="animate-shimmer-title text-[13px] font-medium">Working</span>
-      <span className="font-mono text-[12px] text-muted-foreground/50 tabular-nums">{elapsed}</span>
-    </div>
+    <PixelLoader variant="sparkle" label="Working" elapsed={elapsed} className="py-2" />
   );
 }
 

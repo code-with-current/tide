@@ -150,19 +150,21 @@ function SortableItem({
       )}
     >
       {/* Drag handle */}
-      <Button
-        variant="ghost"
-        size="icon"
-        {...attributes}
-        {...listeners}
-        className="size-5 text-muted-foreground/40 hover:text-muted-foreground cursor-grab active:cursor-grabbing"
-      >
-        <GripVertical className="size-3" />
-      </Button>
+      {!item.synthetic && (
+        <Button
+          variant="ghost"
+          size="icon"
+          {...attributes}
+          {...listeners}
+          className="size-5 text-muted-foreground/40 hover:text-muted-foreground cursor-grab active:cursor-grabbing"
+        >
+          <GripVertical className="size-3" />
+        </Button>
+      )}
 
-      {/* Position number */}
+      {/* Position number (↻ for synthetic background-dispatch results) */}
       <span className="text-[10px] font-mono text-muted-foreground/40 tabular-nums w-3 text-center flex-shrink-0">
-        {index + 1}
+        {item.synthetic ? '↻' : index + 1}
       </span>
 
       {/* Text / editor */}
@@ -207,24 +209,28 @@ function SortableItem({
           </>
         ) : (
           <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setEditing(true)}
-              className="size-6 text-muted-foreground hover:text-foreground"
-              title="Edit"
-            >
-              <Pencil className="size-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onSendNow}
-              className="size-6 text-muted-foreground hover:text-primary"
-              title="Send now — jumps the queue"
-            >
-              <Send className="size-3" />
-            </Button>
+            {!item.synthetic && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setEditing(true)}
+                className="size-6 text-muted-foreground hover:text-foreground"
+                title="Edit"
+              >
+                <Pencil className="size-3" />
+              </Button>
+            )}
+            {!item.synthetic && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSendNow}
+                className="size-6 text-muted-foreground hover:text-primary"
+                title="Send now — jumps the queue"
+              >
+                <Send className="size-3" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

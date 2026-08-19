@@ -18,4 +18,11 @@ export interface AgentDef {
   /** Thinking level override for this agent. Default 'low' — sub-agents are
    *  focused specialists that don't need deep reasoning. */
   thinkingLevel?: import('../../../src/types/index.js').ThinkingLevel;
+  /** Agent names this agent may dispatch via dispatch_agent. `'all'` allows
+   *  any. Absent = cannot dispatch (dispatch_agent is stripped from its
+   *  toolset — declarative recursion, ported from opencode's model where no
+   *  built-in subagent can spawn subagents unless explicitly granted). */
+  canDispatch?: string[] | 'all';
+  /** Hide from the renderer @mention catalog while remaining dispatchable. */
+  hidden?: boolean;
 }

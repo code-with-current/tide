@@ -11,7 +11,7 @@ import {
   Globe,
   Search,
   BookOpen,
-  HelpCircle,
+  MessageCircleQuestionMark,
   ClipboardCheck,
   Minimize2,
   Plug,
@@ -46,6 +46,7 @@ const ICON: Record<ToolName, React.ReactNode> = {
   kill_shell: <Terminal className="size-3 text-muted-foreground/60" />,
   grep: <FileSearch className="size-3 text-muted-foreground/60" />,
   git: <GitBranch className="size-3 text-muted-foreground/60" />,
+  git_repo: <GitBranch className="size-3 text-muted-foreground/60" />,
   dispatch_agent: <Bot className="size-3 text-muted-foreground/60" />,
   load_skill: <BookOpen className="size-3 text-muted-foreground/60" />,
   memory: <BookOpen className="size-3 text-muted-foreground/60" />,
@@ -54,11 +55,12 @@ const ICON: Record<ToolName, React.ReactNode> = {
   web_fetch: <Globe className="size-3 text-muted-foreground/60" />,
   web_search: <Search className="size-3 text-muted-foreground/60" />,
   notebook_edit: <BookOpen className="size-3 text-muted-foreground/60" />,
-  ask_followup_question: <HelpCircle className="size-3 text-muted-foreground/60" />,
+  ask_followup_question: <MessageCircleQuestionMark className="size-3 text-muted-foreground/60" />,
   exit_plan_mode: <ClipboardCheck className="size-3 text-muted-foreground/60" />,
   compact: <Minimize2 className="size-3 text-muted-foreground/60" />,
   slash_command: <span className="text-primary" >/</span>,
   mcp: <Plug className="size-3 text-muted-foreground/60" />,
+  read_media_file: <FileSearch className="size-3 text-muted-foreground/60" />,
 };
 
 /** Status glyph — 1code uses a single char + tone, no chip. */
@@ -71,7 +73,7 @@ function StatusGlyph({ call }: { call: ToolCall }) {
     case 'rejected':
       return <X className="size-3 text-muted-foreground/60" />;
     case 'awaiting_input':
-      return <HelpCircle className="size-3 text-primary animate-pulse" />;
+      return <MessageCircleQuestionMark className="size-3 text-primary animate-pulse" />;
     case 'pending':
     case 'running':
       return <Loader2 className="size-3 text-muted-foreground animate-spin" />;
@@ -564,10 +566,17 @@ export const ToolRow = memo(function ToolRow({
   // agent display kind (carried on the result) or the dispatch_agent tool
   // name (during running, before the result lands).
   const isSubagent = call.toolName === 'dispatch_agent' || call.display?.kind === 'agent';
+  // Child call = executed by a sub-agent (nested under a dispatch_agent).
+  // Marked so rows flattened at top level still read as delegated work.
+  const isChild = !!call.parentToolCallId;
   // Sub-agent accent: primary-tinted regardless of status (it's a delegated
   // agent, not a direct file/shell op) — makes it visually pop from the
   // muted-foreground tool rows around it.
-  const subagentAccent = isSubagent ? 'bg-primary/60' : accentClass(call);
+  const subagentAccent = isSubagent
+    ? 'bg-primary/60'
+    : isChild
+      ? 'bg-primary/25'
+      : accentClass(call);
 
   return (
     <div className="group relative pl-3">
@@ -587,6 +596,14 @@ export const ToolRow = memo(function ToolRow({
         <span className="inline-flex w-3 justify-center flex-shrink-0">
           <StatusGlyph call={call} />
         </span>
+        {isChild && (
+          <span
+            title="run by sub-agent"
+            className="flex-shrink-0 -ml-1 text-[11px] leading-none text-primary/60 select-none"
+          >
+            ↳
+          </span>
+        )}
         {isSubagent
           ? <Bot className="size-3 text-primary/80" />
           : ICON[call.toolName]}
@@ -607,7 +624,7 @@ export const ToolRow = memo(function ToolRow({
         )}
         {target && (
           <span className={cn(
-            'truncate flex-1 text-left',
+            'truncate flex-1 min-w-0 text-left',
             isSubagent ? 'text-muted-foreground' : 'text-muted-foreground/60',
           )}>
             {partial && call.toolName !== 'bash' && call.toolName !== 'bash_output'
@@ -619,7 +636,7 @@ export const ToolRow = memo(function ToolRow({
         {/* Meta (orchestrator-supplied): "25 entries", "12 hits", etc.
          *  Skip for bash/git — their meta ("exit 0 · 26314ms") is already
          *  split into the statusLabel (exit code) + ms (duration) below. */}
-        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[11px] truncate flex-shrink-0 max-w-[40%]">{call.meta}</span>}
+        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[11px] truncate min-w-0 max-w-[40%]">{call.meta}</span>}
         {/* Status label: "exit 0", "end_turn", "12 hits", "failed", etc. */}
         {statusLabel && (
           <span className={cn(

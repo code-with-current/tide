@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { X, CornerDownLeft, MessageCircleQuestion, Check, Send, Circle, CheckCircle2 } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { Kbd } from '../ui/kbd';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '../ui/input-group';
 
 /** OptionsPopup: "model is asking you a question" surface rendered above the composer (blocks until answered). Shows option chips + free-text fallback; state lives in the ui store. */
 export function OptionsPopup({
@@ -173,7 +174,7 @@ export function OptionsPopup({
                         disabled={submitted}
                         onClick={() => handleChipClick(option)}
                         className={cn(
-                          'group flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-[12px] text-left transition-all',
+                          'group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-[12px] text-left transition-all',
                           'cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed',
                           isFlashing || isSelected
                             ? 'border-primary/50 bg-primary/10 text-foreground'
@@ -198,10 +199,10 @@ export function OptionsPopup({
                             <div className="size-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
                           )
                         )}
-                        <div className="flex-1 min-w-0 pt-px">
+                        <div className="flex-1 min-w-0">
                           <span className="block truncate">{option}</span>
                           {opts.optionDescriptions?.[i] && (
-                            <span className="block truncate text-[11px] font-normal text-muted-foreground/70">
+                            <span className="block truncate text-[0.75rem] font-normal text-muted-foreground/70">
                               {opts.optionDescriptions[i]}
                             </span>
                           )}
@@ -240,7 +241,23 @@ export function OptionsPopup({
 
             {/* Free-text input — the fallback for custom answers */}
             <div className="flex items-center gap-2 px-3.5 py-2.5">
-              <Input
+              <InputGroup>
+                      <InputGroupInput placeholder="Search..."  ref={inputRef}
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleTextInput();
+                        }
+                      }}
+                      disabled={submitted} />
+
+                      <InputGroupAddon align="inline-end">
+                        <Kbd>  <CornerDownLeft className="size-3" /></Kbd>
+                      </InputGroupAddon>
+                    </InputGroup>
+              {/*<Input
                 ref={inputRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -255,10 +272,10 @@ export function OptionsPopup({
                 className="h-8 text-[12.5px] flex-1 bg-background/50"
               />
               <span className="hidden sm:flex items-center gap-1 text-[10px] text-muted-foreground/40 flex-shrink-0">
-                <kbd className="font-mono">
+                <Kbd className="font-mono">
                   <CornerDownLeft className="size-3" />
-                </kbd>
-              </span>
+                </Kbd>
+              </span>*/}
             </div>
           </div>
         </div>

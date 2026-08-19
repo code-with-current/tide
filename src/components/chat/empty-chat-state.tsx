@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GitBranch, GitFork, FolderGit2, ChevronDown, ChevronRight, Settings2, X } from 'lucide-react';
 import { ChatComposer } from './chat-composer';
-import { useWorkspaces } from '@/lib/queries';
+import { useModelOption, useWorkspaces, supportsThinking } from '@/lib/queries';
+import { highestThinkingLevelForModel } from './composer/thinking-level-selector';
 import * as api from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,26 @@ export function EmptyChatState({
   const touchDraft = useUi((s) => s.touchDraft);
   const { data: workspaces } = useWorkspaces();
   const workspace = workspaces?.find((w) => w.id === activeWorkspaceId);
+
+  // Every new session pre-selects the highest thinking level the selected
+  // model supports. Keyed on model + published efforts so a late effort load
+  // re-applies, while a manual level change (which doesn't touch the key)
+  // sticks. The ref resets on remount — leaving and re-entering the new-session
+  // screen counts as a new session and pre-selects again.
+  const selectedModelId = useUi((s) => s.selectedModelId);
+  const selectedProviderId = useUi((s) => s.selectedProviderId);
+  const modelOption = useModelOption(selectedProviderId, selectedModelId);
+  const appliedModelKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!modelOption) return;
+    if (!(modelOption.reasoning ?? supportsThinking(modelOption.modelId, modelOption)) && !modelOption.reasoningMandatory) return;
+    const efforts = modelOption.supportedEfforts?.join(',') ?? '';
+    const key = `${selectedProviderId}:${modelOption.modelId}:${efforts}`;
+    if (appliedModelKeyRef.current === key) return;
+    appliedModelKeyRef.current = key;
+    const top = highestThinkingLevelForModel(modelOption);
+    if (top) useUi.getState().setThinkingLevel(top);
+  }, [modelOption, selectedProviderId]);
 
   // Ensure the new-session composer always has a draft slot bound to the
   // active workspace (so typed text shows as a draft in the session list).

@@ -9,9 +9,16 @@ import type { Provider } from '../../src/types';
 const log = createLogger('title');
 
 const TITLE_SYSTEM =
-  'You are a Project Manager and System Engineer.' +
-  'Generate a concise 3-5 word title summarizing what the user is asking for the workspace. ' +
-  'Reply with ONLY the title — no quotes, no trailing punctuation, no explanation. ' +
+  'You are a session title generator for a coding workspace. Generate a concise 3-5 word title ' +
+  'naming WHAT the session is about, not what was asked. ' +
+  'Lead with the primary identifier: the function, file, feature, error, or system the work centers on. ' +
+  'Use sentence case — capitalize only the first word and proper nouns (APIs, class names keep their casing). ' +
+  'No request verbs (fix, add, implement, update, refactor), no "How to", no questions, no quotes, ' +
+  'no trailing punctuation, no explanation. ' +
+  'Examples: "fix auth token refresh" → "Auth token refresh"; ' +
+  '"why does useChatStream re-render on every keystroke" → "useChatStream re-renders"; ' +
+  '"can you add dark mode" → "Dark mode". ' +
+  'Reply with ONLY the title. ' +
   'If the message starts with a /command or @agent (e.g. /code-reviewer, @planner), ' +
   'that context is relevant — reflect the invocation in the title when it adds meaning.';
 

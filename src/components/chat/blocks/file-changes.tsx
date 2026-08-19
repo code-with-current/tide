@@ -36,7 +36,7 @@ function FileChangesImpl({
   const visibleChanges = changes.filter(c => !reverted.has(c.path));
 
   return (
-    <div className="mt-2">
+    <div className="mt-[5px]">
       <div className="rounded-lg border border-input bg-secondary/40 overflow-hidden">
         {/* Header */}
         <button

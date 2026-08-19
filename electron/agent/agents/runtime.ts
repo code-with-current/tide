@@ -6,10 +6,12 @@ import { resolveProtocolOptions, resolveReasoning } from '../protocols/index.js'
 import type { ReasoningInstruction } from '../protocols/index.js';
 import { resolveMaxOutputTokens, contextWindowSize, resolveReasoningContracts } from '../model-capabilities.js';
 import { buildToolsetSubset, formatArgPreview, resolveToolName } from '../tools/registry.js';
+import { effectiveChildTools } from './registry.js';
 import { getToolMeta } from '../tools/tool-meta.js';
 import { currentToolCallId } from '../tools/tool-call-context.js';
 import { categorizeTool } from '../../../src/lib/stream/block-state.js';
 import { createLogger } from '../../logger.js';
+import { getSessionStore } from '../../ipc/sessions.js';
 import type { Provider, Usage, AutonomyMode, ToolName } from '../../../src/types/index.js';
 import type { CompactionSettings } from '../../../src/types/compaction.js';
 import type { RuleSet } from '../permissions/rules.js';
@@ -55,6 +57,13 @@ export interface RunAgentOptions {
    *  dispatches of the same agent type in the UI. Surfaces in the ToolDisplay
    *  agent payload and the row's target slot. */
   title?: string;
+  /** Prior transcript when resuming a dispatch — seeds the loop instead of
+   *  a bare task message, and continues the existing child session. */
+  resume?: { sessionId: string; messages: ModelMessage[] };
+  /** Fired as soon as the dispatch's child session id is known — BEFORE the
+   *  run completes, so background callers can correlate failures (whose
+   *  ToolResults carry no display payload) with their dispatch row. */
+  onDispatchId?: (id: string) => void;
 }
 
 /** Default thinking level for sub-agents when neither the agent definition
@@ -91,9 +100,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<ToolResult> {
     };
   }
 
-  // Multi-step agent: has tools + ctx.
-  if (agent.allowedTools?.length && ctx) {
-    return runMultiStepAgent(opts, thinkingLevel, start);
+  // Multi-step agent: has tools + ctx. Gates on effectiveTools, not raw
+  // allowedTools — an agent declaring only canDispatch lists no tools but
+  // still gets the dispatch tool, and must not fall through to single-shot.
+  const effectiveTools = effectiveChildTools(agent);
+  if (effectiveTools.length && ctx) {
+    return runMultiStepAgent(opts, thinkingLevel, start, effectiveTools);
+  }
+
+  // Single-shot agents keep no persisted transcript worth continuing, and
+  // their bare generateText path has no tool loop to resume into.
+  if (opts.resume) {
+    return {
+      status: 'failed',
+      output: `Agent ${agent.name} is single-shot (no tools) and cannot be resumed via resumeFrom — dispatch it fresh with the needed context in the task.`,
+      durationMs: 0,
+    };
   }
 
   // Single-shot agent: no tools (legacy path).
@@ -118,26 +140,56 @@ async function runSingleShotAgent(
   const proto = resolveProtocolOptions(
     provider.apiStyle,
     reasoning,
-    { hasTools: false, modelId, maxOutputTokens: knownMaxOutput },
+    { hasTools: false, modelId, maxOutputTokens: knownMaxOutput, providerBaseUrl: provider.baseUrl },
   );
+
+  const childSessionId = opts.ctx
+    ? opts.resume?.sessionId ?? createDispatchSession(opts.ctx, agent, task, opts.title, modelId)
+    : undefined;
+  if (childSessionId) {
+    opts.onDispatchId?.(childSessionId);
+    if (opts.resume) setDispatchStatusSafe(childSessionId, 'running');
+  }
 
   try {
     const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
-    const result = await generateText({
+    // runAgent guards resume to the multi-step path; kept here defensively
+    // so a direct runSingleShotAgent call still resumes rather than restarting.
+    const shared = {
       model,
       system: agent.systemPrompt,
-      prompt: task,
       providerOptions: proto.providerOptions,
       maxOutputTokens: proto.maxOutputTokens,
       abortSignal: signal,
-    });
+    };
+    const result = await generateText(
+      opts.resume
+        ? {
+            ...shared,
+            messages: [...opts.resume.messages, { role: 'user' as const, content: task }],
+          }
+        : { ...shared, prompt: task },
+    );
 
     if (result.usage && onUsage) {
       onUsage(mapUsage(result.usage as LanguageModelUsage));
     }
 
-    return buildResult(agent, task, result.text, result.finishReason, result.reasoning, start, proto.label, opts.title);
+    const tr = buildResult(agent, task, result.text, result.finishReason, result.reasoning, start, proto.label, opts.title, childSessionId);
+    if (childSessionId) {
+      if (tr.status === 'executed') {
+        persistDispatchResult(childSessionId, task, tr.output, [], [
+          { role: 'user', content: task },
+          { role: 'assistant', content: tr.output },
+        ]);
+      } else {
+        setDispatchStatusSafe(childSessionId, 'error');
+      }
+    }
+    return tr;
   } catch (e: any) {
+    const aborted = e?.name === 'AbortError' || signal.aborted;
+    setDispatchStatusSafe(childSessionId, aborted ? 'interrupted' : 'error');
     return handleError(agent.name, e, signal, start);
   }
 }
@@ -148,6 +200,7 @@ async function runMultiStepAgent(
   opts: RunAgentOptions,
   thinkingLevel: import('../../../src/types/index.js').ThinkingLevel,
   start: number,
+  effectiveTools: string[],
 ): Promise<ToolResult> {
   const { agent, task, provider, modelId, signal, onUsage, ctx, depth, title } = opts;
 
@@ -170,10 +223,29 @@ async function runMultiStepAgent(
   // (set by buildToolset's execute wrapper at registry.ts:251).
   const parentToolCallId = opts.parentToolCallId ?? currentToolCallId();
 
+  // Resume continues the prior child session instead of creating a new one;
+  // persistDispatchResult then overwrites its transcript with the full
+  // (seeded) run, so the round-trip stays lossless for further resumes.
+  const seedMessages: ModelMessage[] = [
+    ...(opts.resume?.messages ?? []),
+    { role: 'user' as const, content: task },
+  ];
+  const childSessionId = opts.resume?.sessionId ?? createDispatchSession(ctx, agent, task, title, modelId);
+  if (childSessionId) {
+    opts.onDispatchId?.(childSessionId);
+    // A resumed child already reads completed/error from its prior run —
+    // flip it back while this run is in flight.
+    if (opts.resume) setDispatchStatusSafe(childSessionId, 'running');
+  }
+
   // Build a child ToolContext for the sub-agent's toolset.
+  // Note: an escalation granted on a nested dispatch mutates only this
+  // copy (autonomyMode is per-context) — sub-agent autonomy stays contained
+  // to the branch, stricter than the main turn. Intentional.
   const childCtx: ToolContext = {
     ...ctx,
     _depth: (depth ?? 0) + 1,
+    _agentDef: agent,
     // Sub-agent usage folds into the parent's onUsage.
     onUsage: (u: Usage) => {
       onUsage?.(u);
@@ -188,7 +260,7 @@ async function runMultiStepAgent(
     emit: (raw) => ctx.emit(raw),
   };
 
-  const tools = buildToolsetSubset(childCtx, agent.allowedTools!);
+  const tools = buildToolsetSubset(childCtx, effectiveTools);
 
   const modelEntry = provider.models.find((m) => m.modelId === modelId);
   const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
@@ -199,7 +271,7 @@ async function runMultiStepAgent(
   const proto = resolveProtocolOptions(
     provider.apiStyle,
     reasoning,
-    { hasTools: true, modelId, maxOutputTokens: knownMaxOutput },
+    { hasTools: true, modelId, maxOutputTokens: knownMaxOutput, providerBaseUrl: provider.baseUrl },
   );
 
   // ── CONTEXT MANAGEMENT (mirrors main loop, orchestrator-sdk.ts:408-432) ──
@@ -229,14 +301,14 @@ async function runMultiStepAgent(
   let lastInputTokens = 0;
   let consecutiveCompactionFailures = 0;
 
-  log.info('multi-step agent', { name: agent.name, depth: depth ?? 0, tools: agent.allowedTools, maxSteps });
+  log.info('multi-step agent', { name: agent.name, title, depth: depth ?? 0, tools: effectiveTools, maxSteps });
 
   try {
     const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
     const result = streamText({
       model,
       system: agent.systemPrompt,
-      messages: [{ role: 'user' as const, content: task }],
+      messages: seedMessages,
       tools: tools as any,
       maxRetries: 0,
       stopWhen: [isStepCount(maxSteps)],
@@ -365,13 +437,15 @@ async function runMultiStepAgent(
       // The agent exhausted its step budget calling tools without producing a
       // text report (finishReason=tool-calls). Rather than failing, make one
       // final tool-free call so the model synthesizes its findings into text.
-      // The steps array carries the full conversation (task + tool results);
-      // we reuse it as context and instruct the model to write its report.
+      // The conversation lives in seedMessages (task, or the resumed
+      // transcript) plus each step's generated messages; we reuse it as
+      // context and instruct the model to write its report.
       const synthesized = await synthesizeReport({
-        agent, steps, provider, modelId, signal, proto, onUsage,
+        agent, steps, provider, modelId, signal, onUsage, seedMessages,
       });
       if (synthesized) {
-        log.info('multi-step agent synthesized report', { name: agent.name, steps: stepCount, durationMs: Date.now() - start });
+        log.info('multi-step agent synthesized report', { name: agent.name, title, steps: stepCount, durationMs: Date.now() - start });
+        persistDispatchResult(childSessionId, task, synthesized, steps, seedMessages);
         return {
           status: 'executed',
           output: synthesized,
@@ -383,18 +457,22 @@ async function runMultiStepAgent(
             ...(title ? { title } : {}),
             task,
             report: synthesized,
+            ...(childSessionId ? { dispatchId: childSessionId } : {}),
           },
         };
       }
+      setDispatchStatusSafe(childSessionId, 'error');
       return {
         status: 'failed',
-        output: `Agent ${agent.name} returned no content (finishReason=${finishReason}, steps=${stepCount}).`,
+        output: `Agent ${agent.name}${title ? ` (${title})` : ''} returned no content (finishReason=${finishReason}, steps=${stepCount}).`,
         durationMs: Date.now() - start,
         meta: `${agent.name} · ${proto.label} · ${stepCount} steps`,
       };
     }
 
-    log.info('multi-step agent done', { name: agent.name, steps: stepCount, durationMs: Date.now() - start });
+    log.info('multi-step agent done', { name: agent.name, title, steps: stepCount, durationMs: Date.now() - start });
+
+    persistDispatchResult(childSessionId, task, report, steps, seedMessages);
 
     return {
       status: 'executed',
@@ -408,9 +486,12 @@ async function runMultiStepAgent(
         task,
         report,
         reasoning,
+        ...(childSessionId ? { dispatchId: childSessionId } : {}),
       },
     };
   } catch (e: any) {
+    const aborted = e?.name === 'AbortError' || signal.aborted;
+    setDispatchStatusSafe(childSessionId, aborted ? 'interrupted' : 'error');
     return handleError(agent.name, e, signal, start);
   }
 }
@@ -425,34 +506,46 @@ async function runMultiStepAgent(
  *  so the caller falls back to the 'no content' error. */
 async function synthesizeReport(opts: {
   agent: AgentDef;
-  steps: ReadonlyArray<{ messages?: ModelMessage[] }>;
+  steps: ReadonlyArray<{ messages?: ModelMessage[]; response?: { messages?: ModelMessage[] } }>;
   provider: Provider;
   modelId: string;
   signal: AbortSignal;
-  proto: { providerOptions: unknown; maxOutputTokens: number | undefined; label: string };
   onUsage?: (u: Usage) => void;
+  seedMessages: ModelMessage[];
 }): Promise<string | null> {
   try {
-    const allMessages: ModelMessage[] = [];
-    for (const step of opts.steps) {
-      if (step?.messages && Array.isArray(step.messages)) {
-        allMessages.push(...step.messages);
-      }
-    }
-    if (allMessages.length === 0) return null;
+    // ai 7 StepResult carries per-step messages under response.messages —
+    // step.messages doesn't exist, so without the fallback nothing
+    // accumulates and this recovery path always bails.
+    const allMessages: ModelMessage[] = [
+      ...opts.seedMessages,
+      ...opts.steps.flatMap((st) => st.messages ?? st.response?.messages ?? []),
+    ];
 
     allMessages.push({
       role: 'user',
       content: 'Based on your investigation above, write your final report now. Do not call any more tools. Summarize what you found and provide your conclusion.',
     } as ModelMessage);
 
+    // Re-resolve the protocol with reasoning disabled: reusing the parent's
+    // providerOptions lets a reasoning model spend the whole synthesis call's
+    // output budget on thinking tokens and return empty text — the exact
+    // failure this recovery path exists to fix.
+    const modelEntry = opts.provider.models.find((m) => m.modelId === opts.modelId);
+    const knownMaxOutput = resolveMaxOutputTokens(opts.modelId, modelEntry);
+    const synthProto = resolveProtocolOptions(
+      opts.provider.apiStyle,
+      null,
+      { hasTools: false, modelId: opts.modelId, maxOutputTokens: knownMaxOutput, providerBaseUrl: opts.provider.baseUrl },
+    );
+
     const model = resolveModel(opts.provider, { modelId: opts.modelId, contextWindow: 0 } as any);
     const result = await generateText({
       model,
       system: opts.agent.systemPrompt,
       messages: allMessages,
-      providerOptions: opts.proto.providerOptions as any,
-      maxOutputTokens: opts.proto.maxOutputTokens,
+      providerOptions: synthProto.providerOptions,
+      maxOutputTokens: synthProto.maxOutputTokens,
       abortSignal: opts.signal,
     });
 
@@ -460,7 +553,17 @@ async function synthesizeReport(opts: {
       opts.onUsage(mapUsage(result.usage as LanguageModelUsage));
     }
 
-    return ((result.text as string | null | undefined) ?? '').trim() || null;
+    const text = ((result.text as string | null | undefined) ?? '').trim();
+    if (!text) {
+      log.warn('synthesizeReport returned empty text', {
+        agent: opts.agent.name,
+        finishReason: result.finishReason,
+        outputTokens: result.usage?.outputTokens ?? 0,
+        reasoningTokens: result.usage?.outputTokenDetails?.reasoningTokens ?? 0,
+      });
+      return null;
+    }
+    return text;
   } catch (e: any) {
     log.warn('synthesizeReport failed', { agent: opts.agent.name, err: e?.message ?? String(e) });
     return null;
@@ -563,6 +666,60 @@ function translateSubagentPart(
 
 
 
+function createDispatchSession(
+  ctx: ToolContext,
+  agent: AgentDef,
+  task: string,
+  title: string | undefined,
+  modelId: string,
+): string | undefined {
+  try {
+    const child = getSessionStore().createSession(ctx.workspaceId, `${title ?? agent.name} (@${agent.name})`, modelId, {
+      parentId: ctx.sessionId,
+      kind: 'subagent',
+      dispatch: { agentName: agent.name, ...(title ? { title } : {}), task, status: 'running' },
+    });
+    return child.id;
+  } catch {
+    // Store unavailable — dispatch still works inline, just unpersisted.
+  }
+}
+
+function setDispatchStatusSafe(
+  childSessionId: string | undefined,
+  status: 'running' | 'completed' | 'error' | 'interrupted',
+): void {
+  if (!childSessionId) return;
+  try {
+    getSessionStore().setDispatchStatus(childSessionId, status);
+  } catch { /* best-effort */ }
+}
+
+function persistDispatchResult(
+  childSessionId: string | undefined,
+  task: string,
+  report: string,
+  steps: ReadonlyArray<{ messages?: ModelMessage[]; response?: { messages?: ModelMessage[] } }>,
+  seedMessages: ModelMessage[],
+): void {
+  if (!childSessionId) return;
+  try {
+    const now = new Date().toISOString();
+    // StepResults in ai 7.x carry their generated messages under
+    // response.messages (a top-level step.messages no longer exists), so the
+    // lossless transcript is the seed plus each step's response messages.
+    getSessionStore().saveDispatchTranscript(
+      childSessionId,
+      [
+        { id: `${childSessionId}_u1`, role: 'user', content: task, createdAt: now },
+        { id: `${childSessionId}_a1`, role: 'assistant', content: report, createdAt: now },
+      ],
+      [...seedMessages, ...steps.flatMap((st) => st.messages ?? st.response?.messages ?? [])],
+    );
+    setDispatchStatusSafe(childSessionId, 'completed');
+  } catch { /* best-effort */ }
+}
+
 function buildResult(
   agent: AgentDef,
   task: string,
@@ -572,6 +729,7 @@ function buildResult(
   start: number,
   label: string,
   title?: string,
+  dispatchId?: string,
 ): ToolResult {
   const trimmed = (text ?? '').trim();
   if (!trimmed) {
@@ -600,6 +758,7 @@ function buildResult(
       task,
       report: trimmed,
       reasoning: reasoningText,
+      ...(dispatchId ? { dispatchId } : {}),
     },
   };
 }
