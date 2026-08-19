@@ -71,6 +71,19 @@ export function getSessionTodos(sessionId: string): TodoItem[] {
   return sessionTodos.get(sessionId) ?? [];
 }
 
+/** Render the session's todos as `# Current Plan` body lines for the system
+ *  prompt. Same mark syntax as the todo_write tool result ([x]/[~]/[-]/[ ])
+ *  so the list reads identically in the prompt and in tool output. */
+export function renderTodoPlanLines(todos: TodoItem[]): string[] {
+  return todos.map((t, i) => {
+    const mark =
+      t.status === 'completed' ? '[x]' :
+      t.status === 'in_progress' ? '[~]' :
+      t.status === 'cancelled' ? '[-]' : '[ ]';
+    return `${mark} ${i + 1}. ${t.content}`;
+  });
+}
+
 export function clearSessionTodos(sessionId: string): void {
   sessionTodos.delete(sessionId);
   persist(sessionId);
