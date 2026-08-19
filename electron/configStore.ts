@@ -79,6 +79,8 @@ export interface GeneralSettings {
   startAtLogin: boolean;
   /** Show OS notifications for turn completion, errors, etc. */
   notifications: boolean;
+  /** Play in-app sounds for turn completion and permission prompts. */
+  notificationSound: boolean;
   /** Append Co-authored-by trailer to git commits made by the agent. */
   gitCoAuthored: boolean;
   /** Co-author display name (default: "Tide"). */
@@ -92,6 +94,7 @@ export interface GeneralSettings {
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   startAtLogin: false,
   notifications: true,
+  notificationSound: true,
   gitCoAuthored: true,
   gitCoAuthorName: 'Tide',
   gitCoAuthorEmail: '314188112+tide-codes@users.noreply.github.com',

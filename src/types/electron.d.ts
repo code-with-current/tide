@@ -230,8 +230,8 @@ declare global {
       generateSessionTitle(sessionId: string): Promise<string | null>;
       getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean }>;
       updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean }>;
-      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
-      updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
+      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
+      updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
       archiveSession(sessionId: string): Promise<void>;
       unarchiveSession(sessionId: string): Promise<void>;
       listArchivedSessions(workspaceId: string): Promise<import('./index').ArchivedHeader[]>;
