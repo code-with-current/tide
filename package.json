@@ -1,7 +1,7 @@
 {
   "name": "tide",
   "private": true,
-  "version": "0.1.4-beta",
+  "version": "0.2.0-beta",
   "packageManager": "pnpm@10.27.0",
   "description": "Tide \u2014 Code with the current.",
   "type": "module",
