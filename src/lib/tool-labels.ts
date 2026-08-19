@@ -14,6 +14,7 @@ const TOOL_LABELS: Record<string, string> = {
   bash_output: 'Shell',
   kill_shell: 'Stop',
   git: 'Git',
+  git_repo: 'Repo',
   // Search
   glob: 'Search',
   grep: 'Search',
@@ -39,6 +40,7 @@ const TOOL_PROGRESSIVE: Record<string, string> = {
   kill_shell: 'Stopping',
   dispatch_agent: 'Dispatching Agent',
   git: 'Git',         // no progressive — "Git" reads fine while running
+  git_repo: 'Reading Repo',
   exit_plan_mode: 'Plan Ready',
   mcp: 'MCP',
   ask_followup_question: 'Asking',

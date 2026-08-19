@@ -17,6 +17,7 @@ import type { ToolContext } from '../../agent/tools/tool-context.js';
 
 import { createBashTool } from '../../agent/tools/bash.js';
 import { createReadFileTool } from '../../agent/tools/read-file.js';
+import { createReadMediaFileTool } from '../../agent/tools/read-media-file.js';
 import { createListDirTool } from '../../agent/tools/list-dir.js';
 import { createWriteFileTool } from '../../agent/tools/write-file.js';
 import { createEditFileTool } from '../../agent/tools/edit-file.js';
@@ -27,6 +28,7 @@ import { createWebSearchTool } from '../../agent/tools/web-search.js';
 import { createMultiEditTool } from '../../agent/tools/multi-edit.js';
 import { createNotebookEditTool } from '../../agent/tools/notebook-edit.js';
 import { createGitTool } from '../../agent/tools/git.js';
+import { createGitRepoTool } from '../../agent/tools/git-repo.js';
 import { createBashOutputTool, createKillShellTool } from '../../agent/tools/background-shell.js';
 import { createTodoWriteTool } from '../../agent/tools/todo-write.js';
 import { createExitPlanModeTool } from '../../agent/tools/exit-plan-mode.js';
@@ -61,6 +63,7 @@ const FACTORIES: Array<{
 }> = [
   { name: 'bash', factory: createBashTool, valid: { command: 'ls' } },
   { name: 'read_file', factory: createReadFileTool, valid: { path: 'a.ts' } },
+  { name: 'read_media_file', factory: createReadMediaFileTool, valid: { path: 'img.png' } },
   { name: 'list_dir', factory: createListDirTool, valid: { path: 'src' } },
   { name: 'write_file', factory: createWriteFileTool, valid: { path: 'a.ts', content: 'x' } },
   { name: 'edit_file', factory: createEditFileTool, valid: { path: 'a.ts', old_string: 'x', new_string: 'y' } },
@@ -71,6 +74,7 @@ const FACTORIES: Array<{
   { name: 'multi_edit', factory: createMultiEditTool, valid: { path: 'a.ts', edits: [{ old_string: 'x', new_string: 'y' }] } },
   { name: 'notebook_edit', factory: createNotebookEditTool, valid: { path: 'n.ipynb', edit_mode: 'append', source: 'code' } },
   { name: 'git', factory: createGitTool, valid: { args: ['status'] } },
+  { name: 'git_repo', factory: createGitRepoTool, valid: { op: 'info', repo: 'https://github.com/o/r' } },
   { name: 'bash_output', factory: createBashOutputTool, valid: { shell_id: 'sh1' } },
   { name: 'kill_shell', factory: createKillShellTool, valid: { shell_id: 'sh1' } },
   { name: 'todo_write', factory: createTodoWriteTool, valid: { todos: [{ content: 'do thing', status: 'pending' }] } },
