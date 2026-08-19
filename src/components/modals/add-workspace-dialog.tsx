@@ -13,6 +13,7 @@ import {
   AlertCircle,
   Terminal,
   TriangleAlert,
+  Download,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -28,7 +29,7 @@ import reactLogo from '@/assets/stack/react.svg';
 import t3Logo from '@/assets/stack/t3.svg';
 import tanstackLogo from '@/assets/stack/tanstack.svg';
 import { useUi } from '@/lib/stores/ui';
-import { qk, useWorkspaceSteps, useRagInitProgress } from '@/lib/queries';
+import { qk, useWorkspaceSteps, useRagInitProgress, useRagDownloadProgress } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
@@ -112,6 +113,14 @@ export function AddWorkspaceDialog() {
   // RAG step outcome once indexing settles.
   const [ragOutcome, setRagOutcome] = useState<'pending' | 'done' | 'skipped'>('pending');
 
+  // Model download state — mirrors OnboardingScreen's WorkspaceStep: when RAG
+  // is enabled and the model isn't on disk, the user must download it inline
+  // (with progress) before Open/Scaffold becomes enabled.
+  type DlState = 'idle' | 'downloading' | 'done' | 'error';
+  const [dlState, setDlState] = useState<DlState>('idle');
+  const [dlError, setDlError] = useState<string | null>(null);
+  const downloadProgress = useRagDownloadProgress();
+
   const wsSteps = useWorkspaceSteps(requestId);
   const ragProgress = useRagInitProgress(createdWsId);
 
@@ -134,6 +143,51 @@ export function AddWorkspaceDialog() {
   useEffect(() => {
     if (open) setPhase('choice');
   }, [open]);
+
+  // Probe whether the model is already on disk each time the dialog opens —
+  // if so the download section shows "Model ready" and the gate opens.
+  useEffect(() => {
+    if (open) {
+      setDlState('idle');
+      setDlError(null);
+      api.ragModelExists().then((exists) => {
+        if (exists) setDlState('done');
+      }).catch(() => {});
+    }
+  }, [open]);
+
+  // Sync download-progress events → local state.
+  useEffect(() => {
+    if (!downloadProgress) return;
+    if (downloadProgress.phase === 'downloading') setDlState('downloading');
+    else if (downloadProgress.phase === 'done') setDlState('done');
+    else if (downloadProgress.phase === 'failed') {
+      setDlState('error');
+      setDlError(downloadProgress.error ?? 'Download failed');
+    }
+  }, [downloadProgress]);
+
+  const handleDownloadModel = async () => {
+    setDlState('downloading');
+    setDlError(null);
+    try {
+      const r = await api.downloadRagModel();
+      if (r.ok) {
+        const exists = await api.ragModelExists();
+        if (exists) setDlState('done');
+        else {
+          setDlState('error');
+          setDlError('Download reported success but model not found on disk.');
+        }
+      } else {
+        setDlState('error');
+        setDlError(r.error ?? 'Download failed');
+      }
+    } catch (e) {
+      setDlState('error');
+      setDlError(e instanceof Error ? e.message : 'Download failed');
+    }
+  };
 
   useEffect(() => {
     if (source !== 'local' || !localPath) {
@@ -385,8 +439,16 @@ export function AddWorkspaceDialog() {
     close('addWorkspace');
   };
 
-  const canOpen = source === 'local' ? !!localPath : !!cloneDir;
-  const canOpenNew = !!newName.trim() && !!newParent.trim();
+  // Folder-in-place gate for the Script/RAG cards — deliberately NOT canOpen:
+  // canOpen additionally requires the model when RAG is on, which would hide
+  // the RAG card (and its download button) exactly when it's needed.
+  const hasProject = source === 'local' ? !!localPath : !!cloneDir;
+  const canOpen = hasProject && (!enableRag || dlState === 'done');
+  // Template flow: the RAG card (and thus the model requirement) only shows
+  // for real scaffolds; Empty projects no-op RAG without a model.
+  const templateNeedsModel = templateId !== 'empty' && enableRag;
+  const canOpenNew = !!newName.trim() && !!newParent.trim()
+    && (!templateNeedsModel || dlState === 'done');
 
   /** Resolve a checklist row's status from the live streams (not timers).
    *  Creation steps come from the tide:workspace:progress milestones; the
@@ -722,6 +784,12 @@ export function AddWorkspaceDialog() {
                     <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
                       Indexes your codebase locally so the agent can search it semantically.
                     </div>
+                    <ModelDownloadSection
+                      dlState={dlState}
+                      dlError={dlError}
+                      progress={downloadProgress}
+                      onDownload={handleDownloadModel}
+                    />
                   </div>
                   <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1.5" />
                 </div>
@@ -862,7 +930,7 @@ export function AddWorkspaceDialog() {
           {/* Script + RAG sections appear only once a project folder is in
               place — empty-prompts for repo path / clone destination stay the
               focus until the user has actually pointed at a project. */}
-          {canOpen && (
+          {hasProject && (
             <>
           <div className="h-3" />
 
@@ -917,6 +985,12 @@ export function AddWorkspaceDialog() {
               <div className="text-[10px] text-muted-foreground/40 mt-1 font-mono">
                 all-MiniLM-L6-v2-code-search-512 · 384-dim · bundled
               </div>
+              <ModelDownloadSection
+                dlState={dlState}
+                dlError={dlError}
+                progress={downloadProgress}
+                onDownload={handleDownloadModel}
+              />
             </div>
             <Switch checked={enableRag} onCheckedChange={setEnableRag} className="mt-1.5" />
           </div>
@@ -973,6 +1047,67 @@ function StepRow({ label, status, detail }: { label: string; status: StepStatus;
       </span>
       {detail && status === 'active' && (
         <span className="text-[10.5px] text-muted-foreground/60 font-mono tabular-nums truncate">{detail}</span>
+      )}
+    </div>
+  );
+}
+
+/** Inline model-download section shown inside the RAG card when RAG is
+ *  enabled: Download button (model missing) → progress bar (downloading) →
+ *  "Model ready" (on disk). Mirrors the onboarding WorkspaceStep flow; the
+ *  parent gates its continue button on dlState === 'done'. */
+function ModelDownloadSection({
+  dlState, dlError, progress, onDownload,
+}: {
+  dlState: 'idle' | 'downloading' | 'done' | 'error';
+  dlError: string | null;
+  progress: { received: number; total: number } | null | undefined;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="mt-2.5">
+      {dlState === 'idle' && (
+        <Button variant="secondary" size="sm" className="h-[28px] text-[11px] gap-1.5" onClick={onDownload}>
+          <Download className="size-3" /> Download model (22 MB)
+        </Button>
+      )}
+      {dlState === 'downloading' && (
+        <div className="space-y-1.5 w-full max-w-[260px]">
+          <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-300 bg-emerald-400"
+              style={{
+                width: progress && progress.total > 0
+                  ? `${Math.min(100, (progress.received / progress.total) * 100)}%`
+                  : '8%',
+              }}
+            />
+          </div>
+          <div className="text-[10px] text-muted-foreground/50 font-mono flex items-center gap-1.5">
+            <Loader2 className="size-2.5 animate-spin" />
+            {progress && progress.total > 0
+              ? `${(progress.received / 1048576).toFixed(1)} / ${(progress.total / 1048576).toFixed(1)} MB`
+              : 'Connecting to huggingface.co…'}
+          </div>
+        </div>
+      )}
+      {dlState === 'done' && (
+        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+          <CheckCircle2 className="size-3.5" />
+          Model ready
+          <span className="text-muted-foreground/30 font-mono ml-1">all-MiniLM-L6-v2 · 384-dim</span>
+        </div>
+      )}
+      {dlState === 'error' && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-destructive/70">
+            <AlertCircle className="size-3.5" />
+            {dlError ?? 'Download failed'}
+          </div>
+          <Button variant="secondary" size="sm" className="h-[24px] text-[10px] gap-1.5" onClick={onDownload}>
+            <Download className="size-2.5" /> Retry
+          </Button>
+        </div>
       )}
     </div>
   );

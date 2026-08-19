@@ -5,6 +5,7 @@ import type { AgentEvent, RunTurnPayload } from '@/lib/agent/events';
 import type { SessionStream } from '@/types';
 import { useUi, freshStream } from '@/lib/stores/ui';
 import { reduceStream } from '@/lib/stream/stream-reducer';
+import { notifyPermissionRequired, notifyTurnEnd } from '@/lib/sounds';
 
 export interface ChatStreamStartArgs {
   sessionId: string;
@@ -148,6 +149,11 @@ export function useChatStream(): {
 
     ipc.onAgentEvent((event: AgentEvent) => {
       const sid = event.sessionId;
+      if (event.type === 'turn_end') {
+        notifyTurnEnd(sid, event.stopReason);
+      } else if (event.type === 'permission_required') {
+        notifyPermissionRequired(sid, event.toolCalls.map((tc) => tc.id));
+      }
       const urgent = event.type === 'turn_end' || event.type === 'error'
                   || event.type === 'retry'
                   || event.type === 'compacting'

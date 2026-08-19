@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 type GeneralSettingsState = {
   startAtLogin: boolean;
   notifications: boolean;
+  notificationSound: boolean;
   gitCoAuthored: boolean;
   gitCoAuthorName: string;
   gitCoAuthorEmail: string;
@@ -26,6 +27,7 @@ export function GeneralSection() {
       setSettings({
         startAtLogin: (raw.startAtLogin as boolean) ?? false,
         notifications: (raw.notifications as boolean) ?? true,
+        notificationSound: (raw.notificationSound as boolean) ?? true,
         gitCoAuthored: (raw.gitCoAuthored as boolean) ?? false,
         gitCoAuthorName: (raw.gitCoAuthorName as string) ?? 'Tide',
         gitCoAuthorEmail: (raw.gitCoAuthorEmail as string) ?? '314188112+tide-codes@users.noreply.github.com',
@@ -77,13 +79,25 @@ export function GeneralSection() {
               <SettingsRow
                 title="Enable notifications"
                 description="OS notifications for turn completion and errors."
-                last
               >
                 <div className="flex items-center gap-2">
                   {savingKey === 'notifications' && <SavedDot />}
                   <Switch
                     checked={settings.notifications}
                     onCheckedChange={(v) => update('notifications', v)}
+                  />
+                </div>
+              </SettingsRow>
+              <SettingsRow
+                title="Notification sounds"
+                description="Play a sound when a turn finishes or needs your input."
+                last
+              >
+                <div className="flex items-center gap-2">
+                  {savingKey === 'notificationSound' && <SavedDot />}
+                  <Switch
+                    checked={settings.notificationSound}
+                    onCheckedChange={(v) => update('notificationSound', v)}
                   />
                 </div>
               </SettingsRow>

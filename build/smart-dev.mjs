@@ -24,7 +24,6 @@ const ROOT = path.resolve(__dirname, '..');
 
 const DIST_MAIN = path.join(ROOT, 'dist-electron', 'main.mjs');
 const DIST_GRAMMARS = path.join(ROOT, 'dist-electron', 'grammars');
-const DIST_MODEL = path.join(ROOT, 'dist-electron', 'models', 'isuruwijesiri', 'all-MiniLM-L6-v2-code-search-512', 'onnx', 'model_quantized.onnx');
 
 // Directories to watch for staleness.
 const SOURCE_DIRS = [
@@ -68,7 +67,6 @@ const sourceTime = Math.max(...SOURCE_DIRS.map((p) => newestMtime(p)));
 
 let needBuild = false;
 let needGrammars = false;
-let needModel = false;
 
 if (distTime < sourceTime) {
   console.log('[dev] electron source changed — rebuild needed');
@@ -79,12 +77,6 @@ if (distTime < sourceTime) {
 if (!fs.existsSync(DIST_GRAMMARS) || fs.readdirSync(DIST_GRAMMARS).length < 10) {
   console.log('[dev] grammars missing — staging needed');
   needGrammars = true;
-}
-
-// --- Check 3: model staged ---
-if (!fs.existsSync(DIST_MODEL)) {
-  console.log('[dev] model missing — staging needed');
-  needModel = true;
 }
 
 try {
@@ -100,22 +92,7 @@ try {
   } else if (needGrammars) {
     run('node', ['build/copy-tree-sitter-grammars.mjs', '--dist'], 'stage grammars');
   }
-  // needModel: stage the vendored ONNX model from the source tree for dev.
-  // Production builds no longer bundle the model (lazy-downloaded from
-  // HuggingFace on first RAG enable), but dev uses the source copy at
-  // electron/rag/models/ to avoid a download on every dev launch.
-  if (needModel) {
-    const MODEL_SRC = path.join(ROOT, 'electron', 'rag', 'models');
-    const MODEL_DEST = path.join(ROOT, 'dist-electron', 'models');
-    if (fs.existsSync(MODEL_SRC)) {
-      fs.cpSync(MODEL_SRC, MODEL_DEST, { recursive: true });
-      console.log('[dev] staged model to dist-electron/models/');
-    } else {
-      console.log('[dev] WARNING: source model missing — RAG will need a download');
-    }
-  }
-
-  if (!needBuild && !needGrammars && !needModel) {
+  if (!needBuild && !needGrammars) {
     console.log('[dev] dist-electron up-to-date — skipping build');
   }
 } catch (err) {

@@ -986,14 +986,14 @@ export function ChatComposer({
               </span>
             )}
 
-            {inProgress && (!editorEmpty || attachments.length > 0) && (
+            {/*{inProgress && (!editorEmpty || attachments.length > 0) && (
               <SendStopButton
                 className="ml-auto"
                 mode="stop"
                 onSend={() => send()}
                 onStop={() => onStop?.()}
               />
-            )}
+            )}*/}
             <SendStopButton
               className="ml-auto"
               mode={!editorEmpty || attachments.length > 0 ? 'send' : inProgress ? 'stop' : 'send'}

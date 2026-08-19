@@ -1143,7 +1143,7 @@ export function MainScreen() {
 
         {/* File viewer — Sheet positioned below the topbar (top:40px). */}
         <Sheet open={fileViewerOpen} onOpenChange={(o) => { if (!o) useUi.setState({ fileViewerOpen: false }); }}>
-          <SheetContent side="right" showCloseButton={false} className="gap-0 p-0" style={{ top: '40px', height: 'auto', width: `${sheetWidth}vw` }}>
+          <SheetContent side="right" showCloseButton={false} className="gap-0 p-0" style={{ top: '40px', height: 'auto', width: `${sheetWidth}vw`, maxWidth: '100vw' }}>
             <SheetResizeHandle />
             <FileViewerPanel />
           </SheetContent>
@@ -1151,7 +1151,7 @@ export function MainScreen() {
 
         {/* Commit details — Sheet positioned below the topbar. */}
         <Sheet open={!!commitDetail} onOpenChange={(o) => { if (!o) setCommitDetail(null); }}>
-          <SheetContent side="right" showCloseButton={false} className="gap-0 p-0" style={{ top: '40px', height: 'auto', width: `${sheetWidth}vw` }}>
+          <SheetContent side="right" showCloseButton={false} className="gap-0 p-0" style={{ top: '40px', height: 'auto', width: `${sheetWidth}vw`, maxWidth: '100vw' }}>
             <SheetResizeHandle />
             {commitDetail && <CommitDetailsPanel commit={commitDetail} />}
           </SheetContent>
