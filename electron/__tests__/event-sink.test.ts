@@ -156,3 +156,46 @@ describe('event-sink', () => {
     sink.dispose();
   });
 });
+
+describe('event-sink replay + prune', () => {
+  it('replay drains pending events from lastSeq in order', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    sink.emit(delta('a'));
+    sink.emit(delta('b'));
+    sink.flush();
+    const replayed = sink.replay('s1', 0); // from the beginning
+    expect(replayed.map((e) => (e.data as { text: string }).text)).toEqual(['a', 'b']);
+    const afterFirst = sink.replay('s1', replayed[0].seq!);
+    expect(afterFirst.map((e) => (e.data as { text: string }).text)).toEqual(['b']);
+    sink.dispose();
+  });
+
+  it('turn.end prunes events below the min live seq but keeps committed parts', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    sink.emit({ type: 'part.commit', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { kind: 'text', data: { text: 'ab' }, seq: 0 } });
+    sink.emit(delta('c')); // belongs to a second, uncommitted part p2
+    sink.flush();
+    sink.emit({ type: 'turn.end', sessionId: 's1' });
+    sink.flush();
+    const remaining = store.db.prepare(`SELECT COUNT(*) c FROM event`).get() as { c: number };
+    expect(remaining.c).toBe(1); // only the turn.end survives as the tail marker
+    const part = store.db.prepare(`SELECT kind FROM part WHERE id = 'p1'`).get() as { kind: string };
+    expect(part.kind).toBe('text');
+    sink.dispose();
+  });
+
+  it('prune respects live subscriber positions', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    sink.emit(delta('a'));
+    sink.emit(delta('b'));
+    // A subscriber that has only consumed up to the first event holds pruning back.
+    sink.markLive('s1', 1);
+    sink.emit({ type: 'turn.end', sessionId: 's1' });
+    sink.flush();
+    sink.emit({ type: 'turn.end', sessionId: 's1' });
+    sink.flush();
+    const rows = store.db.prepare(`SELECT seq FROM event ORDER BY seq`).all() as { seq: number }[];
+    expect(rows.some((r) => r.seq === 2)).toBe(true);
+    sink.dispose();
+  });
+});

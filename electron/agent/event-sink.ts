@@ -34,6 +34,8 @@ export interface SinkUsage {
 export interface EventSink {
   emit(event: SinkEvent): void;
   flush(): void;
+  replay(sessionId: string, lastSeq: number): (SinkEvent & { seq: number })[];
+  markLive(sessionId: string, lastSeq: number): void;
   dispose(): void;
 }
 
@@ -60,6 +62,16 @@ export function createEventSink(
        tokens_reasoning = tokens_reasoning + @r, tokens_cache_read = tokens_cache_read + @cr,
        cost = cost + @c, time_updated = @now WHERE id = @id`,
   );
+  const selectReplay = db.prepare(
+    `SELECT seq, session_id, message_id, part_id, type, data FROM event WHERE session_id = ? AND seq > ? ORDER BY seq`,
+  );
+  const deleteWithoutFloor = db.prepare(
+    `DELETE FROM event WHERE session_id = ? AND type != 'turn.end'`,
+  );
+  const deleteBelowFloor = db.prepare(
+    `DELETE FROM event WHERE session_id = ? AND seq < ? AND type != 'turn.end'`,
+  );
+  const liveSeq = new Map<string, number>();
 
   function deliver(batch: FlushBatch): void {
     try {
@@ -99,6 +111,7 @@ export function createEventSink(
               addUsage.run({ id: e.sessionId, now: Date.now(), i: usage.inputTokens ?? 0, o: usage.outputTokens ?? 0, r: usage.reasoningTokens ?? 0, cr: usage.cacheRead ?? 0, c: usage.costUsd ?? 0 });
             }
           }
+          if (e.type === 'turn.end') pruneEvents(e.sessionId);
         }
         return out;
       });
@@ -131,9 +144,37 @@ export function createEventSink(
     else if (timer === null) timer = setInterval(flush, flushMs);
   }
 
+  function replay(sessionId: string, lastSeq: number): (SinkEvent & { seq: number })[] {
+    return (selectReplay.all(sessionId, lastSeq) as Array<Record<string, unknown>>).map((r) => ({
+      seq: r.seq as number,
+      type: r.type as SinkEvent['type'],
+      sessionId: r.session_id as string,
+      messageId: (r.message_id as string | null) ?? undefined,
+      partId: (r.part_id as string | null) ?? undefined,
+      data: JSON.parse(r.data as string),
+    }));
+  }
+
+  function markLive(sessionId: string, lastSeq: number): void {
+    liveSeq.set(sessionId, Math.max(liveSeq.get(sessionId) ?? 0, lastSeq));
+  }
+
+  // On turn.end: committed parts are durable rows, so events below the oldest
+  // position anyone might still replay from can go. turn.end markers always stay.
+  function pruneEvents(sessionId: string): void {
+    const floor = liveSeq.get(sessionId);
+    if (floor === undefined) {
+      deleteWithoutFloor.run(sessionId);
+    } else {
+      deleteBelowFloor.run(sessionId, floor);
+    }
+  }
+
   return {
     emit,
     flush,
+    replay,
+    markLive,
     dispose: () => { if (timer !== null) clearInterval(timer); flush(); },
   };
 }
