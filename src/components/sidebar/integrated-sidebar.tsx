@@ -12,7 +12,9 @@ import {
   ArrowUp,
   X,
   MessageCircleQuestion,
+  Search,
 } from 'lucide-react';
+import { useQueries } from '@tanstack/react-query';
 import { useUi } from '@/lib/stores/ui';
 import { UpdatePill } from './update-pill';
 import { useWorkspaces, useSessions, useArchivedSessions } from '@/lib/queries';
@@ -126,6 +128,9 @@ function IntegratedSidebarImpl() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
 
   const toggleExpand = (id: string) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -178,20 +183,47 @@ function IntegratedSidebarImpl() {
         </Tip>
       </div>
 
-      <div className="flex-1 overflow-y-auto scroll p-2 space-y-1">
-        {active.map((ws) => (
-          <WorkspaceTreeItem key={ws.id} ws={ws}
-            isActive={ws.id === activeWorkspaceId} isExpanded={ws.id === activeWorkspaceId || expanded.has(ws.id)}
-            isSwitching={switchingTo === ws.id} activeSessionId={activeSessionId}
-            runningIds={runningSessionIds} unreadIds={unreadSessionIds} sessionPorts={sessionPorts}
-            onToggle={() => toggleExpand(ws.id)} onSelect={() => selectWorkspace(ws.id)}
-            onSelectSession={(sid) => selectSession(ws.id, sid)} onNewSession={() => newSession(ws.id)}
+      <div className="px-2 pb-2 flex-shrink-0">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50 pointer-events-none" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); (e.target as HTMLInputElement).blur(); } }}
+            placeholder="Search sessions…"
+            className="h-7 pl-7 pr-7 text-[0.8rem]"
           />
-        ))}
+          {query && (
+            <button type="button" aria-label="Clear search"
+              onClick={() => setQuery('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center size-4 rounded text-muted-foreground/60 hover:text-foreground hover:bg-secondary cursor-pointer">
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scroll p-2 space-y-1">
+        {searching ? (
+          <SearchResults workspaces={active} query={q}
+            activeWorkspaceId={activeWorkspaceId} activeSessionId={activeSessionId}
+            runningIds={runningSessionIds} unreadIds={unreadSessionIds} sessionPorts={sessionPorts}
+            onSelectWorkspace={selectWorkspace} onSelectSession={selectSession} />
+        ) : (
+          active.map((ws) => (
+            <WorkspaceTreeItem key={ws.id} ws={ws}
+              isActive={ws.id === activeWorkspaceId} isExpanded={ws.id === activeWorkspaceId || expanded.has(ws.id)}
+              isSwitching={switchingTo === ws.id} activeSessionId={activeSessionId}
+              runningIds={runningSessionIds} unreadIds={unreadSessionIds} sessionPorts={sessionPorts}
+              onToggle={() => toggleExpand(ws.id)} onSelect={() => selectWorkspace(ws.id)}
+              onSelectSession={(sid) => selectSession(ws.id, sid)} onNewSession={() => newSession(ws.id)}
+            />
+          ))
+        )}
       </div>
 
       {/* Archived workspaces — expandable, above the footer */}
-      {archived.length > 0 && (
+      {!searching && archived.length > 0 && (
         <div className="flex-shrink-0 border-t border-foreground">
           <button type="button" onClick={() => setShowArchived((v) => !v)}
             className="w-full flex items-center gap-1.5 px-3 py-2 text-[0.7rem] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer">
@@ -218,6 +250,109 @@ function IntegratedSidebarImpl() {
       </div>
     </aside>
     </InlineConfirmProvider>
+  );
+}
+
+/** Flat search view: matching sessions + drafts grouped under their
+ *  workspace. Reuses SessionTreeItem/DraftTreeItem so context menus,
+ *  rename, and status badges behave exactly like the tree. */
+type DraftEntry = { id: string; workspaceId: string; updatedAt: number };
+
+function SearchResults({
+  workspaces, query, activeWorkspaceId, activeSessionId, runningIds, unreadIds, sessionPorts,
+  onSelectWorkspace, onSelectSession,
+}: {
+  workspaces: { id: string; name: string; path: string }[];
+  query: string;
+  activeWorkspaceId: string | null;
+  activeSessionId: string | null;
+  runningIds: string[]; unreadIds: string[]; sessionPorts: Map<string, { port: number; url: string }[]>;
+  onSelectWorkspace: (id: string) => void;
+  onSelectSession: (workspaceId: string, sessionId: string) => void;
+}) {
+  // Shares the ['sessions', wsId] cache with the tree — no duplicate fetches.
+  const queries = useQueries({
+    queries: workspaces.map((ws) => ({
+      queryKey: ['sessions', ws.id],
+      queryFn: () => api.listSessions(ws.id),
+    })),
+  });
+  const loading = queries.some((r) => r.isPending);
+
+  const pendingOptions = useUi((s) => s.pendingOptions);
+  const draftSessions = useUi((s) => s.draftSessions);
+  const composerDrafts = useUi((s) => s.composerDrafts);
+  const activeDraftId = useUi((s) => s.activeDraftId);
+  const selectDraft = useUi((s) => s.selectDraft);
+  const deleteDraft = useUi((s) => s.deleteDraft);
+
+  const groups = useMemo(() => {
+    const out: { ws: { id: string; name: string }; sessions: SessionLite[]; drafts: { id: string; text: string }[] }[] = [];
+    workspaces.forEach((ws, i) => {
+      const sessions = (queries[i].data ?? [])
+        .slice()
+        .sort((a, b) => (b.updatedAt ?? b.createdAt ?? '').localeCompare(a.updatedAt ?? a.createdAt ?? ''));
+      // A workspace-name match pulls in all its sessions; otherwise only
+      // sessions whose title matches.
+      const wsMatches = ws.name.toLowerCase().includes(query);
+      const matched = wsMatches
+        ? sessions
+        : sessions.filter((s) => (s.title || 'Untitled').toLowerCase().includes(query));
+      const wsDrafts = Object.values(draftSessions as Record<string, DraftEntry>)
+        .filter((d) => d.workspaceId === ws.id);
+      const matchedDrafts = (wsMatches
+        ? wsDrafts
+        : wsDrafts.filter((d) => (composerDrafts[d.id] ?? '').toLowerCase().includes(query))
+      )
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((d) => ({ id: d.id, text: composerDrafts[d.id] ?? '' }));
+      if (matched.length === 0 && matchedDrafts.length === 0) return;
+      out.push({ ws, sessions: matched, drafts: matchedDrafts });
+    });
+    return out;
+  }, [workspaces, queries, query, draftSessions, composerDrafts]);
+
+  if (loading) {
+    return <div className="px-4 py-6 text-[0.8rem] text-muted-foreground/50">Searching…</div>;
+  }
+  if (groups.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
+        <Search className="size-4 text-muted-foreground/30" />
+        <span className="text-[0.8rem] text-muted-foreground/50">No results for “{query}”</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {groups.map(({ ws, sessions, drafts }) => (
+        <div key={ws.id} className="mb-1.5">
+          <button type="button" onClick={() => onSelectWorkspace(ws.id)}
+            className={cn('w-full flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer transition-colors min-w-0',
+              ws.id === activeWorkspaceId ? 'text-sidebar-foreground' : 'text-muted-foreground hover:bg-secondary/40')}>
+            <FolderCode className="size-3.5 flex-shrink-0" />
+            <span className="text-[0.7rem] uppercase tracking-wider font-semibold truncate">{ws.name}</span>
+          </button>
+          {drafts.map((d) => (
+            <DraftTreeItem key={d.id} text={d.text}
+              isActive={d.id === activeDraftId}
+              onSelectDraft={() => {
+                if (ws.id !== activeWorkspaceId) useUi.getState().setActiveWorkspace(ws.id);
+                selectDraft(d.id);
+              }}
+              onDelete={() => deleteDraft(d.id)} />
+          ))}
+          {sessions.map((s, idx) => (
+            <SessionTreeItem key={s.id} session={s} workspaceId={ws.id}
+              isLast={idx === sessions.length - 1}
+              isActive={s.id === activeSessionId} isRunning={runningIds.includes(s.id)} isUnread={unreadIds.includes(s.id)} ports={sessionPorts.get(s.id)}
+              needsAttention={!!pendingOptions[s.id]}
+              onSelect={() => onSelectSession(ws.id, s.id)} />
+          ))}
+        </div>
+      ))}
+    </>
   );
 }
 
