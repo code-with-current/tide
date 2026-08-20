@@ -50,3 +50,75 @@ describe('session-store-v2 schema', () => {
     b.close();
   });
 });
+
+describe('session-store-v2 crud', () => {
+  it('creates a session and lists metadata only', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 'New session', modelId: 'm', providerId: 'p' });
+    const listed = s.listSessions('/w').sessions;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ id: 's1', title: 'New session', modelId: 'm' });
+    expect(listed[0]).not.toHaveProperty('messages');
+    s.close();
+  });
+
+  it('paginates the list newest-first with a cursor', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    for (let i = 0; i < 5; i++) {
+      s.createSession({ id: `s${i}`, workspacePath: '/w', title: `t${i}`, modelId: 'm' });
+    }
+    const page1 = s.listSessions('/w', { limit: 2 });
+    expect(page1.sessions.map((x) => x.id)).toEqual(['s4', 's3']);
+    expect(page1.nextCursor).toBe('s2');
+    const page2 = s.listSessions('/w', { limit: 2, cursor: page1.nextCursor });
+    expect(page2.sessions.map((x) => x.id)).toEqual(['s2', 's1']);
+    s.close();
+  });
+
+  it('excludes archived from the default list, includes with flag', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 'a', modelId: 'm' });
+    s.archiveSession('s1');
+    expect(s.listSessions('/w')).toEqual({ sessions: [], nextCursor: null });
+    expect(s.listSessions('/w', { archived: true }).sessions.map((x) => x.id)).toEqual(['s1']);
+    s.close();
+  });
+
+  it('appends parts and returns message windows ascending', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 't', modelId: 'm' });
+    for (let m = 0; m < 3; m++) {
+      s.insertMessage({ id: `m${m}`, sessionId: 's1', role: m % 2 ? 'assistant' : 'user' });
+      s.insertPart({ id: `p${m}-0`, messageId: `m${m}`, sessionId: 's1', seq: 0, kind: 'text', data: { text: `msg ${m}` } });
+    }
+    const all = s.sessionMessages('s1', { limit: 50 });
+    expect(all.messages.map((m) => m.id)).toEqual(['m0', 'm1', 'm2']);
+    const win = s.sessionMessages('s1', { limit: 1 });
+    expect(win.messages.map((m) => m.id)).toEqual(['m2']);
+    expect(win.nextBefore).toBe('m2');
+    const older = s.sessionMessages('s1', { limit: 2, before: win.nextBefore! });
+    expect(older.messages.map((m) => m.id)).toEqual(['m0', 'm1']);
+    s.close();
+  });
+
+  it('increments usage counters via addUsage', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 't', modelId: 'm' });
+    s.addUsage('s1', { inputTokens: 10, outputTokens: 5, costUsd: 0.1 });
+    s.addUsage('s1', { inputTokens: 1, outputTokens: 2, costUsd: 0.2 });
+    const [row] = s.listSessions('/w').sessions;
+    expect(row).toMatchObject({ tokensInput: 11, tokensOutput: 7, cost: 0.30000000000000004 });
+    s.close();
+  });
+
+  it('deleting a session cascades to messages and parts', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 't', modelId: 'm' });
+    s.insertMessage({ id: 'm0', sessionId: 's1', role: 'user' });
+    s.insertPart({ id: 'p0', messageId: 'm0', sessionId: 's1', seq: 0, kind: 'text', data: {} });
+    s.deleteSession('s1');
+    expect(s.listSessions('/w').sessions).toHaveLength(0);
+    expect(s.sessionMessages('s1', { limit: 50 }).messages).toHaveLength(0);
+    s.close();
+  });
+});
