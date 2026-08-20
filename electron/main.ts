@@ -17,13 +17,17 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.disableHardwareAcceleration = false;
+import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { initLogger, createLogger } from './logger.js';
 import { registerIpcHandlers, bootstrapCatalog } from './ipc/handlers.js';
 import { registerChatHandlers } from './ipc/chat.js';
 import { registerAgentSdkHandlers, abortAllTurns } from './agent/orchestrator.js';
-import { getSessionStore } from './ipc/sessions.js';
+import { getSessionStore, registerSessionV2Handlers } from './ipc/sessions.js';
+import { createSessionStoreV2 } from './ipc/session-store-v2.js';
+import { registerEventsIpc } from './ipc/events.js';
+import type { EventSink } from './agent/event-sink.js';
 import { registerScriptHandlers, killAllScripts } from './ipc/scripts.js';
 import { killAllBackgroundShells } from './agent/tools/background-shell.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
@@ -59,6 +63,10 @@ protocol.registerSchemesAsPrivileged([
 const log = createLogger('main');
 
 let mainWindow: BrowserWindow | null = null;
+
+// Stream-event sink for the part-normalized store — created on app ready,
+// flushed on quit. Task 6 threads it into the orchestrator.
+let eventSink: EventSink | null = null;
 
 // The currently active workspace — the MCP pool uses its root for project-scoped servers (.mcp.json), and MCP IPC uses it to pick which config file to mutate. Set by the `tide:mcp:workspaceActivated` IPC handler when the active workspace changes.
 let activeWorkspace: { id: string; root: string } | undefined;
@@ -185,6 +193,18 @@ if (!gotLock) {
     initLogger(path.join(appDataDir(), 'logs'));
     log.info('app ready', { dev: isDev, userData: appDataDir() });
 
+    // Part-normalized sessions (v2): rename the legacy JSON sessions/ dir
+    // aside BEFORE any code path can read it — the legacy store mkdirs an
+    // empty dir on first load, so it simply degrades to an empty store.
+    const legacySessionsDir = path.join(appDataDir(), 'sessions');
+    if (fs.existsSync(legacySessionsDir)) {
+      const legacyDest = path.join(appDataDir(), 'sessions.legacy');
+      if (!fs.existsSync(legacyDest)) fs.renameSync(legacySessionsDir, legacyDest);
+    }
+    const storeV2 = createSessionStoreV2(path.join(appDataDir(), 'sessions-v2.db'));
+    registerSessionV2Handlers(ipcMain, storeV2);
+    eventSink = registerEventsIpc(ipcMain, storeV2);
+
     registerIpcHandlers();
     // Settings handlers MUST be ready before the window shows — the renderer
     registerSettingsHandlers();
@@ -283,6 +303,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // Flush any buffered stream events while the v2 db is still open.
+  eventSink?.dispose();
   abortAllTurns();
   killAllScripts();
   killAllBackgroundShells();
