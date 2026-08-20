@@ -1,6 +1,6 @@
 /** Batches orchestrator stream events into the `event` table (one WAL
  * transaction per flush — one fsync per ~50ms, not per chunk) and forwards
- * flushed batches to the renderer. On DB failure it degrades to push-only:
+ * per-session batches to the renderer. On DB failure it degrades to push-only:
  * streaming continues, reconnect/replay is simply unavailable. */
 
 import type { Database } from 'better-sqlite3';
@@ -11,12 +11,24 @@ export interface SinkEvent {
   messageId?: string;
   partId?: string;
   data?: Record<string, unknown>;
+  seq?: number;
 }
 
+/** One flushed partition of events, delivered per session. Event `seq` is
+ * present iff the transaction committed (persisted rowid, ascending within
+ * the batch); absent ⇒ degraded push-only delivery with firstSeq/lastSeq 0. */
 export interface FlushBatch {
   events: SinkEvent[];
   firstSeq: number;
   lastSeq: number;
+}
+
+export interface SinkUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  cacheRead?: number;
+  costUsd: number;
 }
 
 export interface EventSink {
@@ -49,19 +61,30 @@ export function createEventSink(
        cost = cost + @c, time_updated = @now WHERE id = @id`,
   );
 
+  function deliver(batch: FlushBatch): void {
+    try {
+      opts.onFlush?.(batch);
+    } catch {
+      // A throwing consumer (e.g. webContents.send on a destroyed window) must
+      // not escape flush() — the interval tick would crash — and must not be
+      // mistaken for a DB failure, which would re-deliver the batch.
+    }
+  }
+
   function flush(): void {
     if (buffer.length === 0) return;
     const events = buffer;
     buffer = [];
-    let firstSeq = 0;
-    let lastSeq = 0;
+    let stamped: Map<string, (SinkEvent & { seq: number })[]> | null = null;
     try {
       const tx = db.transaction((evts: SinkEvent[]) => {
+        const out = new Map<string, (SinkEvent & { seq: number })[]>();
         for (const e of evts) {
           const info = insertEvent.run(e.sessionId, e.messageId ?? null, e.partId ?? null, e.type, JSON.stringify(e.data ?? {}), Date.now());
-          const seq = Number(info.lastInsertRowid);
-          if (!firstSeq) firstSeq = seq;
-          lastSeq = seq;
+          const event: SinkEvent & { seq: number } = { ...e, seq: Number(info.lastInsertRowid) };
+          const list = out.get(e.sessionId);
+          if (list) list.push(event);
+          else out.set(e.sessionId, [event]);
           if (e.type === 'part.commit' && e.partId && e.messageId) {
             const body = (e.data ?? {}) as { kind: string; data: unknown; seq?: number };
             const existing = partExists.get(e.partId) as { c: number };
@@ -71,19 +94,34 @@ export function createEventSink(
           }
           if (e.type === 'message.end' && e.messageId) {
             bumpMessageCompleted.run(Date.now(), e.messageId);
-            const usage = ((e.data ?? {}) as { usage?: Record<string, number> }).usage;
+            const usage = ((e.data ?? {}) as { usage?: SinkUsage }).usage;
             if (usage) {
               addUsage.run({ id: e.sessionId, now: Date.now(), i: usage.inputTokens ?? 0, o: usage.outputTokens ?? 0, r: usage.reasoningTokens ?? 0, cr: usage.cacheRead ?? 0, c: usage.costUsd ?? 0 });
             }
           }
         }
+        return out;
       });
-      tx(events);
-      opts.onFlush?.({ events, firstSeq, lastSeq });
+      stamped = tx(events);
     } catch {
       // Push-only degradation: the DB write failed (disk full, closed handle,
       // corruption) — still deliver to the live renderer, skip persistence.
-      opts.onFlush?.({ events, firstSeq: 0, lastSeq: 0 });
+      stamped = null;
+    }
+    if (stamped) {
+      for (const evts of stamped.values()) {
+        deliver({ events: evts, firstSeq: evts[0].seq, lastSeq: evts[evts.length - 1].seq });
+      }
+    } else {
+      const bySession = new Map<string, SinkEvent[]>();
+      for (const e of events) {
+        const list = bySession.get(e.sessionId);
+        if (list) list.push(e);
+        else bySession.set(e.sessionId, [e]);
+      }
+      for (const evts of bySession.values()) {
+        deliver({ events: evts, firstSeq: 0, lastSeq: 0 });
+      }
     }
   }
 
