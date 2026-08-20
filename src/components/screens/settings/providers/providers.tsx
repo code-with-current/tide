@@ -7,16 +7,19 @@ import {
   Check,
   Server,
   Brain,
+  Eye,
   PlugZap,
   Copy,
   Search,
   KeyRound,
   RefreshCw,
   Zap,
+  BrainCircuit,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
+import { SkeletonBar } from "@/components/ui/loading-rows";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -40,19 +43,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { ProviderLogo } from "@/components/primitives/provider-logo";
 import * as api from "@/lib/api/client";
 import { useProviders, useAddProvider } from "@/lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ApiStyle, Provider, Model, ProviderModelMeta } from "@/types";
+import type { ApiStyle, Provider, ProviderModelMeta } from "@/types";
 import { cn, formatContext } from "@/lib/utils";
 import { formatPriceRate } from "@/lib/queries";
 import { SettingsHeader } from "../shared";
@@ -63,6 +58,11 @@ import { SettingsHeader } from "../shared";
 // =============================================================
 
 // Per-protocol form config — drives placeholders, auth-header hints, and the resolved endpoint path. Centralizing here keeps add + edit forms in sync and makes the protocol↔behavior relationship explicit (the auth header is the z.ai coding-vs-anthropic gotcha — each protocol speaks only one, mixing them 404s).
+import {
+  ModelsTable, rowsToModels, useFollowProtocolEndpoint, useModelRows,
+  type Row,
+} from "./models-table";
+
 export const PROTOCOL = {
   anthropic: {
     baseUrlPlaceholder: "https://api.anthropic.com",
@@ -143,8 +143,17 @@ export function ProvidersSection() {
           </div>
           <div className="flex-1 overflow-y-auto scroll space-y-0.5">
             {isLoading && (
-              <div className="px-2 py-3 text-[11px] text-muted-foreground/50">
-                Loading…
+              <div className="space-y-0.5" aria-hidden>
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
+                    <SkeletonBar className="size-5 shrink-0 rounded-md" />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <SkeletonBar className="h-3 w-1/2" />
+                      <SkeletonBar className="h-2 w-1/3" />
+                    </div>
+                    <SkeletonBar className="size-3 shrink-0 rounded-[3px]" />
+                  </div>
+                ))}
               </div>
             )}
             {filtered?.map((p) => (
@@ -310,56 +319,14 @@ function ProviderFormDialog({
   const [apiStyle, setApiStyle] = useState<ApiStyle>("openai");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [apiKey, setApiKey] = useState("");
-  const [rows, setRows] = useState<Row[]>([
+  const { rows, setRows, updateRow, addRow, removeRow } = useModelRows([
     { alias: "", modelId: "", context: "" },
   ]);
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
   const [detected, setDetected] = useState(false);
 
-  // Follow the protocol with its canonical endpoint when toggling style
-  // (only if the URL is empty or still a default). Mirrors ProviderDetail.
-  const prevStyle = useRef<ApiStyle>(apiStyle);
-  useEffect(() => {
-    if (prevStyle.current === apiStyle) return;
-    prevStyle.current = apiStyle;
-    const AD = "https://api.anthropic.com";
-    const OD = "https://api.openai.com/v1";
-    const target = apiStyle === "anthropic" ? AD : OD;
-    setBaseUrl((cur) => {
-      const t = cur.trim();
-      return t === "" || t === AD || t === OD ? target : cur;
-    });
-  }, [apiStyle]);
-
-  const rowsToModels = (): Model[] =>
-    rows
-      .filter((r) => r.modelId.trim() || r.alias.trim())
-      .map((r) => ({
-        id: `m_${Math.random().toString(36).slice(2, 8)}`,
-        alias: r.alias.trim() || r.modelId.trim(),
-        modelId: r.modelId.trim(),
-        contextWindow: parseInt(r.context, 10) || 200_000,
-        providerId: "",
-        catalogId: r.catalogId,
-        reasoning: r.reasoning,
-        reasoningMandatory: r.reasoningMandatory,
-        supportedEfforts: r.supportedEfforts,
-        priceLabel: r.priceLabel,
-        inputCostPerToken: r.inputCostPerToken,
-        outputCostPerToken: r.outputCostPerToken,
-        cacheReadCostPerToken: r.cacheReadCostPerToken,
-        cacheWriteCostPerToken: r.cacheWriteCostPerToken,
-      }));
-
-  const updateRow = (i: number, patch: Partial<Row>) =>
-    setRows((rs) => {
-      const next = rs.slice();
-      next[i] = { ...next[i], ...patch };
-      return next;
-    });
-
-  useCatalogEnrichment(rows, updateRow);
+  useFollowProtocolEndpoint(apiStyle, setBaseUrl);
 
   const detectProtocol = async () => {
     if (!baseUrl.trim() || !apiKey.trim()) return;
@@ -409,7 +376,7 @@ function ProviderFormDialog({
         apiStyle,
         baseUrl: baseUrlToSave,
         apiKey: apiKey.trim() || undefined,
-        models: rowsToModels(),
+        models: rowsToModels(rows),
       });
       qc.invalidateQueries({ queryKey: ["providers"] });
       onCreated(created.id);
@@ -510,135 +477,16 @@ function ProviderFormDialog({
             )}
             {detected && !detectError && (
               <span className="text-[11px] text-muted-foreground/60">
-                Protocol + {rowsToModels().length} models auto-filled.
+                Protocol + {rowsToModels(rows).length} models auto-filled.
               </span>
             )}
           </div>
 
           <div className="space-y-2">
             <SectionLabel
-              icon={<Brain className="size-3" />}
-              count={rowsToModels().length}
-            >
-              Models
-            </SectionLabel>
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="overflow-x-auto">
-                <Table className="text-xs">
-                  <TableHeader>
-                    <TableRow className="border-border hover:bg-transparent">
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">
-                        Alias
-                      </TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">
-                        Model ID
-                      </TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-20">
-                        Context
-                      </TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-28">
-                        Price
-                      </TableHead>
-                      <TableHead className="w-8" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((row, i) => (
-                      <TableRow key={i} className="border-border/60">
-                        <TableCell className="py-1 pr-1">
-                          <div className="flex items-center gap-1">
-                            {row.reasoning && (
-                              <Brain className="size-3 text-reasoning shrink-0" />
-                            )}
-                            <input
-                              className="w-full bg-transparent border-0 outline-none text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                              value={row.alias}
-                              onChange={(e) =>
-                                updateRow(i, { alias: e.target.value })
-                              }
-                              placeholder="Alias"
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          <input
-                            className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                            value={row.modelId}
-                            onChange={(e) =>
-                              updateRow(i, modelIdChangePatch(row, e.target.value))
-                            }
-                            placeholder="model-id"
-                          />
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          {row.catalogId ? (
-                            <div
-                              className="flex items-center gap-1 px-1 py-0.5"
-                              title={`Catalog: ${row.catalogId}`}
-                            >
-                              <span className="font-mono text-[11.5px] text-muted-foreground">
-                                {row.context ? formatContext(parseInt(row.context, 10)) : "—"}
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="text-[8px] px-1 py-0 uppercase tracking-wide text-success/80"
-                              >
-                                cat
-                              </Badge>
-                            </div>
-                          ) : (
-                            <input
-                              className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                              value={row.context}
-                              onChange={(e) =>
-                                updateRow(i, { context: e.target.value })
-                              }
-                              placeholder="200000"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          {row.priceLabel ? (
-                            <span className="font-mono text-[10.5px] text-muted-foreground/70">
-                              {row.priceLabel}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground/30">
-                              —
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-6 text-muted-foreground/45 hover:text-destructive"
-                            onClick={() =>
-                              setRows((rs) => rs.filter((_, idx) => idx !== i))
-                            }
-                          >
-                            <Trash2 className="size-3" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center justify-between gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setRows((rs) => [
-                      ...rs,
-                      { alias: "", modelId: "", context: "" },
-                    ])
-                  }
-                  className="text-[11px] h-7 text-muted-foreground hover:text-foreground"
-                >
-                  <Plus className="size-3" /> Add row
-                </Button>
+              icon={<BrainCircuit className="size-3" />}
+              count={rowsToModels(rows).length}
+              action={
                 <FetchModelsButton
                   apiStyle={apiStyle}
                   baseUrl={baseUrl}
@@ -648,8 +496,16 @@ function ProviderFormDialog({
                   }
                   existingModelIds={rows.map((r) => r.modelId)}
                 />
-              </div>
-            </div>
+              }
+            >
+              Models
+            </SectionLabel>
+            <ModelsTable
+              rows={rows}
+              onUpdate={updateRow}
+              onAdd={addRow}
+              onRemove={removeRow}
+            />
           </div>
         </div>
 
@@ -687,35 +543,6 @@ function ProviderFormDialog({
 // ProviderDetail — the inline edit form (auto-save). Selecting a provider in the sidebar renders this; edits persist ~600ms after the last change. Add is handled by ProviderFormDialog.
 // =============================================================
 
-export interface Row {
-  alias: string;
-  modelId: string;
-  context: string;
-  /** LiteLLM/models.dev catalog canonical id, set when the row came from the Fetch Models
-   *  dialog with a confident match. Enables O(1) metadata lookup at runtime. */
-  catalogId?: string;
-  /** "$in / $out per Mtok" price label, set when the row came from the Fetch
-   *  Models dialog with a catalog/live match. Display-only. */
-  priceLabel?: string;
-  /** Whether the model supports reasoning (sourced from a live provider response).
-   *  Drives the brain icon in the table — replaces the heuristic prefix table. */
-  reasoning?: boolean;
-  /** Raw per-token rates for cost calculation (USD). */
-  inputCostPerToken?: number;
-  outputCostPerToken?: number;
-  cacheReadCostPerToken?: number;
-  cacheWriteCostPerToken?: number;
-  /** True when the model always reasons (sourced from a live provider response).
-   *  Persisted onto Model so the thinking-level selector can disable "off". */
-  reasoningMandatory?: boolean;
-  /** Valid reasoning effort levels (sourced from a live provider response). */
-  supportedEfforts?: string[];
-  /** Present when the row maps to an existing model (edit mode) — preserves
-   *  identity so updateProvider doesn't drop/recreate models on every save. */
-  id?: string;
-  providerId?: string;
-}
-
 function ProviderDetail({
   provider,
   onDeleted,
@@ -730,7 +557,7 @@ function ProviderDetail({
   // Key field starts EMPTY on edit — the decrypted key is never pre-filled into the DOM. Save omits apiKey from the patch when the field is blank, so an untouched form preserves whatever's in the keychain. Type a new value to replace; there's no explicit "clear key" affordance (delete the provider to clear the key).
   const [apiKey, setApiKey] = useState("");
   const hasStoredKey = !!provider.apiKey;
-  const [rows, setRows] = useState<Row[]>(
+  const { rows, setRows, updateRow, addRow, removeRow } = useModelRows(
     provider.models.map((m) => ({
       alias: m.alias,
       modelId: m.modelId,
@@ -739,6 +566,7 @@ function ProviderDetail({
       reasoning: m.reasoning,
       reasoningMandatory: m.reasoningMandatory,
       supportedEfforts: m.supportedEfforts,
+      vision: m.vision,
       priceLabel: m.priceLabel,
       inputCostPerToken: m.inputCostPerToken,
       outputCostPerToken: m.outputCostPerToken,
@@ -749,45 +577,7 @@ function ProviderDetail({
     })),
   );
 
-  // When the API style changes, follow it with the protocol's canonical
-  // endpoint — but ONLY if the URL is empty or still one of the defaults.
-  // A custom URL (z.ai proxy, OpenRouter, LM Studio, etc.) is preserved so
-  // toggling protocol never clobbers the user's input. Skips the mount.
-  const prevStyle = useRef<ApiStyle>(apiStyle);
-  useEffect(() => {
-    if (prevStyle.current === apiStyle) return;
-    prevStyle.current = apiStyle;
-    const ANTHROPIC_DEFAULT = "https://api.anthropic.com";
-    const OPENAI_DEFAULT = "https://api.openai.com/v1";
-    const target =
-      apiStyle === "anthropic" ? ANTHROPIC_DEFAULT : OPENAI_DEFAULT;
-    setBaseUrl((cur) => {
-      const t = cur.trim();
-      if (t === "" || t === ANTHROPIC_DEFAULT || t === OPENAI_DEFAULT)
-        return target;
-      return cur;
-    });
-  }, [apiStyle]);
-
-  const rowsToModels = (): Model[] =>
-    rows
-      .filter((r) => r.modelId.trim() || r.alias.trim())
-      .map((r) => ({
-        id: r.id ?? `m_${Math.random().toString(36).slice(2, 8)}`,
-        alias: r.alias.trim() || r.modelId.trim(),
-        modelId: r.modelId.trim(),
-        contextWindow: parseInt(r.context, 10) || 200_000,
-        providerId: r.providerId ?? provider.id,
-        catalogId: r.catalogId,
-        reasoning: r.reasoning,
-        reasoningMandatory: r.reasoningMandatory,
-        supportedEfforts: r.supportedEfforts,
-        priceLabel: r.priceLabel,
-        inputCostPerToken: r.inputCostPerToken,
-        outputCostPerToken: r.outputCostPerToken,
-        cacheReadCostPerToken: r.cacheReadCostPerToken,
-        cacheWriteCostPerToken: r.cacheWriteCostPerToken,
-      }));
+  useFollowProtocolEndpoint(apiStyle, setBaseUrl);
 
   // Debounced auto-save. Skip the mount so loading the form doesn't write.
   // "New provider" creates a real provider immediately (in the sidebar), so
@@ -807,7 +597,7 @@ function ProviderDetail({
         name: name.trim() || "Untitled",
         apiStyle,
         baseUrl: baseUrlToSave,
-        models: rowsToModels(),
+        models: rowsToModels(rows, provider.id),
       };
       const newKey = apiKey.trim();
       if (newKey) patch.apiKey = newKey;
@@ -825,13 +615,6 @@ function ProviderDetail({
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, apiStyle, baseUrl, apiKey, rows]);
-
-  const updateRow = (i: number, patch: Partial<Row>) =>
-    setRows((rs) => {
-      const next = rs.slice();
-      next[i] = { ...next[i], ...patch };
-      return next;
-    });
 
   useCatalogEnrichment(rows, updateRow);
 
@@ -951,138 +734,9 @@ function ProviderDetail({
           {/* Models */}
           <section className="space-y-3">
             <SectionLabel
-              icon={<Brain className="size-3" />}
-              count={rowsToModels().length}
-            >
-              Models
-            </SectionLabel>
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="overflow-x-auto">
-                <Table className="text-xs">
-                  <TableHeader>
-                    <TableRow className="border-border hover:bg-transparent">
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">
-                        Alias
-                      </TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">
-                        Model ID
-                      </TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-20">
-                        Context
-                      </TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-28">
-                        Price
-                      </TableHead>
-                      <TableHead className="w-8" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((row, i) => (
-                      <TableRow key={i} className="border-border/60">
-                        <TableCell className="py-1 pr-1">
-                          <div className="flex items-center gap-1">
-                            {row.reasoning && (
-                              <Brain className="size-3 text-reasoning shrink-0" />
-                            )}
-                            <input
-                              className="w-full bg-transparent border-0 outline-none text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                              value={row.alias}
-                              onChange={(e) =>
-                                updateRow(i, { alias: e.target.value })
-                              }
-                              placeholder="Alias"
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          <input
-                            className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                            value={row.modelId}
-                            onChange={(e) =>
-                              updateRow(i, modelIdChangePatch(row, e.target.value))
-                            }
-                            placeholder="model-id"
-                          />
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          {row.catalogId ? (
-                            <div
-                              className="flex items-center gap-1 px-1 py-0.5"
-                              title={`Catalog: ${row.catalogId}`}
-                            >
-                              <span className="font-mono text-[11.5px] text-muted-foreground">
-                                {row.context ? formatContext(parseInt(row.context, 10)) : "—"}
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="text-[8px] px-1 py-0 uppercase tracking-wide text-success/80"
-                              >
-                                cat
-                              </Badge>
-                            </div>
-                          ) : (
-                            <input
-                              className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                              value={row.context}
-                              onChange={(e) =>
-                                updateRow(i, { context: e.target.value })
-                              }
-                              placeholder="200000"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          {row.priceLabel ? (
-                            <span className="font-mono text-[10.5px] text-muted-foreground/70">
-                              {row.priceLabel}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground/30">
-                              —
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-6 text-muted-foreground/45 hover:text-destructive"
-                            onClick={() =>
-                              setRows((rs) => rs.filter((_, idx) => idx !== i))
-                            }
-                          >
-                            <Trash2 className="size-3" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {rows.length === 0 && (
-                      <TableRow>
-                        <TableCell
-                          colSpan={4}
-                          className="text-center text-[11px] text-muted-foreground/50 py-6"
-                        >
-                          No models. Add a row to define one.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center justify-between gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setRows((rs) => [
-                      ...rs,
-                      { alias: "", modelId: "", context: "" },
-                    ])
-                  }
-                  className="text-[11px] h-7 text-muted-foreground hover:text-foreground"
-                >
-                  <Plus className="size-3" /> Add row
-                </Button>
+              icon={<BrainCircuit className="size-3" />}
+              count={rowsToModels(rows, provider.id).length}
+              action={
                 <FetchModelsButton
                   apiStyle={apiStyle}
                   baseUrl={baseUrl}
@@ -1094,8 +748,16 @@ function ProviderDetail({
                     setRows((prev) => appendFetchedModels(prev, models))
                   }
                 />
-              </div>
-            </div>
+              }
+            >
+              Models
+            </SectionLabel>
+            <ModelsTable
+              rows={rows}
+              onUpdate={updateRow}
+              onAdd={addRow}
+              onRemove={removeRow}
+            />
           </section>
         </div>
       </div>
@@ -1152,10 +814,12 @@ export function EndpointPreview({
 export function SectionLabel({
   icon,
   count,
+  action,
   children,
 }: {
   icon: React.ReactNode;
   count?: number;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -1165,10 +829,11 @@ export function SectionLabel({
         {children}
       </h3>
       {count != null && (
-        <Badge variant="secondary" className="text-[9px] font-mono ml-auto">
+        <Badge variant="secondary" className="text-[9px] font-mono">
           {count}
         </Badge>
       )}
+      {action && <div className="ml-auto min-w-0">{action}</div>}
     </div>
   );
 }
@@ -1259,6 +924,7 @@ export function appendFetchedModels(
       reasoning: m.reasoning,
       reasoningMandatory: m.reasoningMandatory,
       supportedEfforts: m.supportedEfforts,
+      vision: m.supportsVision,
     }));
   return [...prev, ...fresh];
 }
@@ -1307,25 +973,6 @@ export function useCatalogEnrichment(
     // prevents re-resolution of already-attempted IDs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
-}
-
-/**
- * Build the row patch for a modelId input change. If the row was
- * catalog-enriched (has a catalogId), changing the modelId invalidates the
- * enrichment — clear all catalog-sourced fields so useCatalogEnrichment can
- * re-resolve the new ID. Pass the current row + the new value.
- */
-export function modelIdChangePatch(row: Row, value: string): Partial<Row> {
-  if (!row.catalogId) return { modelId: value };
-  return {
-    modelId: value,
-    catalogId: undefined,
-    context: "",
-    reasoning: undefined,
-    priceLabel: undefined,
-    inputCostPerToken: undefined,
-    outputCostPerToken: undefined,
-  };
 }
 
 /** True when a provider model entry carries rich metadata beyond a bare id.
@@ -1446,6 +1093,7 @@ export function FetchModelsButton({
             catalogId: cat.meta.resolvedCatalogId,
             contextWindow: cat.meta.contextWindow,
             reasoning: cat.meta.supportsReasoning,
+            supportsVision: cat.meta.supportsVision,
             priceLabel: cat.meta.pricing ? formatPriceRate(cat.meta.pricing) : undefined,
             inputCostPerToken: cat.meta.pricing?.inputPerToken,
             outputCostPerToken: cat.meta.pricing?.outputPerToken,
@@ -1577,6 +1225,7 @@ export function FetchModelsButton({
                       }
                       modelId={m.modelId}
                       reasoning={m.reasoning}
+                      vision={m.supportsVision}
                       mandatory={m.reasoningMandatory}
                       meta={
                         m.contextWindow
@@ -1609,6 +1258,7 @@ export function FetchModelsButton({
                       }
                       modelId={m.modelId}
                       reasoning={m.reasoning}
+                      vision={m.supportsVision}
                       meta={
                         m.contextWindow
                           ? `${formatContext(m.contextWindow)} ctx${m.priceLabel ? " · " + m.priceLabel : ""}`
@@ -1695,6 +1345,7 @@ function FetchRow({
   onToggle,
   modelId,
   reasoning,
+  vision,
   mandatory,
   meta,
 }: {
@@ -1702,6 +1353,8 @@ function FetchRow({
   onToggle: () => void;
   modelId: string;
   reasoning?: boolean;
+  /** True when the model accepts image input — shows an eye badge. */
+  vision?: boolean;
   /** True when reasoning is mandatory (always on) — shows a lock badge. */
   mandatory?: boolean;
   meta?: string;
@@ -1725,10 +1378,11 @@ function FetchRow({
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1">
-          {reasoning && <Brain className="size-3 text-reasoning shrink-0" />}
           <code className="font-mono text-[11px] text-foreground/80 truncate">
             {modelId}
           </code>
+          {reasoning && <Brain className="size-3 text-reasoning shrink-0" />}
+          {vision && <Eye className="size-3 text-info shrink-0" />}
           {mandatory && (
             <Badge
               variant="secondary"
