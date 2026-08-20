@@ -1,6 +1,7 @@
 /** Collapsible "files changed" summary appended after a turn's answer.
  *  Each file row has: the path (clickable to open), a Review button (opens
- *  a side-by-side diff), and an Undo button (reverts to pre-turn state). */
+ *  a side-by-side diff), and an Undo button (reverts to pre-turn state).
+ *  The list caps at MAX_VISIBLE files with a "Show More.." expander. */
 
 import { memo, useEffect, useState } from 'react';
 import { ChevronRight, ChevronUp, FileEdit, FilePlus, Undo2, GitCompareArrows } from 'lucide-react';
@@ -14,6 +15,8 @@ export interface FileChangeClickPayload {
   hunks?: DiffHunk[];
 }
 
+const MAX_VISIBLE = 5;
+
 function FileChangesImpl({
   changes,
   streaming,
@@ -26,6 +29,7 @@ function FileChangesImpl({
   onUndoFile?: (path: string) => void;
 }) {
   const [open, setOpen] = useState(streaming);
+  const [expanded, setExpanded] = useState(false);
   const [reverted, setReverted] = useState<Set<string>>(new Set());
   useEffect(() => { if (!streaming) setOpen(false); }, [streaming]);
 
@@ -34,6 +38,8 @@ function FileChangesImpl({
   const totalAdd = changes.reduce((n, c) => n + (c.additions ?? 0), 0);
   const totalDel = changes.reduce((n, c) => n + (c.deletions ?? 0), 0);
   const visibleChanges = changes.filter(c => !reverted.has(c.path));
+  const shown = expanded ? visibleChanges : visibleChanges.slice(0, MAX_VISIBLE);
+  const hidden = visibleChanges.length - shown.length;
 
   return (
     <div className="mt-[5px]">
@@ -78,7 +84,7 @@ function FileChangesImpl({
         {open && (
           <div className="border-t border-input/60 px-2 py-1.5 animate-slide-up">
             <div className="space-y-0">
-              {visibleChanges.map((c) => {
+              {shown.map((c) => {
                 const Icon = c.status === 'created' ? FilePlus : FileEdit;
                 const iconColor = c.status === 'created' ? 'text-success' : 'text-warning';
                 return (
@@ -145,6 +151,16 @@ function FileChangesImpl({
                 );
               })}
             </div>
+            {hidden > 0 && (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setExpanded(true)}
+                className="mt-1 ml-1.5 text-[10px] uppercase tracking-wider gap-1.5"
+              >
+                Show More.. ({hidden})
+              </Button>
+            )}
             <Button
               variant="outline"
               size="xs"

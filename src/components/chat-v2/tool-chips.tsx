@@ -1,6 +1,6 @@
-/* v2 tool-run rendering: compact chip rows + file-diff chips with hover preview.
- * Mockup-derived layout, but driven by real ToolCall / FileChangeEntry data
- * and Tide's design tokens. Lives alongside (not replacing) the v1 tool-row. */
+/* v2 tool-run rendering: compact chip rows per tool call.
+ * Mockup-derived layout, but driven by real ToolCall data and Tide's design
+ * tokens. Lives alongside (not replacing) the v1 tool-row. */
 
 import { memo, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -17,22 +17,28 @@ import {
   Search,
   BookOpen,
   MessageCircleQuestionMark,
+  MessageCircleReply,
   ClipboardCheck,
+  GitCompareArrows,
   Minimize2,
   Plug,
   ChevronDown,
   Check,
+  Copy,
   X,
   Loader2,
+  ExternalLink,
+  Image as ImageIcon,
+  Database,
+  FileWarning,
 } from 'lucide-react';
-import type { ToolCall, ToolName } from '@/types';
-import type { FileChangeEntry } from '@/lib/stream/block-state';
+import type { DiffHunk, DiffLine, ToolCall, ToolName } from '@/types';
 import { cn } from '@/lib/utils';
 import { toolLabel } from '@/lib/tool-labels';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
   read_file: <FileSearch className="size-3" />,
-  read_media_file: <FileSearch className="size-3" />,
+  read_media_file: <ImageIcon className="size-3" />,
   edit_file: <FilePen className="size-3" />,
   multi_edit: <FilePen className="size-3" />,
   write_file: <FilePen className="size-3" />,
@@ -43,6 +49,7 @@ const ICON: Partial<Record<ToolName, React.ReactNode>> = {
   bash_output: <Terminal className="size-3" />,
   kill_shell: <Terminal className="size-3" />,
   grep: <FileSearch className="size-3" />,
+  memory: <Database className="size-3" />,
   git: <GitBranch className="size-3" />,
   dispatch_agent: <Bot className="size-3" />,
   todo_write: <ListChecks className="size-3" />,
@@ -60,6 +67,7 @@ const ICON_COLOR: Partial<Record<ToolName, string>> = {
   read_media_file: 'text-sky-400',
   glob: 'text-sky-400',
   grep: 'text-sky-400',
+  memory: 'text-muted-foreground',
   edit_file: 'text-amber-400',
   multi_edit: 'text-amber-400',
   write_file: 'text-amber-400',
@@ -93,6 +101,7 @@ function targetOf(call: ToolCall): string {
       return String(a.path ?? a.file_path ?? '');
     case 'glob':
     case 'grep':
+    case 'memory':
       return String(a.pattern ?? a.query ?? '');
     case 'bash':
     case 'bash_output':
@@ -105,6 +114,8 @@ function targetOf(call: ToolCall): string {
       return String(a.url ?? a.query ?? '');
     case 'dispatch_agent':
       return String(a.title ?? a.name ?? '');
+    case 'ask_followup_question':
+      return String(a.question ?? '');
     default:
       return call.argPreview ?? '';
   }
@@ -112,26 +123,645 @@ function targetOf(call: ToolCall): string {
 
 const isAgentCall = (c: ToolCall) => c.toolName === 'dispatch_agent' || c.display?.kind === 'agent';
 
-/** Truncated plain-text detail lines for the expanded row body. */
-function detailLinesOf(call: ToolCall): { text: string; tone?: 'add' | 'del' }[] {
-  if (call.display?.kind === 'diff') {
-    const lines: { text: string; tone?: 'add' | 'del' }[] = [];
-    for (const hunk of call.display.hunks) {
-      for (const l of hunk.lines) {
-        if (l.type === 'hunk') continue;
-        lines.push({ text: l.text, tone: l.type === 'add' ? 'add' : l.type === 'del' ? 'del' : undefined });
-      }
-    }
-    return lines.slice(0, 200);
-  }
+/** Plain-text detail lines for the expanded row body — wrapping mono rows,
+ *  never `truncate` (that ellipsized the ends of long lines away). */
+function detailLinesOf(call: ToolCall): string[] {
   const src = call.display?.kind === 'text' ? call.display.text : call.output;
   if (!src) return [];
   return (src as string)
     .replace(ANSI_RE, '')
     .split('\n')
     .filter((l) => l.trim().length > 0)
-    .slice(0, 500)
-    .map((text) => ({ text }));
+    .slice(0, 500);
+}
+
+/** directory_tree output rendered as one pre block. Per-line truncation
+ *  destroys trees: the filename sits at the END of each line, behind the
+ *  `│   ├── ` prefixes, so `truncate` shows only the prefixes and ellipsizes
+ *  the names away. */
+function treeSourceOf(call: ToolCall): string | undefined {
+  if (call.toolName !== 'directory_tree') return undefined;
+  const src = (call.display?.kind === 'text' ? call.display.text : call.output) as string | undefined;
+  if (!src) return undefined;
+  const clean = src.replace(ANSI_RE, '');
+  const lines = clean.split('\n');
+  if (lines.length <= 500) return clean;
+  return lines.slice(0, 500).join('\n') + `\n… ${lines.length - 500} more lines`;
+}
+
+/** ask_followup_question payload for the expanded row: question + offered
+ *  options from the args, answer parsed from the tool output ('User picked: …'
+ *  — multi-picks are ", "-joined). This is the persisted Q&A trace — it lives
+ *  in the tool row so the turn reads as one comprehensive tooling step. */
+function followupBodyOf(call: ToolCall):
+  | {
+      question: string;
+      options: { label: string; description?: string }[];
+      answer: string | null;
+      finished: boolean;
+    }
+  | undefined {
+  if (call.toolName !== 'ask_followup_question') return undefined;
+  const a = call.arguments ?? {};
+  const question = typeof a.question === 'string' ? a.question : '';
+  if (!question) return undefined;
+  const options = Array.isArray(a.options)
+    ? a.options
+        .map((o) => {
+          if (typeof o === 'string') return { label: o };
+          if (o && typeof o === 'object' && typeof (o as { label?: unknown }).label === 'string') {
+            const rec = o as { label: string; description?: unknown };
+            return {
+              label: rec.label,
+              description: typeof rec.description === 'string' ? rec.description : undefined,
+            };
+          }
+          return undefined;
+        })
+        .filter((o): o is { label: string; description?: string } => o !== undefined)
+    : [];
+  const out = typeof call.output === 'string' ? call.output : '';
+  const m = out.match(/^User picked: ([\s\S]*)$/);
+  return { question, options, answer: m ? (m[1] ?? '') : null, finished: out.length > 0 };
+}
+
+/** Expanded ask_followup_question body — the persisted Q&A trace, styled to
+ *  echo the live picker: the question in full, the offered options as cards
+ *  (picked one(s) highlighted with a check), and the typed reply when it was
+ *  free-text or a custom answer (or a muted note while awaiting / unanswered). */
+function FollowupBody({ q }: { q: NonNullable<ReturnType<typeof followupBodyOf>> }) {
+  const picked = q.answer != null ? q.answer.split(', ').map((p) => p.trim()) : [];
+  const matchedAnOption = q.options.some((o) => picked.includes(o.label));
+  return (
+    <div className="flex flex-col gap-2 py-0.5 pr-1">
+      <p className="break-words text-[12.5px] font-medium leading-snug text-foreground">
+        {q.question}
+      </p>
+      {q.options.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {q.options.map((o) => {
+            const isPicked = picked.includes(o.label);
+            return (
+              <div
+                key={o.label}
+                className={cn(
+                  'flex items-start gap-2 rounded-lg border px-2 py-1.5 text-[12px] leading-snug',
+                  isPicked
+                    ? 'border-primary/50 bg-primary/10 text-foreground'
+                    : 'border-border bg-background/60 text-muted-foreground/70',
+                )}
+              >
+                <span
+                  className={cn(
+                    'mt-[1px] flex size-3.5 shrink-0 items-center justify-center rounded-[3px]',
+                    isPicked ? 'bg-primary' : 'border border-muted-foreground/30',
+                  )}
+                >
+                  {isPicked && <Check className="size-2.5 text-primary-foreground" />}
+                </span>
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="break-words font-medium">{o.label}</span>
+                  {o.description && (
+                    <span className="break-words text-[11px] leading-snug text-muted-foreground/70">
+                      {o.description}
+                    </span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {q.answer != null && !matchedAnOption && (
+        <div className="flex items-start gap-2 rounded-lg bg-secondary/70 px-2 py-1.5">
+          <MessageCircleReply className="mt-[3px] size-3.5 shrink-0 text-primary" />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              your answer
+            </span>
+            <span className="break-words text-[12px] font-medium leading-snug text-foreground">
+              {q.answer}
+            </span>
+          </div>
+        </div>
+      )}
+      {q.finished && q.answer == null && (
+        <p className="text-[11px] italic text-muted-foreground/60">no answer</p>
+      )}
+      {!q.finished && (
+        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" />
+          waiting for your reply…
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** todo_write payload from the call arguments — the full-replacement list
+ *  is authoritative (the text display is just a flattened mirror of it). */
+type TodoEntry = { content: string; status: string; priority?: string };
+
+function todoBodyOf(call: ToolCall): { todos: TodoEntry[] } | undefined {
+  if (call.toolName !== 'todo_write') return undefined;
+  const a = call.arguments ?? {};
+  const todos = Array.isArray(a.todos)
+    ? a.todos
+        .map((t): TodoEntry | undefined =>
+          t && typeof t === 'object' && typeof (t as { content?: unknown }).content === 'string'
+            ? {
+                content: (t as { content: string }).content,
+                status: typeof (t as { status?: unknown }).status === 'string' ? (t as { status: string }).status : 'pending',
+                priority: typeof (t as { priority?: unknown }).priority === 'string' ? (t as { priority: string }).priority : undefined,
+              }
+            : undefined,
+        )
+        .filter((t): t is TodoEntry => t !== undefined)
+    : [];
+  return todos.length > 0 ? { todos } : undefined;
+}
+
+const TODO_PRIORITY_COLOR: Record<string, string> = {
+  high: 'bg-destructive/70',
+  medium: 'bg-warning/80',
+  low: 'bg-muted-foreground/40',
+};
+
+function TodoBody({ todos }: { todos: NonNullable<ReturnType<typeof todoBodyOf>>['todos'] }) {
+  const done = todos.filter((t) => t.status === 'completed').length;
+  const cancelled = todos.filter((t) => t.status === 'cancelled').length;
+  const pct = todos.length > 0 ? Math.round((done / todos.length) * 100) : 0;
+  return (
+    <div className="flex flex-col gap-2 py-0.5 pr-1">
+      <div className="flex items-center gap-2">
+        <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-secondary">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground">
+          {done}/{todos.length} done{cancelled ? ` · ${cancelled} cancelled` : ''}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1">
+        {todos.map((t, i) => {
+          const isDone = t.status === 'completed';
+          const isActive = t.status === 'in_progress';
+          const isCancelled = t.status === 'cancelled';
+          return (
+            <div key={i} className="flex items-start gap-2 text-[12px] leading-snug">
+              <span
+                className={cn(
+                  'mt-[1px] flex size-3.5 shrink-0 items-center justify-center rounded-[3px]',
+                  isDone && 'bg-primary',
+                  isActive && 'border border-primary/60',
+                  !isDone && !isActive && !isCancelled && 'border border-muted-foreground/30',
+                  isCancelled && 'border border-muted-foreground/20 text-muted-foreground/50',
+                )}
+              >
+                {isDone && <Check className="size-2.5 text-primary-foreground" />}
+                {isActive && <span className="size-1.5 animate-pulse rounded-full bg-primary" />}
+                {isCancelled && <X className="size-2.5" />}
+              </span>
+              {t.priority && (
+                <span
+                  title={`${t.priority} priority`}
+                  className={cn('mt-[6px] size-1.5 shrink-0 rounded-full', TODO_PRIORITY_COLOR[t.priority] ?? 'bg-muted-foreground/40')}
+                />
+              )}
+              <span
+                className={cn(
+                  'min-w-0 break-words',
+                  isDone && 'text-muted-foreground/70 line-through',
+                  isActive && 'font-medium text-foreground',
+                  !isDone && !isActive && !isCancelled && 'text-muted-foreground',
+                  isCancelled && 'text-muted-foreground/40 line-through',
+                )}
+              >
+                {t.content}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** read_media_file preview — the tool already emits the payload as a media
+ *  display; render it instead of the "Read x (12.3KB)" summary. */
+function mediaBodyOf(call: ToolCall): { dataUrl: string; mimeType: string } | undefined {
+  return call.display?.kind === 'media' ? { dataUrl: call.display.dataUrl, mimeType: call.display.mimeType } : undefined;
+}
+
+/** Copyable source path: prefer the argument, fall back to the output summary
+ *  (`Read <path> (…)`) so reloaded/legacy calls still show it. */
+function mediaPathOf(call: ToolCall): string | undefined {
+  const a = call.arguments;
+  if (a && typeof a.path === 'string' && a.path) return a.path;
+  const m = (call.output ?? '').match(/^Read (.+?) \(/);
+  return m ? m[1] : undefined;
+}
+
+/** SVGs whose root <svg> lacks width/height have no intrinsic size — inside the
+ * shrink-to-fit chip they collapse to nothing. Inject explicit dimensions (scaled
+ * from the viewBox ratio) and re-encode so <img> always has something to render. */
+function normalizeSvgSrc(dataUrl: string, isDark: boolean): string {
+  try {
+    const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    const svgText = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    const vb = svgText.match(/viewBox=["']\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+    const w = 480;
+    const h = vb ? Math.round((Number(vb[4]) / Math.max(Number(vb[3]), 0.001)) * w) || w : w;
+    let sized = svgText.replace(/(<svg\b[^>]*?)\swidth=["'][^"']*["']/i, '$1');
+    sized = sized.replace(/(<svg\b[^>]*?)\sheight=["'][^"']*["']/i, '$1');
+    sized = sized.replace(/<svg\b/i, `<svg width="${w}" height="${h}"`);
+    if (/currentColor/i.test(sized)) {
+      sized = sized.replace(/<svg\b/i, `<svg color="${isDark ? '#e4e4e7' : '#27272a'}" `);
+    }
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sized)}`;
+  } catch {
+    return dataUrl;
+  }
+}
+
+function MediaBody({ dataUrl, mimeType, path }: { dataUrl: string; mimeType: string; path?: string }) {
+  const [zoomed, setZoomed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [broken, setBroken] = useState(false);
+  const isImage = mimeType.startsWith('image/');
+  const isAudio = mimeType.startsWith('audio/');
+  const isVideo = mimeType.startsWith('video/');
+  const isDark = document.documentElement.classList.contains('dark');
+  const src = useMemo(
+    () => (mimeType === 'image/svg+xml' ? normalizeSvgSrc(dataUrl, isDark) : dataUrl),
+    [dataUrl, mimeType, isDark],
+  );
+
+  const copyPath = () => {
+    if (!path) return;
+    navigator.clipboard.writeText(path).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 py-0.5 pr-1">
+      {isImage && !broken && (
+        <button
+          type="button"
+          onClick={() => setZoomed(true)}
+          className="w-fit cursor-zoom-in overflow-hidden rounded-lg border border-border"
+        >
+          <img
+            src={src}
+            alt=""
+            className="max-h-56 max-w-full object-contain"
+            onError={() => setBroken(true)}
+          />
+        </button>
+      )}
+      {isAudio && <audio controls src={dataUrl} className="w-full max-w-md" />}
+      {isVideo && <video controls src={dataUrl} className="max-h-72 max-w-full rounded-lg border border-border" />}
+      {((!isImage && !isAudio && !isVideo) || broken) && (
+        <div className="flex w-fit items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+          <FileWarning className="size-3.5 shrink-0" />
+          {mimeType}
+          {broken ? ' — could not be displayed' : ' — no inline preview'}
+        </div>
+      )}
+      {path && (
+        <button
+          type="button"
+          onClick={copyPath}
+          title={path}
+          className="flex w-fit max-w-full items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+        >
+          <span className="truncate font-mono">{path}</span>
+          {copied ? (
+            <Check className="size-3 shrink-0 text-success" />
+          ) : (
+            <Copy className="size-3 shrink-0" />
+          )}
+        </button>
+      )}
+      {zoomed &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-8 backdrop-blur-sm"
+            onClick={() => setZoomed(false)}
+          >
+            <img
+              src={src}
+              alt=""
+              className="max-h-[92vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/** read_file body — numbered, wrapping code lines. The generic renderer
+ *  truncated each line (nowrap + ellipsis) in muted grey and dropped blank
+ *  lines, ellipsizing the ends of long code lines away. */
+function readBodyOf(call: ToolCall): string | undefined {
+  if (call.toolName !== 'read_file') return undefined;
+  const src = call.display?.kind === 'text' ? call.display.text : call.output;
+  if (typeof src !== 'string' || !src.trim()) return undefined;
+  const lines = src.split('\n');
+  if (lines.length <= 500) return src;
+  return `${lines.slice(0, 500).join('\n')}\n… ${lines.length - 500} more lines`;
+}
+
+function ReadBody({ src }: { src: string }) {
+  const lines = src.split('\n');
+  const w = String(lines.length).length;
+  return (
+    <div className="flex min-w-0 flex-col font-mono text-[11.5px] leading-[1.6] text-foreground/80">
+      {lines.map((l, i) => (
+        <div key={i} className="flex items-start">
+          <span
+            className="shrink-0 select-none pr-2.5 text-right tabular-nums text-muted-foreground/40"
+            style={{ width: `${w + 1}ch` }}
+          >
+            {i + 1}
+          </span>
+          <span className="min-w-0 whitespace-pre-wrap break-words">{l || '\u00a0'}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** edit/multi_edit/write body — the real diff viewer (unified or split with
+ *  word-level highlights), replacing stacked truncated diff lines. write_file
+ *  only has the resulting content (display text), so its hunks are synthesized
+ *  as an all-add diff of what the tool put on disk. */
+const MAX_SYNTH_LINES = 400;
+
+function diffBodyOf(call: ToolCall): DiffHunk[] | undefined {
+  if (call.display?.kind === 'diff') return call.display.hunks;
+  if (call.toolName !== 'write_file') return undefined;
+  const src = call.display?.kind === 'text' ? call.display.text : undefined;
+  if (typeof src !== 'string' || !src.trim()) return undefined;
+  const lines = src.split('\n');
+  const capped = lines.length > MAX_SYNTH_LINES;
+  const rows: DiffLine[] = (capped ? lines.slice(0, MAX_SYNTH_LINES) : lines).map((text, i) => ({
+    type: 'add' as const,
+    newNo: i + 1,
+    text,
+  }));
+  if (capped) rows.push({ type: 'context' as const, text: `… ${lines.length - MAX_SYNTH_LINES} more lines` });
+  return [{ header: `@@ -0,0 +1,${lines.length} @@`, lines: rows }];
+}
+
+function filePathOf(call: ToolCall): string {
+  if (call.display?.kind === 'diff') return call.display.path;
+  return String(call.arguments?.path ?? call.arguments?.file_path ?? '');
+}
+
+function BodyActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex h-6 w-fit items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+/** bash / bash_output body — terminal output as a wrapping mono block. The
+ *  generic renderer drew each line as a truncated muted span: the end of long
+ *  build errors got ellipsized away and the low-contrast grey was easy to miss. */
+function bashBodyOf(call: ToolCall): { output: string; durationMs?: number } | undefined {
+  if (call.toolName !== 'bash' && call.toolName !== 'bash_output') return undefined;
+  const src = ((call.display?.kind === 'text' ? call.display.text : call.output) ?? '').replace(ANSI_RE, '');
+  if (!src.trim()) return undefined;
+  const lines = src.split('\n');
+  const output = lines.length > 500 ? `${lines.slice(0, 500).join('\n')}\n… ${lines.length - 500} more lines` : src;
+  return { output, durationMs: call.durationMs };
+}
+
+function BashBody({ b }: { b: { output: string; durationMs?: number } }) {
+  return (
+    <div className="flex flex-col gap-1 py-0.5">
+      {b.durationMs != null && (
+        <span className="text-[10.5px] tabular-nums text-muted-foreground">
+          {(b.durationMs / 1000).toFixed(b.durationMs < 10_000 ? 2 : 1)}s
+        </span>
+      )}
+      <pre className="whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.6] text-foreground/80">
+        {b.output}
+      </pre>
+    </div>
+  );
+}
+
+/** web_search results parsed from the output text — the tool formats each
+ *  result as `N. title\n   url\n   snippet` blocks joined by blank lines. */
+function searchBodyOf(call: ToolCall): { title: string; url: string; snippet: string }[] | undefined {
+  if (call.toolName !== 'web_search') return undefined;
+  const src = (call.display?.kind === 'text' ? call.display.text : call.output) as string | undefined;
+  if (!src) return undefined;
+  const results: { title: string; url: string; snippet: string }[] = [];
+  for (const m of src.matchAll(/\d+\.\s+(.+)\n\s+(https?:\/\/\S+)\n\s+([^\n]+)/g)) {
+    results.push({ title: m[1]!.trim(), url: m[2]!.trim(), snippet: m[3]!.trim() });
+  }
+  return results.length > 0 ? results : undefined;
+}
+
+function SearchBody({ results }: { results: NonNullable<ReturnType<typeof searchBodyOf>> }) {
+  return (
+    <div className="flex flex-col gap-1.5 py-0.5 pr-1">
+      {results.map((r, i) => {
+        let host = '';
+        try { host = new URL(r.url).hostname; } catch { /* keep empty */ }
+        return (
+          <div key={i} className="flex flex-col gap-1 rounded-lg border border-border bg-background/60 px-2.5 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              {host && (
+                <span className="shrink-0 rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  {host}
+                </span>
+              )}
+              <a
+                href={r.url}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 break-words text-[12.5px] font-medium leading-snug text-primary hover:underline"
+              >
+                {r.title}
+              </a>
+              <ExternalLink className="size-3 shrink-0 text-muted-foreground/50" />
+            </div>
+            <p className="break-words text-[11.5px] leading-snug text-muted-foreground">{r.snippet}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** grep output grouped by file. Raw `path:line:match` lines end-truncate
+ *  badly (long paths ellipsize the match away) and bury the structure. */
+function grepBodyOf(call: ToolCall):
+  | { groups: { path: string; matches: { line: string; text: string }[] }[]; total: number; re?: RegExp }
+  | undefined {
+  if (call.toolName !== 'grep') return undefined;
+  const src = (call.display?.kind === 'text' ? call.display.text : call.output) as string | undefined;
+  if (!src || src.trim() === '(no matches)') return undefined;
+  const groups: { path: string; matches: { line: string; text: string }[] }[] = [];
+  const byPath = new Map<string, { path: string; matches: { line: string; text: string }[] }>();
+  let total = 0;
+  for (const l of src.split('\n')) {
+    if (!l.trim()) continue;
+    const m = l.match(/^(.+?):(\d+):(.*)$/);
+    if (!m) continue;
+    const [, path, line, text] = m as unknown as [string, string, string, string];
+    let g = byPath.get(path);
+    if (!g) {
+      g = { path, matches: [] };
+      byPath.set(path, g);
+      groups.push(g);
+    }
+    g.matches.push({ line, text });
+    total++;
+    if (total >= 500) break;
+  }
+  if (total === 0) return undefined;
+  const pattern = typeof (call.arguments ?? {}).pattern === 'string' ? (call.arguments!).pattern as string : undefined;
+  let re: RegExp | undefined;
+  if (pattern && pattern.length < 500) {
+    try { re = new RegExp(pattern, 'g'); } catch { /* rg syntax ≠ JS regex — skip highlighting */ }
+  }
+  return { groups, total, re };
+}
+
+function GrepBody({ groups, total, re }: { groups: NonNullable<ReturnType<typeof grepBodyOf>>['groups']; total: number; re?: RegExp }) {
+  return (
+    <div className="flex flex-col gap-2 py-0.5 pr-1">
+      <p className="text-[11px] text-muted-foreground">
+        {total} match{total === 1 ? '' : 'es'} · {groups.length} file{groups.length === 1 ? '' : 's'}
+      </p>
+      {groups.map((g) => (
+        <div key={g.path} className="flex flex-col gap-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/80">
+              {g.path}
+            </span>
+            <span className="shrink-0 rounded-full bg-secondary/70 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+              {g.matches.length}
+            </span>
+          </div>
+          {g.matches.map((m, i) => (
+            <div key={i} className="flex items-start gap-2 font-mono text-[11.5px] leading-[1.6]">
+              <span className="w-9 shrink-0 select-none text-right tabular-nums text-muted-foreground/50">
+                {m.line}
+              </span>
+              <span className="min-w-0 break-all whitespace-pre-wrap text-muted-foreground">
+                {re ? highlight(m.text, re) : m.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function highlight(text: string, re: RegExp): React.ReactNode {
+  re.lastIndex = 0;
+  const parts = text.split(re);
+  if (parts.length === 1) return text;
+  return parts.map((p, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="rounded-sm bg-warning/25 px-0.5 font-semibold text-foreground">
+        {p}
+      </mark>
+    ) : (
+      <span key={i}>{p}</span>
+    ),
+  );
+}
+
+/** memory (RAG) hits parsed from the display text — the tool formats results
+ *  as a `Found N …` header plus `[i] path:line (symbol) · NN%` entries each
+ *  followed by the chunk body. Per-line truncation makes those 1500-char
+ *  code bodies unreadable one-liners, so they get their own card layout. */
+function memoryBodyOf(call: ToolCall):
+  | { query: string; total: number; hits: { path: string; line: string; symbol?: string; sim?: number; body: string }[] }
+  | undefined {
+  if (call.toolName !== 'memory') return undefined;
+  const src = (call.display?.kind === 'text' ? call.display.text : call.output) as string | undefined;
+  if (!src) return undefined;
+  const head = src.match(/^Found (\d+) relevant chunks? for "([\s\S]*?)" \(out of ([\d,]+)\):/);
+  if (!head) return undefined;
+  const hits: { path: string; line: string; symbol?: string; sim?: number; body: string }[] = [];
+  let cur: (typeof hits)[number] | undefined;
+  for (const l of src.split('\n').slice(1)) {
+    const m = l.match(/^\[\d+\] (\S+):(\d+)(?: \(([^)]*)\))?(?: · (\d+)%)?$/);
+    if (m) {
+      const [, path, line, symbol, sim] = m as unknown as [string, string, string, string | undefined, string | undefined];
+      cur = { path, line, symbol: symbol || undefined, sim: sim ? Number(sim) : undefined, body: '' };
+      hits.push(cur);
+      continue;
+    }
+    if (!cur) continue;
+    cur.body = cur.body ? `${cur.body}\n${l}` : l;
+  }
+  if (hits.length === 0) return undefined;
+  return { query: head[2]!, total: Number(head[3]!.replace(/,/g, '')), hits };
+}
+
+function MemoryBody({ mem }: { mem: NonNullable<ReturnType<typeof memoryBodyOf>> }) {
+  return (
+    <div className="flex flex-col gap-1.5 py-0.5 pr-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="min-w-0 break-words text-[12.5px] font-medium leading-snug text-foreground/90">
+          “{mem.query}”
+        </span>
+        <span className="shrink-0 rounded-full bg-secondary/70 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+          {mem.hits.length} of {mem.total.toLocaleString()} chunks
+        </span>
+      </div>
+      {mem.hits.map((h, i) => (
+        <div key={i} className="flex flex-col gap-1 rounded-lg border border-border bg-background/60 px-2.5 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/80">
+              {h.path}:{h.line}
+            </span>
+            {h.symbol && (
+              <span className="shrink-0 rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {h.symbol}
+              </span>
+            )}
+            {h.sim != null && (
+              <span
+                title="similarity"
+                className={cn(
+                  'shrink-0 rounded-full px-1.5 text-[10px] tabular-nums',
+                  h.sim >= 80 ? 'bg-success/15 text-success' : h.sim >= 60 ? 'bg-warning/15 text-warning' : 'bg-secondary/70 text-muted-foreground',
+                )}
+              >
+                {h.sim}%
+              </span>
+            )}
+          </div>
+          <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.6] text-muted-foreground">
+            {h.body.trim()}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function StatusGlyph({ call }: { call: ToolCall }) {
@@ -151,66 +781,6 @@ function StatusGlyph({ call }: { call: ToolCall }) {
   }
 }
 
-type Preview = { entry: FileChangeEntry; x: number; top?: number; bottom?: number };
-
-function DiffPreview({ preview }: { preview: Preview }) {
-  const { entry } = preview;
-  const lines = useMemo(() => {
-    const out: { text: string; tone: 'add' | 'del' | 'ctx' }[] = [];
-    for (const hunk of entry.hunks ?? []) {
-      for (const l of hunk.lines) {
-        if (l.type === 'hunk') continue;
-        out.push({ text: l.text, tone: l.type === 'add' || l.type === 'del' ? l.type : 'ctx' });
-      }
-    }
-    return out.slice(0, 40);
-  }, [entry]);
-  const name = entry.path.split('/').pop() ?? entry.path;
-
-  return createPortal(
-    <div
-      className="fixed z-50 w-72 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
-      style={{
-        left: preview.x,
-        top: preview.top,
-        bottom: preview.bottom,
-        animation: 'pop-in 160ms cubic-bezier(0.23,1,0.32,1) both',
-        transformOrigin: preview.top === undefined ? 'bottom left' : 'top left',
-      }}
-    >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-1.5 font-mono text-[11px]">
-        <span className="min-w-0 truncate text-muted-foreground">{name}</span>
-        <span className="shrink-0 tabular-nums">
-          {!!entry.additions && <span className="text-success">+{entry.additions}</span>}
-          {!!entry.deletions && <span className="text-destructive"> −{entry.deletions}</span>}
-        </span>
-      </div>
-      <div className="scroll max-h-72 overflow-y-auto py-1 font-mono text-[11px] leading-[1.7]">
-        {lines.length === 0 && <div className="px-2.5 text-muted-foreground">no diff available</div>}
-        {lines.map((line, i) => (
-          <div
-            key={i}
-            className={cn(
-              'flex gap-2 whitespace-pre px-2.5',
-              line.tone === 'add' && 'bg-success/10 text-success',
-              line.tone === 'del' && 'bg-destructive/10 text-destructive',
-              line.tone === 'ctx' && 'text-muted-foreground',
-            )}
-          >
-            <span className="w-3 shrink-0 select-none">
-              {line.tone === 'add' ? '+' : line.tone === 'del' ? '−' : ' '}
-            </span>
-            <span className="min-w-0 truncate">{line.text}</span>
-          </div>
-        ))}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-const MAX_CHIPS = 3;
-
 /** A single expandable tool chip row — shared by top-level calls and the
  *  sub-agent calls nested inside an expanded dispatch row. agentBody, when
  *  present, replaces the generic detail lines. */
@@ -220,6 +790,7 @@ function ChipRow({
   rowOpen,
   onToggle,
   onViewFile,
+  onViewDiff,
   agentBody,
 }: {
   call: ToolCall;
@@ -227,18 +798,38 @@ function ChipRow({
   rowOpen: boolean;
   onToggle: (id: string) => void;
   onViewFile?: (path: string) => void;
+  onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
   agentBody?: React.ReactNode;
 }) {
-  const details = agentBody ? [] : detailLinesOf(call);
+  const treeSrc = agentBody ? undefined : treeSourceOf(call);
+  const followup = agentBody ? undefined : followupBodyOf(call);
+  const todo = agentBody ? undefined : todoBodyOf(call);
+  const media = agentBody ? undefined : mediaBodyOf(call);
+  const search = agentBody ? undefined : searchBodyOf(call);
+  const grep = agentBody ? undefined : grepBodyOf(call);
+  const mem = agentBody ? undefined : memoryBodyOf(call);
+  const bash = agentBody ? undefined : bashBodyOf(call);
+  const read = agentBody ? undefined : readBodyOf(call);
+  const diff = agentBody ? undefined : diffBodyOf(call);
+  const details =
+    agentBody || diff != null || treeSrc != null || followup != null || todo != null || media != null || search != null || grep != null || mem != null || bash != null || read != null
+      ? []
+      : detailLinesOf(call);
   const target = targetOf(call);
-  const expandable = !!agentBody || details.length > 0;
+  const expandable = !!agentBody || details.length > 0 || treeSrc != null || followup != null || todo != null || media != null || search != null || grep != null || mem != null || bash != null || read != null;
   return (
     <>
-      <button
-        type="button"
-        aria-expanded={rowOpen}
+      <div
+        role="button"
+        tabIndex={expandable ? 0 : -1}
+        aria-expanded={expandable ? rowOpen : undefined}
         aria-disabled={!expandable}
         onClick={() => expandable && onToggle(call.id)}
+        onKeyDown={(e) => {
+          if (!expandable || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          onToggle(call.id);
+        }}
         className={cn(
           'flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md px-1 text-left transition-colors px-1.5',
           expandable ? 'cursor-pointer' : 'cursor-default',
@@ -279,8 +870,22 @@ function ChipRow({
             {target}
           </span>
         )}
+        {diff != null && onViewDiff != null && (
+          <button
+            type="button"
+            title="Review diff"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewDiff({ path: filePathOf(call), hunks: diff });
+            }}
+            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+          >
+            <GitCompareArrows className="size-3" />
+            Review
+          </button>
+        )}
         <StatusGlyph call={call}/>
-      </button>
+      </div>
 
       {/* expanded detail */}
       <div
@@ -289,24 +894,42 @@ function ChipRow({
       >
         <div className="min-h-0 overflow-hidden">
           <div className="scroll ml-[13px] mt-[5px] flex max-h-[368px] flex-col gap-0.5 overflow-y-auto border-l border-border py-0.5 pl-3">
-            {call.display?.kind === 'diff' && onViewFile && (
-              <button
-                type="button"
-                onClick={() => onViewFile(call.display!.kind === 'diff' ? call.display!.path : '')}
-                className="w-fit text-[11px] text-primary hover:underline"
-              >
-                open diff →
-              </button>
-            )}
-            {agentBody ?? details.map((line, i) => (
-              <span
-                key={i}
-                className={cn(
-                  'truncate font-mono text-[11.5px] leading-[1.6]',
-                  line.tone === 'add' ? 'text-success' : line.tone === 'del' ? 'text-destructive' : 'text-muted-foreground',
+            {followup != null ? (
+              <FollowupBody q={followup} />
+            ) : todo != null ? (
+              <TodoBody todos={todo.todos} />
+            ) : media != null ? (
+              <MediaBody
+                dataUrl={media.dataUrl}
+                mimeType={media.mimeType}
+                path={mediaPathOf(call)}
+              />
+            ) : search != null ? (
+              <SearchBody results={search} />
+            ) : grep != null ? (
+              <GrepBody groups={grep.groups} total={grep.total} re={grep.re} />
+            ) : mem != null ? (
+              <MemoryBody mem={mem} />
+            ) : bash != null ? (
+              <BashBody b={bash} />
+            ) : read != null ? (
+              <div className="flex flex-col gap-1">
+                {onViewFile && filePathOf(call) && (
+                  <BodyActionButton
+                    icon={<FileSearch className="size-3" />}
+                    label="Open File"
+                    onClick={() => onViewFile(filePathOf(call))}
+                  />
                 )}
-              >
-                {line.tone ? `${line.tone === 'add' ? '+' : '−'} ${line.text}` : line.text}
+                <ReadBody src={read} />
+              </div>
+            ) : treeSrc != null ? (
+              <pre className="whitespace-pre font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
+                {treeSrc}
+              </pre>
+            ) : agentBody ?? details.map((line, i) => (
+              <span key={i} className="whitespace-pre-wrap break-all font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
+                {line}
               </span>
             ))}
           </div>
@@ -324,12 +947,14 @@ function AgentDetail({
   openRows,
   toggleRow,
   onViewFile,
+  onViewDiff,
 }: {
   call: ToolCall;
   childCalls: ToolCall[];
   openRows: Set<string>;
   toggleRow: (id: string) => void;
   onViewFile?: (path: string) => void;
+  onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
 }) {
   const d = call.display?.kind === 'agent' ? call.display : undefined;
   const agentName = d?.agentName ?? String(call.arguments?.name ?? 'agent');
@@ -375,7 +1000,7 @@ function AgentDetail({
         <p className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.6] text-muted-foreground">{task}</p>
       )}
       {childCalls.map((c) => (
-        <ChipRow key={c.id} call={c} isChild rowOpen={openRows.has(c.id)} onToggle={toggleRow} onViewFile={onViewFile} />
+        <ChipRow key={c.id} call={c} isChild rowOpen={openRows.has(c.id)} onToggle={toggleRow} onViewFile={onViewFile} onViewDiff={onViewDiff} />
       ))}
       {report && (
         <p className="whitespace-pre-wrap rounded-md bg-secondary/40 px-2 py-1.5 text-[12px] leading-[1.65] text-foreground/85">
@@ -388,22 +1013,18 @@ function AgentDetail({
 
 function ToolChipsImpl({
   calls,
-  changes,
   streaming = false,
   onViewFile,
-  bare = false,
+  onViewDiff,
 }: {
   calls: ToolCall[];
-  changes?: FileChangeEntry[];
   streaming?: boolean;
   onViewFile?: (path: string) => void;
-  /** Headerless mode for inline (stream-view) rendering: rows only, always open. */
-  bare?: boolean;
+  onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
 }) {
   const [openState, setOpenState] = useState(true);
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const open = bare ? true : openState;
+  const open = openState;
 
   const toggleRow = (id: string) =>
     setOpenRows((current) => {
@@ -413,37 +1034,15 @@ function ToolChipsImpl({
       return next;
     });
 
-  const openPreview = (entry: FileChangeEntry) => (event: React.SyntheticEvent) => {
-    const el = (event.currentTarget as Element).closest('[data-diffchip]') as HTMLElement | null;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const previewHeight = 38 + Math.min(entry.hunks?.reduce((n, h) => n + h.lines.length, 0) ?? 0, 40) * 19;
-    const fitsBelow = rect.bottom + 6 + previewHeight <= window.innerHeight - 12;
-    setPreview({
-      entry,
-      x: Math.max(12, Math.min(rect.left, window.innerWidth - 300)),
-      ...(fitsBelow
-        ? { top: rect.bottom + 6 }
-        : { bottom: window.innerHeight - rect.top + 6 }),
-    });
-  };
-
-  const closePreview = (path: string) => () =>
-    setPreview((current) => (current?.entry.path === path ? null : current));
-
   const done = !streaming;
   // Agent parents absorb their children into the dispatch row's expanded
   // detail (AgentDetail), so agent children don't render as flat rows.
   const rows = calls.filter(
     (c) => !(c.parentToolCallId && calls.some((p) => p.id === c.parentToolCallId && isAgentCall(p))),
   );
-  const visibleChanges = (changes ?? []).slice(0, MAX_CHIPS);
-  const hiddenCount = (changes?.length ?? 0) - visibleChanges.length;
 
   return (
-    <div className={cn('w-full', !bare && 'mt-[5px]')}>
-      {/* collapsed run header (skipped in bare/inline mode) */}
-      {!bare && (
+    <div className="w-full mt-[5px]">
       <button
         type="button"
         aria-expanded={open}
@@ -458,7 +1057,6 @@ function ToolChipsImpl({
           {rows.length} tool {rows.length === 1 ? 'call' : 'calls'}
         </span>
       </button>
-      )}
 
       {/* tool call rows */}
       <div
@@ -466,7 +1064,7 @@ function ToolChipsImpl({
         style={{ gridTemplateRows: open ? '1fr' : '0fr', opacity: open ? 1 : 0 }}
       >
         <div className="overflow-hidden">
-          <div className={cn('mt-[5px] flex flex-col gap-[5px]', bare && '-ml-1.5')}>
+          <div className="mt-[5px] flex flex-col gap-[5px]">
             {rows.map((call, index) => {
               const isAgent = isAgentCall(call);
               const childCalls = isAgent ? calls.filter((c) => c.parentToolCallId === call.id) : [];
@@ -477,6 +1075,7 @@ function ToolChipsImpl({
                     rowOpen={openRows.has(call.id)}
                     onToggle={toggleRow}
                     onViewFile={onViewFile}
+                    onViewDiff={onViewDiff}
                     agentBody={isAgent ? (
                       <AgentDetail
                         call={call}
@@ -484,6 +1083,7 @@ function ToolChipsImpl({
                         openRows={openRows}
                         toggleRow={toggleRow}
                         onViewFile={onViewFile}
+                        onViewDiff={onViewDiff}
                       />
                     ) : undefined}
                   />
@@ -491,50 +1091,8 @@ function ToolChipsImpl({
               );
             })}
           </div>
-
-          {/* file-diff chips */}
-          {done && visibleChanges.length > 0 && (
-            <div className="mt-[5px] flex max-w-full flex-wrap gap-[5px] border-t border-border pt-[5px]">
-              {visibleChanges.map((c, i) => (
-                <span
-                  key={c.path}
-                  data-diffchip
-                  className="relative"
-                  onMouseEnter={openPreview(c)}
-                  onMouseLeave={closePreview(c.path)}
-                >
-                  <button
-                    type="button"
-                    aria-expanded={preview?.entry.path === c.path}
-                    aria-label={`Show diff for ${c.path}`}
-                    onFocus={openPreview(c)}
-                    onBlur={closePreview(c.path)}
-                    onClick={() => onViewFile?.(c.path)}
-                    className="inline-flex h-7 max-w-full cursor-pointer items-center gap-1.5 rounded-md border border-border bg-secondary/60 px-2 font-mono text-[11.5px] text-foreground/85 shadow-sm transition-colors hover:bg-secondary"
-                    style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${i * 80}ms both` }}
-                  >
-                    <span className="min-w-0 truncate">{c.path.split('/').pop()}</span>
-                    {!!c.additions && <span className="shrink-0 text-success tabular-nums">+{c.additions}</span>}
-                    {!!c.deletions && <span className="shrink-0 text-destructive tabular-nums">−{c.deletions}</span>}
-                  </button>
-                </span>
-              ))}
-              {hiddenCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onViewFile?.(visibleChanges[0].path)}
-                  className="inline-flex h-7 items-center rounded-md px-1.5 font-mono text-[11.5px] text-muted-foreground/70 underline decoration-transparent underline-offset-2 transition-colors hover:text-muted-foreground hover:decoration-current"
-                  style={{ animation: `fade-in 300ms ease-out ${visibleChanges.length * 80}ms both` }}
-                >
-                  +{hiddenCount} more
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </div>
-
-      {preview && <DiffPreview preview={preview} />}
     </div>
   );
 }

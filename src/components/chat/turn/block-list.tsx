@@ -6,10 +6,10 @@ import { deriveLayout } from './block-layout';
 import { TurnHeader } from './turn-header';
 import { summarizeFileChanges } from '@/lib/stream/block-state';
 import { ToolChips } from '@/components/chat-v2/tool-chips';
+import { FileChanges } from '@/components/chat/blocks/file-changes';
 import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 import { FollowupPrompt } from '@/components/chat/blocks/followup-prompt';
-import { FileChanges } from '../blocks/file-changes';
 import { CompactingIndicator } from '@/components/chat/blocks/compacting-indicator';
 import { toolBlockToToolCall } from '@/components/chat/turn/block-adapter';
 import { useUi } from '@/lib/stores/ui';
@@ -23,6 +23,19 @@ function isFollowupResolved(blocks: Block[] | undefined, toolCallId: string): bo
   if (!tool || tool.kind !== 'tool') return false;
   return tool.status === 'executed' || tool.status === 'rejected' ||
          tool.status === 'failed' || tool.status === 'aborted';
+}
+
+/** v2 ToolChips input: tool calls with dispatch_agent children flattened
+ *  directly after their parent row. */
+function flattenCalls(tools: ToolBlock[], childrenByParent: Map<string, ToolBlock[]>): ToolCall[] {
+  const out: ToolCall[] = [];
+  for (const b of tools) {
+    out.push(toolBlockToToolCall(b));
+    for (const child of childrenByParent.get(b.toolCallId) ?? []) {
+      out.push(toolBlockToToolCall(child));
+    }
+  }
+  return out;
 }
 
 interface BlockListProps {
@@ -81,19 +94,28 @@ export const BlockList = memo(function BlockList({
     return map;
   }, [blocks]);
 
-  // v2 ToolChips input: process tool calls with dispatch_agent children
-  // flattened directly after their parent row.
-  const chipCalls = useMemo(() => {
-    const out: ToolCall[] = [];
-    for (const b of layout.process) {
-      if (b.kind !== 'tool') continue;
-      out.push(toolBlockToToolCall(b));
-      for (const child of childrenByParent.get(b.toolCallId) ?? []) {
-        out.push(toolBlockToToolCall(child));
+  const chipCalls = useMemo(
+    () => flattenCalls(layout.process.filter((b): b is ToolBlock => b.kind === 'tool'), childrenByParent),
+    [layout.process, childrenByParent],
+  );
+
+  // Stream view groups contiguous top-level tool blocks into runs; each run
+  // renders as one ToolChips section — the same anatomy as compact's single
+  // grouped section, split where reasoning/text interrupts tooling.
+  const toolRuns = useMemo(() => {
+    const runs: ToolBlock[][] = [];
+    let prevWasTopLevelTool = false;
+    for (const b of blocks ?? []) {
+      const isTopLevelTool = b.kind === 'tool' && !b.parentToolCallId;
+      if (isTopLevelTool) {
+        const run = prevWasTopLevelTool ? runs[runs.length - 1] : undefined;
+        if (run) run.push(b);
+        else runs.push([b]);
       }
+      prevWasTopLevelTool = isTopLevelTool;
     }
-    return out;
-  }, [layout.process, childrenByParent]);
+    return runs;
+  }, [blocks]);
 
   // Refs for scroll-preservation math during the streaming → completed transition.
   const thinkingRef = useRef<HTMLDivElement>(null);
@@ -149,10 +171,10 @@ export const BlockList = memo(function BlockList({
     return () => cancelAnimationFrame(frame);
   }, [streaming]);
 
-  // Stream view: every block inline in emission order — nothing hoisted or
-  // grouped. Reasoning still respects the Flat/Phased setting; tool rows and
-  // text render where the model emitted them. (chatView is read via a
-  // subscribed hook, so switching it re-renders despite the parent memo.)
+  // Stream view: blocks inline in emission order — same block UI as compact
+  // (ThinkingBlock headers, grouped ToolChips sections), just not hoisted:
+  // reasoning renders per model step where it was emitted, and tooling splits
+  // into one section per contiguous run. Only narration text is stream-only.
   const chatView = useUi((s) => s.chatView);
   if (chatView === 'stream') {
     return (
@@ -160,31 +182,36 @@ export const BlockList = memo(function BlockList({
         {(blocks ?? []).map((b, idx) => {
           switch (b.kind) {
             case 'reasoning':
-              // Stream view: inline thinking rendered with the v2 ThinkingBlock
-              // (same row anatomy as the v2 tool chips). The actively-streaming
-              // (last) block auto-expands to show live deltas; others stay
-              // collapsed and collapse on turn end.
+              // Each reasoning block is one model step. `streaming` is only
+              // true for the actively-emitting (last) block, so the previous
+              // step's ThinkingBlock collapses via its streaming effect as a
+              // new one starts — mirroring compact's single-card collapse.
               if (!b.text.trim()) return null;
               return (
                 <ThinkingBlock
                   key={b.id}
-                  bare
                   text={b.text}
+                  tokens={b.tokens}
+                  ms={b.ms}
                   streaming={streaming && !!blocks && b.id === blocks[blocks.length - 1]?.id}
                 />
               );
-            case 'tool':
-              // Children nest under their dispatch_agent parent — skip at top level.
+            case 'tool': {
+              // Children nest under their dispatch_agent parent — skip at top
+              // level. Non-first blocks of a run render with the run.
               if (b.parentToolCallId) return null;
+              const isFirstOfRun = toolRuns.some((r) => r[0]?.id === b.id);
+              if (!isFirstOfRun) return null;
               return (
                 <ToolChips
                   key={b.id}
-                  bare
-                  calls={[toolBlockToToolCall(b), ...(childrenByParent.get(b.toolCallId)?.map(toolBlockToToolCall) ?? [])]}
+                  calls={flattenCalls(toolRuns.find((r) => r[0]?.id === b.id) ?? [], childrenByParent)}
                   streaming={streaming}
                   onViewFile={onViewFile}
+                  onViewDiff={onViewFileDiff}
                 />
               );
+            }
             case 'text':
               if (!b.text.trim()) return null;
               if (b.isAnswer) {
@@ -201,7 +228,7 @@ export const BlockList = memo(function BlockList({
                       text={answerInfo.text}
                       streaming={streaming}
                       stopped={stopped}
-                      hasProcessContent={false}
+                      hasProcessContent={hasProcessContent}
                       elapsedMs={totalMs}
                       sessionId={sessionId}
                       sessionTitle={sessionTitle}
@@ -242,6 +269,7 @@ export const BlockList = memo(function BlockList({
             mode={layout.followup.mode}
             sessionId={sessionId}
             messageId={messageId}
+            toolCallId={layout.followup.toolCallId}
             streaming={streaming}
             resolved={isFollowupResolved(blocks, layout.followup.toolCallId)}
           />
@@ -267,9 +295,9 @@ export const BlockList = memo(function BlockList({
         <div ref={processRef}>
           <ToolChips
             calls={chipCalls}
-            changes={fileChanges}
             streaming={streaming}
             onViewFile={onViewFile}
+            onViewDiff={onViewFileDiff}
           />
         </div>
       )}
@@ -298,13 +326,25 @@ export const BlockList = memo(function BlockList({
         />
       </div>
 
-      {/* Compact view: file changes render as chips inside ToolChips —
-          no separate FileChanges block here (stream view keeps it). */}
+      {/* File changes section card — same block in BOTH views: collapsible
+          summary after the answer. Path click / Review opens the diff viewer,
+          Undo reverts the file to its pre-turn state. List caps at 5 files
+          with a "Show More.." expander. */}
+      {fileChanges.length > 0 && (
+        <FileChanges
+          changes={fileChanges}
+          streaming={streaming}
+          onViewFile={onViewFileDiff}
+          onUndoFile={onUndoFile}
+        />
+      )}
+
       {layout.followup && (
         <FollowupPrompt
           mode={layout.followup.mode}
           sessionId={sessionId}
           messageId={messageId}
+          toolCallId={layout.followup.toolCallId}
           streaming={streaming}
           // Resolved = the associated tool block has terminal status. Live
           // turns set this once the user picks and the tool_result event
