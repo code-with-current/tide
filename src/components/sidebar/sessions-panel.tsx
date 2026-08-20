@@ -24,6 +24,7 @@ import {
 import { useExternalApps } from "@/lib/use-external-apps";
 import { useUi } from "@/lib/stores/ui";
 import { Dot } from "@/components/primitives";
+import { SessionsListSkeleton } from "@/components/sidebar/row-skeletons";
 import { bucketByRecency, cn, formatRelative } from "@/lib/utils";
 import { getEffectiveKeys } from "@/lib/shortcuts";
 import { Button } from "@/components/ui/button";
@@ -202,11 +203,7 @@ export function SessionsPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto scroll px-2 pb-2">
-        {isLoading && (
-          <div className="text-xs text-muted-foreground/60 px-2 py-1">
-            Loading…
-          </div>
-        )}
+        {isLoading && <SessionsListSkeleton />}
         {!isLoading && sessions?.length === 0 && (
           <div className="text-xs text-muted-foreground/60 px-2 py-4 text-center">
             No sessions yet. Click "New session" to start.

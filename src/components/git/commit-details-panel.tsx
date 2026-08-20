@@ -4,6 +4,7 @@
 import { useMemo, useState } from 'react';
 import { X, GitCommitHorizontal, Loader2, ChevronRight, Copy, Check } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
+import { SkeletonBar } from '@/components/ui/loading-rows';
 import { useSession, useCommitFiles } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import type { GitFileChange } from '@/lib/api/client';
@@ -92,8 +93,19 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
       {/* Changed files */}
       <div className="flex-1 min-h-0 overflow-y-auto scroll">
         {isLoading ? (
-          <div className="flex items-center justify-center h-24 text-muted-foreground/50">
-            <Loader2 className="size-4 animate-spin" />
+          <div aria-hidden>
+            {[...Array(4)].map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 border-b border-border/40 px-3 py-1.5"
+              >
+                <SkeletonBar className="size-3 shrink-0 rounded-[3px]" />
+                <SkeletonBar className="h-3 w-3 shrink-0 rounded-[3px]" />
+                <SkeletonBar className="h-3" style={{ width: `${35 + i * 10}%` }} />
+                <span className="flex-1" />
+                <SkeletonBar className="h-2 w-7 shrink-0" />
+              </div>
+            ))}
           </div>
         ) : totals.n === 0 ? (
           <div className="flex items-center justify-center h-24 text-[12px] text-muted-foreground/50">No files in this commit.</div>

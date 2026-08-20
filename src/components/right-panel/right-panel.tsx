@@ -10,11 +10,12 @@ import { useSession } from '@/lib/queries';
 import { InspectorTab } from './tabs/inspector-tab';
 import { FileExplorerTab } from './tabs/file-explorer-tab';
 import { GitPanel } from '@/components/git/git-panel';
+import { InspectorSkeleton } from './inspector-skeleton';
 
 export function RightPanel() {
   const sessionId = useUi((s) => s.activeSessionId ?? 'default');
   const activeSessionId = useUi((s) => s.activeSessionId);
-  const { data: session } = useSession(activeSessionId);
+  const { data: session, isLoading: sessionLoading } = useSession(activeSessionId);
   const hasPermissionPending = useUi((s) =>
     !!(activeSessionId && s.streams[activeSessionId]?.permissionRequest?.toolCalls.length),
   );
@@ -31,9 +32,13 @@ export function RightPanel() {
         {feature === 'inspector' && session ? (
           <InspectorTab session={session} />
         ) : feature === 'inspector' ? (
-          <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground/60 p-4 text-center">
-            Select a session to inspect.
-          </div>
+          sessionLoading ? (
+            <InspectorSkeleton />
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground/60 p-4 text-center">
+              Select a session to inspect.
+            </div>
+          )
         ) : feature === 'files' ? (
           <FileExplorerTab />
         ) : feature === 'changes' ? (
@@ -43,3 +48,5 @@ export function RightPanel() {
     </aside>
   );
 }
+
+
