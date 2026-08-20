@@ -38,6 +38,9 @@ import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-st
 import { recordEditTurn } from '../rag/edit-journal.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
+import type { EventSink } from './event-sink.js';
+import type { SessionStoreV2 } from '../ipc/session-store-v2.js';
+import { newV2MessageId, newV2PartId, orchestratorEventToSink, type OrchestratorStreamEvent } from './orchestrator-events.js';
 
 const log = createLogger('agent-sdk');
 
@@ -81,6 +84,19 @@ const LOOP_BUDGET_WARNING = 40;
 type TimelineEntry = { type: 'text'; text: string } | { type: 'tool'; toolIndex: number };
 type StopReason = 'end_turn' | 'max_tokens' | 'content_filter' | 'iteration_limit' | 'aborted' | 'refusal';
 
+/** Per-turn state for the part-normalized (v2) event stream. Null when the
+ *  sink/storeV2 pair wasn't threaded in — v2 is additive, never required. */
+interface TurnV2 {
+  messageId: string;
+  /** Ordinal of the next committed part within the message. */
+  partIndex: number;
+  /** Open text part, if any — committed when its block closes or the turn ends. */
+  textPartId: string | null;
+  /** Legacy block id the open text part maps to (block boundary = part boundary). */
+  textBlockId: string | null;
+  text: string;
+}
+
 interface Turn {
   sessionId: string;
   /** Workspace the session is bound to — used by the turn-end edit journal. */
@@ -114,11 +130,15 @@ interface Turn {
   /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
    *  the turn_end time to compute the persisted `totalMs` (send → result). */
   startedAt: number;
+  v2: TurnV2 | null;
 }
 
 const activeTurns = new Map<string, Turn>();
 const activeCtxs = new Map<string, ToolContext>();
 const seqCounters = new Map<string, number>();
+
+let sink: EventSink | undefined;
+let storeV2: SessionStoreV2 | undefined;
 
 export function abortAllTurns(): void {
   for (const [sessionId, turn] of activeTurns) {
@@ -138,6 +158,7 @@ export function abortAllTurns(): void {
       if (turn.usage.inputTokens > 0 || turn.usage.outputTokens > 0) {
         addUsage(sessionId, turn.usage, turn.lastStepUsage ?? turn.usage);
       }
+      closeOutV2Turn(turn);
     } catch (e) {
       log.warn('abortAllTurns: failed to persist', { sessionId, err: e instanceof Error ? e.message : String(e) });
     }
@@ -145,7 +166,9 @@ export function abortAllTurns(): void {
   activeTurns.clear();
 }
 
-export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
+export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain, opts?: { sink?: EventSink; storeV2?: SessionStoreV2 }) {
+  sink = opts?.sink;
+  storeV2 = opts?.storeV2;
   ipcMain.handle(AGENT_COMMANDS.runTurn, async (e, payload: RunTurnPayload) => {
     try { await runTurn(e.sender, payload); }
     catch (err: any) {
@@ -274,6 +297,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
     responseMessages: [], stepHadToolCalls: false,
     loopGuardFired: new Set(),
     startedAt: Date.now(),
+    v2: initV2Turn(sessionId, modelId),
   };
   activeTurns.set(sessionId, turn);
 
@@ -562,6 +586,16 @@ function translatePart(
       turn.currentTextEntry.text += text;
       turn.finalText += text;
       send(wc, sessionId, { type: 'delta', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, text, blockId: turn.currentTextBlockId! });
+      if (turn.v2) {
+        if (turn.v2.textPartId === null || turn.v2.textBlockId !== turn.currentTextBlockId) {
+          commitV2TextPart(turn);
+          turn.v2.textPartId = newV2PartId();
+          turn.v2.textBlockId = turn.currentTextBlockId;
+          turn.v2.text = '';
+        }
+        turn.v2.text += text;
+        emitSink(turn, { type: 'text-delta', text }, turn.v2.textPartId);
+      }
       break;
     }
 
@@ -582,6 +616,7 @@ function translatePart(
     case 'tool-input-start': {
       const toolCallId: string = p.id;
       const toolName = resolveToolName(p.toolName) as ToolName;
+      commitV2TextPart(turn);
       turn.currentTextBlockId = null;
       // Close the current thinking segment so the next reasoning delta (next
       // model step) opens a NEW reasoning block. This lets the block stream
@@ -632,6 +667,10 @@ function translatePart(
       turn.currentTextEntry = null;
       patchToolBlock(turn, toolCallId, { status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
       send(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId, status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
+      if (turn.v2) {
+        emitSink(turn, { type: 'tool-end', toolName, input, output: tr.output, status, durationMs: tr.durationMs }, newV2PartId(), turn.v2.partIndex);
+        turn.v2.partIndex++;
+      }
       break;
     }
 
@@ -686,6 +725,7 @@ function stopReasonFor(turn: Turn): StopReason {
 }
 
 function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
+  closeOutV2Turn(turn);
   const blocks = finalizeBlocks(turn, stopReason);
   // Surface the error to the UI on failure (retries exhausted or non-retryable).
   // Sent BEFORE turn_end so the reducer records the error, then turn_end flips
@@ -709,6 +749,56 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
   });
   journalEditTurn(turn);
   fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+/** Message row for the v2 stream lands at turn start (the sink only writes
+ *  parts/events); parts reference it, message.end completes it. A missing v2
+ *  session row (legacy-only session, e.g. sub-agent dispatch children) fails
+ *  the FK insert — v2 emission for the turn is simply off. */
+function initV2Turn(sessionId: string, modelId: string): TurnV2 | null {
+  if (!sink || !storeV2) return null;
+  const messageId = newV2MessageId();
+  try {
+    storeV2.insertMessage({ id: messageId, sessionId, role: 'assistant', model: modelId });
+  } catch {
+    return null;
+  }
+  return { messageId, partIndex: 0, textPartId: null, textBlockId: null, text: '' };
+}
+
+/** Emit through the sink mapped to v2 — always non-fatal: a mapper bug or
+ *  throwing consumer must never break the turn (the sink itself already
+ *  degrades on DB failure). */
+function emitSink(turn: Turn, event: OrchestratorStreamEvent, partId: string | undefined): void {
+  if (!sink || !turn.v2) return;
+  try {
+    const mapped = orchestratorEventToSink(turn.sessionId, turn.v2.messageId, partId, event, turn.v2.partIndex);
+    if (mapped) sink.emit(mapped);
+  } catch {}
+}
+
+function commitV2TextPart(turn: Turn): void {
+  if (!turn.v2?.textPartId) return;
+  emitSink(turn, { type: 'text-end', text: turn.v2.text }, turn.v2.textPartId);
+  turn.v2.partIndex++;
+  turn.v2.textPartId = null;
+  turn.v2.textBlockId = null;
+  turn.v2.text = '';
+}
+
+/** Flush the v2 record of a finished turn: commit any open text part, then
+ *  message.end (usage) before turn.end — the sink applies both in one flush
+ *  transaction and prunes on turn.end. Idempotent: nulls turn.v2 so a turn
+ *  aborted by abortAllTurns can't close out twice when its runTurn coroutine
+ *  also reaches emitTurnEnd (double message.end would double-count usage). */
+function closeOutV2Turn(turn: Turn): void {
+  if (!turn.v2 || !sink) return;
+  try {
+    commitV2TextPart(turn);
+    emitSink(turn, { type: 'finish', usage: turn.usage }, undefined);
+    emitSink(turn, { type: 'turn-end' }, undefined);
+  } catch {}
+  turn.v2 = null;
 }
 
 /** Edit-tool calls whose file argument names a workspace file. */

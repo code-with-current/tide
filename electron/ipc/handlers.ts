@@ -25,6 +25,9 @@ import type { Workspace, FileNode, ProviderModelMeta } from '../../src/types';
 import type { AgentSettings, GeneralSettings } from '../configStore.js';
 import { appDataDir } from '../appPaths.js';
 import { syncCoAuthorHook, syncAllWorkspaceHooks } from '../git-coauthor.js';
+import type { EventSink } from '../agent/event-sink.js';
+import type { SessionStoreV2 } from './session-store-v2.js';
+import { newV2MessageId, newV2PartId, orchestratorEventToSink } from '../agent/orchestrator-events.js';
 
 const log = createLogger('ipc');
 
@@ -190,7 +193,32 @@ function handle(
   });
 }
 
-export function registerIpcHandlers() {
+export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: SessionStoreV2 }) {
+  const sink = opts?.sink;
+  const storeV2 = opts?.storeV2;
+
+  const twinV2Session = (id: string, workspaceId: string, title: string, modelId: string, providerId?: string | null, parentId?: string | null) => {
+    if (!storeV2) return;
+    try {
+      const workspacePath = store.listWorkspaces().find((w) => w.id === workspaceId)?.path ?? '';
+      storeV2.createSession({ id, workspacePath, title, modelId, providerId: providerId ?? null, parentId: parentId ?? null });
+    } catch (e) {
+      log.warn('v2 twin createSession failed', { id, err: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const twinV2TextMessage = (sessionId: string, role: 'user' | 'assistant', text: string, model?: string) => {
+    if (!sink || !storeV2 || !text.trim()) return;
+    try {
+      const messageId = newV2MessageId();
+      storeV2.insertMessage({ id: messageId, sessionId, role, model: model ?? null });
+      const part = orchestratorEventToSink(sessionId, messageId, newV2PartId(), { type: 'text-end', text }, 0);
+      if (part) sink.emit(part);
+    } catch (e) {
+      log.warn('v2 twin message failed', { sessionId, err: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   // ── Workspaces (real persistence via store) ─────────────────
 
   ipcMain.handle('tide:listWorkspaces', async () => {
@@ -786,7 +814,9 @@ export function registerIpcHandlers() {
   });
 
   handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }) => {
-    return sessions.createSession(workspaceId, title, modelId, opts);
+    const s = sessions.createSession(workspaceId, title, modelId, opts);
+    twinV2Session(s.id, workspaceId, s.title, modelId, opts?.providerId);
+    return s;
   });
 
   handle('tide:updateSessionSettings', async (
@@ -799,6 +829,7 @@ export function registerIpcHandlers() {
 
   handle('tide:addMessage', async (_e, sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }) => {
     sessions.addMessage(sessionId, role, content, extra);
+    if (role === 'user') twinV2TextMessage(sessionId, 'user', content);
   });
 
   handle('tide:addAssistantMessage', async (
@@ -960,7 +991,11 @@ export function registerIpcHandlers() {
     newModelId: string,
     opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
   ) => {
-    return sessions.forkWithSummary(sourceId, newModelId, opts);
+    const forked = await sessions.forkWithSummary(sourceId, newModelId, opts);
+    twinV2Session(forked.id, forked.workspaceId, forked.title, newModelId, opts?.providerId, sourceId);
+    const seed = forked.messages[forked.messages.length - 1];
+    if (seed?.role === 'assistant') twinV2TextMessage(forked.id, 'assistant', seed.content ?? '', newModelId);
+    return forked;
   });
 
   ipcMain.handle('tide:workspace:listBranches', async (_e, workspaceId: string) => {

@@ -207,7 +207,7 @@ if (!gotLock) {
     registerSessionV2Handlers(ipcMain, storeV2);
     eventSink = registerEventsIpc(ipcMain, storeV2);
 
-    registerIpcHandlers();
+    registerIpcHandlers({ sink: eventSink ?? undefined, storeV2: sessionStoreV2 ?? undefined });
     // Settings handlers MUST be ready before the window shows — the renderer
     registerSettingsHandlers();
     // Read-side companion to the fullscreen events sent from createWindow —
@@ -235,7 +235,7 @@ if (!gotLock) {
       void initModelCatalog({ bundled: bundledModelCatalog, cacheDir: appDataDir() })
         .then(enrichExistingModels);
       registerChatHandlers();
-      registerAgentSdkHandlers(ipcMain);
+      registerAgentSdkHandlers(ipcMain, { sink: eventSink ?? undefined, storeV2: sessionStoreV2 ?? undefined });
       registerScriptHandlers();
       registerOpenInAppHandlers();
       registerExtensionsHandlers();
@@ -305,10 +305,12 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  // Flush buffered stream events (needs the open v2 db), then close it.
+  // Abort active turns BEFORE disposing the sink — their final v2 emissions
+  // (message.end/turn.end) buffer now and the dispose flush persists them;
+  // after dispose+close the buffer would never flush and the db is gone.
+  abortAllTurns();
   eventSink?.dispose();
   sessionStoreV2?.close();
-  abortAllTurns();
   killAllScripts();
   killAllBackgroundShells();
   // Background dispatches outlive their turn — mark still-running ones
