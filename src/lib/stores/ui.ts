@@ -337,6 +337,12 @@ interface UiState {
    *  chat screen or before any new-session screen has been shown). */
   activeDraftId: string | null;
 
+  /** Last-dismissed todo-panel signature per session (the settled list the
+   *  user dismissed). The floating panel stays hidden across session
+   *  switches and restarts until the todo list changes again. Persisted. */
+  dismissedTodoSignatures: Record<string, string>;
+  setDismissedTodo: (sessionId: string, signature: string) => void;
+
   /** Fork intent for the new-session screen — set by initiateFork (sidebar
    *  "Fork…", an answer's Fork button, or clicking the locked model
    *  selector). Drives the fork variant of EmptyChatState (hero + banner)
@@ -559,12 +565,22 @@ export const useUi = create<UiState>()(
   composerPendingReads: {},
   composerDrafts: {},
   draftSessions: {},
+  dismissedTodoSignatures: {},
   pendingFork: null,
   activeDraftId: null,
   titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
 
   setScreen: (screen) => set({ screen }),
+  setDismissedTodo: (sessionId, signature) =>
+    set((state) => {
+      const next = { ...state.dismissedTodoSignatures };
+      delete next[sessionId];
+      next[sessionId] = signature;
+      const keys = Object.keys(next);
+      if (keys.length > 50) delete next[keys[0]];
+      return { dismissedTodoSignatures: next };
+    }),
   setMainView: (mainView) => set({ mainView }),
   addComposerAttachment: (key, f) =>
     set((state) => {
@@ -1295,6 +1311,7 @@ export const useUi = create<UiState>()(
         // restores the last real session on startup, not a draft slot.
         draftSessions: s.draftSessions,
         composerDrafts: s.composerDrafts,
+        dismissedTodoSignatures: s.dismissedTodoSignatures,
         // shortcutOverrides is intentionally NOT persisted here — it lives in
         // settings.json (via the tide:settings:* IPC) so it's shared across
         // windows and platform-aware. Hydrated by loadShortcuts() at startup.
