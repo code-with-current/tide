@@ -82,7 +82,7 @@ export interface CreateSessionInput {
 
 export interface SessionListOpts {
   archived?: boolean;
-  cursor?: string;
+  cursor?: string | null;
   limit?: number;
 }
 
@@ -120,7 +120,7 @@ export interface MessageV2 {
 
 export interface MessageWindowOpts {
   limit?: number;
-  before?: string;
+  before?: string | null;
 }
 
 export interface UsageDeltaV2 {
@@ -245,12 +245,11 @@ export function createSessionStoreV2(dbPath: string): SessionStoreV2 {
             .all(sessionId, limit) as Omit<MessageV2, 'parts'>[]);
       rows.reverse();
       const partsStmt = db.prepare('SELECT id, seq, kind, data FROM part WHERE message_id = ? ORDER BY seq');
-      const messages = rows.map((m) => ({
+      const messages: MessageV2[] = rows.map((m) => ({
         ...m,
-        parts: (partsStmt.all(m.id) as Omit<MessagePartV2, 'data'> & { data: string }[]).map((p) => ({
-          ...p,
-          data: JSON.parse(p.data),
-        })),
+        parts: (partsStmt.all(m.id) as (Omit<MessagePartV2, 'data'> & { data: string })[]).map(
+          (p): MessagePartV2 => ({ ...p, data: JSON.parse(p.data) }),
+        ),
       }));
       return { messages, nextBefore: rows.length === limit ? rows[0].id : null };
     },
