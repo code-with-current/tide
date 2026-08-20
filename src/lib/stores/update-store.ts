@@ -9,6 +9,7 @@ export type UpdateState =
   | 'idle'
   | 'checking'
   | 'available'
+  | 'manual'
   | 'not-available'
   | 'downloading'
   | 'downloaded'
@@ -50,5 +51,8 @@ export const useUpdateStore = create<UpdateStore>((set) => ({
 
 /** Convenience selector: true when an update is available, downloading, or downloaded. */
 export function hasUpdate(s: UpdateStatus | null): boolean {
-  return !!s && (s.state === 'available' || s.state === 'downloading' || s.state === 'downloaded');
+  return (
+    !!s &&
+    (s.state === 'available' || s.state === 'manual' || s.state === 'downloading' || s.state === 'downloaded')
+  );
 }

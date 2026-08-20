@@ -95,7 +95,7 @@ export function UpdatesSection() {
         status={status}
         checking={checking}
         onInstall={handleInstall}
-        onDownloadManual={() => openExternal(GITHUB_RELEASES)}
+        onDownloadManual={() => openExternal(status?.releaseUrl ?? GITHUB_RELEASES)}
       />
 
       {/* ── Release notes ── */}
@@ -280,6 +280,40 @@ function StatusHero({
           <div className="flex-1">
             <div className="text-sm font-medium">Checking for updates…</div>
             <div className="text-[11px] text-muted-foreground/60">Contacting GitHub releases</div>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  // ── Manual download — ad-hoc mac build can't self-update ──
+  if (state === 'manual') {
+    return (
+      <Card className="mb-5 overflow-hidden">
+        <div className="relative px-5 py-4">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/8 to-transparent pointer-events-none" />
+          <div className="relative flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="size-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                v{version} is available
+                <ArrowRight className="size-3 text-muted-foreground/40" />
+                <code className="font-mono text-[11px] text-muted-foreground/60">v{currentVersion}</code>
+              </div>
+              <div className="text-[11px] text-muted-foreground/60">
+                This build is ad-hoc signed and can't self-update — download the new version from GitHub.
+              </div>
+            </div>
+            <Button
+              variant="default"
+              size="sm"
+              className="text-xs h-7 gap-1.5"
+              onClick={onDownloadManual}
+            >
+              <ExternalLink className="size-3" /> Download
+            </Button>
           </div>
         </div>
       </Card>

@@ -4,11 +4,16 @@
  *
  * In dev (app.isPackaged === false) the module no-ops — electron-updater
  * requires app-update.yml which only electron-builder generates at package
- * time. On macOS with ad-hoc signing, auto-install is unavailable; errors
- * are caught and the UI falls back to a manual-download link.
+ * time. On macOS, ad-hoc signed builds can't auto-install: ShipIt validates
+ * the staged update against the running app's code signature, and an ad-hoc
+ * signature pins the exact build, so no future build can ever pass. Those
+ * builds surface updates as a manual-download state instead.
  */
 
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
+import path from 'node:path';
 import electronUpdater from 'electron-updater';
 import type { UpdateInfo, ProgressInfo } from 'electron-updater';
 const { autoUpdater } = electronUpdater;
@@ -16,12 +21,15 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('updater');
 
+const execFile = promisify(execFileCb);
+
 const GITHUB_RELEASES_URL = 'https://github.com/code-with-current/tide/releases';
 
 export type UpdateState =
   | 'idle'
   | 'checking'
   | 'available'
+  | 'manual'
   | 'not-available'
   | 'downloading'
   | 'downloaded'
@@ -71,6 +79,19 @@ function releaseUrlFor(version: string): string {
   return `${GITHUB_RELEASES_URL}/tag/v${version}`;
 }
 
+let manualOnly = false;
+
+async function detectAdHocMac(): Promise<boolean> {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const bundle = path.dirname(path.dirname(app.getPath('exe')));
+    const { stdout, stderr } = await execFile('codesign', ['-dv', '--verbose=2', bundle]);
+    return /Signature=adhoc/i.test(`${stdout}${stderr}`);
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Wire up event listeners + IPC handlers. Called once from main.ts after the
  * window is created. Safe to call in dev (no-ops silently).
@@ -109,6 +130,15 @@ export function initUpdater() {
   // Don't check asynchronously in the constructor — we control timing.
   autoUpdater.allowDowngrade = false;
 
+  void detectAdHocMac().then((adhoc) => {
+    manualOnly = adhoc;
+    if (adhoc) {
+      autoUpdater.autoDownload = false;
+      autoUpdater.autoInstallOnAppQuit = false;
+      log.info('ad-hoc mac build detected — manual download mode');
+    }
+  });
+
   autoUpdater.on('checking-for-update', () => {
     log.info('checking for updates');
     emit({ state: 'checking' });
@@ -116,6 +146,16 @@ export function initUpdater() {
 
   autoUpdater.on('update-available', (info: UpdateInfo) => {
     log.info('update available', { version: info.version });
+    if (manualOnly) {
+      emit({
+        state: 'manual',
+        version: info.version,
+        releaseNotes: extractReleaseNotes(info),
+        releaseUrl: releaseUrlFor(info.version),
+        lastCheckedAt: Date.now(),
+      });
+      return;
+    }
     emit({
       state: 'available',
       version: info.version,
