@@ -31,10 +31,20 @@ export interface SinkUsage {
   costUsd: number;
 }
 
+/** Two contracts the IPC replay path depends on:
+ * - Sync-atomicity: replay() and markLive() must run back-to-back with no
+ *   await between them — subscriber registration is synchronous start to
+ *   finish. An interleaved flush could otherwise prune past a cursor that was
+ *   read but never registered.
+ * - Floor semantics: markLive tracks the HIGHEST confirmed watermark per
+ *   session (single-live-subscriber assumption — Tide is a single-renderer
+ *   app); the IPC layer is expected to advance it per delivered batch so
+ *   pruning tracks consumption. Committed parts, not events, are the durable
+ *   record — pruning past a consumer only costs replay, never data. */
 export interface EventSink {
   emit(event: SinkEvent): void;
   flush(): void;
-  replay(sessionId: string, lastSeq: number): (SinkEvent & { seq: number })[];
+  replay(sessionId: string, lastSeq: number, limit?: number): (SinkEvent & { seq: number })[];
   markLive(sessionId: string, lastSeq: number): void;
   dispose(): void;
 }
@@ -63,7 +73,7 @@ export function createEventSink(
        cost = cost + @c, time_updated = @now WHERE id = @id`,
   );
   const selectReplay = db.prepare(
-    `SELECT seq, session_id, message_id, part_id, type, data FROM event WHERE session_id = ? AND seq > ? ORDER BY seq`,
+    `SELECT seq, session_id, message_id, part_id, type, data FROM event WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
   );
   const deleteWithoutFloor = db.prepare(
     `DELETE FROM event WHERE session_id = ? AND type != 'turn.end'`,
@@ -144,8 +154,8 @@ export function createEventSink(
     else if (timer === null) timer = setInterval(flush, flushMs);
   }
 
-  function replay(sessionId: string, lastSeq: number): (SinkEvent & { seq: number })[] {
-    return (selectReplay.all(sessionId, lastSeq) as Array<Record<string, unknown>>).map((r) => ({
+  function replay(sessionId: string, lastSeq: number, limit?: number): (SinkEvent & { seq: number })[] {
+    return (selectReplay.all(sessionId, lastSeq, limit ?? -1) as Array<Record<string, unknown>>).map((r) => ({
       seq: r.seq as number,
       type: r.type as SinkEvent['type'],
       sessionId: r.session_id as string,

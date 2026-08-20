@@ -186,16 +186,58 @@ describe('event-sink replay + prune', () => {
 
   it('prune respects live subscriber positions', () => {
     const sink = createEventSink(store.db, { flushMs: 0 });
-    sink.emit(delta('a'));
-    sink.emit(delta('b'));
-    // A subscriber that has only consumed up to the first event holds pruning back.
-    sink.markLive('s1', 1);
-    sink.emit({ type: 'turn.end', sessionId: 's1' });
-    sink.flush();
-    sink.emit({ type: 'turn.end', sessionId: 's1' });
+    sink.emit(delta('a')); // seq 1
+    sink.emit(delta('b')); // seq 2
+    // A subscriber that has consumed up to seq 2 holds pruning back.
+    sink.markLive('s1', 2);
+    sink.emit({ type: 'turn.end', sessionId: 's1' }); // seq 3
     sink.flush();
     const rows = store.db.prepare(`SELECT seq FROM event ORDER BY seq`).all() as { seq: number }[];
+    expect(rows.some((r) => r.seq === 1)).toBe(false);
     expect(rows.some((r) => r.seq === 2)).toBe(true);
+    sink.dispose();
+  });
+
+  it('markLive keeps the highest watermark — a lower mark cannot lower the floor', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    for (const t of ['a', 'b', 'c', 'd', 'e']) sink.emit(delta(t)); // seqs 1-5
+    sink.markLive('s1', 5);
+    sink.markLive('s1', 2);
+    sink.emit({ type: 'turn.end', sessionId: 's1' }); // seq 6
+    sink.flush();
+    const rows = store.db.prepare(`SELECT seq FROM event ORDER BY seq`).all() as { seq: number }[];
+    expect(rows.some((r) => r.seq === 5)).toBe(true);
+    expect(rows.some((r) => r.seq === 2)).toBe(false);
+    sink.dispose();
+  });
+
+  it('floor-path prune preserves older turn.end markers', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    sink.emit(delta('a')); // seq 1
+    sink.emit({ type: 'turn.end', sessionId: 's1' }); // seq 2
+    sink.emit(delta('b')); // seq 3
+    sink.markLive('s1', 3);
+    sink.emit({ type: 'turn.end', sessionId: 's1' }); // seq 4
+    sink.flush();
+    const rows = store.db.prepare(`SELECT seq FROM event WHERE type = 'turn.end' ORDER BY seq`).all() as { seq: number }[];
+    expect(rows.map((r) => r.seq)).toEqual([2, 4]);
+    sink.dispose();
+  });
+
+  it('replay of an unknown session is empty', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    expect(sink.replay('unknown-session', 0)).toEqual([]);
+    sink.dispose();
+  });
+
+  it('replay pages by limit; the last row seq is the next cursor', () => {
+    const sink = createEventSink(store.db, { flushMs: 0 });
+    for (const t of ['a', 'b', 'c', 'd', 'e']) sink.emit(delta(t));
+    sink.flush();
+    const page1 = sink.replay('s1', 0, 3);
+    expect(page1).toHaveLength(3);
+    const page2 = sink.replay('s1', page1[page1.length - 1].seq);
+    expect(page2.map((e) => (e.data as { text: string }).text)).toEqual(['d', 'e']);
     sink.dispose();
   });
 });
