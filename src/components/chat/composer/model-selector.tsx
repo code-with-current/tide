@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { ChevronDown, Check, Brain, Star, Search, Loader2, Lock } from 'lucide-react';
+import { ChevronDown, Check, Brain, Eye, Star, Search, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SkeletonBar } from '@/components/ui/loading-rows';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ProviderLogo } from '@/components/primitives/provider-logo';
 import { cn, formatContext } from '@/lib/utils';
@@ -137,9 +138,12 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
           className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-input-foreground hover:text-foreground', compact && 'px-1.5')}
           disabled={isLoading || models.length === 0}
         >
-          {!compact && (
-            <span>{selected?.alias ?? (isLoading ? 'Loading…' : models.length === 0 ? 'No models' : 'Select model')}</span>
-          )}
+          {!compact &&
+            (isLoading ? (
+              <SkeletonBar className="h-3 w-16" aria-hidden />
+            ) : (
+              <span>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+            ))}
           <ChevronDown className="size-4 text-muted-foreground/60" />
         </Button>
       </PopoverTrigger>
@@ -269,8 +273,16 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
               </div>
             )}
             {isLoading && models.length === 0 && (
-              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center flex items-center justify-center gap-1.5">
-                <Loader2 className="size-3 animate-spin" /> Loading models…
+              <div className="py-0.5" aria-hidden>
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex items-center gap-1.5 px-2 py-1">
+                    <SkeletonBar className="size-3.5 shrink-0 rounded-[4px]" />
+                    <div className="min-w-0 flex-1">
+                      <SkeletonBar className="h-3 w-2/5" />
+                      <SkeletonBar className="mt-1 h-2 w-1/3" />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {!isLoading && models.length === 0 && (
@@ -375,9 +387,9 @@ function ModelRow({
       </button>
       <div className="flex-1 min-w-0">
         <div className="text-[0.8rem] font-medium flex items-center gap-1.5 truncate">
-          {model.reasoning && <Brain className="size-2.5 text-reasoning" />}
-
           <span className="truncate">{model.alias}</span>
+          {model.reasoning && <Brain className="size-2.5 text-reasoning shrink-0" />}
+          {model.vision && <Eye className="size-2.5 text-info shrink-0" />}
         </div>
         <div className="text-[0.7rem] text-muted-foreground/60 truncate">
           {showProvider && <span className="text-muted-foreground/80">{model.providerName} · </span>}

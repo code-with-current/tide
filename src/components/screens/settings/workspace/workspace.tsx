@@ -4,6 +4,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SkeletonBar } from "@/components/ui/loading-rows";
 import {
   useWorkspaces,
   useRagStatus,
@@ -121,8 +122,17 @@ export function WorkspaceSettingsSection() {
           </div>
           <div className="flex-1 overflow-y-auto scroll space-y-0.5">
             {isLoading && (
-              <div className="px-2 py-3 text-[11px] text-muted-foreground/50">
-                Loading…
+              <div className="space-y-0.5" aria-hidden>
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
+                    <SkeletonBar className="size-5 shrink-0 rounded-md" />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <SkeletonBar className="h-3 w-2/5" />
+                      <SkeletonBar className="h-2 w-3/5" />
+                    </div>
+                    <SkeletonBar className="h-4 w-8 shrink-0 rounded-full" />
+                  </div>
+                ))}
               </div>
             )}
             {/* Active workspaces */}

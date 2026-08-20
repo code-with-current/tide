@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import tideLogoPng from '@/assets/logo.png';
 import { LogoText } from '@/components/primitives';
 import {
   ArrowLeft, ArrowRight, ShieldCheck, Loader2,
   Folder, CheckCircle2, HardDrive, Globe,
-  Check, AlertCircle, Plus, Trash2, Plug, Brain,
+  Check, AlertCircle, Plug, BrainCircuit,
   Terminal, TriangleAlert, Server, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,20 +14,18 @@ import { Switch } from '@/components/ui/switch';
 import { useUi } from '@/lib/stores/ui';
 import { qk, useAddProvider, useRagDownloadProgress, useRagInitProgress } from '@/lib/queries';
 import { phaseLabel as phaseLabelLocal } from '@/components/rag/rag-index-progress';
-import { cn, formatContext } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
-import type { ApiStyle, Model, Workspace, WorkspaceScript } from '@/types';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
+import type { ApiStyle, Workspace, WorkspaceScript } from '@/types';
 import {
   PROTOCOL, ApiStylePicker, EndpointPreview, FetchModelsButton,
-  SectionLabel, FormField, appendFetchedModels,
-  useCatalogEnrichment, modelIdChangePatch,
-  type Row,
+  SectionLabel, FormField, appendFetchedModels, useCatalogEnrichment,
 } from './settings/providers/providers';
+import {
+  ModelsTable, rowsToModels, useFollowProtocolEndpoint, useModelRows,
+} from './settings/providers/models-table';
 import { Card, CardContent } from '../ui/card';
 
 type Step = 'provider' | 'workspace';
@@ -174,59 +172,18 @@ function ProviderStep({
   const [apiStyle, setApiStyle] = useState<ApiStyle>('openai');
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
   const [apiKey, setApiKey] = useState('');
-  const [rows, setRows] = useState<Row[]>([{ alias: '', modelId: '', context: '' }]);
+  const { rows, setRows, updateRow, addRow, removeRow } = useModelRows([
+    { alias: '', modelId: '', context: '' },
+  ]);
 
-  // Follow the protocol with its canonical endpoint when toggling style
-  const prevStyle = useRef<ApiStyle>(apiStyle);
-  useEffect(() => {
-    if (prevStyle.current === apiStyle) return;
-    prevStyle.current = apiStyle;
-    const AD = 'https://api.anthropic.com';
-    const OD = 'https://api.openai.com/v1';
-    const target = apiStyle === 'anthropic' ? AD : OD;
-    setBaseUrl((cur) => {
-      const t = cur.trim();
-      return t === '' || t === AD || t === OD ? target : cur;
-    });
-  }, [apiStyle]);
-
-  const rowsToModels = (): Model[] =>
-    rows
-      .filter((r) => r.modelId.trim() || r.alias.trim())
-      .map((r) => ({
-        id: `m_${Math.random().toString(36).slice(2, 8)}`,
-        alias: r.alias.trim() || r.modelId.trim(),
-        modelId: r.modelId.trim(),
-        contextWindow: parseInt(r.context, 10) || 200_000,
-        providerId: '',
-        // Preserve metadata populated by FetchModelsButton — these drive the
-        // brain icon, context lock, thinking gate, and cost meter. Matches
-        // Settings' rowsToModels so a model added in onboarding has the same
-        // metadata as one added in Settings.
-        catalogId: r.catalogId,
-        reasoning: r.reasoning,
-        reasoningMandatory: r.reasoningMandatory,
-        supportedEfforts: r.supportedEfforts,
-        priceLabel: r.priceLabel,
-        inputCostPerToken: r.inputCostPerToken,
-        outputCostPerToken: r.outputCostPerToken,
-        cacheReadCostPerToken: r.cacheReadCostPerToken,
-        cacheWriteCostPerToken: r.cacheWriteCostPerToken,
-      }));
-
-  const updateRow = (i: number, patch: Partial<Row>) =>
-    setRows((rs) => {
-      const next = rs.slice();
-      next[i] = { ...next[i], ...patch };
-      return next;
-    });
+  useFollowProtocolEndpoint(apiStyle, setBaseUrl);
 
   useCatalogEnrichment(rows, updateRow);
 
   // Validation: form is complete when name, baseUrl, apiKey are filled AND
   // at least one model has a modelId (alias-only rows don't count — the agent
   // can't call a model without knowing its ID).
-  const validModels = rowsToModels();
+  const validModels = rowsToModels(rows);
   const hasModelWithId = rows.some((r) => r.modelId.trim().length > 0);
   const formValid = !!name.trim() && !!baseUrl.trim() && !!apiKey.trim() && hasModelWithId;
 
@@ -317,73 +274,27 @@ function ProviderStep({
 
           {/* Models table */}
           <div className="space-y-2">
-            <SectionLabel icon={<Brain className="size-3" />} count={rowsToModels().length}>Models</SectionLabel>
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="overflow-x-auto">
-                <Table className="text-xs">
-                  <TableHeader>
-                    <TableRow className="border-border hover:bg-transparent">
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">Alias</TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">Model ID</TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-20">Context</TableHead>
-                      <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-24">Price</TableHead>
-                      <TableHead className="w-8" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((row, i) => (
-                      <TableRow key={i} className="border-border/60">
-                        <TableCell className="py-1 pr-1">
-                          <div className="flex items-center gap-1">
-                            {row.reasoning && <Brain className="size-3 text-reasoning shrink-0" />}
-                            <input className="w-full bg-transparent border-0 outline-none text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                              value={row.alias} onChange={(e) => updateRow(i, { alias: e.target.value })} placeholder="Alias" />
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          <input className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                            value={row.modelId} onChange={(e) => updateRow(i, modelIdChangePatch(row, e.target.value))} placeholder="model-id" />
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          {row.catalogId ? (
-                            <div className="flex items-center gap-1 px-1 py-0.5" title={`Catalog: ${row.catalogId}`}>
-                              <span className="font-mono text-[11.5px] text-muted-foreground">{row.context ? formatContext(parseInt(row.context, 10)) : '—'}</span>
-                              <span className="text-[8px] px-1 py-0 uppercase tracking-wide text-success/80 bg-success/10 rounded">cat</span>
-                            </div>
-                          ) : (
-                            <input className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
-                              value={row.context} onChange={(e) => updateRow(i, { context: e.target.value })} placeholder="200000" />
-                          )}
-                        </TableCell>
-                        <TableCell className="py-1 pr-1">
-                          <span className="font-mono text-[10.5px] text-muted-foreground/60">
-                            {row.priceLabel || '—'}
-                          </span>
-                        </TableCell>
-                        <TableCell className="py-1">
-                          <Button variant="ghost" size="icon" className="size-6 text-muted-foreground/45 hover:text-destructive"
-                            onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}>
-                            <Trash2 className="size-3" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center justify-between gap-2">
-                <Button variant="ghost" size="sm"
-                  onClick={() => setRows((rs) => [...rs, { alias: '', modelId: '', context: '' }])}
-                  className="text-[11px] h-7 text-muted-foreground hover:text-foreground">
-                  <Plus className="size-3" /> Add row
-                </Button>
+            <SectionLabel
+              icon={<BrainCircuit className="size-3" />}
+              count={rowsToModels(rows).length}
+              action={
                 <FetchModelsButton
-                  apiStyle={apiStyle} baseUrl={baseUrl} apiKey={apiKey}
-                  onFetched={(models) => setRows((prev) => appendFetchedModels(prev, models))}
+                  apiStyle={apiStyle}
+                  baseUrl={baseUrl}
+                  apiKey={apiKey}
+                  onFetched={(models) =>
+                    setRows((prev) => appendFetchedModels(prev, models))
+                  }
                   existingModelIds={rows.map((r) => r.modelId)}
                 />
-              </div>
-            </div>
+              }
+            >Models</SectionLabel>
+            <ModelsTable
+              rows={rows}
+              onUpdate={updateRow}
+              onAdd={addRow}
+              onRemove={removeRow}
+            />
           </div>
             </div>
           </CardContent>

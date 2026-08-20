@@ -26,7 +26,7 @@ export function useChatStream(): {
   abort: (sessionId: string) => void;
   approveToolCalls: (sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   rejectToolCalls: (sessionId: string, toolCallIds: string[], reason?: string) => void;
-  submitFollowup: (sessionId: string, toolCallId: string, answer: string) => void;
+  submitFollowup: (sessionId: string, toolCallId: string, answer: string) => Promise<boolean>;
 } {
   const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
@@ -105,13 +105,22 @@ export function useChatStream(): {
   );
 
   const submitFollowup = useCallback(
-    (sessionId: string, toolCallId: string, answer: string) => {
-      if (!ipc) return;
-      ipc.submitFollowup(sessionId, toolCallId, answer);
-      // Dismiss any popup the FollowupPrompt component may have fired from
-      // the persisted followup block — the live tool_result event will
-      // update the block state. Without this the popup lingers.
-      useUi.getState().dismissOptionsPopup(sessionId);
+    async (sessionId: string, toolCallId: string, answer: string): Promise<boolean> => {
+      if (!ipc) return false;
+      try {
+        // True = the paused turn's awaiting tool resolved. False = no pending
+        // ask (turn already ended) — the caller decides how to deliver the
+        // answer; dismissing the popup below happens either way.
+        const resolved = await ipc.submitFollowup(sessionId, toolCallId, answer);
+        return resolved === true;
+      } catch {
+        return false;
+      } finally {
+        // Dismiss any popup the FollowupPrompt component may have fired from
+        // the persisted followup block — the live tool_result event will
+        // update the block state. Without this the popup lingers.
+        useUi.getState().dismissOptionsPopup(sessionId);
+      }
     },
     [ipc],
   );

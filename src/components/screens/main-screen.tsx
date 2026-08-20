@@ -8,7 +8,7 @@ import { IntegratedSidebar } from "@/components/sidebar/integrated-sidebar";
 import { WindowTopBar } from "@/components/layout/window-top-bar";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { EmptyChatState } from "@/components/chat/empty-chat-state";
-import { LoadingRows } from "@/components/ui/loading-rows";
+import { TimelineSkeleton } from "@/components/chat/turn/turn-skeleton";
 import { NoWorkspaceState } from "@/components/chat/no-workspace-state";
 import { MissingWorkspaceScreen } from "./missing-workspace-screen";
 import { ChatTimeline } from "@/components/chat/timeline/ChatTimeline";
@@ -29,7 +29,7 @@ import * as api from "@/lib/api/client";
 import { stripCommandPrefix } from "@/lib/session-title";
 import { buildSystemPrompt } from "@/lib/prompts/tide-system-prompt";
 import { buildReferencedFilesBlock } from "@/lib/prompts/file-context";
-import { migrateMessagesToBlocks } from "@/lib/stream/block-migration";
+import { migrateMessageToBlocks, migrateMessagesToBlocks } from "@/lib/stream/block-migration";
 import type { Message, MessageAttachment, Session } from "@/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { createLogger } from "@/lib/logger";
@@ -775,7 +775,13 @@ export function MainScreen() {
         continue;
       }
       const messageId = fm.messageId ?? `m_${Date.now().toString(36)}`;
-      const assistantMsg: Message = {
+      // The orchestrator's turn_end blocks never contain followup blocks (only
+      // the renderer's live reducer spawns them), so an unanswered/answered
+      // question card would vanish the moment the streaming message unmounts.
+      // Heal through the same idempotent migration the reload path uses —
+      // spawns `${toolCallId}#followup` blocks matching the live ids, and is
+      // a no-op for messages that already have them.
+      const assistantMsg: Message = migrateMessageToBlocks({
         id: messageId,
         role: "assistant",
         content: fm.content,
@@ -791,7 +797,7 @@ export function MainScreen() {
         compactionInfo: stream.compactedTokens
           ? { tokensBefore: stream.compactedTokens.before, tokensAfter: stream.compactedTokens.after }
           : undefined,
-      };
+      });
       // Only push to the visible chatHistory if the user is currently viewing
       // the session that just finished. Other sessions' histories will refresh
       // from storage on next switch.
@@ -889,13 +895,22 @@ export function MainScreen() {
       const toolCallId = opts?.toolCallId;
       const answer =
         selection.length === 1 ? selection[0] : selection.join(", ");
-      if (activeSessionId) dismissOptionsPopup(activeSessionId);
-      if (toolCallId && activeSessionId) {
-        // Live pause flow — resume the paused turn with the pick.
-        submitFollowup(activeSessionId, toolCallId, answer);
+      const sid = activeSessionId;
+      if (sid) dismissOptionsPopup(sid);
+      const deliverAsMessage = () => handleSend({ text: `I picked: ${answer}` });
+      if (toolCallId && sid) {
+        // Live pause flow — resume the paused turn with the pick. If the
+        // resolver is gone (the turn already ended — e.g. the popup fired
+        // from a stale persisted followup block), the answer would be lost;
+        // deliver it as a regular user message instead. Only when the
+        // session isn't streaming — a running turn means the pick is live
+        // and a stray new message would clobber it.
+        submitFollowup(sid, toolCallId, answer).then((resolved) => {
+          if (!resolved && !useUi.getState().getStream(sid).isStreaming) deliverAsMessage();
+        });
       } else {
         // Legacy persisted flow — send as a new user message.
-        handleSend({ text: `I picked: ${answer}` });
+        deliverAsMessage();
       }
     },
     [dismissOptionsPopup, handleSend, submitFollowup, activeSessionId],
@@ -1005,7 +1020,7 @@ export function MainScreen() {
                                 rejectToolCalls(activeSessionId, ids, reason)
                             : undefined
                         }
-                        loadingFallback={<LoadingRows count={4} className="px-1" rowClassName="h-12" />}
+                        loadingFallback={<TimelineSkeleton />}
                         retryActive={!!retry}
                         errorBlock={error && !isStreaming ? (
                           <div className="flex flex-col gap-2 px-3.5 py-3 rounded-lg border border-primary/20 bg-primary/[0.06] max-w-[75%]">

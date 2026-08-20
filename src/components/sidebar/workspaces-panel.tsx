@@ -25,6 +25,7 @@ import { useUi } from "@/lib/stores/ui";
 import { UpdatePill } from "./update-pill";
 import * as api from "@/lib/api/client";
 import { Dot } from "@/components/primitives";
+import { WorkspacesListSkeleton } from "@/components/sidebar/row-skeletons";
 import { Tip } from "@/components/ui/quick-tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -197,11 +198,7 @@ export function WorkspacesPanel() {
 
       <div className="flex-shrink-0 flex-1">
         <div className="flex-1 overflow-y-auto scroll p-2 space-y-1">
-          {isLoading && (
-            <div className="text-xs text-muted-foreground/60 px-2 py-1">
-              Loading…
-            </div>
-          )}
+          {isLoading && <WorkspacesListSkeleton />}
 
           {active.map((ws) => (
             <WorkspaceItem

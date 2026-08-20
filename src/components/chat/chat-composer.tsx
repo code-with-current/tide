@@ -414,31 +414,50 @@ export function ChatComposer({
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
-      const wu = (typeof window !== 'undefined' ? (window as any).webUtils : undefined) as
-        | { getPathForFile?: (f: File) => string }
+      const tide = (window as any).tideIpc as
+        | { getPathForFile?: (f: File) => string; saveClipboardFile?: (name: string, bytes: ArrayBuffer) => Promise<string> }
         | undefined;
       for (const f of Array.from(files)) {
         const name = f.name || 'pasted-file';
-        const realPath = wu?.getPathForFile?.(f) || name;
+        let realPath = '';
+        try { realPath = tide?.getPathForFile?.(f) ?? ''; } catch { realPath = ''; }
         const kind = kindForPath(name);
         if (kind === 'image') {
-          addAttachment({ path: shortName(realPath), kind, absPath: realPath });
+          // Clipboard screenshots have no backing file — persist the bytes so
+          // the attachment (and the agent's read_media_file) gets a real path.
+          if (realPath) {
+            addAttachment({ path: shortName(realPath), kind, absPath: realPath });
+          } else {
+            bumpPendingReads(1);
+            f.arrayBuffer()
+              .then((buf) => (buf.byteLength > 0 && tide?.saveClipboardFile ? tide.saveClipboardFile(name, buf) : Promise.resolve('')))
+              .then((saved) => {
+                if (saved) {
+                  addAttachment({ path: shortName(saved), kind, absPath: saved, bytes: f.size });
+                } else {
+                  addAttachment({ path: shortName(name), kind, bytes: f.size });
+                }
+              })
+              .catch(() => addAttachment({ path: shortName(name), kind }))
+              .finally(() => bumpPendingReads(-1));
+          }
           continue;
         }
+        const displayPath = shortName(realPath || name);
         bumpPendingReads(1);
         f.text().then((content) => {
           const MAX = 200_000;
           const truncated = content.length > MAX;
           addAttachment({
-            path: shortName(realPath),
+            path: displayPath,
             kind,
             content: truncated ? content.slice(0, MAX) : content,
             bytes: f.size,
             truncated,
-            absPath: realPath,
+            absPath: realPath || undefined,
           });
         }).catch(() => {
-          addAttachment({ path: shortName(realPath), kind: 'text', content: '[read failed]', absPath: realPath });
+          addAttachment({ path: displayPath, kind: 'text', content: '[read failed]', absPath: realPath || undefined });
         }).finally(() => bumpPendingReads(-1));
       }
       return;

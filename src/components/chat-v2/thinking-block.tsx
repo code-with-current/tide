@@ -38,13 +38,11 @@ function ThinkingBlockImpl({
   tokens,
   ms,
   streaming = false,
-  bare = false,
 }: {
   text: string;
   tokens?: number;
   ms?: number;
   streaming?: boolean;
-  bare?: boolean;
 }) {
   const reasoningView = useUi((s) => s.reasoningView);
   const [open, setOpen] = useState(streaming);
@@ -75,83 +73,6 @@ function ThinkingBlockImpl({
   const headerSnippet = streaming && phases && phases.length > 0
     ? `${phases[phases.length - 1].label}…`
     : snippet;
-
-  // Bare mode (stream view): no "Thinking" header — phase rows render
-  // directly in the turn, always visible.
-  if (bare) {
-    return (
-      <div className="w-full">
-        {phases ? (
-          <div className="-ml-1.5 mt-[5px] flex flex-col gap-[5px]">
-            {phases.map((p) => {
-              const Icon = PHASE_ICON[p.label];
-              const phaseOpen = isPhaseOpen(p);
-              const phaseStreaming = streaming && p.id === activePhaseId;
-              return (
-                <div key={p.id} style={{ animation: 'fade-up 300ms cubic-bezier(0.23,1,0.32,1) both' }}>
-                  <button
-                    type="button"
-                    aria-expanded={phaseOpen}
-                    onClick={() =>
-                      setOpenPhases((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(p.id)) next.delete(p.id);
-                        else next.add(p.id);
-                        return next;
-                      })
-                    }
-                    className="group/phase flex h-7 min-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-secondary/60"
-                  >
-                    <span className="relative flex size-4 shrink-0 items-center justify-center">
-                      <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/phase:opacity-0">
-                        <Icon className={cn('size-3', PHASE_COLOR[p.label], phaseStreaming && 'animate-pulse')} />
-                      </span>
-                      <ChevronDown
-                        className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/phase:opacity-100"
-                        style={{ transform: phaseOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
-                      />
-                    </span>
-                    <span className={cn('shrink-0 text-[12px] font-medium', PHASE_COLOR[p.label])}>
-                      {p.label}
-                    </span>
-                    <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11px] text-muted-foreground">
-                      {phaseStreaming ? '…' : p.text.trim().split('\n')[0]?.slice(0, 80)}
-                    </span>
-                    <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground/60">
-                      ~{p.estTokens.toLocaleString()} tok
-                    </span>
-                    {phaseStreaming ? (
-                      <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-                    ) : null}
-                  </button>
-                  <div
-                    className="grid transition-[grid-template-rows,opacity] duration-300"
-                    style={{ gridTemplateRows: phaseOpen ? '1fr' : '0fr', opacity: phaseOpen ? 1 : 0, transitionTimingFunction: 'cubic-bezier(0.23,1,0.32,1)' }}
-                  >
-                    <div className="min-h-0 overflow-hidden">
-                      <div className="mt-[5px] ml-[13px] border-l border-border py-0.5 pl-3">
-                        <pre className="scroll max-h-[352px] overflow-y-auto whitespace-pre-wrap py-1 pl-1 pr-2 font-mono text-[11px] leading-[1.6] text-muted-foreground">
-                          {p.text}
-                        </pre>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="ml-[13px] mt-[5px] border-l border-border py-0.5 pl-3">
-            <div className="scroll max-h-[368px] overflow-y-auto text-[11.5px] leading-[1.6] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]">
-              {lines.map((line, i) => (
-                <p key={i}>{line}</p>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="mt-[5px] w-full">

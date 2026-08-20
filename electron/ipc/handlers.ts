@@ -299,6 +299,22 @@ export function registerIpcHandlers() {
     return result.filePaths;
   });
 
+  // Persist clipboard-blob bytes (e.g. pasted screenshots, which have no file
+  // on disk) under <appData>/attachments so they get a real absolute path the
+  // agent can read with read_media_file. Returns the absolute path.
+  ipcMain.handle('tide:saveClipboardFile', async (_e, name: string, bytes: ArrayBuffer) => {
+    try {
+      const dir = path.join(appDataDir(), 'attachments');
+      fs.mkdirSync(dir, { recursive: true });
+      const safe = path.basename(name || 'pasted-file').replace(/[^a-zA-Z0-9._-]/g, '_') || 'pasted-file';
+      const target = path.join(dir, `${Date.now()}-${safe}`);
+      fs.writeFileSync(target, Buffer.from(bytes));
+      return target;
+    } catch {
+      return '';
+    }
+  });
+
   // Read an external file (absolute path, outside workspace) for attachment.
   ipcMain.handle('tide:readExternalFile', async (_e, filePath: string) => {
     try {

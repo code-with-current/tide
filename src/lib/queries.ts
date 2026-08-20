@@ -126,6 +126,8 @@ export interface ModelOption {
   priceLabel?: string;
   /** Whether the model supports reasoning (live provider data). Drives the brain icon. */
   reasoning?: boolean;
+  /** Whether the model accepts image input. Drives the eye icon. */
+  vision?: boolean;
   /** True when the model always reasons and cannot be turned off (live provider data). */
   reasoningMandatory?: boolean;
   /** Valid reasoning effort levels the model accepts, e.g. ['high','medium','low'] (live provider data). */
@@ -162,6 +164,7 @@ export function useModels(): { models: ModelOption[]; isLoading: boolean } {
         contextWindow: m.contextWindow,
         catalogId: m.catalogId,
         reasoning: m.reasoning,
+        vision: m.vision,
         reasoningMandatory: m.reasoningMandatory,
         supportedEfforts: m.supportedEfforts,
         reasoningContracts: m.reasoningContracts,

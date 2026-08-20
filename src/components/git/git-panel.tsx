@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff, GitBranch } from 'lucide-react';
 import { FolderIcon } from 'react-material-icon-theme';
+import { SkeletonBar, CircleSkeleton } from '@/components/ui/loading-rows';
 import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
@@ -233,11 +234,14 @@ export function GitPanel() {
           )}
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
             {isLoading ? (
-              <div className="px-3 py-2 space-y-2">
+              <div className="px-3 py-2 space-y-2" aria-hidden>
                 {[...Array(4)].map((_, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1 animate-pulse">
-                    <div className="w-3.5 h-3.5 rounded bg-secondary" />
-                    <div className="h-3 rounded bg-secondary" style={{ width: `${60 + i * 10}%` }} />
+                  <div key={i} className="flex items-center gap-2 py-1">
+                    <SkeletonBar className="size-3.5 shrink-0 rounded-[3px]" />
+                    <SkeletonBar className="h-3.5 w-3.5 shrink-0 rounded-[3px]" />
+                    <SkeletonBar className="h-3" style={{ width: `${60 + i * 10}%` }} />
+                    <span className="flex-1" />
+                    <SkeletonBar className="h-2 w-6 shrink-0" />
                   </div>
                 ))}
               </div>
@@ -281,11 +285,14 @@ export function GitPanel() {
           </div>
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
             {historyLoading ? (
-              <div className="px-3 py-2 space-y-3">
+              <div className="px-3 py-2 space-y-3" aria-hidden>
                 {[...Array(6)].map((_, i) => (
-                  <div key={i} className="space-y-1 animate-pulse">
-                    <div className="h-2.5 rounded bg-secondary" style={{ width: `${50 + i * 8}%` }} />
-                    <div className="h-2 w-20 rounded bg-secondary" />
+                  <div key={i} className="flex items-center gap-2 space-y-1">
+                    <CircleSkeleton className="size-2.5 shrink-0" />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <SkeletonBar className="h-2.5" style={{ width: `${50 + i * 8}%` }} />
+                      <SkeletonBar className="h-2 w-20" />
+                    </div>
                   </div>
                 ))}
               </div>

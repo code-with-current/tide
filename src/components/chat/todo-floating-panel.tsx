@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Check, ChevronDown, Loader2, Circle, Minus } from 'lucide-react';
 import { useSessionTodos, type TodoItem } from '@/hooks/use-todos';
+import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
 
 /** Floating todo panel: a single live list (the source of truth) with an
@@ -8,6 +9,8 @@ import { cn } from '@/lib/utils';
  *  to a compact bar once everything is completed/cancelled. */
 export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | undefined }) {
   const todos = useSessionTodos(sessionId);
+  const setDismissedTodo = useUi((s) => s.setDismissedTodo);
+  const dismissedSignature = useUi((s) => (sessionId ? s.dismissedTodoSignatures[sessionId] : undefined));
   const [collapsed, setCollapsed] = useState(false);
 
   const total = todos.length;
@@ -18,13 +21,20 @@ export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | un
   const settled = total > 0 && open === 0;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  // Auto-collapse when everything settles, auto-expand when work resumes.
+  // A todo update while collapsed force-expands; settling (all done)
+  // force-expands for the completion review. Dismissal is derived from the
+  // persisted store record: the panel stays hidden across session switches
+  // and restarts until the todo list changes again (new signature).
+  const signature = useMemo(() => todos.map((t) => `${t.status}:${t.content}`).join('|'), [todos]);
+  const dismissed = dismissedSignature !== undefined && dismissedSignature === signature;
+  const prevSignature = useRef(signature);
   useEffect(() => {
-    if (settled) setCollapsed(true);
-    else if (active) setCollapsed(false);
-  }, [settled, active?.content]);
+    if (signature === prevSignature.current) return;
+    prevSignature.current = signature;
+    setCollapsed(false);
+  }, [signature]);
 
-  if (total === 0) return null;
+  if (total === 0 || dismissed) return null;
 
   const headline = active
     ? (active.content.length > 42 ? active.content.slice(0, 39) + '…' : active.content)
@@ -74,6 +84,18 @@ export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | un
               </div>
             )}
           </div>
+        )}
+
+        {/* Completion footer — embedded flush to the panel's bottom edge
+            (the container clips it into the rounded corners). */}
+        {!collapsed && settled && (
+          <button
+            type="button"
+            onClick={() => sessionId && setDismissedTodo(sessionId, signature)}
+            className="w-full px-3 py-2 flex items-center justify-center gap-1.5 border-t border-white/10 text-[10.5px] font-semibold uppercase tracking-wider text-white/50 hover:text-foreground hover:bg-success/10 transition-colors"
+          >
+            Dismiss
+          </button>
         )}
       </div>
     </div>

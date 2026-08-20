@@ -27,6 +27,7 @@ export function UpdatePill() {
   const { state, version, percent } = status!;
   const isDownloading = state === 'downloading';
   const isReady = state === 'downloaded';
+  const isManual = state === 'manual';
 
   return (
     <div className="px-2 pt-1 pb-0.5 flex-shrink-0">
@@ -74,9 +75,11 @@ export function UpdatePill() {
               <div className="text-[0.68rem] text-primary/60 leading-tight mt-px">
                 {isReady
                   ? `v${version} — restart to apply`
-                  : version
-                    ? `v${version} — tap to update`
-                    : 'Tap to view'}
+                  : isManual
+                    ? `v${version} — download from GitHub`
+                    : version
+                      ? `v${version} — tap to update`
+                      : 'Tap to view'}
               </div>
             </>
           )}

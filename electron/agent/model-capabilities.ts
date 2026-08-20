@@ -92,6 +92,20 @@ export function supportsThinking(modelId: string, modelEntry?: Model): boolean {
   return false;
 }
 
+/** Does this model accept image input (vision)? Reads `model.vision` from
+ *  provider config; falls back to catalog; defaults false. Drives the
+ *  attachment fallback chain: vision models get images inlined, others get
+ *  an MCP/read_media_file path hint. */
+export function supportsVision(modelId: string, modelEntry?: Model): boolean {
+  if (modelEntry?.vision !== undefined) return modelEntry.vision;
+  if (activeCatalog) {
+    const ref: ModelRef = { modelId, contextWindow: 0 };
+    const meta = resolveModelMeta(ref, activeCatalog);
+    if (meta.resolvedCatalogId) return meta.supportsVision;
+  }
+  return false;
+}
+
 /** Context window size from provider config (`model.contextWindow`); falls back to catalog; undefined when unknown. */
 export function contextWindowSize(modelId: string, modelEntry?: Model): number | undefined {
   if (modelEntry?.contextWindow) return modelEntry.contextWindow;
@@ -147,6 +161,7 @@ export function enrichModelFromCatalog(model: Model, catalog: CatalogMap): Model
     max_completion_tokens: model.max_completion_tokens ?? meta.maxOutputTokens,
     maxInputTokens: model.maxInputTokens ?? meta.maxInputTokens,
     reasoning: model.reasoning ?? meta.supportsReasoning,
+    vision: model.vision ?? meta.supportsVision,
     inputCostPerToken: model.inputCostPerToken ?? meta.pricing?.inputPerToken,
     outputCostPerToken: model.outputCostPerToken ?? meta.pricing?.outputPerToken,
     reasoningContracts: meta.reasoningOptions as ReasoningOption[] | undefined,

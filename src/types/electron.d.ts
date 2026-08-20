@@ -16,6 +16,8 @@ declare global {
       // File dialog (real)
       pickDirectory(): Promise<string | null>;
       pickFiles(): Promise<string[]>;
+      getPathForFile(file: File): string;
+      saveClipboardFile(name: string, bytes: ArrayBuffer): Promise<string>;
       readExternalFile(filePath: string): Promise<{ content: string; bytes: number; truncated: boolean } | null>;
       readImageFile(input: { absPath?: string; workspaceId?: string; relPath?: string }): Promise<{ dataUrl: string; bytes: number } | null>;
       // Open the active session's project folder in an external app. The path
@@ -417,7 +419,10 @@ declare global {
         toolCallIds: string[],
         reason?: string,
       ): Promise<void>;
-      submitFollowup(sessionId: string, toolCallId: string, answer: string): Promise<void>;
+      /** Resolves the live paused ask. True = resolved; false = no pending ask
+       *  (the turn already ended) — callers should deliver the answer as a
+       *  regular user message instead of dropping it. */
+      submitFollowup(sessionId: string, toolCallId: string, answer: string): Promise<boolean>;
       /** Live-update the autonomy mode on a running turn (mid-stream). */
       updateMode(sessionId: string, mode: import('./index').AutonomyMode): Promise<void>;
       onAgentEvent(

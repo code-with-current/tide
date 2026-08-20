@@ -17,7 +17,12 @@ import type { Session } from '@/types';
 import { Avatar } from '@/components/primitives';
 import { RagIndexProgress } from '@/components/rag/rag-index-progress';
 import { Badge } from '@/components/ui/badge';
-import { LoadingRows } from '@/components/ui/loading-rows';
+import {
+  ConfigRowsSkeleton,
+  ContextWindowSkeleton,
+  GitRowsSkeleton,
+  MemoryRagRowsSkeleton,
+} from '../inspector-skeleton';
 import { formatContext, formatNumber, formatRelative, cn } from '@/lib/utils';
 import {
   useModelOption,
@@ -58,6 +63,10 @@ export function InspectorTab({ session }: { session: Session }) {
   // Any core async dep still loading → show a skeleton for the Configuration section (avoids fabricated values like a hardcoded 100 maxSteps). Uses isLoading flags (not value === undefined) so a legitimately-missing model doesn't keep the skeleton up forever.
   const loading =
     modelsLoading || agentSettings === undefined || workspaces === undefined || gitChanges === undefined;
+  // Git section deps — separate flag so Git can skeleton independently of
+  // Configuration (branch info is its own query and can lag the rest).
+  const gitLoading =
+    workspaces === undefined || gitChanges === undefined || gitBranch === undefined;
 
   const gitStats = useMemo(() => {
     const changes = gitChanges ?? [];
@@ -92,9 +101,10 @@ export function InspectorTab({ session }: { session: Session }) {
         {/* Configuration */}
         <PanelSection title="Configuration" defaultOpen>
           {loading ? (
-            // Deps still resolving — skeleton instead of fabricated values
-            // (avoids leaking a hardcoded 100 maxSteps or a raw modelId).
-            <LoadingRows count={3} />
+            // Deps still resolving — skeleton mirroring the Model/Permissions/
+            // Iteration rows instead of fabricated values (hardcoded 100
+            // maxSteps, raw modelId).
+            <ConfigRowsSkeleton />
           ) : (
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
@@ -131,9 +141,13 @@ export function InspectorTab({ session }: { session: Session }) {
           title="Git"
           defaultOpen={pending.length === 0}
           badge={session.worktree ? <Badge variant="secondary" className="ml-1.5 text-[9px]">worktree</Badge> : undefined}
-          action={<OpenChangesButton sessionId={session.id} changed={gitStats.changed} />}
+          action={<OpenChangesButton sessionId={session.id} changed={gitLoading ? 0 : gitStats.changed} />}
         >
-          {(session.worktree || workspace) ? (
+          {gitLoading ? (
+            // Branch/status still resolving — skeleton mirroring the branch
+            // row, base/head + changed rows, and the diffstat strip.
+            <GitRowsSkeleton />
+          ) : (session.worktree || workspace) ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <GitBranch className="size-3" />
@@ -179,7 +193,7 @@ export function InspectorTab({ session }: { session: Session }) {
               </div>
             </div>
           ) : (
-            <div className="text-muted-foreground">Loading workspace…</div>
+            <div className="text-xs text-muted-foreground/60">No repository info for this session.</div>
           )}
         </PanelSection>
 
@@ -309,6 +323,10 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
   );
 
   const { data: agentSettings } = useAgentSettings();
+  const { isLoading: modelsLoading } = useModels();
+  // Model/agent deps unresolved — skeleton the whole section. Otherwise the
+  // meter renders against fabricated fallbacks (200k window, 100 max steps).
+  const ctxLoading = modelsLoading || agentSettings === undefined;
   const maxSteps = agentSettings?.maxSteps ?? 100;
   const model = useModelOption(null, session.modelId);
   const contextWindow = model?.contextWindow ?? 200_000;
@@ -372,6 +390,10 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
       title="Context Window"
       defaultOpen={true}
     >
+      {ctxLoading ? (
+        <ContextWindowSkeleton />
+      ) : (
+      <>
       {/* Stat strip — Iteration / Tools / Cost */}
       <div className="grid grid-cols-3 gap-px bg-border border border-border rounded-md overflow-hidden mb-3">
         <div className="bg-background px-2.5 py-2">
@@ -450,6 +472,8 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
           </div>
         ))}
       </div>
+      </>
+      )}
     </PanelSection>
   );
 }
@@ -459,7 +483,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
 // =============================================================
 
 function MemoryRagSection({ session }: { session: Session }) {
-  const { data } = useRagStatus(session.workspaceId ?? null);
+  const { data, isLoading: statusLoading } = useRagStatus(session.workspaceId ?? null);
   const status = data && !('error' in data) ? (data as import('@/types').RagStatus) : undefined;
   const { reindex, isReindexing } = useReindexWorkspace(session.workspaceId);
   // Streamed indexing progress — the Inspector previously ignored this and
@@ -483,7 +507,12 @@ function MemoryRagSection({ session }: { session: Session }) {
       defaultOpen={true}
       action={
         <Badge variant="secondary" className={cn('ml-1.5 flex items-center gap-1 font-mono normal-case tracking-normal rounded-md', indexing && 'animate-pulse')}>
-          {indexing ? (
+          {statusLoading ? (
+            <>
+              <Loader2 className="size-2.5 animate-spin text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground">Checking</span>
+            </>
+          ) : indexing ? (
             <>
               <Loader2 className="size-2.5 animate-spin text-emerald-400" />
               <span className="text-[10px] text-emerald-400">Indexing</span>
@@ -503,7 +532,13 @@ function MemoryRagSection({ session }: { session: Session }) {
       }
 
     >
-      {!isEnabled ? (
+      {statusLoading ? (
+        // Status still resolving — skeleton mirroring the Memory/Indexed/
+        // Last-Indexed rows + Re-Index button. Without this the disabled-
+        // overlay below flashes "RAG is disabled" on every remount
+        // (staleTime: 0).
+        <MemoryRagRowsSkeleton />
+      ) : !isEnabled ? (
         // RAG not enabled for this workspace — overlay the section with a
         // disabled state and a button to open Settings → Memory & RAG.
         <div className="relative">
