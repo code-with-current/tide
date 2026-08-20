@@ -18,9 +18,10 @@ interface HandleableIpcMain {
   handle(channel: string, fn: (e: { sender: SinkSender }, ...args: any[]) => unknown): void;
 }
 
-const REPLAY_PAGE = 500;
+const DEFAULT_REPLAY_PAGE = 500;
 
-export function registerEventsIpc(ipcMain: HandleableIpcMain, store: SessionStoreV2, opts?: { flushMs?: number }): EventSink {
+export function registerEventsIpc(ipcMain: HandleableIpcMain, store: SessionStoreV2, opts?: { flushMs?: number; replayPage?: number }): EventSink {
+  const replayPage = opts?.replayPage ?? DEFAULT_REPLAY_PAGE;
   const subscribers = new Map<string, Set<SinkSender>>();
   // One destroyed-listener per sender, not per subscribe — the renderer
   // re-subscribes on every session switch and would otherwise pile up
@@ -34,7 +35,17 @@ export function registerEventsIpc(ipcMain: HandleableIpcMain, store: SessionStor
       const sessionId = batch.events[0].sessionId;
       const subs = subscribers.get(sessionId);
       if (!subs) return;
-      for (const s of subs) s.send('tide:events', batch);
+      for (const s of subs) {
+        try {
+          s.send('tide:events', batch);
+        } catch {
+          // A destroyed webContents throws from send — drop it, keep the loop
+          // going. Otherwise peers after it in the Set miss the batch and the
+          // floor below never advances.
+          subs.delete(s);
+          if (subs.size === 0) subscribers.delete(sessionId);
+        }
+      }
       // Degraded push-only batches (lastSeq 0) carry no watermark — skip.
       // Prune keeps seq < floor, so the floor moves PAST the delivered seq to
       // make the just-delivered rows reclaimable at the next turn.end.
@@ -54,11 +65,11 @@ export function registerEventsIpc(ipcMain: HandleableIpcMain, store: SessionStor
     // yield to the event loop, so no flush can interleave and prune past the cursor.
     let cursor = lastSeq ?? 0;
     for (;;) {
-      const page = sink.replay(sessionId, cursor, REPLAY_PAGE);
+      const page = sink.replay(sessionId, cursor, replayPage);
       if (page.length === 0) break;
       sub.send('tide:events', { events: page, firstSeq: page[0].seq, lastSeq: page[page.length - 1].seq });
       cursor = page[page.length - 1].seq;
-      if (page.length < REPLAY_PAGE) break;
+      if (page.length < replayPage) break;
     }
     if (cursor > 0) sink.markLive(sessionId, cursor + 1);
     set.add(sub);

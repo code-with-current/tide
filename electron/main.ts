@@ -25,7 +25,7 @@ import { registerIpcHandlers, bootstrapCatalog } from './ipc/handlers.js';
 import { registerChatHandlers } from './ipc/chat.js';
 import { registerAgentSdkHandlers, abortAllTurns } from './agent/orchestrator.js';
 import { getSessionStore, registerSessionV2Handlers } from './ipc/sessions.js';
-import { createSessionStoreV2 } from './ipc/session-store-v2.js';
+import { createSessionStoreV2, type SessionStoreV2 } from './ipc/session-store-v2.js';
 import { registerEventsIpc } from './ipc/events.js';
 import type { EventSink } from './agent/event-sink.js';
 import { registerScriptHandlers, killAllScripts } from './ipc/scripts.js';
@@ -67,6 +67,7 @@ let mainWindow: BrowserWindow | null = null;
 // Stream-event sink for the part-normalized store — created on app ready,
 // flushed on quit. Task 6 threads it into the orchestrator.
 let eventSink: EventSink | null = null;
+let sessionStoreV2: SessionStoreV2 | null = null;
 
 // The currently active workspace — the MCP pool uses its root for project-scoped servers (.mcp.json), and MCP IPC uses it to pick which config file to mutate. Set by the `tide:mcp:workspaceActivated` IPC handler when the active workspace changes.
 let activeWorkspace: { id: string; root: string } | undefined;
@@ -202,6 +203,7 @@ if (!gotLock) {
       if (!fs.existsSync(legacyDest)) fs.renameSync(legacySessionsDir, legacyDest);
     }
     const storeV2 = createSessionStoreV2(path.join(appDataDir(), 'sessions-v2.db'));
+    sessionStoreV2 = storeV2;
     registerSessionV2Handlers(ipcMain, storeV2);
     eventSink = registerEventsIpc(ipcMain, storeV2);
 
@@ -303,8 +305,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  // Flush any buffered stream events while the v2 db is still open.
+  // Flush buffered stream events (needs the open v2 db), then close it.
   eventSink?.dispose();
+  sessionStoreV2?.close();
   abortAllTurns();
   killAllScripts();
   killAllBackgroundShells();
