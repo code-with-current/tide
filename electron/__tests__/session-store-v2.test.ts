@@ -21,7 +21,9 @@ describe('session-store-v2 schema', () => {
         name: string;
       }[]
     ).map((r) => r.name);
-    expect(indexes).toEqual(expect.arrayContaining(['session_list', 'part_window', 'event_replay']));
+    expect(indexes).toEqual(
+      expect.arrayContaining(['session_list', 'part_window', 'event_replay', 'part_message', 'message_session']),
+    );
     store.close();
   });
 
@@ -72,6 +74,9 @@ describe('session-store-v2 crud', () => {
     expect(page1.nextCursor).toBe('s2');
     const page2 = s.listSessions('/w', { limit: 2, cursor: page1.nextCursor });
     expect(page2.sessions.map((x) => x.id)).toEqual(['s2', 's1']);
+    const page3 = s.listSessions('/w', { limit: 2, cursor: page2.nextCursor });
+    expect(page3.sessions.map((x) => x.id)).toEqual(['s0']);
+    expect(page3.nextCursor).toBeNull();
     s.close();
   });
 
@@ -98,6 +103,32 @@ describe('session-store-v2 crud', () => {
     expect(win.nextBefore).toBe('m2');
     const older = s.sessionMessages('s1', { limit: 2, before: win.nextBefore! });
     expect(older.messages.map((m) => m.id)).toEqual(['m0', 'm1']);
+    const tail = s.sessionMessages('s1', { limit: 3, before: win.nextBefore! });
+    expect(tail.messages.map((m) => m.id)).toEqual(['m0', 'm1']);
+    expect(tail.nextBefore).toBeNull();
+    s.close();
+  });
+
+  it('orders parts by seq regardless of insertion order', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 't', modelId: 'm' });
+    s.insertMessage({ id: 'm0', sessionId: 's1', role: 'user' });
+    for (const seq of [2, 0, 1]) {
+      s.insertPart({ id: `p${seq}`, messageId: 'm0', sessionId: 's1', seq, kind: 'text', data: { seq } });
+    }
+    const { messages } = s.sessionMessages('s1', { limit: 50 });
+    expect(messages[0].parts.map((p) => p.seq)).toEqual([0, 1, 2]);
+    s.close();
+  });
+
+  it('round-trips nested JSON part data deep-equal', () => {
+    const s = createSessionStoreV2(path.join(dir, 'sessions-v2.db'));
+    s.createSession({ id: 's1', workspacePath: '/w', title: 't', modelId: 'm' });
+    s.insertMessage({ id: 'm0', sessionId: 's1', role: 'user' });
+    const data = { nested: { a: [1, { b: null }] }, text: 'x' };
+    s.insertPart({ id: 'p0', messageId: 'm0', sessionId: 's1', seq: 0, kind: 'text', data });
+    const { messages } = s.sessionMessages('s1', { limit: 50 });
+    expect(messages[0].parts[0].data).toEqual(data);
     s.close();
   });
 

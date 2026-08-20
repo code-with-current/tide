@@ -1,6 +1,6 @@
 /** Part-normalized session storage (sessions-v2.db). Streaming deltas land in
  * the append-only `event` table; parts materialize on commit. Replaces the
- * JSON-per-session store — see docs/plans/2026-08-21-part-normalized-sessions-design.md. */
+ * JSON-per-session store — see docs/plans/2026-08-21-part-normalized-sessions.md. */
 
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS message (
   time_created INTEGER NOT NULL, time_completed INTEGER
 );
 
+CREATE INDEX IF NOT EXISTS message_session ON message(session_id, id);
+
 CREATE TABLE IF NOT EXISTS part (
   id TEXT PRIMARY KEY,
   message_id TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE,
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS part (
   time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS part_window ON part(session_id, id);
+CREATE INDEX IF NOT EXISTS part_message ON part(message_id, seq);
 
 CREATE TABLE IF NOT EXISTS event (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
