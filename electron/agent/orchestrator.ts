@@ -21,7 +21,8 @@ import { createConfigStore } from '../configStore.js';
 import { createTurnController, type TurnController } from './turn-controller.js';
 import { loadHookConfig, type HookConfig } from './hooks/hook-config.js';
 import { shouldCompact, compactConversation, isContextOverflow } from './context/auto-compact.js';
-import { supportsThinking, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts } from './model-capabilities.js';
+import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts } from './model-capabilities.js';
+import { mediaMimeFor } from './tools/read-media-file.js';
 import type { ToolResult } from './tools/types.js';
 import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
 import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
@@ -43,6 +44,22 @@ const log = createLogger('agent-sdk');
 const MAX_STEPS = 100;
 const TURN_MAX_RETRIES = 10;
 const TURN_RETRY_TIMEOUT_MS = 120_000;
+
+/** MIME types safe to inline as image parts — the set Anthropic/OpenAI vision
+ *  endpoints both accept. SVG/AVIF/BMP/etc. fall through to the hint tiers. */
+const INLINE_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+/** Inline image size cap — base64 of anything larger blows up the request. */
+const INLINE_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+/** Heuristic for image-capable MCP tools (tier 2 of the attachment chain):
+ *  name or description mentions images/vision/OCR. */
+const IMAGE_CAPABLE_RE = /image|vision|ocr|screenshot|photo|picture/i;
+
+/** Attachment-delivery decision for a turn: whether the model sees images
+ *  natively, and which MCP tools can analyze them when it can't. */
+interface AttachmentDelivery {
+  vision: boolean;
+  mcpImageTools: string[];
+}
 const ESCALATED_MAX_TOKENS = 65_535;
 const MAX_RESUME_ATTEMPTS = 3;
 /** Max forced compactions triggered by a context-overflow 400 in a single
@@ -171,9 +188,11 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
   );
 
   ipcMain.handle(AGENT_COMMANDS.submitFollowup,
-    (_e, sessionId: string, toolCallId: string, answer: string) => {
-      resolveFollowup(sessionId, toolCallId, answer);
-    },
+    (_e, sessionId: string, toolCallId: string, answer: string) =>
+      // Boolean reaches the renderer: true = live resolver resolved; false = no
+      // pending ask (turn already ended) — the renderer falls back to sending
+      // the answer as a user message instead of dropping it silently.
+      resolveFollowup(sessionId, toolCallId, answer),
   );
 
   ipcMain.handle('agent:updateMode', (_e, sessionId: string, mode: AutonomyMode) => {
@@ -218,12 +237,22 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
     throw new Error(`The ${where} folder no longer exists:\n${root}`);
   }
 
+  const modelEntry = provider.models.find((m) => m.modelId === modelId);
+  // Built once here: drives both the attachment fallback chain (image-capable
+  // MCP tools) and the streamText toolset below — avoid building it twice.
+  const mcpTools = mcpToolsetForWorkspace(workspaceId);
+  const mcpImageTools = Object.entries(mcpTools)
+    .filter(([n, t]) =>
+      IMAGE_CAPABLE_RE.test(n) || IMAGE_CAPABLE_RE.test(String((t as { description?: string }).description ?? '')))
+    .map(([n]) => n);
+  const attachmentDelivery = { vision: supportsVision(modelId, modelEntry), mcpImageTools };
+
   // Build conversation from payload messages.
   let systemPrompt = '';
   const convo: ModelMessage[] = [];
   for (const m of messages) {
     if (m.role === 'system') { systemPrompt = m.content; continue; }
-    const core = toCoreMessage(m);
+    const core = await toCoreMessage(m, attachmentDelivery);
     if (core) convo.push(core);
   }
 
@@ -249,7 +278,6 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   activeTurns.set(sessionId, turn);
 
   const turnController = createTurnController(effectiveMaxSteps);
-  const modelEntry = provider.models.find((m) => m.modelId === modelId);
   const knownCtxWindow = contextWindowSize(modelId, modelEntry);
   const knownMaxInput = resolveMaxInputTokens(modelId, modelEntry) ?? knownCtxWindow;
   const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
@@ -316,7 +344,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   };
   activeCtxs.set(sessionId, ctx);
 
-  const tools = { ...buildToolset(ctx, loadHookConfig(root)), ...mcpToolsetForWorkspace(workspaceId) };
+  const tools = { ...buildToolset(ctx, loadHookConfig(root)), ...mcpTools };
 
   const baseProtocol = resolveProtocolOptions(
     provider.apiStyle, reasoning,
@@ -931,14 +959,52 @@ function nextSeq(sessionId: string): number {
   return n;
 }
 
-function toCoreMessage(m: TurnMessage): ModelMessage | null {
+async function toCoreMessage(m: TurnMessage, delivery: AttachmentDelivery): Promise<ModelMessage | null> {
   if (m.role !== 'user' && m.role !== 'assistant') return null;
   let content = m.content;
+  const imageParts: Array<{ type: 'image'; image: string; mimeType: string }> = [];
   if (m.attachments?.length) {
     const blocks = m.attachments.filter(a => a.content).map(a => `<file path="${a.path}">\n${a.content}\n</file>`);
+    // Path-only attachments (images/media) resolve through a fallback chain:
+    // 1) vision model → inline as image parts (the model sees them directly),
+    // 2) image-capable MCP tool → point the model at it with the path,
+    // 3) read_media_file with the exact absolute path.
+    const media = m.attachments.filter(a => !a.content && (a.absPath ?? a.path));
+    for (const a of media) {
+      const abs = a.absPath ?? a.path;
+      const mime = mediaMimeFor(abs);
+      if (delivery.vision && mime && INLINE_IMAGE_MIMES.has(mime)) {
+        const base64 = await readInlineImage(abs);
+        if (base64 !== null) {
+          imageParts.push({ type: 'image', image: base64, mimeType: mime });
+          blocks.push(`<file path="${abs}" kind="image" note="user-attached image — inlined with this message, you can see it directly"/>`);
+          continue;
+        }
+      }
+      if (delivery.mcpImageTools.length) {
+        blocks.push(`<file path="${abs}" kind="image" note="user-attached media — you cannot view images directly; an image-capable MCP tool (${delivery.mcpImageTools.join(', ')}) may be able to analyze it with this path"/>`);
+      } else {
+        blocks.push(`<file path="${abs}" kind="image" note="user-attached image — use read_media_file with this exact absolute path to view it"/>`);
+      }
+    }
     if (blocks.length) content += '\n\n' + blocks.join('\n\n');
   }
+  if (imageParts.length) {
+    return { role: m.role, content: [{ type: 'text', text: content }, ...imageParts] } as ModelMessage;
+  }
   return { role: m.role, content } as ModelMessage;
+}
+
+/** Read an image file as base64 for inlining; null when missing/oversized —
+ *  callers fall through to the next tier of the attachment chain. */
+async function readInlineImage(abs: string): Promise<string | null> {
+  try {
+    const stat = await fs.promises.stat(abs);
+    if (stat.size > INLINE_IMAGE_MAX_BYTES) return null;
+    return (await fs.promises.readFile(abs)).toString('base64');
+  } catch {
+    return null;
+  }
 }
 
 function normalizeStatus(s: string | undefined): ToolCall['status'] {

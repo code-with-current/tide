@@ -57,6 +57,10 @@ export interface Model {
   /** Whether the model supports reasoning (sourced from a live provider /models
    *  response). Drives the brain icon — replaces the heuristic prefix table. */
   reasoning?: boolean;
+  /** Whether the model accepts image input (vision). Sourced from a live
+   *  provider /models response or the models.dev catalog. When true, attached
+   *  images are inlined as image parts instead of hinted via read_media_file. */
+  vision?: boolean;
   /** True when the model always reasons and cannot be told not to (e.g.
    *  grok-4.5, some r1 variants). Sourced from a rich provider /models
    *  response. When true, the thinking-level selector disables "off". */
@@ -466,6 +470,7 @@ export type ToolDisplay =
   | { kind: 'command'; command: string }
   | { kind: 'file_list'; paths: string[] }
   | { kind: 'text'; text: string }
+  | { kind: 'media'; dataUrl: string; mimeType: string }
   | { kind: 'agent'; agentName: string; title?: string; task: string; report: string; usage?: Usage; reasoning?: string; dispatchId?: string; background?: boolean; backgroundState?: 'completed' | 'error' | 'interrupted' }
   | { kind: 'file_loaded'; path: string; lines: number; bytes: number; description?: string; body: string };
 

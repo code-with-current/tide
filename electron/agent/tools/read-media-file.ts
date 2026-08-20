@@ -12,20 +12,36 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10MB cap — models can't handle larger i
 
 const MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
+  '.apng': 'image/apng',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.jfif': 'image/jpeg',
+  '.pjpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.avif': 'image/avif',
   '.svg': 'image/svg+xml',
   '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.flac': 'audio/flac',
+  '.aac': 'audio/aac',
+  '.m4a': 'audio/mp4',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
   '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
   '.pdf': 'application/pdf',
 };
+
+/** MIME type for a media path (extension-based); undefined when unsupported. */
+export function mediaMimeFor(p: string): string | undefined {
+  return MIME_MAP[path.extname(p).toLowerCase()];
+}
 
 export async function runReadMediaFile(
   relPath: string,
@@ -90,9 +106,9 @@ export const readMediaFileTool: ToolRegistration = {
   definition: {
     name: 'read_media_file',
     description:
-      'Read a binary/media file (image, audio, PDF) as a base64 data URL. ' +
+      'Read a binary/media file (image, audio, video, PDF) as a base64 data URL. ' +
       'Use for viewing images, diagrams, or other non-text files. ' +
-      'Supports: png, jpg, gif, webp, svg, bmp, ico, mp3, wav, mp4, webm, pdf. ' +
+      'Supports: png, jpg, gif, webp, avif, svg, bmp, ico, mp3, wav, flac, mp4, webm, mov, pdf. ' +
       'Max 10MB.',
     input_schema: {
       type: 'object',
@@ -115,9 +131,9 @@ export const readMediaFileTool: ToolRegistration = {
 export function createReadMediaFileTool(ctx: ToolContext) {
   return tool({
     description:
-      'Read a binary/media file (image, audio, PDF) as a base64 data URL. ' +
+      'Read a binary/media file (image, audio, video, PDF) as a base64 data URL. ' +
       'Use for viewing images, diagrams, or other non-text files. ' +
-      'Supports: png, jpg, gif, webp, svg, bmp, ico, mp3, wav, mp4, webm, pdf. Max 10MB.',
+      'Supports: png, jpg, gif, webp, avif, svg, bmp, ico, mp3, wav, flac, mp4, webm, mov, pdf. Max 10MB.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to workspace root.'),
     }),

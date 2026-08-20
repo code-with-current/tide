@@ -1,6 +1,6 @@
 /** Preload script: runs in the renderer before page load and exposes a narrow, named API via contextBridge. The renderer never gets direct ipcRenderer/Node/filesystem access — only the methods listed here. */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('tideIpc', {
   // ── Workspaces ──
@@ -15,6 +15,15 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // ── File dialog (real) ──
   pickDirectory: () => ipcRenderer.invoke('tide:pickDirectory'),
   pickFiles: () => ipcRenderer.invoke('tide:pickFiles'),
+  // Resolve the real on-disk path of a pasted/dropped File. Returns '' for
+  // clipboard blobs that have no backing file.
+  getPathForFile: (file: File) => {
+    try { return webUtils.getPathForFile(file); } catch { return ''; }
+  },
+  // Persist clipboard-blob bytes (e.g. pasted screenshots) so they get a real
+  // absolute path the agent can read with read_media_file. Returns the path.
+  saveClipboardFile: (name: string, bytes: ArrayBuffer) =>
+    ipcRenderer.invoke('tide:saveClipboardFile', name, bytes),
   readExternalFile: (filePath: string) => ipcRenderer.invoke('tide:readExternalFile', filePath),
   // Read an image as a base64 data URL for <img> rendering in the viewer.
   // Accepts an absolute path (external attachment) or workspace+relPath.
