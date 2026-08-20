@@ -3,17 +3,23 @@ import { MessageCircleQuestionMark, Loader2, MessageCircleReply, List } from 'lu
 import type { FollowupMode } from '@/types';
 import { useUi } from '@/lib/stores/ui';
 
-/** Routes ask_followup_question: 'options' fires popup with chips+input, 'question' fires input-only, 'blank' shimmers while args stream. Dismissed-but-unresolved shows an Answer button. */
+/** Routes ask_followup_question: 'options' fires popup with chips+input, 'question' fires input-only, 'blank' shimmers while args stream. Dismissed-but-unresolved shows an Answer button. Once resolved nothing renders here — the question/options/answer trace lives in the ask_followup_question tool row. */
 export const FollowupPrompt = memo(function FollowupPrompt({
   mode,
   sessionId,
   messageId,
+  toolCallId,
   streaming,
   resolved = false,
 }: {
   mode: FollowupMode;
   sessionId: string | null;
   messageId: string;
+  /** The ask_followup_question tool call this block belongs to. Always pass
+   *  it: the popup must carry the id so answering resolves the LIVE paused
+   *  tool (submitFollowup) instead of the legacy new-user-message path —
+   *  which would start a second turn while the first still awaits its pick. */
+  toolCallId?: string;
   streaming: boolean;
   resolved?: boolean;
 }) {
@@ -33,6 +39,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
         multiple: mode.multiple,
         options: mode.options,
         messageId,
+        toolCallId,
       });
       setDismissed(false);
     } else if (mode.kind === 'question') {
@@ -41,10 +48,11 @@ export const FollowupPrompt = memo(function FollowupPrompt({
         multiple: false,
         options: [],
         messageId,
+        toolCallId,
       });
       setDismissed(false);
     }
-  }, [streaming, resolved, mode, sessionId, messageId, showOptionsPopup]);
+  }, [streaming, resolved, mode, sessionId, messageId, toolCallId, showOptionsPopup]);
 
   // Track dismissal: if pendingOptions was set but is now gone (for this
   // messageId) and we're not resolved, the user dismissed it.
@@ -66,7 +74,9 @@ export const FollowupPrompt = memo(function FollowupPrompt({
     }
   }, [pendingOpts, dismissed, resolved, streaming, messageId]);
 
-  // Fully resolved — hide the card entirely.
+  // Fully resolved — nothing renders here. The Q&A trace (question,
+  // options, answer) lives in the ask_followup_question tool row so the
+  // turn reads as one comprehensive tooling step.
   if (resolved) return null;
 
   // Mode 3 — blank.
@@ -94,6 +104,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
               multiple: mode.multiple,
               options: mode.options,
               messageId,
+              toolCallId,
             });
           } else if (mode.kind === 'question') {
             showOptionsPopup(sessionId, {
@@ -101,6 +112,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
               multiple: false,
               options: [],
               messageId,
+              toolCallId,
             });
           }
           setDismissed(false);
@@ -108,7 +120,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
         className="flex items-center gap-2 py-1.5 px-2.5 w-full text-left bg-primary/5 border border-accent/20 rounded-md hover:bg-primary/10 transition-colors group"
       >
         <MessageCircleQuestionMark className="size-3 text-primary flex-shrink-0" />
-        <span className="text-xs text-muted-foreground flex-1 truncate">
+        <span className="text-xs text-muted-foreground flex-1 leading-snug">
           {question}
         </span>
         <span className="flex items-center gap-1 text-[11px] text-primary font-medium flex-shrink-0">

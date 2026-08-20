@@ -108,15 +108,17 @@ export function OptionsPopup({
         role="dialog"
         aria-label="Tide is asking a question"
         className={cn(
-          'rounded-xl border bg-card shadow-2xl overflow-hidden',
-          'border-primary/30',
+          'backdrop-blur-md overflow-hidden rounded-xl border border-white/10 shadow-2xl',
+          'max-h-[70vh] flex flex-col',
         )}
+
+        style={{ background: 'color-mix(in srgb, var(--background) 78%, transparent)' }}
       >
         {/* Accent left border — signals "model needs your input" */}
-        <div className="flex">
+        <div className="flex min-h-0 flex-1">
           <div className="w-1 bg-primary flex-shrink-0" />
 
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 overflow-y-auto">
             {/* Header — icon + "Tide is asking" label + question + dismiss */}
             <div className="px-3.5 pt-3 pb-2.5 flex items-start gap-2.5">
               <div className="size-9 rounded-lg bg-warning/10 border border-warning/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -130,15 +132,15 @@ export function OptionsPopup({
                   {opts.question}
                 </div>
               </div>
-              <button
-                type="button"
+              <Button
                 onClick={() => !submitted && startDismiss()}
-                className="text-muted-foreground/50 hover:text-foreground p-1 rounded hover:bg-accent shrink-0 transition-colors cursor-pointer"
                 title="Dismiss (Esc)"
                 aria-label="Dismiss"
+                size="icon-xs"
+                variant="outline"
               >
-                <X className="size-3.5" />
-              </button>
+                <X/>
+              </Button>
             </div>
 
             {/* Option chips — 2-column grid */}
@@ -162,7 +164,7 @@ export function OptionsPopup({
                 </div>
 
                 <div className="grid grid-cols-1 gap-1.5">
-                  {opts.options.slice(0, 8).map((option, i) => {
+                  {opts.options.map((option, i) => {
                     const isSelected = selected.has(option);
                     const isFlashing = flashChip === option;
                     return (
@@ -200,9 +202,9 @@ export function OptionsPopup({
                           )
                         )}
                         <div className="flex-1 min-w-0">
-                          <span className="block truncate">{option}</span>
+                          <span className="block break-words">{option}</span>
                           {opts.optionDescriptions?.[i] && (
-                            <span className="block truncate text-[0.75rem] font-normal text-muted-foreground/70">
+                            <span className="block break-words text-[0.75rem] font-normal text-muted-foreground/70 leading-snug">
                               {opts.optionDescriptions[i]}
                             </span>
                           )}
@@ -242,7 +244,9 @@ export function OptionsPopup({
             {/* Free-text input — the fallback for custom answers */}
             <div className="flex items-center gap-2 px-3.5 py-2.5">
               <InputGroup>
-                      <InputGroupInput placeholder="Search..."  ref={inputRef}
+                      <InputGroupInput
+                        placeholder={opts.options.length > 0 ? 'Or type your own answer…' : 'Type your answer…'}
+                        ref={inputRef}
                       value={text}
                       onChange={(e) => setText(e.target.value)}
                       onKeyDown={(e) => {
@@ -254,7 +258,7 @@ export function OptionsPopup({
                       disabled={submitted} />
 
                       <InputGroupAddon align="inline-end">
-                        <Kbd>  <CornerDownLeft className="size-3" /></Kbd>
+                        <Kbd className="bg-primary text-primary-foreground">  <CornerDownLeft className="size-3" /></Kbd>
                       </InputGroupAddon>
                     </InputGroup>
               {/*<Input
