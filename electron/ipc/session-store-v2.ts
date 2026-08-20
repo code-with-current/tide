@@ -3,6 +3,8 @@
  * JSON-per-session store — see docs/plans/2026-08-21-part-normalized-sessions-design.md. */
 
 import Database from 'better-sqlite3';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS session (
@@ -55,11 +57,17 @@ export function createSessionStoreV2(dbPath: string): {
   tables: () => string[];
   close: () => void;
 } {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
   // Baseline for future schema changes; 1 was never shipped (legacy store had no version).
-  db.pragma('user_version = 2');
+  // Only bump up — an older binary must not downgrade a newer db.
+  const currentVersion = db.pragma('user_version', { simple: true }) as number;
+  if (currentVersion < 2) {
+    db.pragma('user_version = 2');
+  }
   return {
     db,
     pragma: (name) => db.pragma(name, { simple: true }),
