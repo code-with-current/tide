@@ -1191,7 +1191,7 @@ export function MainScreen() {
               id="right"
               defaultSize="25"
               minSize="25"
-              maxSize="30"
+              maxSize="60"
               className="h-full relative min-w-0"
             >
               <RightPanel />

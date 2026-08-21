@@ -542,7 +542,7 @@ export const useUi = create<UiState>()(
   rightPanelOpen: true,
   fileViewerOpen: false,
   sheetWidth: 40,
-  setSheetWidth: (w) => set({ sheetWidth: Math.max(25, Math.min(70, w)) }),
+  setSheetWidth: (w) => set({ sheetWidth: Math.max(25, Math.min(60, w)) }),
   commitDetail: null,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
