@@ -96,6 +96,9 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // <webview> for the right-panel Browser tab. The webview runs with its
+      // own isolated guest context — no node, no preload bridging.
+      webviewTag: true,
     },
   });
 

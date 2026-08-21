@@ -319,6 +319,11 @@ interface UiState {
   /** Push a sent prompt to the session's history (deduped, most-recent-first). */
   pushPromptHistory: (sessionId: string, text: string) => void;
 
+  /** Per-workspace URL remembered by the right-panel Browser tab. The
+   *  webview unmounts with the panel; the stored URL reloads on reopen. */
+  browserUrls: Record<string, string>;
+  setBrowserUrl: (workspaceId: string, url: string) => void;
+
   /** Per-session terminal tabs. Keyed by sessionId. Empty = panel collapsed. */
   terminals: Record<string, TerminalInstance[]>;
   activeTerminal: Record<string, string | undefined>;
@@ -578,6 +583,7 @@ export const useUi = create<UiState>()(
   queue: {},
   preTurnShas: {},
   promptHistory: {},
+  browserUrls: {},
   terminals: {},
   activeTerminal: {},
   terminalPorts: {},
@@ -1052,6 +1058,9 @@ export const useUi = create<UiState>()(
       return { promptHistory: { ...s.promptHistory, [sessionId]: next } };
     }),
 
+  setBrowserUrl: (workspaceId, url) =>
+    set((s) => ({ browserUrls: { ...s.browserUrls, [workspaceId]: url } })),
+
   // ─── Per-session terminal tabs ───────────────────────────────────────────
   addTerminal: (sessionId, name, pendingCommand) =>
     set((s) => {
@@ -1336,6 +1345,7 @@ export const useUi = create<UiState>()(
         draftSessions: s.draftSessions,
         composerDrafts: s.composerDrafts,
         dismissedTodoSignatures: s.dismissedTodoSignatures,
+        browserUrls: s.browserUrls,
         // shortcutOverrides is intentionally NOT persisted here — it lives in
         // settings.json (via the tide:settings:* IPC) so it's shared across
         // windows and platform-aware. Hydrated by loadShortcuts() at startup.

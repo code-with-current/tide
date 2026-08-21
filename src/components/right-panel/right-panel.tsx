@@ -7,6 +7,7 @@ import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { FileExplorerTab } from './tabs/file-explorer-tab';
 import { GitTab } from './tabs/git-tab';
+import { BrowserTab } from './tabs/browser-tab';
 
 export function RightPanel() {
   const sessionId = useUi((s) => s.activeSessionId ?? 'default');
@@ -28,6 +29,8 @@ export function RightPanel() {
           <FileExplorerTab />
         ) : feature === 'git' ? (
           <GitTab />
+        ) : feature === 'browser' ? (
+          <BrowserTab />
         ) : null}
       </div>
     </aside>
