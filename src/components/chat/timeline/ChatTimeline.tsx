@@ -1,7 +1,18 @@
 /** ChatTimeline — chat message list with self-contained scroll. Renders persisted
- *  + streaming messages in a single flat list. Owns its scroll container. */
+ *  + streaming messages in a single flat list. Owns its scroll container.
+ *
+ *  The message list is virtualized (@tanstack/react-virtual): offscreen rows
+ *  unmount entirely, so their markdown / diff / mermaid subtrees only exist
+ *  for rows near the viewport. The virtual box keeps its full height via
+ *  getTotalSize() (measurements are cached per message id and survive row
+ *  unmount), and the pin-scroll sentinels — [data-timeline-end] and the
+ *  100vh spacer from usePinnedTimelineScroll — stay OUTSIDE the box as
+ *  always-mounted siblings, so their geometry is stable while rows come and
+ *  go. Row heights come from measureElement (ResizeObserver); estimateSize is
+ *  only the pre-measure hint. */
 
 import { memo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown } from 'lucide-react';
 import type { Message } from '@/types';
 import { ChatMessage } from '../chat-message';
@@ -33,62 +44,87 @@ export interface ChatTimelineProps {
   retryActive?: boolean;
 }
 
+/** Pre-measure height hints. measureElement corrects both on first mount and
+ *  caches by message id, so these only shape initial geometry and far-jump
+ *  scroll math. 220px matches the containIntrinsicSize hint this replaced. */
+const USER_ROW_ESTIMATE = 88;
+const TURN_ROW_ESTIMATE = 220;
+
 function ChatTimelineImpl({
   messages, streamingMessage, isStreaming, pendingToolCallIds, stopReason,
   sessionLoading, onApproveToolCalls, onRejectToolCalls, sessionId,
   loadingFallback, emptyState, errorBlock, className, retryActive,
 }: ChatTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isEmpty = messages.length === 0 && !streamingMessage && !sessionLoading;
+  const listActive = !isEmpty && !(sessionLoading && messages.length === 0);
   const totalCount = messages.length + (streamingMessage ? 1 : 0);
   const lastRole = (streamingMessage ?? messages[messages.length - 1])?.role;
   const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole, sessionId);
-  const isEmpty = messages.length === 0 && !streamingMessage && !sessionLoading;
+
+  const virtualizer = useVirtualizer({
+    count: listActive ? totalCount : 0,
+    getScrollElement: () => scrollRef.current,
+    overscan: 8,
+    estimateSize: (i) => (i < messages.length && messages[i].role === 'user' ? USER_ROW_ESTIMATE : TURN_ROW_ESTIMATE),
+    // Stable keys keep the per-id measurement cache valid across unmount —
+    // re-measure loops and estimate-flashing scrolls both hinge on this.
+    getItemKey: (i) => (i < messages.length ? messages[i].id : '__streaming__'),
+  });
 
   return (
     <div className="relative flex-1 min-h-0">
       <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll [scrollbar-gutter:stable] px-6 py-3', className)}>
-        <div className="w-[80%] max-w-3xl mx-auto flex flex-col">
+        <div className="w-[80%] max-w-3xl mx-auto">
           {sessionLoading && messages.length === 0 ? loadingFallback
             : isEmpty ? emptyState
             : (
               <>
-                {messages.map((msg, i) => (
-                  <div
-                    key={msg.id}
-                    className="min-w-0 w-full"
-                    data-user-message={msg.role === 'user' ? 'true' : undefined}
-                    style={{
-                      // Skip layout/paint for off-screen messages — the browser
-                      // restores real geometry on scroll-in via containIntrinsicSize.
-                      // Never apply to the last message (it may still be live or
-                      // need accurate measurement for auto-scroll).
-                      contentVisibility: i === messages.length - 1 ? 'visible' : 'auto',
-                      containIntrinsicSize: 'auto 220px',
-                    }}
-                  >
-                    {msg.compactionInfo && (
-                      <CompactedDivider
-                        tokensBefore={msg.compactionInfo.tokensBefore}
-                        tokensAfter={msg.compactionInfo.tokensAfter}
-                      />
-                    )}
-                    <ChatMessage message={msg} stopReason={msg.stopReason} sessionId={sessionId} />
-                  </div>
-                ))}
-                {streamingMessage && (
-                  <ChatMessage
-                    key="__streaming__"
-                    message={streamingMessage}
-                    streaming
-                    pendingToolCallIds={pendingToolCallIds}
-                    stopReason={stopReason}
-                    onApproveToolCalls={onApproveToolCalls}
-                    onRejectToolCalls={onRejectToolCalls}
-                  />
-                )}
+                <div style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
+                  {virtualizer.getVirtualItems().map((row) => {
+                    const isStreamingRow = row.index >= messages.length;
+                    const msg = isStreamingRow ? streamingMessage! : messages[row.index];
+                    return (
+                      <div
+                        key={row.key}
+                        data-index={row.index}
+                        ref={virtualizer.measureElement}
+                        data-user-message={msg.role === 'user' ? 'true' : undefined}
+                        className="min-w-0 w-full"
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          // Absolute rows establish a formatting context, so
+                          // TurnBlock's mb-6 stays inside the measured
+                          // border-box — with plain static divs that margin
+                          // would collapse out and turns would overlap.
+                          transform: `translateY(${row.start}px)`,
+                        }}
+                      >
+                        {msg.compactionInfo && (
+                          <CompactedDivider
+                            tokensBefore={msg.compactionInfo.tokensBefore}
+                            tokensAfter={msg.compactionInfo.tokensAfter}
+                          />
+                        )}
+                        <ChatMessage
+                          message={msg}
+                          streaming={isStreamingRow}
+                          pendingToolCallIds={isStreamingRow ? pendingToolCallIds : undefined}
+                          stopReason={isStreamingRow ? stopReason : msg.stopReason}
+                          sessionId={sessionId}
+                          onApproveToolCalls={isStreamingRow ? onApproveToolCalls : undefined}
+                          onRejectToolCalls={isStreamingRow ? onRejectToolCalls : undefined}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
                 {errorBlock}
                 {/* Marks the real content end for usePinnedTimelineScroll —
-                    must stay below every message and above the spacer. */}
+                    must stay below every message and above the spacer. Lives
+                    outside the virtual box so it never unmounts. */}
                 <div data-timeline-end="true" style={{ height: 1 }} aria-hidden="true" />
                 {/* Scroll room that lets the pinned user message reach the
                     viewport top; mounted for the whole turn so a mid-stream

@@ -11,6 +11,8 @@ import type { SinkEventV2, PartV2 } from '@/types/session-v2';
 interface SessionState {
   lastSeq: number;
   buffers: Map<string, string[]>;
+  // Append-only: commits always grow a new array, never mutate in place —
+  // useSessionMessagesV2's version counter snapshots turnParts().length.
   committed: PartV2[];
 }
 

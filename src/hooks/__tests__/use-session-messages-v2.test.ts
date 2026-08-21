@@ -73,4 +73,12 @@ describe('mergeSessionWindow', () => {
   it('returns an empty array for no pages and no commits (ref-stable empty path)', () => {
     expect(mergeSessionWindow([], [], ownerIn({}))).toEqual([]);
   });
+
+  it('shells committed parts with no pages at all — fast stream before the first fetch resolves', () => {
+    const out = mergeSessionWindow([], [part('p1', 1), part('p2', 2)], ownerIn({ p1: 'm-live', p2: 'm-live' }));
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('m-live');
+    expect(out[0].role).toBe('assistant');
+    expect(out[0].parts.map((p) => p.id)).toEqual(['p1', 'p2']);
+  });
 });

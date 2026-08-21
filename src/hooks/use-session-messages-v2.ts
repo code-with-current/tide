@@ -10,7 +10,11 @@
  *
  *  PartV2 carries no messageId, so the part→message association is recorded
  *  from the event stream (every event has both ids) into a per-subscription
- *  map — the store stays Task 8's shape, untouched. */
+ *  map — the store stays Task 8's shape, untouched.
+ *
+ *  Single consumer per session: cleanup clears the session's stream state and
+ *  evicts the messages query, so a second mounted consumer for the same
+ *  session would tear down the first's cache and live parts on unmount. */
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -118,7 +122,9 @@ export function useSessionMessagesV2(sessionId: string | null) {
       }
       streamStore.applyBatch(mine);
     });
-    eventsSubscribe(sessionId, streamStore.lastSeq(sessionId)).catch(() => {});
+    eventsSubscribe(sessionId, streamStore.lastSeq(sessionId)).catch((err) => {
+      console.warn('eventsSubscribe failed', err);
+    });
 
     return () => {
       unsubscribe();
