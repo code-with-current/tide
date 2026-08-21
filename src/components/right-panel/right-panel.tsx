@@ -1,6 +1,6 @@
 /**
- * RightPanel — renders content based on the active feature (files / git),
- * with NO tab strip. The view is switched from the top bar's
+ * RightPanel — renders the active right-panel tab (files / git / browser /
+ * agents), with NO tab strip. The view is switched from the top bar's
  * "Right Panel Switcher" buttons.
  */
 import { useUi } from '@/lib/stores/ui';
@@ -8,6 +8,7 @@ import { useTabs } from '@/lib/stores/tabs';
 import { FileExplorerTab } from './tabs/file-explorer-tab';
 import { GitTab } from './tabs/git-tab';
 import { BrowserTab } from './tabs/browser-tab';
+import { AgentsTab } from './tabs/agents-tab';
 
 export function RightPanel() {
   const sessionId = useUi((s) => s.activeSessionId ?? 'default');
@@ -31,6 +32,8 @@ export function RightPanel() {
           <GitTab />
         ) : feature === 'browser' ? (
           <BrowserTab />
+        ) : feature === 'agents' && activeSessionId ? (
+          <AgentsTab sessionId={activeSessionId} />
         ) : null}
       </div>
     </aside>

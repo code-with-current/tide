@@ -37,6 +37,7 @@ import { cn } from '@/lib/utils';
 import { toolLabel } from '@/lib/tool-labels';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { useUi } from '@/lib/stores/ui';
+import { useTabs } from '@/lib/stores/tabs';
 import { agentStatusOf, type AgentStatus } from './agent-status';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
@@ -847,7 +848,7 @@ function ChipRow({
           e.preventDefault();
           onOpenDispatch();
         }}
-        title="Open this agent's stream in the Agents panel"
+        title="Open this agent's stream in the Agents tab"
         className="flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
       >
         <span className={cn('flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
@@ -1019,7 +1020,7 @@ function ToolChipsImpl({
   calls: ToolCall[];
   streaming?: boolean;
   variant?: 'header' | 'stream';
-  /** Owning session — wires dispatch rows to the Agents panel. Without it,
+  /** Owning session — wires dispatch rows to the Agents tab. Without it,
    *  dispatch rows render but don't navigate. */
   sessionId?: string | null;
   onViewFile?: (path: string) => void;
@@ -1044,7 +1045,7 @@ function ToolChipsImpl({
 
   const done = !streaming;
   // Agent children don't render as top-level rows — they live in the
-  // dispatch's Agents-panel stream instead.
+  // dispatch's Agents-tab stream instead.
   const rows = calls.filter(
     (c) => !(c.parentToolCallId && calls.some((p) => p.id === c.parentToolCallId && isAgentCall(p))),
   );
@@ -1052,13 +1053,9 @@ function ToolChipsImpl({
   const openDispatch = (call: ToolCall) => {
     if (!sessionId) return;
     useUi.getState().setFocusedDispatch(sessionId, call.id);
-    // Sticky OR: clicking a second dispatch row while the panel is already
-    // open must not clear a restore flag captured by the first click.
-    useUi.setState((s) => ({
-      agentsPanelRestoreRightPanel: s.rightPanelOpen || s.agentsPanelRestoreRightPanel,
-    }));
-    useUi.getState().setAgentsPanelOpen(true);
-    useUi.getState().setRightPanel(false);
+    useTabs.getState().addTab(sessionId, 'agents');
+    useTabs.getState().setActive(sessionId, 'agents');
+    useUi.getState().setRightPanel(true);
   };
 
   const rowEls = rows.map((call, index) => {

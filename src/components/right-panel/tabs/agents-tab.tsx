@@ -1,6 +1,7 @@
-/** AgentsPanel — docked sub-agent dispatch stream, opened only by dispatch-row
- *  clicks in the chat (which focus the dispatch and flip agentsPanelOpen) and
- *  closed by the header X. Focus is kept on close so reopening returns.
+/** AgentsTab — sub-agent dispatch stream as a right-panel tab, opened only by
+ *  dispatch-row clicks in the chat (which focus the dispatch and activate the
+ *  agents tab) and closed by the header X. Focus is kept on close so
+ *  reopening returns.
  *
  *  Data path: sub-agent events (tool + narration + reasoning) are re-tagged
  *  with parentToolCallId and ride the PARENT session's event stream
@@ -20,9 +21,9 @@ import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { useSession, useDispatches } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
-import { ThinkingBlock } from './thinking-block';
-import { AgentStatusChip } from './tool-chips';
-import { agentStatusOf } from './agent-status';
+import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
+import { AgentStatusChip } from '@/components/chat-v2/tool-chips';
+import { agentStatusOf } from '@/components/chat-v2/agent-status';
 import { StreamBlocks } from '@/components/chat/turn/stream-blocks';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 
@@ -81,10 +82,9 @@ function findDispatchBlock(
   return null;
 }
 
-export function AgentsPanel({ sessionId }: { sessionId: string }) {
+export function AgentsTab({ sessionId }: { sessionId: string }) {
   const focus = useUi((s) => s.focusedDispatchId[sessionId] ?? null);
   const setFocusedDispatch = useUi((s) => s.setFocusedDispatch);
-  const setAgentsPanelOpen = useUi((s) => s.setAgentsPanelOpen);
   const liveBlocks = useUi((s) => s.streams[sessionId]?.blocks);
   const parentStreaming = useUi((s) => s.streams[sessionId]?.isStreaming ?? false);
   const { data: session } = useSession(sessionId);
@@ -177,16 +177,10 @@ export function AgentsPanel({ sessionId }: { sessionId: string }) {
           </div>
           <button
             type="button"
-            aria-label="Close agents panel"
+            aria-label="Close agents tab"
             onClick={() => {
-              // Reopen the right panel only if opening this panel displaced it.
-              const restore = useUi.getState().agentsPanelRestoreRightPanel;
-              useUi.setState({ agentsPanelRestoreRightPanel: false });
-              setAgentsPanelOpen(false);
-              if (restore) {
-                useTabs.getState().setActive(sessionId, 'files');
-                useUi.getState().setRightPanel(true);
-              }
+              useTabs.getState().setActive(sessionId, 'files');
+              useUi.getState().setRightPanel(false);
             }}
             className="shrink-0 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground"
           >
