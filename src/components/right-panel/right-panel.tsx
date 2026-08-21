@@ -6,7 +6,7 @@
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { FileExplorerTab } from './tabs/file-explorer-tab';
-import { GitPanel } from '@/components/git/git-panel';
+import { GitTab } from './tabs/git-tab';
 
 export function RightPanel() {
   const sessionId = useUi((s) => s.activeSessionId ?? 'default');
@@ -27,7 +27,7 @@ export function RightPanel() {
         {feature === 'files' ? (
           <FileExplorerTab />
         ) : feature === 'git' ? (
-          <div className="flex-1 overflow-y-auto scroll"><GitPanel /></div>
+          <GitTab />
         ) : null}
       </div>
     </aside>

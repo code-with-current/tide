@@ -6,7 +6,7 @@ import {
   PanelRight, Terminal, PanelRightClose,
   ChevronRight, GitBranch, Play,
   Hammer, ChevronDown, Trash2,
-  FolderCode, Info,
+  FolderCode,
   FolderTree,
   GitPullRequestArrow, Check, Plus, Loader2,
 } from "lucide-react";
@@ -578,15 +578,6 @@ export function WindowTopBar() {
 
         {/* Right Panel Switcher — click to switch the right panel content */}
         <ButtonGroup>
-          <Tip label="Inspector">
-            <Button
-              variant={rpFeature === 'files' && rightPanelOpen ? 'outline' : 'outline'}
-              size="sm"
-              onClick={() => switchTo('files')}
-            >
-              <Info className="size-3.5" />
-            </Button>
-          </Tip>
           <Tip label="Explorer">
             <Button
               variant={rpFeature === 'files' && rightPanelOpen ? 'outline' : 'outline'}
