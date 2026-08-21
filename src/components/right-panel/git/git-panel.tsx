@@ -95,6 +95,10 @@ export function GitPanel() {
       path: change.path,
       language: change.path.split('.').pop() ?? 'text',
       diffHunks: hunks.length > 0 ? hunks : undefined,
+      // Recorded so the viewer can refetch at wider context on expand.
+      diffSource: hunks.length > 0
+        ? { staged: change.staged, sessionId: gitSessionId ?? undefined, contextLines: 3 }
+        : undefined,
     });
   };
 

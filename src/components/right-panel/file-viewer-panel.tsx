@@ -176,7 +176,7 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
   const isDiff = !!(file.diffHunks && file.diffHunks.length > 0);
 
   if (isDiff) {
-    return <DiffBody file={file} />;
+    return <DiffBody file={file} workspaceId={workspaceId} />;
   }
 
   if (file.isImage || isImageExt(file.path)) {
@@ -188,11 +188,25 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
 
 // ── DiffBody: Pierre once loaded, native DiffView while loading / on failure ──
 
-function DiffBody({ file }: { file: OpenFile }) {
-  const hunks = file.diffHunks!;
+function DiffBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
   const pierre = usePierre();
   const diffMode = useUi((s) => s.diffMode);
   const setDiffMode = useUi((s) => s.setDiffMode);
+  // Local copy — expand refetches replace it without mutating the store's
+  // OpenFile (which keeps the originally-opened hunks for other surfaces).
+  const [hunks, setHunks] = useState(file.diffHunks!);
+  const [contextLines, setContextLines] = useState(file.diffSource?.contextLines ?? 3);
+  const handleExpand = useCallback(async (next: number) => {
+    const src = file.diffSource;
+    if (!src) return;
+    try {
+      const widened = await api.gitDiff(workspaceId, file.path, src.staged, src.sessionId, next);
+      if (widened.length > 0) {
+        setHunks(widened);
+        setContextLines(next);
+      }
+    } catch { /* keep the current hunks */ }
+  }, [workspaceId, file.path, file.diffSource]);
   const fileDiff = useMemo(() => mapHunksToPierreMetadata(hunks, undefined, file.path), [hunks, file.path]);
   const PierreDiff = pierre != null && pierre !== 'failed' ? pierre.PierreDiff : null;
 
@@ -208,7 +222,11 @@ function DiffBody({ file }: { file: OpenFile }) {
         </>
       ) : (
         <div className="flex-1 overflow-auto scroll">
-          <DiffView hunks={hunks} />
+          <DiffView
+            hunks={hunks}
+            contextLines={contextLines}
+            onExpandContext={file.diffSource ? handleExpand : undefined}
+          />
         </div>
       )}
     </div>

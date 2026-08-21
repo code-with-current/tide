@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolveInsideWorkspace } from '../agent/path-safety';
 import { parseUnifiedDiff } from '../../src/lib/stream/parse-diff';
+import { clampContextLines } from '../../src/lib/diff/expand-context';
 import { toolEnv } from '../agent/tools/tool-env';
 import type { DiffHunk } from '../../src/types';
 
@@ -183,11 +184,13 @@ export async function gitCommit(rootDir: string, message: string): Promise<strin
 }
 
 /** Get the diff for a specific file as parsed hunks. `contextLines` controls
- *  the number of unchanged context lines around each change (default 3).
- *  Pass a large number (e.g. 100000) for a full-file diff view. */
+ *  the number of unchanged context lines around each change (absent = git's
+ *  default 3). Ladder values clamp to 1..200; a large sentinel (e.g. 100000)
+ *  still yields a full-file diff view. */
 export async function gitDiff(rootDir: string, filePath: string, staged: boolean, contextLines?: number): Promise<DiffHunk[]> {
   resolveInsideWorkspace(rootDir, filePath);
-  const contextArgs = contextLines != null ? ['-U', String(contextLines)] : [];
+  const clamped = clampContextLines(contextLines);
+  const contextArgs = clamped != null ? ['-U', String(clamped)] : [];
   const args = staged
     ? ['diff', ...contextArgs, '--cached', '--', filePath]
     : ['diff', ...contextArgs, '--', filePath];

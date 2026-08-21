@@ -103,6 +103,16 @@ export interface OpenFile {
    *  (no workspace sandbox). Survives reload because it's encoded in the
    *  content link target. */
   absPath?: string;
+  /** How the diffHunks were produced — present only when they came from a
+   *  live gitDiff fetch, so the viewer can refetch at a wider context when
+   *  the user expands a collapsed-context separator. */
+  diffSource?: {
+    staged: boolean;
+    /** Session id that resolved the git root (worktree sessions only). */
+    sessionId?: string;
+    /** Context width the hunks were fetched with. */
+    contextLines: number;
+  };
 }
 
 /** A file attached to the composer (browsed or pasted). Mirrors AttachedFile
