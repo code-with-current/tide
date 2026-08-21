@@ -7,12 +7,14 @@ import googleIcon from '@/assets/provider/google.svg';
 import openrouterIcon from '@/assets/provider/openrouter.svg';
 import togetherIcon from '@/assets/provider/together.svg';
 import fireworksIcon from '@/assets/provider/fireworks.svg';
+import zaiIcon from '@/assets/provider/zai.svg';
 
 const PRESET_IMGS: Record<string, string> = {
   google: googleIcon,
   openrouter: openrouterIcon,
   together: togetherIcon,
   fireworks: fireworksIcon,
+  zai: zaiIcon,
 };
 
 const PRESET_MARKS: Record<string, { d: string; label: string }> = {

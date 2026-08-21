@@ -50,7 +50,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'zai', name: 'z.ai', group: 'aggregator', apiStyle: 'anthropic',
     baseUrl: 'https://api.z.ai/api/anthropic', requiresKey: true,
     keyUrl: 'https://z.ai/manage-apikey/apikey.html', keyPlaceholder: '…',
-    recommended: ['glm-5', 'glm-4.6'], accent: '#1f6fee',
+    recommended: ['glm-5', 'glm-4.6'], accent: '#ffffff',
   },
   {
     id: 'deepseek', name: 'DeepSeek', group: 'aggregator', apiStyle: 'openai',
