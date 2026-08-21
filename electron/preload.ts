@@ -151,7 +151,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.on('todos:updated', (_e, data) => callback(data)),
   removeTodosListener: () => ipcRenderer.removeAllListeners('todos:updated'),
   getSession: (id: string) => ipcRenderer.invoke('tide:getSession', id),
-  createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
+  createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; kind?: 'main' | 'subagent' }) =>
     ipcRenderer.invoke('tide:createSession', workspaceId, title, modelId, opts),
   updateSessionSettings: (sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:updateSessionSettings', sessionId, patch),
@@ -219,6 +219,21 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:workspace:listBranches', workspaceId),
   listConfigFiles: (workspaceId: string) =>
     ipcRenderer.invoke('tide:workspace:listConfigFiles', workspaceId),
+
+  // ── Part-normalized v2 sessions + event stream ──
+  // List/messages page by cursor / nextBefore. Event batches (live + replay)
+  // arrive on 'tide:events' after eventsSubscribe registers a session.
+  sessionListV2: (workspacePath: string, opts?: { archived?: boolean; cursor?: string | null; limit?: number }) =>
+    ipcRenderer.invoke('tide:session:list-v2', workspacePath, opts),
+  sessionMessagesV2: (sessionId: string, opts?: { limit?: number; before?: string | null }) =>
+    ipcRenderer.invoke('tide:session:messages-v2', sessionId, opts),
+  eventsSubscribe: (sessionId: string, lastSeq: number | null) =>
+    ipcRenderer.invoke('tide:events:subscribe', sessionId, lastSeq),
+  onEvents: (cb: (batch: unknown) => void) => {
+    const listener = (_e: unknown, batch: unknown) => cb(batch);
+    ipcRenderer.on('tide:events', listener);
+    return () => ipcRenderer.off('tide:events', listener);
+  },
 
   // ── Providers (real persistence) ──
   listProviders: () => ipcRenderer.invoke('tide:listProviders'),
@@ -348,8 +363,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitRecentBranches', workspaceId, sessionId),
   gitCheckout: (workspaceId: string, branch: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitCheckout', workspaceId, branch, sessionId),
-  gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string) =>
-    ipcRenderer.invoke('tide:gitCreateBranch', workspaceId, branchName, sessionId),
+  gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string, sha?: string) =>
+    ipcRenderer.invoke('tide:gitCreateBranch', workspaceId, branchName, sessionId, sha),
   gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStage', workspaceId, filePath, stage, sessionId),
   gitCommit: (workspaceId: string, message: string, sessionId?: string) =>
@@ -360,6 +375,34 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitHeadSha', workspaceId, sessionId),
   gitRestoreFile: (workspaceId: string, filePath: string, sha: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitRestoreFile', workspaceId, filePath, sha, sessionId),
+  gitAmend: (workspaceId: string, message: string | null, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitAmend', workspaceId, message, sessionId),
+  gitRevert: (workspaceId: string, sha: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitRevert', workspaceId, sha, sessionId),
+  gitFetch: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitFetch', workspaceId, sessionId),
+  gitPush: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitPush', workspaceId, sessionId),
+  gitPull: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitPull', workspaceId, sessionId),
+  gitAheadBehind: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitAheadBehind', workspaceId, sessionId),
+  gitBranchesDetailed: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitBranchesDetailed', workspaceId, sessionId),
+  gitDeleteBranch: (workspaceId: string, name: string, force: boolean, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitDeleteBranch', workspaceId, name, force, sessionId),
+  gitMergeBranch: (workspaceId: string, name: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitMergeBranch', workspaceId, name, sessionId),
+  gitConflictFiles: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitConflictFiles', workspaceId, sessionId),
+  gitResolveFile: (workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitResolveFile', workspaceId, filePath, side, sessionId),
+  gitStagedDiff: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitStagedDiff', workspaceId, sessionId),
+  gitCommitMessage: (workspaceId: string, sha: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitCommitMessage', workspaceId, sha, sessionId),
+  gitDiscardFile: (workspaceId: string, filePath: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitDiscardFile', workspaceId, filePath, sessionId),
 
   // ── RAG (Memory & RAG panel) ──
   ragStatus: (workspaceId: string) =>

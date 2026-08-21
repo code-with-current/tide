@@ -103,6 +103,16 @@ export interface OpenFile {
    *  (no workspace sandbox). Survives reload because it's encoded in the
    *  content link target. */
   absPath?: string;
+  /** How the diffHunks were produced — present only when they came from a
+   *  live gitDiff fetch, so the viewer can refetch at a wider context when
+   *  the user expands a collapsed-context separator. */
+  diffSource?: {
+    staged: boolean;
+    /** Session id that resolved the git root (worktree sessions only). */
+    sessionId?: string;
+    /** Context width the hunks were fetched with. */
+    contextLines: number;
+  };
 }
 
 /** A file attached to the composer (browsed or pasted). Mirrors AttachedFile
@@ -224,8 +234,6 @@ interface UiState {
   activeWorkspaceId: string | null;
   activeSessionId: string | null;
 
-  /** Panel visibility, keyed per terminal scope (session id / draft id) so each session remembers its own open state. */
-  terminalOpen: Record<string, boolean>;
   /** Native window fullscreen state, bridged from main. The macOS
    *  traffic-light spacer collapses to zero while fullscreen (buttons hide). */
   isFullScreen: boolean;
@@ -255,10 +263,6 @@ interface UiState {
   sessionSearchFocus: number;
   focusSessionSearch: () => void;
 
-  /** Terminal panel height in pixels per scope — draggable from its top edge. */
-  terminalHeight: Record<string, number>;
-  setTerminalHeight: (h: number) => void;
-
   /** Modal visibility. */
   dialogs: Dialogs;
 
@@ -267,6 +271,13 @@ interface UiState {
 
   /** Per-session streaming state (keyed by sessionId) so two sessions can stream in parallel without overwriting each other. Runtime only — not persisted. */
   streams: Record<string, SessionStream>;
+
+  /** Focused sub-agent dispatch per session (the dispatch ToolCall's id) —
+   *  drives the Agents tab's stream view. Runtime only — not
+   *  persisted. */
+  focusedDispatchId: Record<string, string | null>;
+  /** Focus (or clear, with null) the dispatch whose stream the Agents tab shows. */
+  setFocusedDispatch: (sessionId: string, dispatchId: string | null) => void;
 
   /** Per-session composer controls (kept here so chat and empty-state stay in sync). */
   selectedModelId: string | null;
@@ -303,6 +314,11 @@ interface UiState {
   /** Push a sent prompt to the session's history (deduped, most-recent-first). */
   pushPromptHistory: (sessionId: string, text: string) => void;
 
+  /** Per-workspace URL remembered by the right-panel Browser tab. The
+   *  webview unmounts with the panel; the stored URL reloads on reopen. */
+  browserUrls: Record<string, string>;
+  setBrowserUrl: (workspaceId: string, url: string) => void;
+
   /** Per-session terminal tabs. Keyed by sessionId. Empty = panel collapsed. */
   terminals: Record<string, TerminalInstance[]>;
   activeTerminal: Record<string, string | undefined>;
@@ -329,6 +345,11 @@ interface UiState {
    *  Restored into the contentEditable on mount so in-progress typing survives
    *  session switches. Persisted to localStorage so drafts survive restarts. */
   composerDrafts: Record<string, string>;
+
+  /** Commit-bar draft (summary/description/amend), keyed by workspace id —
+   *  survives Git tab switches, panel close, and app restarts. Cleared on
+   *  successful commit/amend. Persisted. */
+  commitDrafts: Record<string, { summary: string; description: string; amend: boolean }>;
 
   /** Draft (unsent) sessions, keyed by draft id. Each entry's text lives in
    *  `composerDrafts[id]`; this map holds only list metadata. Persisted. */
@@ -361,6 +382,8 @@ interface UiState {
   clearComposerAttachments: (key: string) => void;
   bumpComposerPendingReads: (key: string, delta: number) => void;
   setComposerDraft: (key: string, text: string) => void;
+  setCommitDraft: (workspaceId: string, draft: { summary: string; description: string; amend: boolean }) => void;
+  clearCommitDraft: (workspaceId: string) => void;
 
   // Draft (unsent) session lifecycle — backs the "Drafts" section of the
   // session list. Text is stored in composerDrafts[id]; these manage the
@@ -390,7 +413,6 @@ interface UiState {
   /** Purge all session-specific data (terminals, tabs, openFiles, streams).
    *  Kills PTYs via IPC. Called on session delete. */
   clearSessionData: (sessionId: string) => void;
-  toggleTerminal: () => void;
   toggleRightPanel: () => void;
   /** Explicit open/close (the toggle needs to know current state; this doesn't). */
   setRightPanel: (open: boolean) => void;
@@ -521,16 +543,11 @@ export const useUi = create<UiState>()(
   mainView: 'new',
   activeWorkspaceId: null,
   activeSessionId: null,
-  terminalOpen: {},
   isFullScreen: false,
-  // 220 matches the long-standing fixed height — first-run default before
-  // the user drags. Clamped to [120, 720] on resize (see TerminalPanel).
-  terminalHeight: {},
-  setTerminalHeight: (h: number) => set((s) => ({ terminalHeight: { ...s.terminalHeight, [terminalScopeKey(s)]: h } })),
   rightPanelOpen: true,
   fileViewerOpen: false,
   sheetWidth: 40,
-  setSheetWidth: (w) => set({ sheetWidth: Math.max(25, Math.min(70, w)) }),
+  setSheetWidth: (w) => set({ sheetWidth: Math.max(25, Math.min(60, w)) }),
   commitDetail: null,
   leftPanelOpen: true,
   sessionsPanelOpen: true,
@@ -553,9 +570,13 @@ export const useUi = create<UiState>()(
   sessionLastActive: {},
   pendingOptions: {},
   streams: {},
+  focusedDispatchId: {},
+  setFocusedDispatch: (sessionId, dispatchId) =>
+    set((s) => ({ focusedDispatchId: { ...s.focusedDispatchId, [sessionId]: dispatchId } })),
   queue: {},
   preTurnShas: {},
   promptHistory: {},
+  browserUrls: {},
   terminals: {},
   activeTerminal: {},
   terminalPorts: {},
@@ -564,6 +585,7 @@ export const useUi = create<UiState>()(
   composerAttachments: {},
   composerPendingReads: {},
   composerDrafts: {},
+  commitDrafts: {},
   draftSessions: {},
   dismissedTodoSignatures: {},
   pendingFork: null,
@@ -610,6 +632,10 @@ export const useUi = create<UiState>()(
     })),
   setComposerDraft: (key, text) =>
     set((s) => ({ composerDrafts: { ...s.composerDrafts, [key]: text } })),
+  setCommitDraft: (workspaceId, draft) =>
+    set((s) => ({ commitDrafts: { ...s.commitDrafts, [workspaceId]: draft } })),
+  clearCommitDraft: (workspaceId) =>
+    set((s) => { const rest = { ...s.commitDrafts }; delete rest[workspaceId]; return { commitDrafts: rest }; }),
 
   startNewDraft: () => {
     const workspaceId = get().activeWorkspaceId;
@@ -782,6 +808,7 @@ export const useUi = create<UiState>()(
     const { [sessionId]: _of, ...restOpenFiles } = state.openFiles;
     const { [sessionId]: _aof, ...restActiveOpenFile } = state.activeOpenFile;
     const { [sessionId]: _s, ...restStream } = state.streams;
+    const { [sessionId]: _fd, ...restFocusedDispatch } = state.focusedDispatchId;
     const { [sessionId]: _la, ...restLastActive } = state.sessionLastActive;
     const { [sessionId]: _ca, ...restComposerAttachments } = state.composerAttachments;
     const { [sessionId]: _cpr, ...restComposerPendingReads } = state.composerPendingReads;
@@ -797,6 +824,7 @@ export const useUi = create<UiState>()(
       openFiles: restOpenFiles,
       activeOpenFile: restActiveOpenFile,
       streams: restStream,
+      focusedDispatchId: restFocusedDispatch,
       sessionLastActive: restLastActive,
       composerAttachments: restComposerAttachments,
       composerPendingReads: restComposerPendingReads,
@@ -804,28 +832,6 @@ export const useUi = create<UiState>()(
       sessionSettings: restSessionSettings,
     });
   },
-  toggleTerminal: () =>
-    set((s) => {
-      const scope = terminalScopeKey(s);
-      const turningOn = !s.terminalOpen[scope];
-      // Auto-seed a terminal for the active session the first time the panel
-      // is opened with zero terminals — saves the user an extra click.
-      if (turningOn && s.activeSessionId) {
-        const list = s.terminals[s.activeSessionId] ?? [];
-        if (list.length === 0) {
-          const id = `t_${Math.random().toString(36).slice(2, 9)}`;
-          return {
-            terminalOpen: { ...s.terminalOpen, [scope]: true },
-            terminals: {
-              ...s.terminals,
-              [s.activeSessionId]: [{ id, name: 'Terminal 1', createdAt: Date.now() }],
-            },
-            activeTerminal: { ...s.activeTerminal, [s.activeSessionId]: id },
-          };
-        }
-      }
-      return { terminalOpen: { ...s.terminalOpen, [scope]: turningOn } };
-    }),
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   setRightPanel: (open) => set({ rightPanelOpen: open }),
   toggleFileViewer: () => set((s) => ({ fileViewerOpen: !s.fileViewerOpen })),
@@ -1028,6 +1034,9 @@ export const useUi = create<UiState>()(
       return { promptHistory: { ...s.promptHistory, [sessionId]: next } };
     }),
 
+  setBrowserUrl: (workspaceId, url) =>
+    set((s) => ({ browserUrls: { ...s.browserUrls, [workspaceId]: url } })),
+
   // ─── Per-session terminal tabs ───────────────────────────────────────────
   addTerminal: (sessionId, name, pendingCommand) =>
     set((s) => {
@@ -1085,12 +1094,6 @@ export const useUi = create<UiState>()(
             ? list[list.length - 1].id
             : undefined
           : currentActive;
-      // Auto-collapse the panel when the active session runs out of
-      // terminals. Scoped to the active session — closing terminals in a
-      // background session (which the panel isn't showing anyway) shouldn't
-      // collapse the panel out from under the user.
-      const collapsePanel =
-        list.length === 0 && s.activeSessionId === sessionId;
       return {
         terminals: { ...s.terminals, [sessionId]: list },
         activeTerminal: { ...s.activeTerminal, [sessionId]: newActive },
@@ -1099,7 +1102,6 @@ export const useUi = create<UiState>()(
         ...(s.terminalPorts[id]
           ? { terminalPorts: Object.fromEntries(Object.entries(s.terminalPorts).filter(([k]) => k !== id)) }
           : {}),
-        ...(collapsePanel ? { terminalOpen: { ...s.terminalOpen, [sessionId]: false } } : {}),
       };
     }),
   setActiveTerminal: (sessionId, id) =>
@@ -1296,7 +1298,6 @@ export const useUi = create<UiState>()(
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         sheetWidth: s.sheetWidth,
-        terminalHeight: typeof s.terminalHeight === 'object' && s.terminalHeight !== null ? s.terminalHeight : {},
         terminals: s.terminals,
         fontScale: s.fontScale,
         reduceMotion: s.reduceMotion,
@@ -1311,19 +1312,18 @@ export const useUi = create<UiState>()(
         // restores the last real session on startup, not a draft slot.
         draftSessions: s.draftSessions,
         composerDrafts: s.composerDrafts,
+        commitDrafts: s.commitDrafts,
         dismissedTodoSignatures: s.dismissedTodoSignatures,
+        browserUrls: s.browserUrls,
         // shortcutOverrides is intentionally NOT persisted here — it lives in
         // settings.json (via the tide:settings:* IPC) so it's shared across
         // windows and platform-aware. Hydrated by loadShortcuts() at startup.
       }),
       // Don't restore screen — splash always routes first to validate providers/workspaces.
       // mainView is also runtime state — start at 'new' each load.
-      // terminalOpen is forced false on every startup — the terminal should
-      // only open via the explicit Terminal button, never auto-restored.
       merge: (persistedState, current) => ({
         ...current,
         ...(persistedState as Partial<UiState>),
-        terminalOpen: {},
         // Sessions can't still be running after a restart — the orchestrator
         // died with the app. Force the running set empty so a stale persisted
         // blob can't restore running indicators for dead turns.

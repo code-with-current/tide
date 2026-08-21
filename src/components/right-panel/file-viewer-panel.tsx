@@ -3,13 +3,41 @@
  * or diffs. Uses the same ScrollTabs component as the right panel (chevrons,
  * drag-to-scroll, folder-tab curves). Rendered inside a Sheet below the topbar.
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { FileText, X, Loader2, GitCompareArrows, Copy, Check } from 'lucide-react';
 import { useUi, type OpenFile } from '@/lib/stores/ui';
 import * as api from '@/lib/api/client';
-import { DiffView } from '@/components/chat/blocks/diff-view';
+import { DiffView, DiffModeTabs } from '@/components/chat/blocks/diff-view';
+import { langFromPath } from '@/components/chat/turn/turn-block';
+import { mapHunksToPierreMetadata } from '@/lib/diff/pierre-mapper';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
+
+// ── Lazy Pierre loading ──
+
+type PierreModule = typeof import('@/components/diff/pierre-diff');
+
+/** Module-level singleton: the 2MB+ pierre chunk loads once per app, and a
+ *  load failure is remembered so every surface keeps its native fallback. */
+let pierreModulePromise: Promise<PierreModule> | null = null;
+function loadPierreModule(): Promise<PierreModule> {
+  return (pierreModulePromise ??= import('@/components/diff/pierre-diff'));
+}
+
+/** null while loading, 'failed' when the chunk failed to load, else the module.
+ *  Callers render the current native UI until (unless) Pierre arrives. */
+function usePierre(): PierreModule | null | 'failed' {
+  const [state, setState] = useState<PierreModule | null | 'failed'>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadPierreModule().then(
+      (mod) => { if (!cancelled) setState(mod); },
+      () => { if (!cancelled) setState('failed'); },
+    );
+    return () => { cancelled = true; };
+  }, []);
+  return state;
+}
 
 // ── Helpers ──
 
@@ -149,14 +177,7 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
   const isDiff = !!(file.diffHunks && file.diffHunks.length > 0);
 
   if (isDiff) {
-    return (
-      <div className="flex flex-col h-full">
-        <FileHeader path={file.path} badge={`diff · ${file.diffHunks!.length} hunks`} />
-        <div className="flex-1 overflow-auto scroll">
-          <DiffView hunks={file.diffHunks!} />
-        </div>
-      </div>
-    );
+    return <DiffBody file={file} workspaceId={workspaceId} />;
   }
 
   if (file.isImage || isImageExt(file.path)) {
@@ -164,6 +185,54 @@ function FileBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
   }
 
   return <TextBody file={file} workspaceId={workspaceId} />;
+}
+
+// ── DiffBody: Pierre once loaded, native DiffView while loading / on failure ──
+
+function DiffBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
+  const pierre = usePierre();
+  const diffMode = useUi((s) => s.diffMode);
+  const setDiffMode = useUi((s) => s.setDiffMode);
+  // Local copy — expand refetches replace it without mutating the store's
+  // OpenFile (which keeps the originally-opened hunks for other surfaces).
+  const [hunks, setHunks] = useState(file.diffHunks!);
+  const [contextLines, setContextLines] = useState(file.diffSource?.contextLines ?? 3);
+  const handleExpand = useCallback(async (next: number) => {
+    const src = file.diffSource;
+    if (!src) return;
+    try {
+      const widened = await api.gitDiff(workspaceId, file.path, src.staged, src.sessionId, next);
+      if (widened.length > 0) {
+        setHunks(widened);
+        setContextLines(next);
+      }
+    } catch { /* keep the current hunks */ }
+  }, [workspaceId, file.path, file.diffSource]);
+  const fileDiff = useMemo(() => mapHunksToPierreMetadata(hunks, undefined, file.path), [hunks, file.path]);
+  const PierreDiff = pierre != null && pierre !== 'failed' ? pierre.PierreDiff : null;
+
+  return (
+    <div className="flex flex-col h-full">
+      <FileHeader path={file.path} badge={`diff · ${hunks.length} hunks`} />
+      {PierreDiff ? (
+        <>
+          <DiffModeTabs mode={diffMode} onChange={setDiffMode} />
+          <div className="flex-1 min-h-0">
+            <PierreDiff original="" modified="" fileDiff={fileDiff} sideBySide={diffMode === 'split'} wrap={false} />
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 overflow-auto scroll">
+          <DiffView
+            hunks={hunks}
+            language={langFromPath(file.path)}
+            contextLines={contextLines}
+            onExpandContext={file.diffSource ? handleExpand : undefined}
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── ImageBody ──
@@ -199,6 +268,7 @@ function ImageBody({ file, workspaceId }: { file: OpenFile; workspaceId: string 
 // ── TextBody ──
 
 function TextBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }) {
+  const pierre = usePierre();
   const [state, setState] = useState<
     | { loading: true }
     | { loading: false; content: string }
@@ -232,6 +302,7 @@ function TextBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
   if ('error' in state) return <CenteredMessage message={state.error} />;
 
   const lines = state.content.split('\n');
+  const PierreFile = pierre != null && pierre !== 'failed' ? pierre.PierreFile : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -240,18 +311,24 @@ function TextBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
           {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
         </button>
       } />
-      <div className="flex-1 overflow-auto scroll">
-        <div className="flex font-mono text-[12px] leading-relaxed">
-          {/* Line numbers */}
-          <div className="select-none text-right text-muted-foreground/30 py-3 pl-3 pr-2 flex-shrink-0 sticky left-0 bg-background">
-            {lines.map((_, i) => <div key={i}>{i + 1}</div>)}
-          </div>
-          {/* Code */}
-          <pre className="py-3 px-2 whitespace-pre-wrap break-words text-foreground/90 flex-1 min-w-0">
-            {state.content}
-          </pre>
+      {PierreFile ? (
+        <div className="flex-1 min-h-0">
+          <PierreFile content={state.content} name={file.path} wrap />
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-auto scroll">
+          <div className="flex font-mono text-[12px] leading-relaxed">
+            {/* Line numbers */}
+            <div className="select-none text-right text-muted-foreground/30 py-3 pl-3 pr-2 flex-shrink-0 sticky left-0 bg-background">
+              {lines.map((_, i) => <div key={i}>{i + 1}</div>)}
+            </div>
+            {/* Code */}
+            <pre className="py-3 px-2 whitespace-pre-wrap break-words text-foreground/90 flex-1 min-w-0">
+              {state.content}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

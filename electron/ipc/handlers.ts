@@ -13,7 +13,7 @@ import { resolveModelMeta, matchModelToCatalog } from '../agent/model-catalog.js
 import { getActiveCatalog, refreshModelCatalog } from '../agent/model-capabilities.js';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches } from './git.js';
+import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches, gitAmend, gitRevertCommit, gitFetch, gitPush, gitPull, gitAheadBehind, gitListBranchesDetailed, gitDeleteBranch, gitMergeBranch, gitConflictFiles, gitResolveFile, gitStagedDiff, gitCommitMessage, gitDiscardFile } from './git.js';
 import { startGitWatcher } from './git-watcher.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
@@ -25,6 +25,9 @@ import type { Workspace, FileNode, ProviderModelMeta } from '../../src/types';
 import type { AgentSettings, GeneralSettings } from '../configStore.js';
 import { appDataDir } from '../appPaths.js';
 import { syncCoAuthorHook, syncAllWorkspaceHooks } from '../git-coauthor.js';
+import type { EventSink } from '../agent/event-sink.js';
+import type { SessionStoreV2 } from './session-store-v2.js';
+import { newV2MessageId, newV2PartId, orchestratorEventToSink } from '../agent/orchestrator-events.js';
 
 const log = createLogger('ipc');
 
@@ -190,7 +193,32 @@ function handle(
   });
 }
 
-export function registerIpcHandlers() {
+export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: SessionStoreV2 }) {
+  const sink = opts?.sink;
+  const storeV2 = opts?.storeV2;
+
+  const twinV2Session = (id: string, workspaceId: string, title: string, modelId: string, providerId?: string | null, parentId?: string | null) => {
+    if (!storeV2) return;
+    try {
+      const workspacePath = store.listWorkspaces().find((w) => w.id === workspaceId)?.path ?? '';
+      storeV2.createSession({ id, workspacePath, title, modelId, providerId: providerId ?? null, parentId: parentId ?? null });
+    } catch (e) {
+      log.warn('v2 twin createSession failed', { id, err: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const twinV2TextMessage = (sessionId: string, role: 'user' | 'assistant', text: string, model?: string) => {
+    if (!sink || !storeV2 || !text.trim()) return;
+    try {
+      const messageId = newV2MessageId();
+      storeV2.insertMessage({ id: messageId, sessionId, role, model: model ?? null });
+      const part = orchestratorEventToSink(sessionId, messageId, newV2PartId(), { type: 'text-end', text }, 0);
+      if (part) sink.emit(part);
+    } catch (e) {
+      log.warn('v2 twin message failed', { sessionId, err: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   // ── Workspaces (real persistence via store) ─────────────────
 
   ipcMain.handle('tide:listWorkspaces', async () => {
@@ -785,8 +813,10 @@ export function registerIpcHandlers() {
     return sessions.getSession(id);
   });
 
-  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }) => {
-    return sessions.createSession(workspaceId, title, modelId, opts);
+  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string; kind?: 'main' | 'subagent' }) => {
+    const s = sessions.createSession(workspaceId, title, modelId, opts);
+    twinV2Session(s.id, workspaceId, s.title, modelId, opts?.providerId);
+    return s;
   });
 
   handle('tide:updateSessionSettings', async (
@@ -799,6 +829,7 @@ export function registerIpcHandlers() {
 
   handle('tide:addMessage', async (_e, sessionId: string, role: 'user' | 'assistant' | 'system', content: string, extra?: { attachments?: any[]; mentions?: any[] }) => {
     sessions.addMessage(sessionId, role, content, extra);
+    if (role === 'user') twinV2TextMessage(sessionId, 'user', content);
   });
 
   handle('tide:addAssistantMessage', async (
@@ -960,7 +991,11 @@ export function registerIpcHandlers() {
     newModelId: string,
     opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
   ) => {
-    return sessions.forkWithSummary(sourceId, newModelId, opts);
+    const forked = await sessions.forkWithSummary(sourceId, newModelId, opts);
+    twinV2Session(forked.id, forked.workspaceId, forked.title, newModelId, opts?.providerId, sourceId);
+    const seed = forked.messages[forked.messages.length - 1];
+    if (seed?.role === 'assistant') twinV2TextMessage(forked.id, 'assistant', seed.content ?? '', newModelId);
+    return forked;
   });
 
   ipcMain.handle('tide:workspace:listBranches', async (_e, workspaceId: string) => {
@@ -1324,10 +1359,10 @@ export function registerIpcHandlers() {
     catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
   });
 
-  handle('tide:gitCreateBranch', async (_e, workspaceId: string, branchName: string, sessionId?: string) => {
+  handle('tide:gitCreateBranch', async (_e, workspaceId: string, branchName: string, sessionId?: string, sha?: string) => {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { ok: false, error: 'no workspace' };
-    try { await gitCreateBranch(root, branchName); return { ok: true }; }
+    try { await gitCreateBranch(root, branchName, sha); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
   });
 
@@ -1366,6 +1401,100 @@ export function registerIpcHandlers() {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { ok: false, error: 'no workspace' };
     return await gitRestoreFile(root, filePath, sha);
+  });
+
+  // ── Git: remote + history + branch + conflict service ops ──────
+
+  handle('tide:gitAmend', async (_e, workspaceId: string, message: string | null, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    try {
+      const sha = await gitAmend(root, message ?? undefined);
+      return { ok: true, sha };
+    } catch (e: any) { return { ok: false, error: e?.message }; }
+  });
+
+  // Revert a commit; conflicts come back as ok:false for the resolve flow.
+  handle('tide:gitRevert', async (_e, workspaceId: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitRevertCommit(root, sha);
+  });
+
+  handle('tide:gitFetch', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitFetch(root);
+  });
+
+  handle('tide:gitPush', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitPush(root);
+  });
+
+  handle('tide:gitPull', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitPull(root);
+  });
+
+  // null when no upstream is configured.
+  ipcMain.handle('tide:gitAheadBehind', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return null;
+    try { return await gitAheadBehind(root); } catch { return null; }
+  });
+
+  // Local + remote-tracking branches with ahead/behind for tracked locals.
+  ipcMain.handle('tide:gitBranchesDetailed', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await gitListBranchesDetailed(root); } catch { return []; }
+  });
+
+  handle('tide:gitDeleteBranch', async (_e, workspaceId: string, name: string, force: boolean, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitDeleteBranch(root, name, force);
+  });
+
+  // Merge a branch into HEAD; conflicts returned for the resolve flow.
+  handle('tide:gitMergeBranch', async (_e, workspaceId: string, name: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitMergeBranch(root, name);
+  });
+
+  ipcMain.handle('tide:gitConflictFiles', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await gitConflictFiles(root); } catch { return []; }
+  });
+
+  handle('tide:gitResolveFile', async (_e, workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitResolveFile(root, filePath, side);
+  });
+
+  // Raw staged-diff text — feeds the commit-writer agent's dispatch task.
+  ipcMain.handle('tide:gitStagedDiff', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return '';
+    try { return await gitStagedDiff(root); } catch { return ''; }
+  });
+
+  ipcMain.handle('tide:gitCommitMessage', async (_e, workspaceId: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return '';
+    try { return await gitCommitMessage(root, sha); } catch { return ''; }
+  });
+
+  handle('tide:gitDiscardFile', async (_e, workspaceId: string, filePath: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitDiscardFile(root, filePath);
   });
 
   // ── RAG (Memory & RAG panel) ────────────────────────────────────

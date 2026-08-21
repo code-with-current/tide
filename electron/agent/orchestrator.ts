@@ -38,6 +38,10 @@ import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-st
 import { recordEditTurn } from '../rag/edit-journal.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
+import type { EventSink, SinkEvent } from './event-sink.js';
+import type { SessionStoreV2 } from '../ipc/session-store-v2.js';
+import { newV2MessageId } from './orchestrator-events.js';
+import { createV2TurnTracker, type V2TurnTracker } from './v2-turn-tracker.js';
 
 const log = createLogger('agent-sdk');
 
@@ -114,11 +118,17 @@ interface Turn {
   /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
    *  the turn_end time to compute the persisted `totalMs` (send → result). */
   startedAt: number;
+  /** v2 event sequencing for this turn — null until the turn's try opens
+   *  (initV2Turn) or when v2 is unavailable; additive, never required. */
+  v2: V2TurnTracker | null;
 }
 
 const activeTurns = new Map<string, Turn>();
 const activeCtxs = new Map<string, ToolContext>();
 const seqCounters = new Map<string, number>();
+
+let sink: EventSink | undefined;
+let storeV2: SessionStoreV2 | undefined;
 
 export function abortAllTurns(): void {
   for (const [sessionId, turn] of activeTurns) {
@@ -138,6 +148,7 @@ export function abortAllTurns(): void {
       if (turn.usage.inputTokens > 0 || turn.usage.outputTokens > 0) {
         addUsage(sessionId, turn.usage, turn.lastStepUsage ?? turn.usage);
       }
+      emitSink(turn.v2?.abort(turn.usage) ?? []);
     } catch (e) {
       log.warn('abortAllTurns: failed to persist', { sessionId, err: e instanceof Error ? e.message : String(e) });
     }
@@ -145,7 +156,9 @@ export function abortAllTurns(): void {
   activeTurns.clear();
 }
 
-export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain) {
+export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain, opts?: { sink?: EventSink; storeV2?: SessionStoreV2 }) {
+  sink = opts?.sink;
+  storeV2 = opts?.storeV2;
   ipcMain.handle(AGENT_COMMANDS.runTurn, async (e, payload: RunTurnPayload) => {
     try { await runTurn(e.sender, payload); }
     catch (err: any) {
@@ -274,6 +287,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
     responseMessages: [], stepHadToolCalls: false,
     loopGuardFired: new Set(),
     startedAt: Date.now(),
+    v2: null,
   };
   activeTurns.set(sessionId, turn);
 
@@ -364,6 +378,9 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   let currentConvo = convo;
 
   try {
+    // Inside the try: a throw in resolveModel/toolset/hook setup above must
+    // not orphan a v2 message row with no parts and no message.end.
+    turn.v2 = initV2Turn(sessionId, modelId);
     while (true) {
       if (controller.signal.aborted) break;
 
@@ -562,6 +579,7 @@ function translatePart(
       turn.currentTextEntry.text += text;
       turn.finalText += text;
       send(wc, sessionId, { type: 'delta', sessionId, seq: nextSeq(sessionId), messageId: turn.messageId, text, blockId: turn.currentTextBlockId! });
+      emitSink(turn.v2?.textDelta(turn.currentTextBlockId!, text) ?? []);
       break;
     }
 
@@ -582,6 +600,7 @@ function translatePart(
     case 'tool-input-start': {
       const toolCallId: string = p.id;
       const toolName = resolveToolName(p.toolName) as ToolName;
+      emitSink(turn.v2?.toolStart(toolCallId) ?? []);
       turn.currentTextBlockId = null;
       // Close the current thinking segment so the next reasoning delta (next
       // model step) opens a NEW reasoning block. This lets the block stream
@@ -632,6 +651,7 @@ function translatePart(
       turn.currentTextEntry = null;
       patchToolBlock(turn, toolCallId, { status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
       send(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId, status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
+      emitSink(turn.v2?.toolEnd(toolCallId, { toolName, input, output: tr.output, status, durationMs: tr.durationMs }) ?? []);
       break;
     }
 
@@ -686,6 +706,7 @@ function stopReasonFor(turn: Turn): StopReason {
 }
 
 function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
+  emitSink(turn.v2?.finish(turn.usage) ?? []);
   const blocks = finalizeBlocks(turn, stopReason);
   // Surface the error to the UI on failure (retries exhausted or non-retryable).
   // Sent BEFORE turn_end so the reducer records the error, then turn_end flips
@@ -709,6 +730,32 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
   });
   journalEditTurn(turn);
   fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+/** Message row for the v2 stream lands at turn start (the sink only writes
+ *  parts/events); parts reference it, message.end completes it. Called inside
+ *  the turn's try so a setup throw can't orphan the row. A missing v2 session
+ *  row (legacy-only session, e.g. sub-agent dispatch children) fails the FK
+ *  insert — v2 emission for the turn is simply off. */
+function initV2Turn(sessionId: string, modelId: string): V2TurnTracker | null {
+  if (!sink || !storeV2) return null;
+  const messageId = newV2MessageId();
+  try {
+    storeV2.insertMessage({ id: messageId, sessionId, role: 'assistant', model: modelId });
+  } catch {
+    log.warn('v2 turn init failed — continuing legacy-only', { sessionId });
+    return null;
+  }
+  return createV2TurnTracker({ sessionId, messageId });
+}
+
+/** Emit tracker-produced v2 events — always non-fatal: a sink bug must never
+ *  break the turn (the sink itself already degrades on DB failure). */
+function emitSink(events: SinkEvent[]): void {
+  if (!sink) return;
+  for (const e of events) {
+    try { sink.emit(e); } catch {}
+  }
 }
 
 /** Edit-tool calls whose file argument names a workspace file. */

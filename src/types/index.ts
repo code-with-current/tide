@@ -573,7 +573,7 @@ export interface Usage {
 // Right-panel tabs
 // ============================================================
 
-export type RightTabKind = 'inspector' | 'files' | 'review' | 'changes' | 'terminal';
+export type RightTabKind = 'git' | 'files' | 'agents' | 'terminal' | 'browser';
 
 export interface RightTab {
   kind: RightTabKind;

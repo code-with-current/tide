@@ -1,17 +1,22 @@
-import { useState, useMemo, useCallback } from 'react';
-import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff, GitBranch } from 'lucide-react';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff, GitBranch, AlertTriangle } from 'lucide-react';
 import { FolderIcon } from 'react-material-icon-theme';
 import { SkeletonBar, CircleSkeleton } from '@/components/ui/loading-rows';
-import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo } from '@/lib/queries';
+import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo, useGitAmend, useConflictFiles, useGitResolveFile, useGitDiscardFile, useGitRevert, useGitCreateBranch, useGitCheckout } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { cn } from '@/lib/utils';
+import { toastError, toastSuccess } from '@/lib/toast';
 import { ChangedFileRow } from './changed-file-row';
 import { CommitBar } from './commit-bar';
 import { TabButton } from './tab-button';
-import { CommitRow } from './commit-row';
+import { CommitRow, HISTORY_GRID } from './commit-row';
+import { GraphColumn, LANE_COLORS, ROW_H } from './commit-graph';
+import { assignLanes } from '@/lib/git/lanes';
 import { CollapsibleSection } from './collapsible-section';
 import { buildFileTree, countFiles, type TreeNode } from './file-tree';
+import { BranchMenu, BranchBadges } from '@/components/git/branch-menu';
 import * as api from '@/lib/api/client';
 import type { GitFileChange } from '@/lib/api/client';
 import type { DiffHunk } from '@/types';
@@ -21,6 +26,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 type ViewMode = 'list' | 'tree';
+
+const NO_CONFLICTS: api.GitConflictEntry[] = [];
 
 // ── Component ──
 
@@ -42,9 +49,52 @@ export function GitPanel() {
   const branch = gitBranchInfo?.branch ?? activeSession?.worktree?.branch;
   const stageMutation = useGitStage(workspaceId ?? '', gitSessionId);
   const commitMutation = useGitCommit(workspaceId ?? '', gitSessionId);
-  const { data: history, isLoading: historyLoading, isFetching: historyFetching, refetch: refetchHistory } = useGitLog(workspaceId, gitSessionId);
+  const amendMutation = useGitAmend(workspaceId ?? '', gitSessionId);
+  const discardMutation = useGitDiscardFile(workspaceId ?? '', gitSessionId);
+  const resolveMutation = useGitResolveFile(workspaceId ?? '', gitSessionId);
+  const conflictQ = useConflictFiles(workspaceId, gitSessionId);
+  const conflicts = conflictQ.data ?? NO_CONFLICTS;
+  const hasConflicts = conflicts.length > 0;
+  const { data: history, isLoading: historyLoading, isFetching: historyFetching, refetch: refetchHistory } = useGitLog(workspaceId, gitSessionId, 500);
   const bulk = useGitBulk(workspaceId, gitSessionId);
   const stashQ = useGitStashList(workspaceId, gitSessionId);
+
+  // History: lane layout + virtualization (fixed 24px rows) so 500-commit
+  // logs scroll smoothly. The graph is one tall svg behind the rows, so
+  // virtualization never slices an edge mid-curve.
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+  const revertMutation = useGitRevert(workspaceId ?? '', gitSessionId);
+  const checkoutMutation = useGitCheckout(workspaceId ?? '', gitSessionId);
+  const createBranchMutation = useGitCreateBranch(workspaceId ?? '', gitSessionId);
+  const laidHistory = useMemo(
+    () => assignLanes((history ?? []).map((c) => ({ sha: c.sha, parents: c.parents ?? [], isHead: c.isHead, branchHeads: c.branchHeads }))),
+    [history],
+  );
+  const historyVirtualizer = useVirtualizer({
+    count: laidHistory.length,
+    getScrollElement: () => historyScrollRef.current,
+    estimateSize: () => ROW_H,
+    overscan: 12,
+    getItemKey: (i) => laidHistory[i].commit.sha,
+  });
+  const handleRevertCommit = useCallback((sha: string) => {
+    revertMutation.mutate(sha, {
+      onSuccess: (res) => {
+        if (res?.ok) toastSuccess('Reverted commit');
+        else toastError('Revert failed', { description: res?.error });
+      },
+      onError: () => toastError('Revert failed'),
+    });
+  }, [revertMutation]);
+  const handleBranchFrom = useCallback((name: string, sha: string) => {
+    createBranchMutation.mutate({ name, sha }, {
+      onSuccess: (res) => {
+        if (res?.ok) toastSuccess(`Switched to ${name}`);
+        else toastError('Branch failed', { description: res?.error });
+      },
+      onError: () => toastError('Branch failed'),
+    });
+  }, [createBranchMutation]);
 
   const viewMode = useTabs(s => s.gpViewMode[sessionId ?? 'default'] ?? 'tree') as ViewMode;
   const setViewMode = useCallback((mode: ViewMode) => useTabs.getState().setGpViewMode(sessionId ?? 'default', mode), [sessionId]);
@@ -53,13 +103,23 @@ export function GitPanel() {
   const [changesOpen, setChangesOpen] = useState(true);
   const [tab, setTab] = useState<'changes' | 'history'>('changes');
   const [confirmRestore, setConfirmRestore] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState<GitFileChange | null>(null);
   const [viewStash, setViewStash] = useState(false);
   // Track CLOSED dirs (inverted — default empty = all open). Using a Set
   // of closed paths avoids initializing with every possible dir open.
   const [closedDirs, setClosedDirs] = useState<Set<string>>(new Set());
 
-  const staged = changes?.filter(c => c.staged) ?? [];
-  const unstaged = changes?.filter(c => !c.staged) ?? [];
+  // Conflict paths are owned by the resolve band — keep them out of the
+  // staged/unstaged lists so they don't render twice.
+  const conflictPaths = useMemo(() => new Set(conflicts.map(c => c.path)), [conflicts]);
+  const staged = useMemo(
+    () => (changes ?? []).filter(c => c.staged && !conflictPaths.has(c.path)),
+    [changes, conflictPaths],
+  );
+  const unstaged = useMemo(
+    () => (changes ?? []).filter(c => !c.staged && !conflictPaths.has(c.path)),
+    [changes, conflictPaths],
+  );
 
   // Total +/- across all changes (staged + unstaged) for the summary line.
   const { totalAdd, totalDel } = useMemo(() => {
@@ -95,6 +155,10 @@ export function GitPanel() {
       path: change.path,
       language: change.path.split('.').pop() ?? 'text',
       diffHunks: hunks.length > 0 ? hunks : undefined,
+      // Recorded so the viewer can refetch at wider context on expand.
+      diffSource: hunks.length > 0
+        ? { staged: change.staged, sessionId: gitSessionId ?? undefined, contextLines: 3 }
+        : undefined,
     });
   };
 
@@ -102,11 +166,36 @@ export function GitPanel() {
     stageMutation.mutate({ path: change.path, stage: !change.staged });
   };
 
-  const handleCommit = (message: string) => {
-    commitMutation.mutate(message);
+  const handleDiscard = (change: GitFileChange) => {
+    discardMutation.mutate(change.path, {
+      onSuccess: (res) => {
+        if (res.ok) toastSuccess('Discarded');
+        else toastError('Discard failed', { description: res.error });
+      },
+      onError: () => toastError('Discard failed'),
+    });
+    setConfirmDiscard(null);
   };
 
-  const renderFiles = (files: GitFileChange[]) =>
+  const handleResolve = (path: string, side: 'ours' | 'theirs') => {
+    resolveMutation.mutate({ filePath: path, side }, {
+      onSuccess: (res) => {
+        if (res.ok) toastSuccess(`Resolved with ${side === 'ours' ? 'our side' : 'their side'}`);
+        else toastError('Resolve failed', { description: res.error });
+      },
+      onError: () => toastError('Resolve failed'),
+    });
+  };
+
+  const handleCommit = (message: string) => commitMutation.mutateAsync(message)
+    .then(res => res ?? { ok: false, error: 'no workspace' });
+  const handleAmend = (message: string) => amendMutation.mutateAsync(message)
+    .then(res => res ?? { ok: false, error: 'no workspace' });
+  const handleStageAll = async () => {
+    await bulk.mutateAsync('stage-all');
+  };
+
+  const renderFiles = (files: GitFileChange[], section: 'staged' | 'unstaged') =>
     files.map(c => (
       <ChangedFileRow
         key={c.path}
@@ -114,6 +203,7 @@ export function GitPanel() {
         active={selectedFile?.path === c.path}
         onClick={() => handleFileClick(c)}
         onToggleStage={() => toggleStage(c)}
+        onDiscard={section === 'unstaged' ? () => setConfirmDiscard(c) : undefined}
       />
     ));
 
@@ -156,6 +246,7 @@ export function GitPanel() {
             active={selectedFile?.path === child.path}
             onClick={() => handleFileClick(child.file!)}
             onToggleStage={() => toggleStage(child.file!)}
+            onDiscard={sectionKey === 'unstaged' ? () => setConfirmDiscard(child.file!) : undefined}
           />
         </div>,
       ];
@@ -166,16 +257,29 @@ export function GitPanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0 min-w-0 bg-background">
-      {/* Branch strip — the live checked-out branch for this session's
-          working directory. Updates instantly when the agent checks out a
-          branch (via the git-tool/bash invalidation in MainScreen). */}
+      {/* Branch toolbar — BranchMenu popover + ahead/behind badges + stash.
+          Replaces the old plain branch strip at the top of the Changes
+          sub-section. */}
       {branch && (
-        <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0 border-b border-border text-muted-foreground">
-          <GitBranch className="size-3 flex-shrink-0" />
-          <span className="font-mono text-[11px] truncate">{branch}</span>
+        <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0 border-b border-border text-muted-foreground min-w-0">
+          <BranchMenu
+            trigger={
+              <button
+                type="button"
+                className="flex items-center gap-1.5 h-6 px-1.5 rounded-md text-[11px] hover:bg-secondary/60 transition-colors min-w-0"
+                title="Switch branch"
+              >
+                <GitBranch className="size-3 flex-shrink-0" />
+                <span className="font-mono truncate">{branch}</span>
+                <ChevronRight className="size-3 flex-shrink-0 rotate-90 opacity-50" />
+              </button>
+            }
+          />
+          <BranchBadges />
           {activeSession?.worktree && (
-            <span className="ml-auto text-[9px] uppercase tracking-wide opacity-70">worktree</span>
+            <span className="text-[9px] uppercase tracking-wide opacity-70">worktree</span>
           )}
+
         </div>
       )}
       {/* Square, full-width tab bar */}
@@ -227,9 +331,20 @@ export function GitPanel() {
             />
           </div>}
           {/* CommitBar pinned to the bottom of the Changes tab */}
-          {workspaceId && changesCount > 0 && (
+          {workspaceId && (changesCount > 0 || hasConflicts) && (
             <div className="flex-shrink-0 px-3 bg-card">
-              <CommitBar stagedCount={staged.length} onCommit={handleCommit} disabled={commitMutation.isPending} />
+              <CommitBar
+                workspaceId={workspaceId}
+                gitSessionId={gitSessionId}
+
+                staged={staged}
+                hasConflicts={hasConflicts}
+                hasChanges={changesCount > 0}
+                onCommit={handleCommit}
+                onAmend={handleAmend}
+                onStageAll={handleStageAll}
+                disabled={commitMutation.isPending || amendMutation.isPending}
+              />
             </div>
           )}
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
@@ -249,7 +364,7 @@ export function GitPanel() {
               <div className="flex items-center justify-center h-full px-4">
                 <span className="text-xs text-muted-foreground">No workspace selected.</span>
               </div>
-            ) : changesCount === 0 ? (
+            ) : changesCount === 0 && !hasConflicts ? (
               <div className="flex flex-col items-center justify-center gap-3 h-full px-4">
                 <CheckCircle2 className="size-6 text-muted-foreground/40" />
                 <span className="text-xs text-muted-foreground text-center">
@@ -258,14 +373,91 @@ export function GitPanel() {
               </div>
             ) : (
               <>
+                {/* Conflict band — pinned above Staged/Unstaged; presence
+                    disables the commit bar (explained inline there). */}
+                {hasConflicts && (
+                  <div className="sticky top-0 z-10 bg-destructive/5 border-b border-destructive/30">
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 text-[0.8rem] font-semibold text-destructive">
+                      <AlertTriangle className="size-3.5 flex-shrink-0" />
+                      Resolve conflicts — {conflicts.length} file{conflicts.length === 1 ? '' : 's'}
+                    </div>
+                    {conflicts.map((c) => (
+                      <div
+                        key={c.path}
+                        className="flex items-center gap-1.5 px-3 py-1 text-[0.78rem] min-w-0 hover:bg-destructive/10 transition-colors"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-mono text-foreground/80" title={c.path}>{c.path}</span>
+                        <span className="flex-shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {c.state.replaceAll('-', ' ')}
+                        </span>
+                        <Button
+                          variant="outline" size="xs"
+                          className="h-5 px-1.5 text-[10px]"
+                          disabled={resolveMutation.isPending}
+                          onClick={() => handleResolve(c.path, 'ours')}
+                        >
+                          Use ours
+                        </Button>
+                        <Button
+                          variant="outline" size="xs"
+                          className="h-5 px-1.5 text-[10px]"
+                          disabled={resolveMutation.isPending}
+                          onClick={() => handleResolve(c.path, 'theirs')}
+                        >
+                          Use theirs
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {staged.length > 0 && (
-                  <CollapsibleSection label="Staged" count={staged.length} open={stagedOpen} onToggle={() => setStagedOpen(o => !o)}>
-                    {viewMode === 'tree' && stagedTree ? renderTreeNodes(stagedTree, 0, 'staged') : renderFiles(staged)}
+                  <CollapsibleSection
+                    label="Staged"
+                    count={staged.length}
+                    open={stagedOpen}
+                    onToggle={() => setStagedOpen(o => !o)}
+                    actions={
+                      <Button
+                        variant="ghost" size="icon-xs"
+                        disabled={bulk.isPending}
+                        onClick={() => bulk.mutate('unstage-all')}
+                        aria-label="Unstage all" title="Unstage All"
+                      >
+                        <MinusCircle className="size-3" />
+                      </Button>
+                    }
+                  >
+                    {viewMode === 'tree' && stagedTree ? renderTreeNodes(stagedTree, 0, 'staged') : renderFiles(staged, 'staged')}
                   </CollapsibleSection>
                 )}
                 {unstaged.length > 0 && (
-                  <CollapsibleSection label="Changes" count={unstaged.length} open={changesOpen} onToggle={() => setChangesOpen(o => !o)}>
-                    {viewMode === 'tree' && unstagedTree ? renderTreeNodes(unstagedTree, 0, 'unstaged') : renderFiles(unstaged)}
+                  <CollapsibleSection
+                    label="Changes"
+                    count={unstaged.length}
+                    open={changesOpen}
+                    onToggle={() => setChangesOpen(o => !o)}
+                    actions={
+                      <>
+                        <Button
+                          variant="ghost" size="icon-xs"
+                          disabled={bulk.isPending}
+                          onClick={() => setConfirmRestore(true)}
+                          aria-label="Discard all changes" title="Discard All"
+                        >
+                          <RotateCcw className="size-3" />
+                        </Button>
+                        <Button
+                          variant="ghost" size="icon-xs"
+                          disabled={bulk.isPending}
+                          onClick={() => bulk.mutate('stage-all')}
+                          aria-label="Stage all" title="Stage All"
+                        >
+                          <PlusCircle className="size-3" />
+                        </Button>
+                      </>
+                    }
+                  >
+                    {viewMode === 'tree' && unstagedTree ? renderTreeNodes(unstagedTree, 0, 'unstaged') : renderFiles(unstaged, 'unstaged')}
                   </CollapsibleSection>
                 )}
               </>
@@ -283,7 +475,12 @@ export function GitPanel() {
               <RefreshCw className={cn('size-3 transition-transform', historyFetching && 'animate-spin')} />
             </Button>
           </div>
-          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
+          <div className={cn(HISTORY_GRID, 'px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground/40')}>
+            <span className="col-start-2">Subject</span>
+            <span className="justify-self-end">Date</span>
+            <span className="w-28 text-right">Author</span>
+          </div>
+          <div ref={historyScrollRef} className="relative flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
             {historyLoading ? (
               <div className="px-3 py-2 space-y-3" aria-hidden>
                 {[...Array(6)].map((_, i) => (
@@ -300,20 +497,41 @@ export function GitPanel() {
               <div className="flex items-center justify-center h-full px-4">
                 <span className="text-xs text-muted-foreground">No workspace selected.</span>
               </div>
-            ) : (history?.length ?? 0) === 0 ? (
+            ) : laidHistory.length === 0 ? (
               <div className="flex items-center justify-center h-full px-4">
                 <span className="text-xs text-muted-foreground">No commits yet.</span>
               </div>
             ) : (
-              history?.map((c, i) => (
-                <CommitRow
-                  key={c.sha}
-                  commit={c}
-                  isLast={i === (history?.length ?? 0) - 1}
-                  active={c.sha === commitDetail?.sha}
-                  onSelect={() => setCommitDetail(c)}
-                />
-              ))
+              <div className="relative" style={{ height: historyVirtualizer.getTotalSize() }}>
+                <GraphColumn commits={laidHistory} height={historyVirtualizer.getTotalSize()} />
+                {historyVirtualizer.getVirtualItems().map((row) => {
+                  const commit = history![row.index];
+                  const laid = laidHistory[row.index];
+                  return (
+                    <div
+                      key={commit.sha}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ height: ROW_H, transform: `translateY(${row.start}px)` }}
+                    >
+                      <CommitRow
+                        commit={commit}
+                        active={commit.sha === commitDetail?.sha}
+                        pendingAction={revertMutation.isPending || createBranchMutation.isPending}
+                        laneColor={LANE_COLORS[laid.lane % LANE_COLORS.length]}
+                        onSelect={() => setCommitDetail(commit)}
+                        onRevert={handleRevertCommit}
+                        onBranch={handleBranchFrom}
+                        onCheckout={(sha) =>
+                          checkoutMutation.mutate(sha, {
+                            onSuccess: (res) => { if (res?.ok) toastSuccess('Checked out (detached)'); else toastError('Checkout failed', { description: res?.error }); },
+                            onError: () => toastError('Checkout failed'),
+                          })
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </>
@@ -335,6 +553,30 @@ export function GitPanel() {
               onClick={() => { bulk.mutate('restore-all'); setConfirmRestore(false); }}
             >
               Restore All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Discard-one-file confirmation */}
+      <AlertDialog open={!!confirmDiscard} onOpenChange={(open) => { if (!open) setConfirmDiscard(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes in this file?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <span className="block font-mono text-xs mb-1 break-all">{confirmDiscard?.path}</span>
+                Working-tree changes (including untracked content) are reverted and cannot be undone. Staged content is kept.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => { if (confirmDiscard) handleDiscard(confirmDiscard); }}
+            >
+              Discard
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

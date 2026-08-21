@@ -2,6 +2,7 @@
 import type { Session } from '@/types';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
+import { toggleTerminalTab } from '@/lib/terminal-tab';
 import { queryClient } from '@/lib/queries';
 import { createLogger } from '@/lib/logger';
 
@@ -231,7 +232,7 @@ const ACTIONS: Record<string, Action> = {
   toggleRightPanel,
   toggleTerminal: () => {
     if (!requireMain()) return false;
-    useUi.getState().toggleTerminal();
+    toggleTerminalTab();
     return true;
   },
   toggleRightPanelBare: () => {

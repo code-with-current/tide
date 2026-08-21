@@ -1,26 +1,24 @@
 /**
- * RightPanel — renders content based on the active feature (inspector / files /
- * git), with NO tab strip. The view is switched from the top bar's 3-button
- * "Right Panel Switcher" (Info / Explorer / Git).
+ * RightPanel — renders the active right-panel tab (files / git / browser /
+ * agents / terminal), with NO tab strip. The view is switched from the top
+ * bar's "Right Panel Switcher" buttons.
  */
-import type { RightTabKind } from '@/types';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
-import { useSession } from '@/lib/queries';
-import { InspectorTab } from './tabs/inspector-tab';
 import { FileExplorerTab } from './tabs/file-explorer-tab';
-import { GitPanel } from '@/components/git/git-panel';
-import { InspectorSkeleton } from './inspector-skeleton';
+import { GitTab } from './tabs/git-tab';
+import { BrowserTab } from './tabs/browser-tab';
+import { AgentsTab } from './tabs/agents-tab';
+import { TerminalPanel } from '@/components/terminal/terminal-panel';
 
 export function RightPanel() {
   const sessionId = useUi((s) => s.activeSessionId ?? 'default');
   const activeSessionId = useUi((s) => s.activeSessionId);
-  const { data: session, isLoading: sessionLoading } = useSession(activeSessionId);
   const hasPermissionPending = useUi((s) =>
     !!(activeSessionId && s.streams[activeSessionId]?.permissionRequest?.toolCalls.length),
   );
 
-  const feature = useTabs((s) => s.active[sessionId] ?? 'inspector') as RightTabKind;
+  const feature = useTabs((s) => s.active[sessionId] ?? 'files');
 
   return (
     <aside className="bg-card flex flex-col h-full w-full min-w-0 overflow-hidden relative z-40">
@@ -29,20 +27,16 @@ export function RightPanel() {
       )}
 
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
-        {feature === 'inspector' && session ? (
-          <InspectorTab session={session} />
-        ) : feature === 'inspector' ? (
-          sessionLoading ? (
-            <InspectorSkeleton />
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground/60 p-4 text-center">
-              Select a session to inspect.
-            </div>
-          )
-        ) : feature === 'files' ? (
+        {feature === 'files' ? (
           <FileExplorerTab />
-        ) : feature === 'changes' ? (
-          <div className="flex-1 overflow-y-auto scroll"><GitPanel /></div>
+        ) : feature === 'git' ? (
+          <GitTab />
+        ) : feature === 'browser' ? (
+          <BrowserTab />
+        ) : feature === 'terminal' ? (
+          <TerminalPanel />
+        ) : feature === 'agents' && activeSessionId ? (
+          <AgentsTab sessionId={activeSessionId} />
         ) : null}
       </div>
     </aside>

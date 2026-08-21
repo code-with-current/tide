@@ -17,4 +17,32 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Keep @pierre/diffs (+shiki) out of the entry chunk — it's a large,
+        // lazily-adopted dependency that only diff surfaces pull in.
+        //
+        // The $initial vendor group must claim statically-imported node_modules
+        // first: rolldown's chunk groups capture matched modules' dependencies
+        // recursively by default, so without it shiki's mdast/hast deps (shared
+        // with react-markdown) land in the pierre chunk and the entry ends up
+        // statically importing the whole 2MB chunk.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'initial-vendor',
+              test: /[\\/]node_modules[\\/]/,
+              tags: ['$initial'],
+              priority: 10,
+            },
+            {
+              name: 'pierre-diffs',
+              test: /[\\/]node_modules[\\/](@pierre|shiki|@shikijs)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 })

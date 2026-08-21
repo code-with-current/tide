@@ -20,6 +20,15 @@ html, body, #root {
   overflow: hidden;
   overscroll-behavior: none;
 }
+/* Chromium overlay scrollbars — the enable switch must sit on html. */
+html {
+  overflow: overlay;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
 ::selection { background: color-mix(in srgb, var(--primary) 25%, transparent); }
 .scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .scroll::-webkit-scrollbar-track { background: transparent; }
@@ -477,11 +486,19 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--primary);
+  background: transparent;
   border-radius: 4px;
+  transition: background 0.25s ease;
 }
-*::-webkit-scrollbar-thumb:hover {
-  background: #34343a;
+*:hover > ::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active,
+*:hover > ::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+*:hover > ::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background: var(--ring);
 }
 
 /* ============================================================ */
@@ -544,7 +561,7 @@ body {
   [style*="pixel-spin"] { animation: none !important; }
 }
 
-/* chat-v2 tool-chips entrance animations */
+/* blocks tool-chips entrance animations */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }

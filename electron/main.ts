@@ -17,13 +17,17 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.disableHardwareAcceleration = false;
+import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { initLogger, createLogger } from './logger.js';
 import { registerIpcHandlers, bootstrapCatalog } from './ipc/handlers.js';
 import { registerChatHandlers } from './ipc/chat.js';
 import { registerAgentSdkHandlers, abortAllTurns } from './agent/orchestrator.js';
-import { getSessionStore } from './ipc/sessions.js';
+import { getSessionStore, registerSessionV2Handlers } from './ipc/sessions.js';
+import { createSessionStoreV2, type SessionStoreV2 } from './ipc/session-store-v2.js';
+import { registerEventsIpc } from './ipc/events.js';
+import type { EventSink } from './agent/event-sink.js';
 import { registerScriptHandlers, killAllScripts } from './ipc/scripts.js';
 import { killAllBackgroundShells } from './agent/tools/background-shell.js';
 import { registerOpenInAppHandlers } from './ipc/openInApp.js';
@@ -60,6 +64,11 @@ const log = createLogger('main');
 
 let mainWindow: BrowserWindow | null = null;
 
+// Stream-event sink for the part-normalized store — created on app ready,
+// flushed on quit. Task 6 threads it into the orchestrator.
+let eventSink: EventSink | null = null;
+let sessionStoreV2: SessionStoreV2 | null = null;
+
 // The currently active workspace — the MCP pool uses its root for project-scoped servers (.mcp.json), and MCP IPC uses it to pick which config file to mutate. Set by the `tide:mcp:workspaceActivated` IPC handler when the active workspace changes.
 let activeWorkspace: { id: string; root: string } | undefined;
 
@@ -87,6 +96,11 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // <webview> for the right-panel Browser tab. The webview runs with its
+      // own isolated guest context — no node, no preload bridging.
+      webviewTag: true,
+      // Native overlay scrollbars (macOS-style auto-hide) for every frame.
+      enableBlinkFeatures: 'OverlayScrollbars',
     },
   });
 
@@ -185,7 +199,20 @@ if (!gotLock) {
     initLogger(path.join(appDataDir(), 'logs'));
     log.info('app ready', { dev: isDev, userData: appDataDir() });
 
-    registerIpcHandlers();
+    // Part-normalized sessions (v2): rename the legacy JSON sessions/ dir
+    // aside BEFORE any code path can read it — the legacy store mkdirs an
+    // empty dir on first load, so it simply degrades to an empty store.
+    const legacySessionsDir = path.join(appDataDir(), 'sessions');
+    if (fs.existsSync(legacySessionsDir)) {
+      const legacyDest = path.join(appDataDir(), 'sessions.legacy');
+      if (!fs.existsSync(legacyDest)) fs.renameSync(legacySessionsDir, legacyDest);
+    }
+    const storeV2 = createSessionStoreV2(path.join(appDataDir(), 'sessions-v2.db'));
+    sessionStoreV2 = storeV2;
+    registerSessionV2Handlers(ipcMain, storeV2);
+    eventSink = registerEventsIpc(ipcMain, storeV2);
+
+    registerIpcHandlers({ sink: eventSink ?? undefined, storeV2: sessionStoreV2 ?? undefined });
     // Settings handlers MUST be ready before the window shows — the renderer
     registerSettingsHandlers();
     // Read-side companion to the fullscreen events sent from createWindow —
@@ -213,7 +240,7 @@ if (!gotLock) {
       void initModelCatalog({ bundled: bundledModelCatalog, cacheDir: appDataDir() })
         .then(enrichExistingModels);
       registerChatHandlers();
-      registerAgentSdkHandlers(ipcMain);
+      registerAgentSdkHandlers(ipcMain, { sink: eventSink ?? undefined, storeV2: sessionStoreV2 ?? undefined });
       registerScriptHandlers();
       registerOpenInAppHandlers();
       registerExtensionsHandlers();
@@ -283,7 +310,12 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // Abort active turns BEFORE disposing the sink — their final v2 emissions
+  // (message.end/turn.end) buffer now and the dispose flush persists them;
+  // after dispose+close the buffer would never flush and the db is gone.
   abortAllTurns();
+  eventSink?.dispose();
+  sessionStoreV2?.close();
   killAllScripts();
   killAllBackgroundShells();
   // Background dispatches outlive their turn — mark still-running ones

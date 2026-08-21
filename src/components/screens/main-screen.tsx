@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AlertCircle, RotateCw } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import type { PanelImperativeHandle } from "react-resizable-panels";
 import { WorkspacesPanel } from "@/components/sidebar/workspaces-panel";
 import { SessionsPanel } from "@/components/sidebar/sessions-panel";
 import { IntegratedSidebar } from "@/components/sidebar/integrated-sidebar";
@@ -14,16 +13,17 @@ import { MissingWorkspaceScreen } from "./missing-workspace-screen";
 import { ChatTimeline } from "@/components/chat/timeline/ChatTimeline";
 import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
-import { TerminalPanel } from "@/components/terminal/terminal-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
 import { useRightPanelOverlay } from '@/lib/right-panel-layout';
+import { InspectorColumn } from "@/components/chat/inspector/inspector-column";
+import { useInspectorColumnVisible } from "@/lib/inspector-visibility";
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
-import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
+import { CommitDetailsPanel } from "@/components/right-panel/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SheetResizeHandle } from "@/components/ui/sheet-resize-handle";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
-import { useUi, terminalScopeKey } from "@/lib/stores/ui";
-import { useModelOption, useWorkspaces, useSessions } from "@/lib/queries";
+import { useUi } from "@/lib/stores/ui";
+import { useModelOption, useWorkspaces, useSessions, useSession } from "@/lib/queries";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import * as api from "@/lib/api/client";
 import { stripCommandPrefix } from "@/lib/session-title";
@@ -74,9 +74,10 @@ export function MainScreen() {
   useEffect(() => { if (fileViewerOpen && commitDetail) setCommitDetail(null); }, [fileViewerOpen]);
   useEffect(() => { if (commitDetail && fileViewerOpen) useUi.setState({ fileViewerOpen: false }); }, [commitDetail]);
   // Whether this screen is the active top-level view. App.tsx keeps MainScreen
-  // always-mounted (so TerminalPanel + xterm state survive Settings visits);
-  // this flag lets effects no-op while hidden to avoid wasted work (auto-
-  // scroll, streaming re-renders) on a display:none element.
+  // always-mounted (its child state — including the right panel's terminal
+  // registry — survives Settings visits); this flag lets effects no-op while
+  // hidden to avoid wasted work (auto-scroll, streaming re-renders) on a
+  // display:none element.
   const setSessionsPanelOpen = useUi((s) => s.toggleSessionsPanel);
   const setRightPanelOpen = useUi((s) => s.toggleRightPanel);
   const mainView = useUi((s) => s.mainView);
@@ -106,21 +107,6 @@ export function MainScreen() {
       if (restore && !rightPanelOpen) setRightPanelOpen();
     }
   }, [rightPanelOverlay, rightPanelOpen, setRightPanelOpen]);
-  const terminalScope = useUi(terminalScopeKey);
-  const terminalOpen = useUi((s) => !!s.terminalOpen[terminalScope]);
-  const terminalHeight = useUi((s) => s.terminalHeight[terminalScope] ?? 220);
-  const setTerminalHeight = useUi((s) => s.setTerminalHeight);
-  const screen = useUi((s) => s.screen);
-  // Imperative ref on the terminal ResizablePanel — collapse/expand it from
-  // the terminal toggle (which still just flips the persisted `terminalOpen`).
-  const terminalPanelRef = useRef<PanelImperativeHandle>(null);
-  useEffect(() => {
-    const ref = terminalPanelRef.current;
-    if (!ref) return;
-    if (terminalOpen) ref.expand();
-    else ref.collapse();
-  }, [terminalOpen, screen]);
-
   const activeSessionId = useUi((s) => s.activeSessionId);
   const selectedModelId = useUi((s) => s.selectedModelId);
   const selectedProviderId = useUi((s) => s.selectedProviderId);
@@ -213,6 +199,16 @@ export function MainScreen() {
   // mainView changes; cleared on success so the normal chat/new view returns.
   const activeWorkspace = workspaces?.find((w) => w.id === activeWorkspaceId);
   const [workspaceMissing, setWorkspaceMissing] = useState(false);
+  // Permanent inspector column — full InspectorTab pinned beside the chat
+  // when the window is wide and the unified right panel is closed. Guarded by
+  // mainView because setMainView alone can leave a stale activeSessionId on
+  // the new-session screen (store-level transitions null it, this covers the
+  // MissingWorkspaceScreen restore path).
+  const inspectorColumnVisible = useInspectorColumnVisible(
+    showRightPanel,
+    mainView !== "new" && !!activeSessionId,
+  );
+  const { data: inspectorSession } = useSession(mainView !== "new" ? activeSessionId : null);
   useEffect(() => {
     if (!activeWorkspace) { setWorkspaceMissing(false); return; }
     let cancelled = false;
@@ -974,12 +970,12 @@ export function MainScreen() {
             className="h-full min-h-0 min-w-0"
           >
             <main className="flex h-full w-full flex-col min-w-0 min-h-0 overflow-hidden">
-              {/* Body — vertical ResizablePanelGroup: chat body + collapsible
-                  terminal. The terminal panel stays mounted when collapsed so
-                  xterm/PTY state survives hide/show + chat↔new-session switches. */}
-              <ResizablePanelGroup orientation="vertical" className="flex-1 min-h-0">
-                <ResizablePanel id="chat-body" minSize="40" className="min-h-0">
-                  <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
+              {/* Body row — the chat column flexes; the permanent inspector
+                  column (wide windows, right panel closed) sits as its
+                  right-side sibling. The terminal now lives in the right
+                  panel's terminal tab. */}
+              <div className="flex-1 min-h-0 flex">
+                  <div className="flex h-full w-full flex-col min-h-0 overflow-hidden flex-1 min-w-0">
                 {!activeWorkspaceId ? (
                   <NoWorkspaceState />
                 ) : workspaceMissing && activeWorkspace ? (
@@ -994,8 +990,8 @@ export function MainScreen() {
                   />
                 ) : mainView === "chat" || isStreaming ? (
                   <>
-                    {/* Chat timeline — flex-1 absorbs leftover height so terminal
-                      + composer shrink it rather than pushing it off-screen.
+                    {/* Chat timeline — flex-1 absorbs leftover height so the
+                      composer stays pinned rather than pushing it off-screen.
                       Wrapped in a relative container so the floating todo
                       panel can anchor to the top-right of the chat column. */}
                     <div className="flex-1 min-h-0 flex flex-col relative">
@@ -1143,27 +1139,11 @@ export function MainScreen() {
                     isStreaming={isStreaming}
                   />
                 )}
-                  </div>
-                </ResizablePanel>
-
-                {/* Terminal — collapsible panel (stays mounted → PTY preserved).
-                    toggleTerminal flips the persisted terminalOpen; the effect
-                    near the top collapse/expand()s this panel via panelRef. */}
-                <ResizableHandle />
-                <ResizablePanel
-                  id="terminal"
-                  collapsible
-                  collapsedSize={0}
-                  defaultSize={terminalOpen ? terminalHeight : 0}
-                  minSize={120}
-                  maxSize={720}
-                  panelRef={terminalPanelRef}
-                  onResize={(size) => setTerminalHeight(size.inPixels)}
-                  className="min-h-0"
-                >
-                  <TerminalPanel />
-                </ResizablePanel>
-              </ResizablePanelGroup>
+                   </div>
+                   {inspectorColumnVisible && !workspaceMissing && inspectorSession && (
+                     <InspectorColumn session={inspectorSession} />
+                   )}
+              </div>
             </main>
           </ResizablePanel>
 
@@ -1173,7 +1153,7 @@ export function MainScreen() {
               id="right"
               defaultSize="25"
               minSize="25"
-              maxSize="30"
+              maxSize="60"
               className="h-full relative min-w-0"
             >
               <RightPanel />

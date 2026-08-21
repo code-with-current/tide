@@ -71,3 +71,4 @@ src/lib/prompts/_tool-descriptions-bundle.ts
 # rendered output from packaging/render.mjs is generated per-release.
 !packaging/README.md
 packaging/out/
+.worktrees/

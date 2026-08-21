@@ -22,7 +22,7 @@ import {
   ContextWindowSkeleton,
   GitRowsSkeleton,
   MemoryRagRowsSkeleton,
-} from '../inspector-skeleton';
+} from './inspector-skeleton';
 import { formatContext, formatNumber, formatRelative, cn } from '@/lib/utils';
 import {
   useModelOption,
@@ -38,8 +38,8 @@ import {
 import { useShallow } from 'zustand/react/shallow';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
-import { PanelSection } from '../panel-section';
-import { SessionHero } from '../session-hero';
+import { PanelSection } from '@/components/right-panel/panel-section';
+import { SessionHero } from '@/components/right-panel/session-hero';
 import { Button } from '@/components/ui/button';
 
 export function InspectorTab({ session }: { session: Session }) {
@@ -283,7 +283,7 @@ function OpenChangesButton({ sessionId, changed }: { sessionId: string; changed:
   return (
     <button
       type="button"
-      onClick={() => addTab(sessionId, 'changes')}
+      onClick={() => addTab(sessionId, 'git')}
       title="Open Git Panel tab"
       // Mirrors the mockup's .head-action: a compact bordered pill that reads
       // as a distinct action, not part of the header. Ghost Button blended in.

@@ -392,17 +392,20 @@ async function runMultiStepAgent(
       },
     });
 
-    // Iterate the stream to surface the sub-agent's tool calls as nested
-    // AgentEvents (mirrors orchestrator-sdk.ts:1104). Each tool lifecycle
-    // part is forwarded via ctx.emitToolEvent with parentToolCallId so the
-    // renderer streams them live under the dispatch_agent block. Falls back
-    // to bare await when emitToolEvent is unavailable (legacy ctx) so the
-    // sub-agent still completes — just without visible child tool calls.
+    // Iterate the stream to surface the sub-agent's activity as nested
+    // AgentEvents (mirrors orchestrator.ts:437). Tool lifecycle AND
+    // text/reasoning deltas are forwarded via ctx.emitToolEvent with
+    // parentToolCallId so parent-aware consumers (the Agents panel) can
+    // stream the sub-agent's narration and thinking live under the
+    // dispatch_agent block. Falls back to bare await when emitToolEvent is
+    // unavailable (legacy ctx) so the sub-agent still completes — just
+    // without visible child activity.
     let finalResult: Awaited<typeof result>;
     if (ctx.emitToolEvent && parentToolCallId) {
       try {
+        const ids: SubagentBlockIds = {};
         for await (const part of result.stream) {
-          translateSubagentPart(part, ctx.emitToolEvent, parentToolCallId);
+          translateSubagentPart(part, ctx.emitToolEvent, parentToolCallId, ids);
         }
       } catch (streamErr: any) {
         log.warn('sub-agent stream interrupted', { agent: agent.name, err: streamErr?.message ?? streamErr });
@@ -572,23 +575,73 @@ async function synthesizeReport(opts: {
 
 // ─── Sub-agent stream → nested tool events ──────────────────────────────
 
+/** Block-id carry for translateSubagentPart — mirrors the orchestrator's
+ *  turn.currentTextBlockId / turn.reasoningBlockId. Ids are always minted
+ *  locally (crypto.randomUUID), never taken from the SDK part: providers
+ *  may reuse one part id across every step of a run. Tool parts reset both
+ *  so the next text/reasoning segment opens a fresh block (one thinking
+ *  block per model step). */
+export interface SubagentBlockIds {
+  textBlockId?: string;
+  reasoningBlockId?: string;
+}
+
 /** Translate an AI SDK stream part from a sub-agent's tool loop into a nested
  *  AgentEvent forwarded via ctx.emitToolEvent. Mirrors the orchestrator's
- *  translatePart (orchestrator-sdk.ts:1124) but tags every event with
- *  parentToolCallId so the renderer nests the tool block under the
- *  dispatch_agent row. Only tool lifecycle parts are forwarded — text and
- *  reasoning stay in the sub-agent's own context (the report carries them). */
-function translateSubagentPart(
+ *  translatePart (orchestrator.ts:556) but tags every event with
+ *  parentToolCallId so the renderer nests the block under the dispatch_agent
+ *  row. Tool lifecycle AND text/reasoning deltas are forwarded — parent-aware
+ *  consumers (the Agents panel) render the narration/thinking; the main chat
+ *  skips parented blocks. */
+export function translateSubagentPart(
   part: Readonly<{ type: string }>,
   emit: EmitToolEvent,
   parentToolCallId: string,
+  ids: SubagentBlockIds = {},
 ): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const p = part as any;
   switch (part.type) {
+    case 'text-delta': {
+      const text: string = p.text ?? '';
+      if (!text) return;
+      // Never trust the SDK part's id here: some providers (z.ai) reuse the
+      // same id across ALL steps of a run, which would merge post-tool
+      // segments back into the pre-tool block (duplicated narration). The
+      // tool cases below null the carry so each segment mints a fresh id.
+      if (!ids.textBlockId) ids.textBlockId = crypto.randomUUID();
+      emit({
+        type: 'delta',
+        parentToolCallId,
+        text,
+        blockId: ids.textBlockId,
+      });
+      return;
+    }
+    case 'reasoning-delta': {
+      // The raw stream part carries its text on `text` (not `delta`) —
+      // same shape the orchestrator's translatePart reads.
+      const text: string = p.text ?? '';
+      if (!text) return;
+      // Same rationale as text-delta: provider part ids are per-run, not
+      // per-step — always mint/reuse our own carry instead.
+      if (!ids.reasoningBlockId) ids.reasoningBlockId = crypto.randomUUID();
+      emit({
+        type: 'reasoning',
+        parentToolCallId,
+        delta: text,
+        blockId: ids.reasoningBlockId,
+      });
+      return;
+    }
     case 'tool-input-start': {
       const toolCallId: string = p.id;
       const toolName = resolveToolName(p.toolName ?? 'unknown') as ToolName;
+      // Mirror the orchestrator's tool-input-start reset: the segment before
+      // the tool call is closed, the next text/reasoning delta opens a new
+      // block.
+      ids.textBlockId = undefined;
+      ids.reasoningBlockId = undefined;
       emit({
         type: 'tool_call_start',
         parentToolCallId,
@@ -614,6 +667,10 @@ function translateSubagentPart(
       const toolName = resolveToolName(p.toolName ?? 'unknown') as ToolName;
       const input = (p.input ?? {}) as Record<string, unknown>;
       const meta = getToolMeta(toolName);
+      // Same segment reset as tool-input-start — some providers skip
+      // input-start, and a synthesized id must not survive a tool boundary.
+      ids.textBlockId = undefined;
+      ids.reasoningBlockId = undefined;
       emit({
         type: 'tool_call',
         parentToolCallId,
@@ -658,8 +715,7 @@ function translateSubagentPart(
       return;
     }
     default:
-      // text-delta, reasoning-delta, finish-step, etc. stay in the sub-agent's
-      // own context — only tool lifecycle is surfaced to the parent UI.
+      // finish-step, start, raw, etc. have no parent-facing rendering.
       return;
   }
 }

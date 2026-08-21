@@ -28,6 +28,11 @@ export interface DeltaEvent extends AgentEventBase {
    *  a fresh UUID signals "open a new text block." The reducer uses this
    *  to decide append-vs-push without guessing from position. */
   blockId: string;
+  /** When set, this delta was emitted inside a sub-agent dispatched by the
+   *  named parent dispatch_agent tool call — the reducer tags the text
+   *  block so parent-aware consumers (Agents panel) render it and the main
+   *  chat skips it. */
+  parentToolCallId?: string;
 }
 
 /** Streamed reasoning token (Anthropic `thinking`, R1 `<think>`, etc.). */
@@ -38,6 +43,8 @@ export interface ReasoningEvent extends AgentEventBase {
   /** UUID for the reasoning block. Stable for the whole turn — every
    *  reasoning delta shares it. */
   blockId: string;
+  /** Sub-agent origin marker — see DeltaEvent.parentToolCallId. */
+  parentToolCallId?: string;
 }
 
 /** Model started a tool call — id + name known, args still streaming. */

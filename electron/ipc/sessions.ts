@@ -31,6 +31,7 @@ import { abortSession, abortAllSessions } from '../agent/session-abort.js';
 import type { Block } from '../../src/types/block.js';
 import type { ActivityEvent } from '../../src/types/index.js';
 import { appDataDir } from '../appPaths.js';
+import type { SessionListOpts, SessionStoreV2, MessageWindowOpts } from './session-store-v2.js';
 
 // Re-export types so existing callers don't break.
 export type { StoredMessage, StoredSession, SessionHeader, ArchivedHeader };
@@ -88,6 +89,20 @@ function store(): SessionStore {
  *  each other's writes on disk. */
 export function getSessionStore(): SessionStore {
   return store();
+}
+
+// ── Part-normalized v2 store IPC ─────────────────────────────────────
+// The v2 store instance is owned by main.ts (one connection for the whole
+// app) and passed in here — no module-level singleton in session-store-v2.
+
+export function registerSessionV2Handlers(
+  ipcMain: { handle(channel: string, fn: (e: unknown, ...args: any[]) => unknown): void },
+  storeV2: SessionStoreV2,
+): void {
+  ipcMain.handle('tide:session:list-v2', (_e, workspacePath: string, opts?: SessionListOpts) =>
+    storeV2.listSessions(workspacePath, opts ?? {}));
+  ipcMain.handle('tide:session:messages-v2', (_e, sessionId: string, opts?: MessageWindowOpts) =>
+    storeV2.sessionMessages(sessionId, opts ?? {}));
 }
 
 // ── Branch + worktree lifecycle ───────────────────────────────────────

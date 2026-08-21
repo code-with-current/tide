@@ -252,6 +252,21 @@ declare global {
       listBranches(workspaceId: string): Promise<string[]>;
       listConfigFiles(workspaceId: string): Promise<string[]>;
 
+      // Part-normalized v2 sessions — paged by cursor / nextBefore message ids.
+      sessionListV2(
+        workspacePath: string,
+        opts?: { archived?: boolean; cursor?: string | null; limit?: number },
+      ): Promise<{ sessions: import('./session-v2').SessionMetaV2[]; nextCursor: string | null }>;
+      sessionMessagesV2(
+        sessionId: string,
+        opts?: { limit?: number; before?: string | null },
+      ): Promise<{ messages: import('./session-v2').MessageWithPartsV2[]; nextBefore: string | null }>;
+      /** (Re)subscribe to a session's event stream — persisted events
+       *  (seq > lastSeq) replay as tide:events batches before live push. */
+      eventsSubscribe(sessionId: string, lastSeq: number | null): Promise<void>;
+      /** Live + replayed event batches pushed on the tide:events channel. */
+      onEvents: (cb: (batch: import('./session-v2').FlushBatchV2) => void) => () => void;
+
       // Providers (real persistence)
       listProviders(): Promise<import('./index').Provider[]>;
       addProvider(input: {
@@ -389,12 +404,26 @@ declare global {
       gitBranchInfo: (workspaceId: string, sessionId?: string) => Promise<{ branch: string | null; headCommit: string | null }>;
       gitRecentBranches: (workspaceId: string, sessionId?: string) => Promise<string[]>;
       gitCheckout: (workspaceId: string, branch: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
-      gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string, sha?: string) => Promise<{ ok: boolean; error?: string }>;
       gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitCommit: (workspaceId: string, message: string, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;
       gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) => Promise<any[]>;
       gitHeadSha: (workspaceId: string, sessionId?: string) => Promise<string | null>;
       gitRestoreFile: (workspaceId: string, filePath: string, sha: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitAmend: (workspaceId: string, message: string | null, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;
+      gitRevert: (workspaceId: string, sha: string, sessionId?: string) => Promise<{ ok: boolean; newSha?: string; error?: string }>;
+      gitFetch: (workspaceId: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitPush: (workspaceId: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitPull: (workspaceId: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitAheadBehind: (workspaceId: string, sessionId?: string) => Promise<{ ahead: number; behind: number } | null>;
+      gitBranchesDetailed: (workspaceId: string, sessionId?: string) => Promise<import('../lib/api/client').GitBranchDetailed[]>;
+      gitDeleteBranch: (workspaceId: string, name: string, force: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitMergeBranch: (workspaceId: string, name: string, sessionId?: string) => Promise<{ ok: boolean; conflicts?: import('../lib/api/client').GitConflictEntry[]; error?: string }>;
+      gitConflictFiles: (workspaceId: string, sessionId?: string) => Promise<import('../lib/api/client').GitConflictEntry[]>;
+      gitResolveFile: (workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitStagedDiff: (workspaceId: string, sessionId?: string) => Promise<string>;
+      gitCommitMessage: (workspaceId: string, sha: string, sessionId?: string) => Promise<string>;
+      gitDiscardFile: (workspaceId: string, filePath: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
 
       // ── RAG (Memory & RAG panel) ──
       ragStatus: (workspaceId: string) => Promise<import('./index').RagStatus | { error: string }>;

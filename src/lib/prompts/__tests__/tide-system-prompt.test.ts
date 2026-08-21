@@ -20,7 +20,7 @@ describe('buildSystemPrompt injected context', () => {
           { path: 'src/a.ts', status: 'modified', staged: true, additions: 2, deletions: 1 },
           { path: 'notes.txt', status: 'untracked', staged: false, additions: 0, deletions: 0 },
         ],
-        log: [{ sha: 'def9876543', author: 'Jane', date: '2025-07-20T10:00:00Z', subject: 'fix widget' }],
+        log: [{ sha: 'def9876543', author: 'Jane', date: '2025-07-20T10:00:00Z', subject: 'fix widget', parents: [] }],
       },
     });
     expect(sp).toContain('# Git state (at turn start)');

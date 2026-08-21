@@ -24,6 +24,7 @@ import type {
   WorkspaceScript,
   Session,
 } from '@/types';
+import type { FlushBatchV2, MessageWithPartsV2, SessionMetaV2 } from '@/types/session-v2';
 
 // ── Electron detection ──────────────────────────────────────────
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
@@ -211,7 +212,7 @@ export async function createSession(
   workspaceId: string,
   title: string,
   modelId: string,
-  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string; kind?: 'main' | 'subagent' },
 ): Promise<any> {
   if (ipc) return ipc.createSession(workspaceId, title, modelId, opts);
   await delay(200);
@@ -388,6 +389,37 @@ export async function listBranches(workspaceId: string): Promise<string[]> {
 export async function listConfigFiles(workspaceId: string): Promise<string[]> {
   if (ipc) return ipc.listConfigFiles(workspaceId);
   return [];
+}
+
+// ─── Part-normalized v2 sessions + event stream ────────────────────
+
+/** List v2 sessions by workspace path. Browser dev mode resolves empty —
+ *  there is no v2 store without the main process. */
+export async function listSessionsV2(
+  workspacePath: string,
+  opts?: { archived?: boolean; cursor?: string | null; limit?: number },
+): Promise<{ sessions: SessionMetaV2[]; nextCursor: string | null }> {
+  if (ipc && ipc.sessionListV2) return ipc.sessionListV2(workspacePath, opts);
+  return { sessions: [], nextCursor: null };
+}
+
+export async function listSessionMessagesV2(
+  sessionId: string,
+  opts?: { limit?: number; before?: string | null },
+): Promise<{ messages: MessageWithPartsV2[]; nextBefore: string | null }> {
+  if (ipc && ipc.sessionMessagesV2) return ipc.sessionMessagesV2(sessionId, opts);
+  return { messages: [], nextBefore: null };
+}
+
+/** (Re)subscribe to a session's event stream. Persisted events (seq > lastSeq)
+ *  replay as tide:events batches before live push begins. */
+export async function eventsSubscribe(sessionId: string, lastSeq: number | null): Promise<void> {
+  if (ipc && ipc.eventsSubscribe) return ipc.eventsSubscribe(sessionId, lastSeq);
+}
+
+export function subscribeEvents(cb: (batch: FlushBatchV2) => void): () => void {
+  if (ipc && ipc.onEvents) return ipc.onEvents(cb);
+  return () => {};
 }
 
 // ============================================================
@@ -586,6 +618,14 @@ export interface GitCommit {
   author: string;
   date: string;
   subject: string;
+  /** Short parent SHAs, first-parent first. */
+  parents: string[];
+  /** True when this commit is HEAD. */
+  isHead?: boolean;
+  /** Branch names whose tip is this sha. */
+  branchHeads?: string[];
+  /** Tags pointing at this sha (annotated tags peeled to the commit). */
+  tags?: string[];
 }
 
 export async function gitLog(workspaceId: string, sessionId?: string, limit?: number): Promise<GitCommit[]> {
@@ -628,8 +668,8 @@ export async function gitCheckout(workspaceId: string, branch: string, sessionId
   if (ipc) return ipc.gitCheckout(workspaceId, branch, sessionId);
   return { ok: false };
 }
-export async function gitCreateBranch(workspaceId: string, branchName: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
-  if (ipc) return ipc.gitCreateBranch(workspaceId, branchName, sessionId);
+export async function gitCreateBranch(workspaceId: string, branchName: string, sessionId?: string, sha?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitCreateBranch(workspaceId, branchName, sessionId, sha);
   return { ok: false };
 }
 export async function gitStage(workspaceId: string, filePath: string, stage: boolean, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
@@ -652,6 +692,85 @@ export async function gitHeadSha(workspaceId: string, sessionId?: string): Promi
 
 export async function gitRestoreFile(workspaceId: string, filePath: string, sha: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
   if (ipc) return ipc.gitRestoreFile(workspaceId, filePath, sha, sessionId);
+  return { ok: false, error: 'IPC unavailable' };
+}
+
+export type GitConflictState =
+  | 'both-modified'
+  | 'both-added'
+  | 'both-deleted'
+  | 'added-by-us'
+  | 'added-by-them'
+  | 'deleted-by-us'
+  | 'deleted-by-them';
+
+export interface GitConflictEntry { path: string; state: GitConflictState; }
+
+export interface GitBranchDetailed {
+  name: string;
+  isRemote: boolean;
+  upstream?: string;
+  shortSha: string;
+  subject: string;
+  lastCommitUnix: number;
+  ahead?: number;
+  behind?: number;
+}
+
+export async function gitAmend(workspaceId: string, message: string | null, sessionId?: string): Promise<{ ok: boolean; sha?: string; error?: string }> {
+  if (ipc) return ipc.gitAmend(workspaceId, message, sessionId);
+  return { ok: false };
+}
+export async function gitRevert(workspaceId: string, sha: string, sessionId?: string): Promise<{ ok: boolean; newSha?: string; error?: string }> {
+  if (ipc) return ipc.gitRevert(workspaceId, sha, sessionId);
+  return { ok: false };
+}
+export async function gitFetch(workspaceId: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitFetch(workspaceId, sessionId);
+  return { ok: false };
+}
+export async function gitPush(workspaceId: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitPush(workspaceId, sessionId);
+  return { ok: false };
+}
+export async function gitPull(workspaceId: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitPull(workspaceId, sessionId);
+  return { ok: false };
+}
+export async function gitAheadBehind(workspaceId: string, sessionId?: string): Promise<{ ahead: number; behind: number } | null> {
+  if (ipc) return ipc.gitAheadBehind(workspaceId, sessionId);
+  return null;
+}
+export async function gitBranchesDetailed(workspaceId: string, sessionId?: string): Promise<GitBranchDetailed[]> {
+  if (ipc) return ipc.gitBranchesDetailed(workspaceId, sessionId);
+  return [];
+}
+export async function gitDeleteBranch(workspaceId: string, name: string, force: boolean, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitDeleteBranch(workspaceId, name, force, sessionId);
+  return { ok: false };
+}
+export async function gitMergeBranch(workspaceId: string, name: string, sessionId?: string): Promise<{ ok: boolean; conflicts?: GitConflictEntry[]; error?: string }> {
+  if (ipc) return ipc.gitMergeBranch(workspaceId, name, sessionId);
+  return { ok: false };
+}
+export async function gitConflictFiles(workspaceId: string, sessionId?: string): Promise<GitConflictEntry[]> {
+  if (ipc) return ipc.gitConflictFiles(workspaceId, sessionId);
+  return [];
+}
+export async function gitResolveFile(workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitResolveFile(workspaceId, filePath, side, sessionId);
+  return { ok: false };
+}
+export async function gitStagedDiff(workspaceId: string, sessionId?: string): Promise<string> {
+  if (ipc) return ipc.gitStagedDiff(workspaceId, sessionId);
+  return '';
+}
+export async function gitCommitMessage(workspaceId: string, sha: string, sessionId?: string): Promise<string> {
+  if (ipc) return ipc.gitCommitMessage(workspaceId, sha, sessionId);
+  return '';
+}
+export async function gitDiscardFile(workspaceId: string, filePath: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitDiscardFile(workspaceId, filePath, sessionId);
   return { ok: false, error: 'IPC unavailable' };
 }
 
