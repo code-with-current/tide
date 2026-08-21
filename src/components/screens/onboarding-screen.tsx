@@ -3,31 +3,24 @@ import { useQueryClient } from '@tanstack/react-query';
 import tideLogoPng from '@/assets/logo.png';
 import { LogoText } from '@/components/primitives';
 import {
-  ArrowLeft, ArrowRight, ShieldCheck, Loader2,
+  ArrowLeft, ArrowRight, Loader2,
   Folder, CheckCircle2, HardDrive, Globe,
-  Check, AlertCircle, Plug, BrainCircuit,
-  Terminal, TriangleAlert, Server, Download,
+  Check, AlertCircle,
+  Terminal, TriangleAlert, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useUi } from '@/lib/stores/ui';
-import { qk, useAddProvider, useRagDownloadProgress, useRagInitProgress } from '@/lib/queries';
+import { qk, useRagDownloadProgress, useRagInitProgress } from '@/lib/queries';
 import { phaseLabel as phaseLabelLocal } from '@/components/rag/rag-index-progress';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
-import type { ApiStyle, Workspace, WorkspaceScript } from '@/types';
-import {
-  PROTOCOL, ApiStylePicker, EndpointPreview, FetchModelsButton,
-  SectionLabel, FormField, useCatalogEnrichment,
-} from './settings/providers/providers';
-import {
-  ModelsTable, appendFetchedModels, rowsToModels, useFollowProtocolEndpoint,
-  useModelRows,
-} from './settings/providers/models-table';
+import type { Workspace, WorkspaceScript } from '@/types';
 import { Card, CardContent } from '../ui/card';
+import { AddProviderWizard } from './settings/providers/add-wizard/add-wizard';
 
 type Step = 'provider' | 'workspace';
 type Phase = 'form' | 'creating' | 'indexing' | 'done' | 'error';
@@ -138,7 +131,6 @@ export function OnboardingScreen() {
           <ProviderStep
             onNext={() => setStep('workspace')}
             setSelectedModel={setSelectedModel}
-            qc={qc}
           />
         ) : (
           <WorkspaceStep
@@ -159,187 +151,28 @@ export function OnboardingScreen() {
 // =============================================================
 
 function ProviderStep({
-  onNext, setSelectedModel, qc,
+  onNext, setSelectedModel,
 }: {
   onNext: () => void;
   setSelectedModel: (providerId: string, modelId: string) => void;
-  qc: ReturnType<typeof useQueryClient>;
 }) {
-  const addProvider = useAddProvider();
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
-  const [name, setName] = useState('');
-  const [apiStyle, setApiStyle] = useState<ApiStyle>('openai');
-  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
-  const [apiKey, setApiKey] = useState('');
-  const { rows, setRows, updateRow, addRow, removeRow } = useModelRows([
-    { alias: '', modelId: '', context: '' },
-  ]);
-
-  useFollowProtocolEndpoint(apiStyle, setBaseUrl);
-
-  useCatalogEnrichment(rows, updateRow);
-
-  // Validation: form is complete when name, baseUrl, apiKey are filled AND
-  // at least one model has a modelId (alias-only rows don't count — the agent
-  // can't call a model without knowing its ID).
-  const validModels = rowsToModels(rows);
-  const hasModelWithId = rows.some((r) => r.modelId.trim().length > 0);
-  const formValid = !!name.trim() && !!baseUrl.trim() && !!apiKey.trim() && hasModelWithId;
-
-  // Clear test result whenever the form changes after a test — stale green
-  // checkmarks are misleading if the user edited a field.
-  useEffect(() => { setTestResult(null); }, [name, baseUrl, apiKey, apiStyle, rows]);
-
-  const handleSave = async () => {
-    if (!formValid) return;
-
-    // Step 1: test the connection with the first model before saving.
-    setTesting(true);
-    setTestResult(null);
-    const test = await window.tideIpc!.testProviderConnection({
-      apiStyle,
-      baseUrl: baseUrl.trim(),
-      apiKey: apiKey.trim(),
-      modelId: rows.find((r) => r.modelId.trim())!.modelId.trim(),
-    });
-    setTesting(false);
-
-    if (!test.ok) {
-      setTestResult({ ok: false, error: test.error });
-      return; // Don't save — let the user fix the config and retry.
-    }
-    setTestResult({ ok: true });
-
-    // Step 2: save the provider now that we know it works.
-    setSaving(true);
-    try {
-      const created = await addProvider.mutateAsync({
-        name: name.trim() || 'Untitled',
-        apiStyle,
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || undefined,
-        models: validModels,
-      });
-      qc.invalidateQueries({ queryKey: ['providers'] });
-      if (created.models[0]) setSelectedModel(created.id, created.models[0].modelId);
-      onNext();
-    } finally { setSaving(false); }
-  };
-
   return (
     <div className="flex flex-col h-full" style={{ animation: 'fadeIn 0.3s ease-out' }}>
-      {/* Mobile brand */}
       <div className="md:hidden flex items-center gap-2 px-6 pt-4">
         <LogoText size={35} />
       </div>
-
-      <div className="flex-1 flex flex-col justify-center px-6 md:px-8 py-6 mx-auto w-full overflow-y-auto scroll">
+      <div className="flex-1 flex flex-col justify-center px-6 md:px-8 py-6 mx-auto w-full max-w-3xl overflow-y-auto scroll">
         <div className="flex justify-start items-end gap-2.5 mb-5">
           <LogoText size={35} />
         </div>
-        <Card className="relative">
-          <CardContent>
-        <div className="space-y-5">
-          {/* API Protocol */}
-          <div className="space-y-2">
-            <SectionLabel icon={<Plug className="size-3" />}>API Protocol</SectionLabel>
-            <ApiStylePicker value={apiStyle} onChange={setApiStyle} />
-          </div>
-
-          {/* Endpoint preview */}
-          <EndpointPreview apiStyle={apiStyle} baseUrl={baseUrl} />
-
-          {/* Connection — stacked FormFields under a SectionLabel, matching
-              the Settings → Provider detail layout (not a 2-col grid). */}
-          <section className="space-y-3.5">
-            <SectionLabel icon={<Server className="size-3" />}>Connection</SectionLabel>
-            <FormField id="ob-name" label="Provider name">
-              <Input className="h-8 text-[12.5px]" value={name}
-                onChange={(e) => setName(e.target.value)} placeholder="OpenRouter, z.ai, LM Studio…" />
-            </FormField>
-            <FormField id="ob-baseUrl" label="Base URL">
-              <Input className="font-mono text-[12px] h-8" value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)} placeholder={PROTOCOL[apiStyle].baseUrlPlaceholder} />
-            </FormField>
-            <FormField id="ob-key" label="API key">
-              <Input type="password" className="font-mono text-[12px] h-8" value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)} placeholder={PROTOCOL[apiStyle].keyPlaceholder} />
-              <p className="text-[10px] text-muted-foreground/50 mt-1 flex items-center gap-1">
-                <ShieldCheck className="size-2.5 text-success" />
-                Sent as <span className="font-mono">{PROTOCOL[apiStyle].authHeader}</span>. Stored in OS keychain.
-              </p>
-            </FormField>
-          </section>
-
-          {/* Models table */}
-          <div className="space-y-2">
-            <SectionLabel
-              icon={<BrainCircuit className="size-3" />}
-              count={rowsToModels(rows).length}
-              action={
-                <FetchModelsButton
-                  apiStyle={apiStyle}
-                  baseUrl={baseUrl}
-                  apiKey={apiKey}
-                  onFetched={(models) =>
-                    setRows((prev) => appendFetchedModels(prev, models))
-                  }
-                  existingModelIds={rows.map((r) => r.modelId)}
-                />
-              }
-            >Models</SectionLabel>
-            <ModelsTable
-              rows={rows}
-              onUpdate={updateRow}
-              onAdd={addRow}
-              onRemove={removeRow}
-            />
-          </div>
-            </div>
-          </CardContent>
-
-          {/* Loading overlay — covers the entire form card during testing
-              and saving. Semi-transparent backdrop + centered spinner so the
-              user sees the form is locked and something is happening. */}
-          {(testing || saving) && (
-            <div className="absolute inset-0 z-10 rounded-[inherit] bg-background/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-              <Loader2 className="size-7 animate-spin text-primary" />
-              <div className="text-[13px] font-medium text-foreground">
-                {testing ? 'Testing connection…' : 'Saving provider…'}
-              </div>
-              {testing && (
-                <div className="text-[11px] text-muted-foreground max-w-[240px] text-center">
-                  Sending a test message to verify your API key and model.
-                </div>
-              )}
-            </div>
-          )}
-        </Card>
-
-        {/* Test result — shown below the card (not inside) so the form
-            stays clean. Error in red, success briefly in green. */}
-        {testResult?.ok && !saving && (
-          <div className="flex items-center gap-2 text-[12px] text-emerald-400 py-1 px-1">
-            <CheckCircle2 className="size-3.5" /> Connection verified.
-          </div>
-        )}
-        {testResult && !testResult.ok && (
-          <div className="flex items-start gap-2 text-[12px] text-destructive py-1 px-1">
-            <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-            <span className="flex-1">{testResult.error}</span>
-          </div>
-        )}
-
-        <OnboardingFooter
-          onNext={handleSave}
-          nextLabel={testing ? 'Testing…' : 'Continue'}
-          saving={saving}
-          disabled={!formValid || testing}
+        <AddProviderWizard
+          embedded
+          onFinish={(created) => {
+            if (created.models[0]) setSelectedModel(created.id, created.models[0].modelId);
+            onNext();
+          }}
         />
       </div>
-
     </div>
   );
 }
