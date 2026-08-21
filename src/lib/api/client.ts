@@ -393,7 +393,9 @@ export async function listConfigFiles(workspaceId: string): Promise<string[]> {
 
 // ─── Part-normalized v2 sessions + event stream ────────────────────
 
-export async function sessionListV2(
+/** List v2 sessions by workspace path. Browser dev mode resolves empty —
+ *  there is no v2 store without the main process. */
+export async function listSessionsV2(
   workspacePath: string,
   opts?: { archived?: boolean; cursor?: string | null; limit?: number },
 ): Promise<{ sessions: SessionMetaV2[]; nextCursor: string | null }> {
@@ -401,7 +403,7 @@ export async function sessionListV2(
   return { sessions: [], nextCursor: null };
 }
 
-export async function sessionMessagesV2(
+export async function listSessionMessagesV2(
   sessionId: string,
   opts?: { limit?: number; before?: string | null },
 ): Promise<{ messages: MessageWithPartsV2[]; nextBefore: string | null }> {
@@ -415,7 +417,7 @@ export async function eventsSubscribe(sessionId: string, lastSeq: number | null)
   if (ipc && ipc.eventsSubscribe) return ipc.eventsSubscribe(sessionId, lastSeq);
 }
 
-export function onEvents(cb: (batch: FlushBatchV2) => void): () => void {
+export function subscribeEvents(cb: (batch: FlushBatchV2) => void): () => void {
   if (ipc && ipc.onEvents) return ipc.onEvents(cb);
   return () => {};
 }
