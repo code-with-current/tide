@@ -2,28 +2,11 @@ import { useEffect, useRef, useState, type Dispatch } from 'react';
 import { BrainCircuit, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import * as api from '@/lib/api/client';
-import { fetchAndEnrichModels, type FetchedModel, type ResolveFn } from '@/lib/fetch-models';
+import { fetchAndEnrichModels, toResolveFn, type FetchedModel } from '@/lib/fetch-models';
 import type { ProviderPreset } from '@/lib/provider-presets';
 import { cn, formatContext } from '@/lib/utils';
 import { FetchRow, FetchSection, SectionLabel } from '../providers';
 import type { WizardAction, WizardState } from './wizard-reducer';
-
-/** Adapts api.resolveModelCatalog (nulls for "absent") to ResolveFn (optional fields). */
-const resolveCatalogMeta: ResolveFn = async (input) => {
-  const res = await api.resolveModelCatalog(input);
-  const meta = res?.meta;
-  return meta
-    ? {
-        meta: {
-          resolvedCatalogId: meta.resolvedCatalogId ?? undefined,
-          contextWindow: meta.contextWindow,
-          supportsReasoning: meta.supportsReasoning,
-          supportsVision: meta.supportsVision,
-          pricing: meta.pricing ?? undefined,
-        },
-      }
-    : null;
-};
 
 export function PickModelsStep({
   state,
@@ -43,7 +26,7 @@ export function PickModelsStep({
     try {
       const models = await fetchAndEnrichModels(
         api.probeProviderModels,
-        resolveCatalogMeta,
+        toResolveFn(api.resolveModelCatalog),
         {
           apiStyle: state.apiStyle,
           baseUrl: state.baseUrl.trim(),

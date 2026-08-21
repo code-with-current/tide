@@ -52,8 +52,8 @@ import { cn, formatContext } from "@/lib/utils";
 import { formatPriceRate } from "@/lib/queries";
 import {
   fetchAndEnrichModels,
+  toResolveFn,
   type FetchedModel,
-  type ResolveFn,
 } from "@/lib/fetch-models";
 import { SettingsHeader } from "../shared";
 
@@ -919,23 +919,6 @@ export function useCatalogEnrichment(
   }, [rows]);
 }
 
-/** Adapts api.resolveModelCatalog (nulls for "absent") to ResolveFn (optional fields). */
-const resolveCatalogMeta: ResolveFn = async (input) => {
-  const res = await api.resolveModelCatalog(input);
-  const meta = res?.meta;
-  return meta
-    ? {
-        meta: {
-          resolvedCatalogId: meta.resolvedCatalogId ?? undefined,
-          contextWindow: meta.contextWindow,
-          supportsReasoning: meta.supportsReasoning,
-          supportsVision: meta.supportsVision,
-          pricing: meta.pricing ?? undefined,
-        },
-      }
-    : null;
-};
-
 /** Fetch-models button — probes the provider's /models endpoint, resolves each result against the models.dev catalog, and opens a grouped dialog (✅ MATCHED / ⚠ AMBIGUOUS / — NONE) where the user multi-selects models to add. baseUrl/apiKey come from the form's current state so it works in the add form before the provider is saved. Errors show inline next to the button (no modal). */
 export function FetchModelsButton({
   apiStyle,
@@ -971,7 +954,7 @@ export function FetchModelsButton({
     try {
       const models = await fetchAndEnrichModels(
         api.probeProviderModels,
-        resolveCatalogMeta,
+        toResolveFn(api.resolveModelCatalog),
         { apiStyle, baseUrl, apiKey, existingIds: existingModelIds },
       );
       setAvailable(models);

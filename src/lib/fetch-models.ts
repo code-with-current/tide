@@ -69,6 +69,35 @@ export interface ResolveMeta {
 export type ResolveFn = (i: { modelId: string; contextWindow: number }) =>
   Promise<{ meta?: ResolveMeta } | null | undefined>;
 
+/** Adapts a raw catalog resolver (IPC shape: nulls for "absent") to ResolveFn (optional fields). */
+export function toResolveFn(
+  resolve: (i: { modelId: string; contextWindow: number }) => Promise<{
+    meta?: {
+      resolvedCatalogId?: string | null;
+      contextWindow?: number;
+      supportsReasoning?: boolean;
+      supportsVision?: boolean;
+      pricing?: { inputPerToken: number; outputPerToken: number } | null;
+    };
+  } | null | undefined>,
+): ResolveFn {
+  return async (input) => {
+    const res = await resolve(input);
+    const meta = res?.meta;
+    return meta
+      ? {
+          meta: {
+            resolvedCatalogId: meta.resolvedCatalogId ?? undefined,
+            contextWindow: meta.contextWindow,
+            supportsReasoning: meta.supportsReasoning,
+            supportsVision: meta.supportsVision,
+            pricing: meta.pricing ?? undefined,
+          },
+        }
+      : null;
+  };
+}
+
 export async function fetchAndEnrichModels(
   probe: ProbeFn,
   resolve: ResolveFn,
