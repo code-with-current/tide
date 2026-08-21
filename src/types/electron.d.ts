@@ -252,6 +252,21 @@ declare global {
       listBranches(workspaceId: string): Promise<string[]>;
       listConfigFiles(workspaceId: string): Promise<string[]>;
 
+      // Part-normalized v2 sessions — paged by cursor / nextBefore message ids.
+      sessionListV2(
+        workspacePath: string,
+        opts?: { archived?: boolean; cursor?: string | null; limit?: number },
+      ): Promise<{ sessions: import('./session-v2').SessionMetaV2[]; nextCursor: string | null }>;
+      sessionMessagesV2(
+        sessionId: string,
+        opts?: { limit?: number; before?: string | null },
+      ): Promise<{ messages: import('./session-v2').MessageWithPartsV2[]; nextBefore: string | null }>;
+      /** (Re)subscribe to a session's event stream — persisted events
+       *  (seq > lastSeq) replay as tide:events batches before live push. */
+      eventsSubscribe(sessionId: string, lastSeq: number | null): Promise<void>;
+      /** Live + replayed event batches pushed on the tide:events channel. */
+      onEvents: (cb: (batch: import('./session-v2').FlushBatchV2) => void) => () => void;
+
       // Providers (real persistence)
       listProviders(): Promise<import('./index').Provider[]>;
       addProvider(input: {

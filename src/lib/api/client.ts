@@ -24,6 +24,7 @@ import type {
   WorkspaceScript,
   Session,
 } from '@/types';
+import type { FlushBatchV2, MessageWithPartsV2, SessionMetaV2 } from '@/types/session-v2';
 
 // ── Electron detection ──────────────────────────────────────────
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
@@ -388,6 +389,35 @@ export async function listBranches(workspaceId: string): Promise<string[]> {
 export async function listConfigFiles(workspaceId: string): Promise<string[]> {
   if (ipc) return ipc.listConfigFiles(workspaceId);
   return [];
+}
+
+// ─── Part-normalized v2 sessions + event stream ────────────────────
+
+export async function sessionListV2(
+  workspacePath: string,
+  opts?: { archived?: boolean; cursor?: string | null; limit?: number },
+): Promise<{ sessions: SessionMetaV2[]; nextCursor: string | null }> {
+  if (ipc && ipc.sessionListV2) return ipc.sessionListV2(workspacePath, opts);
+  return { sessions: [], nextCursor: null };
+}
+
+export async function sessionMessagesV2(
+  sessionId: string,
+  opts?: { limit?: number; before?: string | null },
+): Promise<{ messages: MessageWithPartsV2[]; nextBefore: string | null }> {
+  if (ipc && ipc.sessionMessagesV2) return ipc.sessionMessagesV2(sessionId, opts);
+  return { messages: [], nextBefore: null };
+}
+
+/** (Re)subscribe to a session's event stream. Persisted events (seq > lastSeq)
+ *  replay as tide:events batches before live push begins. */
+export async function eventsSubscribe(sessionId: string, lastSeq: number | null): Promise<void> {
+  if (ipc && ipc.eventsSubscribe) return ipc.eventsSubscribe(sessionId, lastSeq);
+}
+
+export function onEvents(cb: (batch: FlushBatchV2) => void): () => void {
+  if (ipc && ipc.onEvents) return ipc.onEvents(cb);
+  return () => {};
 }
 
 // ============================================================

@@ -220,6 +220,21 @@ contextBridge.exposeInMainWorld('tideIpc', {
   listConfigFiles: (workspaceId: string) =>
     ipcRenderer.invoke('tide:workspace:listConfigFiles', workspaceId),
 
+  // ── Part-normalized v2 sessions + event stream ──
+  // List/messages page by cursor / nextBefore. Event batches (live + replay)
+  // arrive on 'tide:events' after eventsSubscribe registers a session.
+  sessionListV2: (workspacePath: string, opts?: { archived?: boolean; cursor?: string | null; limit?: number }) =>
+    ipcRenderer.invoke('tide:session:list-v2', workspacePath, opts),
+  sessionMessagesV2: (sessionId: string, opts?: { limit?: number; before?: string | null }) =>
+    ipcRenderer.invoke('tide:session:messages-v2', sessionId, opts),
+  eventsSubscribe: (sessionId: string, lastSeq: number | null) =>
+    ipcRenderer.invoke('tide:events:subscribe', sessionId, lastSeq),
+  onEvents: (cb: (batch: unknown) => void) => {
+    const listener = (_e: unknown, batch: unknown) => cb(batch);
+    ipcRenderer.on('tide:events', listener);
+    return () => ipcRenderer.off('tide:events', listener);
+  },
+
   // ── Providers (real persistence) ──
   listProviders: () => ipcRenderer.invoke('tide:listProviders'),
   addProvider: (input: {
