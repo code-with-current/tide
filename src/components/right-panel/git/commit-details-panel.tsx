@@ -11,6 +11,7 @@ import type { GitFileChange } from '@/lib/api/client';
 import type { DiffHunk } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
 import { DiffView } from '@/components/chat/blocks/diff-view';
+import { CommitAiActions } from './commit-ai-actions';
 
 type CommitDetail = { sha: string; author: string; date: string; subject: string };
 
@@ -57,6 +58,15 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
     setDiffLoading(false);
   };
 
+  // Finding → file links open (and scroll to) that file's diff expansion.
+  const openFile = (f: GitFileChange) => {
+    if (expandedPath === f.path) return;
+    void handleFile(f);
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-commit-file="${CSS.escape(f.path)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-card overflow-hidden">
       {/* Header */}
@@ -74,6 +84,17 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
           <X className="size-3.5" />
         </button>
       </div>
+
+      {/* AI actions + results (explain card, review findings) */}
+      <CommitAiActions
+        commit={commit}
+        files={files}
+        filesLoading={isLoading}
+        workspaceId={activeWorkspaceId}
+        gitSessionId={gitSessionId}
+        sessionId={activeSessionId}
+        onOpenFile={openFile}
+      />
 
       {/* Subject + meta */}
       <div className="px-3 py-2.5 border-b border-input flex-shrink-0">
@@ -111,7 +132,7 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
           <div className="flex items-center justify-center h-24 text-[12px] text-muted-foreground/50">No files in this commit.</div>
         ) : (
           files!.map((f) => (
-            <div key={f.path}>
+            <div key={f.path} data-commit-file={f.path}>
               <CommitFileRow
                 file={f}
                 expanded={expandedPath === f.path}

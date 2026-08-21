@@ -1,11 +1,13 @@
 /** useGitAgentAction — dispatch a built-in sub-agent (e.g. commit-writer)
- *  from Git UI. There is no direct renderer→dispatch IPC: the mechanism is a
- *  chat turn whose prompt carries the same agent-mention hint the composer
- *  injects, so the orchestrator calls dispatch_agent and the report streams
- *  back over the normal agent event stream. This hook starts that turn and
- *  mirrors the dispatch's report out of the shared stream store (maintained
- *  by useChatStream's mount-once listener) — it never registers its own IPC
- *  listener, so cleanup is a plain store unsubscribe.
+ *  from Git UI, or (agent omitted) run a plain model turn on the session.
+ *  There is no direct renderer→dispatch IPC: the mechanism is a chat turn
+ *  whose prompt carries the same agent-mention hint the composer injects,
+ *  so the orchestrator calls dispatch_agent and the report streams back
+ *  over the normal agent event stream. This hook starts that turn and
+ *  mirrors the dispatch's report (or, for plain turns, the assistant text)
+ *  out of the shared stream store (maintained by useChatStream's
+ *  mount-once listener) — it never registers its own IPC listener, so
+ *  cleanup is a plain store unsubscribe.
  *
  *  The turn is visible in the session's chat (user line + dispatch row +
  *  report); MainScreen's freeze effect persists the assistant message as
@@ -14,13 +16,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
-import type { ToolCall } from '@/types';
+import type { SessionStream, ToolCall } from '@/types';
 
 export interface GitAgentDispatchArgs {
   /** Session the dispatch turn runs on. Dispatch needs one — absent means no-op. */
   sessionId: string | null | undefined;
-  /** Built-in agent name (must exist in the dispatch_agent catalog). */
-  agent: string;
+  /** Built-in agent name (must exist in the dispatch_agent catalog). Omit for
+   *  a plain model turn — no dispatch hint, assistant text mirrors as report. */
+  agent?: string;
   /** Full task text handed to the agent. */
   task: string;
 }
@@ -98,11 +101,13 @@ export function useGitAgentAction(): {
       cleanup();
       setState(next);
     };
+    const reportOf = (stream: SessionStream) =>
+      args.agent ? dispatchReportOf(stream.toolCalls, args.agent) : stream.text;
     unsubscribeRef.current = useUi.subscribe((s) => {
       const stream = s.streams[sid];
       if (stream === prevStream || !stream) return;
       prevStream = stream;
-      const report = dispatchReportOf(stream.toolCalls, args.agent);
+      const report = reportOf(stream);
       if (stream.finalMessage && !stream.isStreaming) {
         const failed = !!stream.error || stream.stopReason === 'aborted';
         finish(failed
@@ -120,17 +125,20 @@ export function useGitAgentAction(): {
     void (async () => {
       try {
         const session = await api.getSession(sid);
-        const agents = await api.listAgents().catch(() => []);
-        const description = agents.find((a) => a.name === args.agent)?.description;
+        const agents = args.agent ? await api.listAgents().catch(() => []) : [];
+        const description = args.agent ? agents.find((a) => a.name === args.agent)?.description : undefined;
 
-        const displayText = `✨ @${args.agent} — ${args.task.split('\n')[0].slice(0, 120)}`;
-        const promptText = [
-          description
-            ? `[User wants to use the "${args.agent}" agent — ${description} Dispatch via the dispatch_agent tool if the task matches, or apply its approach directly.]`
-            : `[User wants to use the "${args.agent}" agent.]`,
-          `<task>\n${args.task}\n</task>`,
-          `Dispatch the "${args.agent}" agent with the task above via the dispatch_agent tool instead of answering it yourself.`,
-        ].join('\n\n');
+        const firstLine = args.task.split('\n')[0].slice(0, 120);
+        const displayText = args.agent ? `✨ @${args.agent} — ${firstLine}` : `✨ ${firstLine}`;
+        const promptText = args.agent
+          ? [
+              description
+                ? `[User wants to use the "${args.agent}" agent — ${description} Dispatch via the dispatch_agent tool if the task matches, or apply its approach directly.]`
+                : `[User wants to use the "${args.agent}" agent.]`,
+              `<task>\n${args.task}\n</task>`,
+              `Dispatch the "${args.agent}" agent with the task above via the dispatch_agent tool instead of answering it yourself.`,
+            ].join('\n\n')
+          : args.task;
 
         await api.addMessage(sid, 'user', displayText);
 
@@ -163,7 +171,7 @@ export function useGitAgentAction(): {
           const stream = useUi.getState().streams[sid];
           if (stream?.isStreaming) {
             useUi.getState().patchStream(sid, { isStreaming: false });
-            finish({ status: 'done', report: dispatchReportOf(stream.toolCalls, args.agent), error: null });
+            finish({ status: 'done', report: reportOf(stream), error: null });
           }
         }
       } catch (err: any) {
