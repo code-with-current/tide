@@ -9,7 +9,7 @@
  *  persisted message blocks once the live stream resets on the next turn. */
 
 import { useMemo, useRef } from 'react';
-import { Bot, Check, Loader2, X } from 'lucide-react';
+import { Bot, Loader2 } from 'lucide-react';
 import type { Block, Session, ToolBlock } from '@/types';
 import type { ToolCall } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
@@ -17,31 +17,9 @@ import { useUi } from '@/lib/stores/ui';
 import { useDispatches } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
-import { ToolChips } from '@/components/chat-v2/tool-chips';
+import { ToolChips, AgentStatusChip } from '@/components/chat-v2/tool-chips';
+import { agentStatusOf } from '@/components/chat-v2/agent-status';
 import { toolBlockToToolCall } from '@/components/chat/turn/block-adapter';
-
-type DispatchStatus = 'running' | 'done' | 'error' | 'interrupted';
-
-function dispatchStatusOf(block: ToolBlock): DispatchStatus {
-  const d = block.display?.kind === 'agent' ? block.display : undefined;
-  if (d?.background) {
-    if (d.backgroundState === 'completed') return 'done';
-    if (d.backgroundState === 'error') return 'error';
-    if (d.backgroundState === 'interrupted') return 'interrupted';
-    return 'running';
-  }
-  switch (block.status) {
-    case 'executed':
-      return 'done';
-    case 'failed':
-    case 'rejected':
-      return 'error';
-    case 'aborted':
-      return 'interrupted';
-    default:
-      return 'running';
-  }
-}
 
 /** Find the focused dispatch's block list — live stream first (freshest,
  *  covers in-flight dispatches), then persisted message blocks (the live
@@ -99,37 +77,6 @@ function flattenRun(run: ToolBlock[], childrenByParent: Map<string, ToolBlock[]>
   return out;
 }
 
-function StatusChip({ status }: { status: DispatchStatus }) {
-  return (
-    <span
-      className={cn(
-        'flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground',
-        status === 'done' && 'text-success',
-        status === 'error' && 'text-destructive',
-      )}
-    >
-      {status === 'running' ? (
-        <>
-          <Loader2 className="size-2.5 animate-spin" />
-          running…
-        </>
-      ) : status === 'done' ? (
-        <>
-          <Check className="size-2.5" />
-          done
-        </>
-      ) : status === 'error' ? (
-        <>
-          <X className="size-2.5" />
-          failed
-        </>
-      ) : (
-        'interrupted'
-      )}
-    </span>
-  );
-}
-
 export function AgentsTab({ session }: { session: Session }) {
   const focus = useUi((s) => s.focusedDispatchId[session.id] ?? null);
   const setFocusedDispatch = useUi((s) => s.setFocusedDispatch);
@@ -146,7 +93,7 @@ export function AgentsTab({ session }: { session: Session }) {
   }, [focus, liveBlocks, session.messages]);
 
   const bodyRef = useRef<HTMLDivElement>(null);
-  const status = resolved ? dispatchStatusOf(resolved.dispatch) : 'running';
+  const status = resolved ? agentStatusOf(resolved.dispatch) : 'running';
   const running = status === 'running';
   useFollowScroll(bodyRef, running);
 
@@ -214,7 +161,7 @@ export function AgentsTab({ session }: { session: Session }) {
           {!!resolved.dispatch.arguments?.resumeFrom && (
             <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground">↻ resumed</span>
           )}
-          <StatusChip status={status} />
+          <AgentStatusChip status={status} />
           {childCount > 0 && (
             <span className="shrink-0 text-[11px] text-muted-foreground">
               · {childCount} tool {childCount === 1 ? 'call' : 'calls'}
@@ -245,6 +192,7 @@ export function AgentsTab({ session }: { session: Session }) {
               calls={flattenRun(run, childrenByParent)}
               streaming={running}
               variant="stream"
+              sessionId={session.id}
             />
           ))}
           {report && (

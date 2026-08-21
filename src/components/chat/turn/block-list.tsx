@@ -211,6 +211,7 @@ export const BlockList = memo(function BlockList({
                   calls={flattenCalls(toolRuns.find((r) => r[0]?.id === b.id) ?? [], childrenByParent)}
                   streaming={streaming}
                   variant="stream"
+                  sessionId={sessionId}
                   onViewFile={onViewFile}
                   onViewDiff={onViewFileDiff}
                 />
@@ -310,6 +311,7 @@ export const BlockList = memo(function BlockList({
           <ToolChips
             calls={chipCalls}
             streaming={streaming}
+            sessionId={sessionId}
             onViewFile={onViewFile}
             onViewDiff={onViewFileDiff}
           />

@@ -36,6 +36,9 @@ import type { DiffHunk, DiffLine, ToolCall, ToolName } from '@/types';
 import { cn } from '@/lib/utils';
 import { toolLabel } from '@/lib/tool-labels';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
+import { useUi } from '@/lib/stores/ui';
+import { useTabs } from '@/lib/stores/tabs';
+import { agentStatusOf, type AgentStatus } from './agent-status';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
   read_file: <FileSearch className="size-3" />,
@@ -123,6 +126,37 @@ function targetOf(call: ToolCall): string {
 }
 
 const isAgentCall = (c: ToolCall) => c.toolName === 'dispatch_agent' || c.display?.kind === 'agent';
+
+export function AgentStatusChip({ status }: { status: AgentStatus }) {
+  return (
+    <span
+      className={cn(
+        'flex shrink-0 items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground',
+        status === 'done' && 'text-success',
+        status === 'error' && 'text-destructive',
+      )}
+    >
+      {status === 'running' ? (
+        <>
+          <Loader2 className="size-2.5 animate-spin" />
+          running…
+        </>
+      ) : status === 'done' ? (
+        <>
+          <Check className="size-2.5" />
+          done
+        </>
+      ) : status === 'error' ? (
+        <>
+          <X className="size-2.5" />
+          failed
+        </>
+      ) : (
+        'interrupted'
+      )}
+    </span>
+  );
+}
 
 /** Plain-text detail lines for the expanded row body — wrapping mono rows,
  *  never `truncate` (that ellipsized the ends of long lines away). */
@@ -782,42 +816,85 @@ function StatusGlyph({ call }: { call: ToolCall }) {
   }
 }
 
-/** A single expandable tool chip row — shared by top-level calls and the
- *  sub-agent calls nested inside an expanded dispatch row. agentBody, when
- *  present, replaces the generic detail lines. */
+/** A single tool chip row. Expandable rows toggle an inline detail body;
+ *  dispatch_agent rows are NON-expanding single lines — click opens the
+ *  sub-agent's stream in the Agents right-panel tab (onOpenDispatch). */
 function ChipRow({
   call,
-  isChild = false,
   rowOpen,
   onToggle,
   onViewFile,
   onViewDiff,
-  agentBody,
+  onOpenDispatch,
 }: {
   call: ToolCall;
-  isChild?: boolean;
   rowOpen: boolean;
   onToggle: (id: string) => void;
   onViewFile?: (path: string) => void;
   onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
-  agentBody?: React.ReactNode;
+  onOpenDispatch?: () => void;
 }) {
-  const treeSrc = agentBody ? undefined : treeSourceOf(call);
-  const followup = agentBody ? undefined : followupBodyOf(call);
-  const todo = agentBody ? undefined : todoBodyOf(call);
-  const media = agentBody ? undefined : mediaBodyOf(call);
-  const search = agentBody ? undefined : searchBodyOf(call);
-  const grep = agentBody ? undefined : grepBodyOf(call);
-  const mem = agentBody ? undefined : memoryBodyOf(call);
-  const bash = agentBody ? undefined : bashBodyOf(call);
-  const read = agentBody ? undefined : readBodyOf(call);
-  const diff = agentBody ? undefined : diffBodyOf(call);
+  if (onOpenDispatch) {
+    const d = call.display?.kind === 'agent' ? call.display : undefined;
+    const task = (d?.task ?? call.argPreview ?? '').replace(/\s+/g, ' ').trim();
+    const summary = task.length > 60 ? `${task.slice(0, 60)}…` : task;
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpenDispatch}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          onOpenDispatch();
+        }}
+        title="Open this agent's stream in the Agents panel"
+        className="flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
+      >
+        <span className={cn('flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
+          {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
+        </span>
+        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium text-purple-400">
+          {d?.agentName ?? toolLabel(call.toolName, call.status)}
+        </span>
+        {summary && (
+          <span
+            title={d?.task ?? call.argPreview}
+            className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 font-mono text-[11.5px] text-muted-foreground"
+          >
+            {summary}
+          </span>
+        )}
+        <AgentStatusChip status={agentStatusOf(call)} />
+        {call.durationMs != null && (
+          <span className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground">
+            {(call.durationMs / 1000).toFixed(call.durationMs < 10_000 ? 2 : 1)}s
+          </span>
+        )}
+        {!!d?.usage && (
+          <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+            {(d.usage.inputTokens / 1000).toFixed(1)}k in · {(d.usage.outputTokens / 1000).toFixed(1)}k out
+          </span>
+        )}
+      </div>
+    );
+  }
+  const treeSrc = treeSourceOf(call);
+  const followup = followupBodyOf(call);
+  const todo = todoBodyOf(call);
+  const media = mediaBodyOf(call);
+  const search = searchBodyOf(call);
+  const grep = grepBodyOf(call);
+  const mem = memoryBodyOf(call);
+  const bash = bashBodyOf(call);
+  const read = readBodyOf(call);
+  const diff = diffBodyOf(call);
   const details =
-    agentBody || diff != null || treeSrc != null || followup != null || todo != null || media != null || search != null || grep != null || mem != null || bash != null || read != null
+    diff != null || treeSrc != null || followup != null || todo != null || media != null || search != null || grep != null || mem != null || bash != null || read != null
       ? []
       : detailLinesOf(call);
   const target = targetOf(call);
-  const expandable = !!agentBody || details.length > 0 || treeSrc != null || followup != null || todo != null || media != null || search != null || grep != null || mem != null || bash != null || read != null;
+  const expandable = details.length > 0 || treeSrc != null || followup != null || todo != null || media != null || search != null || grep != null || mem != null || bash != null || read != null;
   return (
     <>
       <div
@@ -855,15 +932,7 @@ function ChipRow({
             style={{ transform: rowOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        {isChild && (
-          <span
-            title="run by sub-agent"
-            className="shrink-0 text-[11px] leading-none text-primary/60 select-none"
-          >
-            ↳
-          </span>
-        )}
-        <span className={cn('min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium', isChild ? 'text-foreground/60' : 'text-foreground/80')}>
+        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium text-foreground/80">
           {toolLabel(call.toolName, call.status)}
         </span>
         {target && (
@@ -928,7 +997,7 @@ function ChipRow({
               <pre className="whitespace-pre font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
                 {treeSrc}
               </pre>
-            ) : agentBody ?? details.map((line, i) => (
+            ) : details.map((line, i) => (
               <span key={i} className="whitespace-pre-wrap break-all font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
                 {line}
               </span>
@@ -940,97 +1009,20 @@ function ChipRow({
   );
 }
 
-/** Expanded dispatch_agent body: agent badge + usage, the task (scrollable),
- *  the sub-agent's child calls as fully expandable rows, and the report last. */
-function AgentDetail({
-  call,
-  childCalls,
-  openRows,
-  toggleRow,
-  onViewFile,
-  onViewDiff,
-  streaming,
-}: {
-  call: ToolCall;
-  childCalls: ToolCall[];
-  openRows: Set<string>;
-  toggleRow: (id: string) => void;
-  onViewFile?: (path: string) => void;
-  onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
-  streaming?: boolean;
-}) {
-  const d = call.display?.kind === 'agent' ? call.display : undefined;
-  const agentName = d?.agentName ?? String(call.arguments?.name ?? 'agent');
-  const task = d?.task ?? String(call.arguments?.task ?? '');
-  const report = d?.report ?? call.report ?? call.output ?? '';
-  // Background dispatches keep streaming children after the turn ends, so
-  // follow the dispatch's own status rather than the turn's streaming flag.
-  const childStreamRunning = call.status ? call.status === 'running' : !!streaming;
-  const childRowsRef = useRef<HTMLDivElement>(null);
-  useFollowScroll(childRowsRef, childStreamRunning);
-  return (
-    <div className="flex flex-col gap-[5px] py-1">
-      <div className="flex items-center gap-1.5">
-        <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10.5px] font-medium text-primary">
-          {agentName}
-        </span>
-        {!!call.arguments?.resumeFrom && (
-          <span className="rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground">↻ resumed</span>
-        )}
-        {!!d?.background && (
-          <span className="flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
-            {d.backgroundState === 'completed' ? (
-              '✓ done'
-            ) : d.backgroundState === 'error' ? (
-              'failed'
-            ) : d.backgroundState === 'interrupted' ? (
-              'interrupted'
-            ) : (
-              <>
-                <Loader2 className="size-2.5 animate-spin" />
-                running…
-              </>
-            )}
-          </span>
-        )}
-        {childCalls.length > 0 && (
-          <span className="text-[11px] text-muted-foreground">
-            · {childCalls.length} tool {childCalls.length === 1 ? 'call' : 'calls'}
-          </span>
-        )}
-        {!!d?.usage && (
-          <span className="ml-auto shrink-0 font-mono text-[10.5px] text-muted-foreground">
-            {(d.usage.inputTokens / 1000).toFixed(1)}k in · {(d.usage.outputTokens / 1000).toFixed(1)}k out
-          </span>
-        )}
-      </div>
-      {task && (
-        <p className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.6] text-muted-foreground">{task}</p>
-      )}
-      <div ref={childRowsRef} className={cn('flex flex-col gap-[5px]', childStreamRunning && 'max-h-[420px] overflow-y-auto')}>
-        {childCalls.map((c) => (
-          <ChipRow key={c.id} call={c} isChild rowOpen={openRows.has(c.id)} onToggle={toggleRow} onViewFile={onViewFile} onViewDiff={onViewDiff} />
-        ))}
-      </div>
-      {report && (
-        <p className="whitespace-pre-wrap rounded-md bg-secondary/40 px-2 py-1.5 text-[12px] leading-[1.65] text-foreground/85">
-          {report}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function ToolChipsImpl({
   calls,
   streaming = false,
   variant = 'header',
+  sessionId,
   onViewFile,
   onViewDiff,
 }: {
   calls: ToolCall[];
   streaming?: boolean;
   variant?: 'header' | 'stream';
+  /** Owning session — wires dispatch rows to the Agents panel. Without it,
+   *  dispatch rows render but don't navigate. */
+  sessionId?: string | null;
   onViewFile?: (path: string) => void;
   onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
 }) {
@@ -1052,15 +1044,22 @@ function ToolChipsImpl({
     });
 
   const done = !streaming;
-  // Agent parents absorb their children into the dispatch row's expanded
-  // detail (AgentDetail), so agent children don't render as flat rows.
+  // Agent children don't render as top-level rows — they live in the
+  // dispatch's Agents-panel stream instead.
   const rows = calls.filter(
     (c) => !(c.parentToolCallId && calls.some((p) => p.id === c.parentToolCallId && isAgentCall(p))),
   );
 
+  const openDispatch = (call: ToolCall) => {
+    if (!sessionId) return;
+    useUi.getState().setFocusedDispatch(sessionId, call.id);
+    useTabs.getState().addTab(sessionId, 'agents');
+    useTabs.getState().setActive(sessionId, 'agents');
+    useUi.setState({ rightPanelOpen: true });
+  };
+
   const rowEls = rows.map((call, index) => {
     const isAgent = isAgentCall(call);
-    const childCalls = isAgent ? calls.filter((c) => c.parentToolCallId === call.id) : [];
     return (
       <div key={call.id} style={{ animation: 'fade-up 300ms cubic-bezier(0.23,1,0.32,1) both', animationDelay: done ? undefined : `${Math.min(index, 8) * 60}ms` }}>
         <ChipRow
@@ -1069,17 +1068,7 @@ function ToolChipsImpl({
           onToggle={toggleRow}
           onViewFile={onViewFile}
           onViewDiff={onViewDiff}
-          agentBody={isAgent ? (
-            <AgentDetail
-              call={call}
-              childCalls={childCalls}
-              openRows={openRows}
-              toggleRow={toggleRow}
-              onViewFile={onViewFile}
-              onViewDiff={onViewDiff}
-              streaming={streaming}
-            />
-          ) : undefined}
+          onOpenDispatch={isAgent && sessionId ? () => openDispatch(call) : undefined}
         />
       </div>
     );
