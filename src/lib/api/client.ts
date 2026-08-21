@@ -687,6 +687,73 @@ export async function gitRestoreFile(workspaceId: string, filePath: string, sha:
   return { ok: false, error: 'IPC unavailable' };
 }
 
+export type GitConflictState =
+  | 'both-modified'
+  | 'both-added'
+  | 'both-deleted'
+  | 'added-by-us'
+  | 'added-by-them'
+  | 'deleted-by-us'
+  | 'deleted-by-them';
+
+export interface GitConflictEntry { path: string; state: GitConflictState; }
+
+export interface GitBranchDetailed {
+  name: string;
+  isRemote: boolean;
+  upstream?: string;
+  shortSha: string;
+  subject: string;
+  lastCommitUnix: number;
+  ahead?: number;
+  behind?: number;
+}
+
+export async function gitAmend(workspaceId: string, message: string | null, sessionId?: string): Promise<{ ok: boolean; sha?: string; error?: string }> {
+  if (ipc) return ipc.gitAmend(workspaceId, message, sessionId);
+  return { ok: false };
+}
+export async function gitRevert(workspaceId: string, sha: string, sessionId?: string): Promise<{ ok: boolean; newSha?: string; error?: string }> {
+  if (ipc) return ipc.gitRevert(workspaceId, sha, sessionId);
+  return { ok: false };
+}
+export async function gitFetch(workspaceId: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitFetch(workspaceId, sessionId);
+  return { ok: false };
+}
+export async function gitPush(workspaceId: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitPush(workspaceId, sessionId);
+  return { ok: false };
+}
+export async function gitPull(workspaceId: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitPull(workspaceId, sessionId);
+  return { ok: false };
+}
+export async function gitAheadBehind(workspaceId: string, sessionId?: string): Promise<{ ahead: number; behind: number } | null> {
+  if (ipc) return ipc.gitAheadBehind(workspaceId, sessionId);
+  return null;
+}
+export async function gitBranchesDetailed(workspaceId: string, sessionId?: string): Promise<GitBranchDetailed[]> {
+  if (ipc) return ipc.gitBranchesDetailed(workspaceId, sessionId);
+  return [];
+}
+export async function gitDeleteBranch(workspaceId: string, name: string, force: boolean, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitDeleteBranch(workspaceId, name, force, sessionId);
+  return { ok: false };
+}
+export async function gitMergeBranch(workspaceId: string, name: string, sessionId?: string): Promise<{ ok: boolean; conflicts?: GitConflictEntry[]; error?: string }> {
+  if (ipc) return ipc.gitMergeBranch(workspaceId, name, sessionId);
+  return { ok: false };
+}
+export async function gitConflictFiles(workspaceId: string, sessionId?: string): Promise<GitConflictEntry[]> {
+  if (ipc) return ipc.gitConflictFiles(workspaceId, sessionId);
+  return [];
+}
+export async function gitResolveFile(workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitResolveFile(workspaceId, filePath, side, sessionId);
+  return { ok: false };
+}
+
 // ============================================================
 // RAG status (Memory & RAG panel)
 // ============================================================

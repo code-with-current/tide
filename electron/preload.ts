@@ -375,6 +375,28 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitHeadSha', workspaceId, sessionId),
   gitRestoreFile: (workspaceId: string, filePath: string, sha: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitRestoreFile', workspaceId, filePath, sha, sessionId),
+  gitAmend: (workspaceId: string, message: string | null, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitAmend', workspaceId, message, sessionId),
+  gitRevert: (workspaceId: string, sha: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitRevert', workspaceId, sha, sessionId),
+  gitFetch: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitFetch', workspaceId, sessionId),
+  gitPush: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitPush', workspaceId, sessionId),
+  gitPull: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitPull', workspaceId, sessionId),
+  gitAheadBehind: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitAheadBehind', workspaceId, sessionId),
+  gitBranchesDetailed: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitBranchesDetailed', workspaceId, sessionId),
+  gitDeleteBranch: (workspaceId: string, name: string, force: boolean, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitDeleteBranch', workspaceId, name, force, sessionId),
+  gitMergeBranch: (workspaceId: string, name: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitMergeBranch', workspaceId, name, sessionId),
+  gitConflictFiles: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitConflictFiles', workspaceId, sessionId),
+  gitResolveFile: (workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitResolveFile', workspaceId, filePath, side, sessionId),
 
   // ── RAG (Memory & RAG panel) ──
   ragStatus: (workspaceId: string) =>

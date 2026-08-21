@@ -1,4 +1,4 @@
-/** Git IPC handlers. Each function runs git via spawn with shell:false (args passed directly — no shell quoting, platform-independent) in the workspace root. No remote operations (push/fetch/pull) are exposed. */
+/** Git IPC handlers. Each function runs git via spawn with shell:false (args passed directly — no shell quoting, platform-independent) in the workspace root. Remote operations (fetch/push/pull) return {ok, error?} instead of throwing so the renderer can surface git's stderr. */
 
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -7,6 +7,7 @@ import { resolveInsideWorkspace } from '../agent/path-safety';
 import { parseUnifiedDiff } from '../../src/lib/stream/parse-diff';
 import { clampContextLines } from '../../src/lib/diff/expand-context';
 import { toolEnv } from '../agent/tools/tool-env';
+import { parseConflictEntries, type ConflictEntry } from './git-conflicts';
 import type { DiffHunk } from '../../src/types';
 
 /**
@@ -272,6 +273,181 @@ export async function gitRestoreFile(rootDir: string, filePath: string, sha: str
     } catch (e: any) {
       return { ok: false, error: e?.message ?? String(e) };
     }
+  }
+}
+
+// ─── Remote + history + branch + conflict ops (Git Panel service operations) ───────────────
+
+/** Amend the last commit. With a message, replaces it; without, keeps the
+ *  original (`--no-edit`). Returns the new short SHA. */
+export async function gitAmend(rootDir: string, message?: string): Promise<string> {
+  const args = message?.trim()
+    ? ['commit', '--amend', '-m', message]
+    : ['commit', '--amend', '--no-edit'];
+  await runGit(args, rootDir, 10000);
+  const { stdout } = await runGit(['rev-parse', '--short', 'HEAD'], rootDir);
+  return stdout.trim();
+}
+
+/** Revert a commit with an auto-generated message. On conflict git leaves the
+ *  repo mid-revert — the caller resolves via gitConflictFiles/gitResolveFile. */
+export async function gitRevertCommit(rootDir: string, sha: string): Promise<{ ok: boolean; newSha?: string; error?: string }> {
+  try {
+    await runGit(['revert', '--no-edit', sha], rootDir, 10000);
+    const { stdout } = await runGit(['rev-parse', '--short', 'HEAD'], rootDir);
+    return { ok: true, newSha: stdout.trim() };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+export async function gitFetch(rootDir: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await runGit(['fetch'], rootDir, 60000);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/** Push HEAD. Without an upstream, pushes and sets it via `push -u origin HEAD`. */
+export async function gitPush(rootDir: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    let hasUpstream = false;
+    try {
+      await runGit(['rev-parse', '--abbrev-ref', '@{u}'], rootDir);
+      hasUpstream = true;
+    } catch { /* no upstream configured — set it on push */ }
+    const args = hasUpstream ? ['push'] : ['push', '-u', 'origin', 'HEAD'];
+    await runGit(args, rootDir, 120000);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+export async function gitPull(rootDir: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await runGit(['pull', '--ff-only'], rootDir, 120000);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/** Ahead/behind of HEAD vs its upstream. null when no upstream is configured. */
+export async function gitAheadBehind(rootDir: string): Promise<{ ahead: number; behind: number } | null> {
+  try {
+    // left of `...` is the upstream side (behind), right is HEAD (ahead).
+    const { stdout } = await runGit(['rev-list', '--left-right', '--count', '@{u}...HEAD'], rootDir);
+    const [behind, ahead] = stdout.trim().split(/\s+/).map(Number);
+    return { ahead: ahead || 0, behind: behind || 0 };
+  } catch { return null; }
+}
+
+export interface GitBranchDetailed {
+  name: string;
+  isRemote: boolean;
+  upstream?: string;
+  shortSha: string;
+  subject: string;
+  lastCommitUnix: number;
+  ahead?: number;
+  behind?: number;
+}
+
+// Subject is last so `|` inside it can be recovered via join; refnames cannot contain `|`.
+const DETAILED_BRANCH_FORMAT = '%(refname:short)|%(upstream:short)|%(committerdate:unix)|%(objectname:short)|%(subject)';
+
+/** Local + remote-tracking branches with subject/date/sha, and ahead/behind
+ *  for local branches that track an upstream. The origin/HEAD symref is
+ *  excluded. Local and remote namespaces are queried separately so isRemote
+ *  is structural, not inferred from the short name. */
+export async function gitListBranchesDetailed(rootDir: string): Promise<GitBranchDetailed[]> {
+  try {
+    const parse = (stdout: string, isRemote: boolean): GitBranchDetailed[] => {
+      const out: GitBranchDetailed[] = [];
+      for (const line of stdout.split('\n')) {
+        if (!line.trim()) continue;
+        const [name, upstream, date, sha, ...subject] = line.split('|');
+        if (isRemote && name === 'origin/HEAD') continue;
+        out.push({
+          name,
+          isRemote,
+          shortSha: sha ?? '',
+          subject: subject.join('|'),
+          lastCommitUnix: Number(date) || 0,
+          ...(upstream ? { upstream } : {}),
+        });
+      }
+      return out;
+    };
+    const { stdout: locals } = await runGit(['for-each-ref', `--format=${DETAILED_BRANCH_FORMAT}`, 'refs/heads'], rootDir);
+    const { stdout: remotes } = await runGit(['for-each-ref', `--format=${DETAILED_BRANCH_FORMAT}`, 'refs/remotes'], rootDir);
+    const branches = [...parse(locals, false), ...parse(remotes, true)];
+    for (const b of branches) {
+      if (!b.isRemote && b.upstream) {
+        try {
+          const { stdout } = await runGit(['rev-list', '--left-right', '--count', `${b.upstream}...${b.name}`], rootDir);
+          const [behind, ahead] = stdout.trim().split(/\s+/).map(Number);
+          b.ahead = ahead || 0;
+          b.behind = behind || 0;
+        } catch { /* upstream ref gone (not yet pruned) — omit counts */ }
+      }
+    }
+    return branches;
+  } catch { return []; }
+}
+
+export async function gitDeleteBranch(rootDir: string, name: string, force = false): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await runGit(['branch', force ? '-D' : '-d', name], rootDir);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/** Merge a branch into HEAD. On conflict, exits non-zero and leaves the
+ *  worktree mid-merge — conflicts are returned for the resolve flow. */
+export async function gitMergeBranch(rootDir: string, name: string): Promise<{ ok: boolean; conflicts?: ConflictEntry[]; error?: string }> {
+  try {
+    await runGit(['merge', name, '--no-edit'], rootDir, 30000);
+    return { ok: true };
+  } catch (e: any) {
+    const conflicts = await gitConflictFiles(rootDir);
+    if (conflicts.length > 0) return { ok: false, conflicts };
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+/** Unmerged paths from `status --porcelain -z` (raw NUL-delimited paths —
+ *  see git-conflicts.ts). */
+export async function gitConflictFiles(rootDir: string): Promise<ConflictEntry[]> {
+  try {
+    const { stdout } = await runGit(['status', '--porcelain', '-z'], rootDir);
+    return parseConflictEntries(stdout);
+  } catch { return []; }
+}
+
+/** Resolve one conflicted path by picking a side. If the chosen side deleted
+ *  the file, `git rm` it (records the deletion); otherwise `checkout --ours/--theirs`.
+ *  Either way the path is then staged, completing the resolution. */
+export async function gitResolveFile(rootDir: string, filePath: string, side: 'ours' | 'theirs'): Promise<{ ok: boolean; error?: string }> {
+  resolveInsideWorkspace(rootDir, filePath);
+  try {
+    const entry = (await gitConflictFiles(rootDir)).find((c) => c.path === filePath);
+    const oursDeleted = entry?.state === 'deleted-by-us' || entry?.state === 'both-deleted';
+    const theirsDeleted = entry?.state === 'deleted-by-them' || entry?.state === 'both-deleted';
+    if ((side === 'ours' && oursDeleted) || (side === 'theirs' && theirsDeleted)) {
+      await runGit(['rm', '--', filePath], rootDir);
+    } else {
+      await runGit(['checkout', `--${side}`, '--', filePath], rootDir);
+    }
+    await runGit(['add', '--', filePath], rootDir);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
   }
 }
 

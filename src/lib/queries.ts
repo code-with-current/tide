@@ -508,6 +508,112 @@ export function useGitCommit(workspaceId: string, sessionId?: string | null) {
   });
 }
 
+/** Ahead/behind of HEAD vs its upstream. null when no upstream is configured. */
+export function useGitAheadBehind(workspaceId: string | null, sessionId?: string | null) {
+  const key = ['gitAheadBehind', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitAheadBehind(workspaceId, sessionId ?? undefined) : Promise.resolve(null)),
+    enabled: !!workspaceId,
+    staleTime: 10_000,
+  });
+}
+
+/** Amend the last commit (message=null keeps the original). Rewrites HEAD,
+ *  so status + history refresh — same invalidation as useGitCommit. */
+export function useGitAmend(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (message: string | null) => api.gitAmend(workspaceId, message, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+      qc.invalidateQueries({ queryKey: ['gitLog', workspaceId] });
+    },
+  });
+}
+
+export function useGitRevert(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sha: string) => api.gitRevert(workspaceId, sha, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+      qc.invalidateQueries({ queryKey: ['gitLog', workspaceId] });
+    },
+  });
+}
+
+export function useGitFetch(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.gitFetch(workspaceId, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gitAheadBehind', workspaceId] });
+      qc.invalidateQueries({ queryKey: ['gitBranchesDetailed', workspaceId] });
+    },
+  });
+}
+
+export function useGitPush(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.gitPush(workspaceId, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gitAheadBehind', workspaceId] });
+    },
+  });
+}
+
+export function useGitPull(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.gitPull(workspaceId, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+      qc.invalidateQueries({ queryKey: ['gitLog', workspaceId] });
+      qc.invalidateQueries({ queryKey: ['gitAheadBehind', workspaceId] });
+      qc.invalidateQueries({ queryKey: ['gitBranchesDetailed', workspaceId] });
+    },
+  });
+}
+
+export function useGitDeleteBranch(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, force }: { name: string; force?: boolean }) =>
+      api.gitDeleteBranch(workspaceId, name, force ?? false, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gitBranchesDetailed', workspaceId] });
+      qc.invalidateQueries({ queryKey: ['gitRecentBranches', workspaceId] });
+    },
+  });
+}
+
+/** Merge a branch into HEAD. On conflict the result carries the conflict
+ *  entries for the resolve flow. */
+export function useGitMergeBranch(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.gitMergeBranch(workspaceId, name, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+      qc.invalidateQueries({ queryKey: ['gitLog', workspaceId] });
+    },
+  });
+}
+
+export function useGitResolveFile(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ filePath, side }: { filePath: string; side: 'ours' | 'theirs' }) =>
+      api.gitResolveFile(workspaceId, filePath, side, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
+      qc.invalidateQueries({ queryKey: ['gitConflictFiles', workspaceId] });
+    },
+  });
+}
+
 // ============================================================
 // RAG status (Memory & RAG panel)
 // ============================================================

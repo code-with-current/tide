@@ -13,7 +13,7 @@ import { resolveModelMeta, matchModelToCatalog } from '../agent/model-catalog.js
 import { getActiveCatalog, refreshModelCatalog } from '../agent/model-capabilities.js';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches } from './git.js';
+import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches, gitAmend, gitRevertCommit, gitFetch, gitPush, gitPull, gitAheadBehind, gitListBranchesDetailed, gitDeleteBranch, gitMergeBranch, gitConflictFiles, gitResolveFile } from './git.js';
 import { startGitWatcher } from './git-watcher.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
@@ -1401,6 +1401,81 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { ok: false, error: 'no workspace' };
     return await gitRestoreFile(root, filePath, sha);
+  });
+
+  // ── Git: remote + history + branch + conflict service ops ──────
+
+  handle('tide:gitAmend', async (_e, workspaceId: string, message: string | null, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    try {
+      const sha = await gitAmend(root, message ?? undefined);
+      return { ok: true, sha };
+    } catch (e: any) { return { ok: false, error: e?.message }; }
+  });
+
+  // Revert a commit; conflicts come back as ok:false for the resolve flow.
+  handle('tide:gitRevert', async (_e, workspaceId: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitRevertCommit(root, sha);
+  });
+
+  handle('tide:gitFetch', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitFetch(root);
+  });
+
+  handle('tide:gitPush', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitPush(root);
+  });
+
+  handle('tide:gitPull', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitPull(root);
+  });
+
+  // null when no upstream is configured.
+  ipcMain.handle('tide:gitAheadBehind', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return null;
+    try { return await gitAheadBehind(root); } catch { return null; }
+  });
+
+  // Local + remote-tracking branches with ahead/behind for tracked locals.
+  ipcMain.handle('tide:gitBranchesDetailed', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await gitListBranchesDetailed(root); } catch { return []; }
+  });
+
+  handle('tide:gitDeleteBranch', async (_e, workspaceId: string, name: string, force: boolean, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitDeleteBranch(root, name, force);
+  });
+
+  // Merge a branch into HEAD; conflicts returned for the resolve flow.
+  handle('tide:gitMergeBranch', async (_e, workspaceId: string, name: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitMergeBranch(root, name);
+  });
+
+  ipcMain.handle('tide:gitConflictFiles', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return [];
+    try { return await gitConflictFiles(root); } catch { return []; }
+  });
+
+  handle('tide:gitResolveFile', async (_e, workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitResolveFile(root, filePath, side);
   });
 
   // ── RAG (Memory & RAG panel) ────────────────────────────────────
