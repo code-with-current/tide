@@ -108,32 +108,46 @@ export function AddProviderWizard({
 
   const body = (
     <div className="flex flex-1 min-h-0">
-      <div className="w-[148px] border-r border-border px-3 py-4 flex flex-col gap-1.5 shrink-0">
+      <div className="w-[168px] border-r border-border px-3 py-4 flex flex-col gap-2 shrink-0">
         {STEPS.map((s, i) => {
           const current = s === state.step;
           const completed = i < STEPS.indexOf(state.step);
           return (
-            <div key={s} className="flex items-center gap-2">
+            <div
+              key={s}
+              className={cn(
+                'flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors',
+                current
+                  ? 'border-primary/40 bg-secondary shadow-sm'
+                  : completed
+                    ? 'border-border/60 bg-secondary/40'
+                    : 'border-transparent',
+              )}
+            >
               <span
                 className={cn(
-                  'size-5 rounded-full flex items-center justify-center shrink-0',
+                  'size-6 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-mono font-semibold',
                   current
                     ? 'bg-primary text-primary-foreground'
                     : completed
                       ? 'bg-primary/20 text-primary'
-                      : 'bg-secondary text-muted-foreground/50',
+                      : 'bg-secondary text-muted-foreground/50 border border-border',
                 )}
               >
                 {completed ? (
-                  <Check className="size-2.5" />
+                  <Check className="size-3" />
                 ) : (
-                  <span className="text-[9px] font-mono">{i + 1}</span>
+                  i + 1
                 )}
               </span>
               <span
                 className={cn(
-                  'text-[11px]',
-                  current ? 'text-foreground font-medium' : 'text-muted-foreground/55',
+                  'text-[12px]',
+                  current
+                    ? 'text-foreground font-semibold'
+                    : completed
+                      ? 'text-foreground/80'
+                      : 'text-muted-foreground/55',
                 )}
               >
                 {STEP_LABELS[s]}
@@ -190,7 +204,14 @@ export function AddProviderWizard({
         )}
         <Button
           size="sm"
-          disabled={!canAdvance(state, test, requiresKey) || saving || test.status === 'running'}
+          disabled={
+            state.step === 'choose' ||
+            // Fields only — handleNext runs the connection test on click, so
+            // requiring an already-passed test here would deadlock the button.
+            !canAdvance(state, { status: 'ok' }, requiresKey) ||
+            saving ||
+            test.status === 'running'
+          }
           onClick={state.step === 'review' ? handleSave : handleNext}
         >
           {saving || test.status === 'running' ? (
