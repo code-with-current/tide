@@ -519,6 +519,49 @@ export function useGitAheadBehind(workspaceId: string | null, sessionId?: string
   });
 }
 
+/** All branches (local + remote) with last-commit metadata + ahead/behind
+ *  per local branch. Powers the branch popover; `enabled` gates it to open state. */
+export function useBranchesDetailed(workspaceId: string | null, sessionId?: string | null, enabled = true) {
+  const key = ['gitBranchesDetailed', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitBranchesDetailed(workspaceId, sessionId ?? undefined) : Promise.resolve([] as import('@/lib/api/client').GitBranchDetailed[])),
+    enabled: !!workspaceId && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useGitCheckout(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (branch: string) => api.gitCheckout(workspaceId, branch, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gitBranch'] });
+      qc.invalidateQueries({ queryKey: ['gitStatus'] });
+      qc.invalidateQueries({ queryKey: ['gitLog'] });
+      qc.invalidateQueries({ queryKey: ['gitRecentBranches'] });
+      qc.invalidateQueries({ queryKey: ['gitAheadBehind'] });
+      qc.invalidateQueries({ queryKey: ['gitBranchesDetailed'] });
+    },
+  });
+}
+
+/** gitCreateBranch runs `checkout -b` in the main process — the new branch
+ *  is checked out on success (auto-switch). */
+export function useGitCreateBranch(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (branchName: string) => api.gitCreateBranch(workspaceId, branchName, sessionId ?? undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gitBranch'] });
+      qc.invalidateQueries({ queryKey: ['gitStatus'] });
+      qc.invalidateQueries({ queryKey: ['gitLog'] });
+      qc.invalidateQueries({ queryKey: ['gitRecentBranches'] });
+      qc.invalidateQueries({ queryKey: ['gitBranchesDetailed'] });
+    },
+  });
+}
+
 /** Amend the last commit (message=null keeps the original). Rewrites HEAD,
  *  so status + history refresh — same invalidation as useGitCommit. */
 export function useGitAmend(workspaceId: string, sessionId?: string | null) {

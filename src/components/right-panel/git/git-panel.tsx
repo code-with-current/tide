@@ -12,6 +12,7 @@ import { TabButton } from './tab-button';
 import { CommitRow } from './commit-row';
 import { CollapsibleSection } from './collapsible-section';
 import { buildFileTree, countFiles, type TreeNode } from './file-tree';
+import { BranchMenu, BranchBadges } from '@/components/git/branch-menu';
 import * as api from '@/lib/api/client';
 import type { GitFileChange } from '@/lib/api/client';
 import type { DiffHunk } from '@/types';
@@ -170,16 +171,37 @@ export function GitPanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0 min-w-0 bg-background">
-      {/* Branch strip — the live checked-out branch for this session's
-          working directory. Updates instantly when the agent checks out a
-          branch (via the git-tool/bash invalidation in MainScreen). */}
+      {/* Branch toolbar — BranchMenu popover + ahead/behind badges + stash.
+          Replaces the old plain branch strip at the top of the Changes
+          sub-section. */}
       {branch && (
-        <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0 border-b border-border text-muted-foreground">
-          <GitBranch className="size-3 flex-shrink-0" />
-          <span className="font-mono text-[11px] truncate">{branch}</span>
+        <div className="flex items-center gap-1.5 px-2 py-1 flex-shrink-0 border-b border-border text-muted-foreground min-w-0">
+          <BranchMenu
+            trigger={
+              <button
+                type="button"
+                className="flex items-center gap-1.5 h-6 px-1.5 rounded-md text-[11px] hover:bg-secondary/60 transition-colors min-w-0"
+                title="Switch branch"
+              >
+                <GitBranch className="size-3 flex-shrink-0" />
+                <span className="font-mono truncate">{branch}</span>
+                <ChevronRight className="size-3 flex-shrink-0 rotate-90 opacity-50" />
+              </button>
+            }
+          />
+          <BranchBadges />
           {activeSession?.worktree && (
-            <span className="ml-auto text-[9px] uppercase tracking-wide opacity-70">worktree</span>
+            <span className="text-[9px] uppercase tracking-wide opacity-70">worktree</span>
           )}
+          <div className="flex-1" />
+          <Button
+            variant="ghost" size="icon-xs"
+            disabled={bulk.isPending || changesCount === 0}
+            onClick={() => bulk.mutate('stash')}
+            aria-label="Stash all changes" title="Stash All"
+          >
+            <Archive className="size-3" />
+          </Button>
         </div>
       )}
       {/* Square, full-width tab bar */}
