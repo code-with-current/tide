@@ -27,7 +27,6 @@ const MAX_DIFF_CHARS = 50_000;
 export function CommitBar({
   workspaceId,
   gitSessionId,
-  sessionId,
   staged,
   hasConflicts,
   hasChanges,
@@ -39,8 +38,6 @@ export function CommitBar({
   workspaceId: string;
   /** Worktree-aware session id for git fetches (staged diff, HEAD message). */
   gitSessionId?: string | null;
-  /** Active session — the ✨ dispatch turn runs here. */
-  sessionId?: string | null;
   staged: GitFileChange[];
   hasConflicts: boolean;
   hasChanges: boolean;
@@ -113,7 +110,7 @@ export function CommitBar({
     if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n… (truncated)`;
     setSuggesting(true);
     const res = run({
-      sessionId,
+      workspaceId,
       agent: 'commit-writer',
       task: `Draft a conventional commit message for the staged diff below. Do NOT commit — report only the proposed message. Reply with the message in a fenced code block: subject line, blank line, then an optional body.\n\n<staged-diff>\n${diff}\n</staged-diff>`,
     });

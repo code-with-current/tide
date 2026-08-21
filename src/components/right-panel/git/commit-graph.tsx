@@ -11,7 +11,7 @@ const LANE_X0 = 14;
 const LANE_DX = 9;
 const MAX_LANE = 5;
 
-const LANE_COLORS = ['#7aa2f7', '#bb9af7', '#9ece6a', '#e0af68', '#f7768e', '#7dcfff'];
+export const LANE_COLORS = ['#7aa2f7', '#bb9af7', '#9ece6a', '#e0af68', '#f7768e', '#7dcfff'];
 
 function laneX(lane: number) {
   return LANE_X0 + Math.min(lane, MAX_LANE) * LANE_DX;

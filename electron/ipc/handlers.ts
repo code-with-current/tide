@@ -813,7 +813,7 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     return sessions.getSession(id);
   });
 
-  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string }) => {
+  handle('tide:createSession', async (_e, workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string; kind?: 'main' | 'subagent' }) => {
     const s = sessions.createSession(workspaceId, title, modelId, opts);
     twinV2Session(s.id, workspaceId, s.title, modelId, opts?.providerId);
     return s;

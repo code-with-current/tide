@@ -1,17 +1,19 @@
 /** useGitAgentAction — dispatch a built-in sub-agent (e.g. commit-writer)
- *  from Git UI, or (agent omitted) run a plain model turn on the session.
- *  There is no direct renderer→dispatch IPC: the mechanism is a chat turn
- *  whose prompt carries the same agent-mention hint the composer injects,
- *  so the orchestrator calls dispatch_agent and the report streams back
- *  over the normal agent event stream. This hook starts that turn and
- *  mirrors the dispatch's report (or, for plain turns, the assistant text)
- *  out of the shared stream store (maintained by useChatStream's
- *  mount-once listener) — it never registers its own IPC listener, so
- *  cleanup is a plain store unsubscribe.
+ *  from Git UI, or (agent omitted) run a plain model turn — on a HIDDEN
+ *  utility session so git tooling never leaks turns into the user's active
+ *  chat. There is no direct renderer→dispatch IPC: the mechanism is a chat
+ *  turn whose prompt carries the same agent-mention hint the composer
+ *  injects, so the orchestrator calls dispatch_agent and the report streams
+ *  back over the normal agent event stream. This hook starts that turn on
+ *  the utility session and mirrors the dispatch's report (falling back to
+ *  the assistant text when the model answers inline instead of dispatching)
+ *  out of the shared stream store — it never registers its own IPC
+ *  listener, so cleanup is a plain store unsubscribe.
  *
- *  The turn is visible in the session's chat (user line + dispatch row +
- *  report); MainScreen's freeze effect persists the assistant message as
- *  usual. */
+ *  Utility sessions are created with kind 'subagent' (excluded from session
+ *  lists and dispatch lists — invisible everywhere) at autonomy 'full' so
+ *  the dispatch never waits on a permission card that can't render. One
+ *  per workspace per app run. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api/client';
@@ -19,8 +21,8 @@ import { useUi } from '@/lib/stores/ui';
 import type { SessionStream, ToolCall } from '@/types';
 
 export interface GitAgentDispatchArgs {
-  /** Session the dispatch turn runs on. Dispatch needs one — absent means no-op. */
-  sessionId: string | null | undefined;
+  /** Workspace the utility session belongs to. */
+  workspaceId: string;
   /** Built-in agent name (must exist in the dispatch_agent catalog). Omit for
    *  a plain model turn — no dispatch hint, assistant text mirrors as report. */
   agent?: string;
@@ -53,6 +55,41 @@ function dispatchReportOf(toolCalls: ToolCall[] | undefined, agent: string): str
   return report;
 }
 
+const utilitySessions = new Map<string, Promise<string>>();
+
+/** Find-or-create this workspace's hidden git-tools session. Model settings
+ *  copy the active session (or the composer's selected model) so the turn
+ *  bills to the provider the user actually uses. */
+async function ensureUtilitySession(workspaceId: string): Promise<string> {
+  const cached = utilitySessions.get(workspaceId);
+  if (cached) return cached;
+  const created = (async () => {
+    let modelId = '';
+    let providerId: string | undefined;
+    const activeId = useUi.getState().activeSessionId;
+    if (activeId) {
+      const s = await api.getSession(activeId).catch(() => null);
+      modelId = s?.modelId ?? '';
+      providerId = s?.providerId ?? undefined;
+    }
+    if (!modelId) {
+      const ui = useUi.getState();
+      modelId = ui.selectedModelId ?? '';
+      providerId = ui.selectedProviderId ?? undefined;
+    }
+    const s = await api.createSession(workspaceId, '✨ Git tools', modelId, {
+      kind: 'subagent',
+      autonomyMode: 'full',
+      thinkingLevel: 'low',
+      ...(providerId ? { providerId } : {}),
+    });
+    return s.id as string;
+  })();
+  utilitySessions.set(workspaceId, created);
+  created.catch(() => utilitySessions.delete(workspaceId));
+  return created;
+}
+
 export function useGitAgentAction(): {
   run: (args: GitAgentDispatchArgs) => GitAgentRunResult;
   state: GitAgentActionState;
@@ -82,48 +119,16 @@ export function useGitAgentAction(): {
       console.warn('useGitAgentAction: IPC unavailable (browser dev mode)');
       return { status: 'error' };
     }
-    if (!args.sessionId) {
-      console.warn('useGitAgentAction: agent dispatch requires an active session');
-      return { status: 'error' };
-    }
-    if (useUi.getState().streams[args.sessionId]?.isStreaming) {
-      console.warn('useGitAgentAction: session already streaming — not dispatching');
-      return { status: 'error' };
-    }
-
-    const sid = args.sessionId;
-    activeSidRef.current = sid;
     setState({ status: 'running', report: '', error: null });
-
-    // Watch the shared stream store for this dispatch's report + completion.
-    let prevStream = useUi.getState().streams[sid];
-    const finish = (next: GitAgentActionState) => {
-      cleanup();
-      setState(next);
-    };
-    const reportOf = (stream: SessionStream) =>
-      args.agent ? dispatchReportOf(stream.toolCalls, args.agent) : stream.text;
-    unsubscribeRef.current = useUi.subscribe((s) => {
-      const stream = s.streams[sid];
-      if (stream === prevStream || !stream) return;
-      prevStream = stream;
-      const report = reportOf(stream);
-      if (stream.finalMessage && !stream.isStreaming) {
-        const failed = !!stream.error || stream.stopReason === 'aborted';
-        finish(failed
-          ? { status: 'error', report, error: stream.error ?? `turn ${stream.stopReason ?? 'ended'}` }
-          : { status: 'done', report, error: null });
-        return;
-      }
-      if (stream.error) {
-        finish({ status: 'error', report, error: stream.error });
-        return;
-      }
-      setState((cur) => (cur.status === 'running' ? { ...cur, report } : cur));
-    });
 
     void (async () => {
       try {
+        const sid = await ensureUtilitySession(args.workspaceId);
+        if (useUi.getState().streams[sid]?.isStreaming) {
+          throw new Error('a git tool action is already running');
+        }
+        activeSidRef.current = sid;
+
         const session = await api.getSession(sid);
         const agents = args.agent ? await api.listAgents().catch(() => []) : [];
         const description = args.agent ? agents.find((a) => a.name === args.agent)?.description : undefined;
@@ -133,24 +138,53 @@ export function useGitAgentAction(): {
         const promptText = args.agent
           ? [
               description
-                ? `[User wants to use the "${args.agent}" agent — ${description} Dispatch via the dispatch_agent tool if the task matches, or apply its approach directly.]`
+                ? `[User wants to use the "${args.agent}" agent — ${description} Dispatch via the dispatch_agent tool.]`
                 : `[User wants to use the "${args.agent}" agent.]`,
               `<task>\n${args.task}\n</task>`,
-              `Dispatch the "${args.agent}" agent with the task above via the dispatch_agent tool instead of answering it yourself.`,
+              `Dispatch the "${args.agent}" agent with the task above via the dispatch_agent tool. Do not perform the task yourself and do not answer it directly.`,
             ].join('\n\n')
           : args.task;
 
         await api.addMessage(sid, 'user', displayText);
 
-        const history = (session?.messages ?? [])
-          .filter((m: { role: string }) => m.role === 'user' || m.role === 'assistant')
-          .slice(-20)
-          .map((m: { role: string; content: string }) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+        // Self-contained tasks — no prior history keeps every action cheap
+        // and stops git-tool prompts from cross-contaminating.
+        const history: { role: 'user' | 'assistant'; content: string }[] = [];
 
         useUi.getState().resetStream(sid);
         useUi.getState().patchStream(sid, { isStreaming: true });
         useUi.getState().setSessionRunning(sid, true);
-        prevStream = useUi.getState().streams[sid];
+
+        // Watch the shared stream store for this dispatch's report + completion.
+        let prevStream = useUi.getState().streams[sid];
+        const finish = (next: GitAgentActionState) => {
+          cleanup();
+          setState(next);
+        };
+        const reportOf = (stream: SessionStream) => {
+          if (!args.agent) return stream.text;
+          // The model occasionally answers inline despite the imperative
+          // dispatch instruction — its text IS the requested output then.
+          return dispatchReportOf(stream.toolCalls, args.agent) || stream.text;
+        };
+        unsubscribeRef.current = useUi.subscribe((s) => {
+          const stream = s.streams[sid];
+          if (stream === prevStream || !stream) return;
+          prevStream = stream;
+          const report = reportOf(stream);
+          if (stream.finalMessage && !stream.isStreaming) {
+            const failed = !!stream.error || stream.stopReason === 'aborted';
+            finish(failed
+              ? { status: 'error', report, error: stream.error ?? `turn ${stream.stopReason ?? 'ended'}` }
+              : { status: 'done', report, error: null });
+            return;
+          }
+          if (stream.error) {
+            finish({ status: 'error', report, error: stream.error });
+            return;
+          }
+          setState((cur) => (cur.status === 'running' ? { ...cur, report } : cur));
+        });
 
         await ipc.runTurn({
           sessionId: sid,
@@ -161,8 +195,8 @@ export function useGitAgentAction(): {
           ],
           modelId: session?.modelId ?? '',
           providerId: session?.providerId ?? '',
-          autonomyMode: session?.autonomyMode ?? 'ask',
-          thinkingLevel: session?.thinkingLevel ?? 'medium',
+          autonomyMode: 'full',
+          thinkingLevel: 'low',
         });
 
         // runTurn resolved but no turn_end landed (empty turn) — settle with
@@ -175,16 +209,17 @@ export function useGitAgentAction(): {
           }
         }
       } catch (err: any) {
-        if (activeSidRef.current === sid) {
-          useUi.getState().patchStream(sid, { isStreaming: false });
-          useUi.getState().setSessionRunning(sid, false);
-          finish({ status: 'error', report: '', error: err?.message ?? String(err) });
+        if (activeSidRef.current) {
+          useUi.getState().patchStream(activeSidRef.current, { isStreaming: false });
+          useUi.getState().setSessionRunning(activeSidRef.current, false);
         }
+        cleanup();
+        setState({ status: 'error', report: '', error: err?.message ?? String(err) });
       }
     })();
 
     return { status: 'running' };
-  }, [ipc, cleanup]);
+  }, [cleanup, ipc]);
 
   const reset = useCallback(() => {
     cleanup();

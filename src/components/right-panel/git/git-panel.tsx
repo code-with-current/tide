@@ -12,7 +12,7 @@ import { ChangedFileRow } from './changed-file-row';
 import { CommitBar } from './commit-bar';
 import { TabButton } from './tab-button';
 import { CommitRow } from './commit-row';
-import { GraphColumn, ROW_H } from './commit-graph';
+import { GraphColumn, LANE_COLORS, ROW_H } from './commit-graph';
 import { assignLanes } from '@/lib/git/lanes';
 import { CollapsibleSection } from './collapsible-section';
 import { buildFileTree, countFiles, type TreeNode } from './file-tree';
@@ -343,7 +343,7 @@ export function GitPanel() {
               <CommitBar
                 workspaceId={workspaceId}
                 gitSessionId={gitSessionId}
-                sessionId={sessionId}
+
                 staged={staged}
                 hasConflicts={hasConflicts}
                 hasChanges={changesCount > 0}
@@ -508,6 +508,7 @@ export function GitPanel() {
                 <GraphColumn commits={laidHistory} height={historyVirtualizer.getTotalSize()} />
                 {historyVirtualizer.getVirtualItems().map((row) => {
                   const commit = history![row.index];
+                  const laid = laidHistory[row.index];
                   return (
                     <div
                       key={commit.sha}
@@ -518,6 +519,7 @@ export function GitPanel() {
                         commit={commit}
                         active={commit.sha === commitDetail?.sha}
                         pendingAction={revertMutation.isPending || createBranchMutation.isPending}
+                        laneColor={LANE_COLORS[laid.lane % LANE_COLORS.length]}
                         onSelect={() => setCommitDetail(commit)}
                         onRevert={handleRevertCommit}
                         onBranch={handleBranchFrom}

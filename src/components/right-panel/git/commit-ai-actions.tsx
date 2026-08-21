@@ -14,7 +14,7 @@ import { Loader2, Sparkles, X } from 'lucide-react';
 import * as api from '@/lib/api/client';
 import type { GitFileChange } from '@/lib/api/client';
 import type { DiffHunk } from '@/types';
-import { useUi } from '@/lib/stores/ui';
+
 import { toast } from '@/lib/toast';
 import { useGitAgentAction } from '@/hooks/use-git-agent-action';
 
@@ -63,7 +63,6 @@ export function CommitAiActions({
   filesLoading,
   workspaceId,
   gitSessionId,
-  sessionId,
   onOpenFile,
 }: {
   commit: CommitDetail;
@@ -72,8 +71,6 @@ export function CommitAiActions({
   workspaceId: string | null;
   /** Worktree-aware session id for git fetches (per-file diffs). */
   gitSessionId?: string | null;
-  /** Active session — the explain turn / review dispatch runs here. */
-  sessionId: string | null | undefined;
   onOpenFile: (f: GitFileChange) => void;
 }) {
   const { run: runExplain, state: explainState, reset: resetExplain } = useGitAgentAction();
@@ -82,8 +79,7 @@ export function CommitAiActions({
   const [reviewSlot, setReviewSlot] = useState<Slot>(null);
   const [pending, setPending] = useState<'explain' | 'review' | null>(null);
 
-  const sessionStreaming = useUi((s) => (sessionId ? !!s.streams[sessionId]?.isStreaming : false));
-  const anyRunning = explainState.status === 'running' || reviewState.status === 'running' || sessionStreaming;
+  const anyRunning = explainState.status === 'running' || reviewState.status === 'running';
 
   // (Re)seed from cache when the sheet switches commits.
   useEffect(() => {
@@ -96,9 +92,9 @@ export function CommitAiActions({
   }, [commit.sha, resetExplain, resetReview]);
 
   const fireExplain = useCallback(() => {
-    if (!sessionId) {
+    if (!workspaceId) {
       setExplainSlot(null);
-      toast.error('Could not explain commit', { description: 'Needs an active session.' });
+      toast.error('Could not explain commit', { description: 'Needs a workspace.' });
       return;
     }
     const list = files ?? [];
@@ -111,17 +107,17 @@ export function CommitAiActions({
       list.map(numstatLine).join('\n') || '(none)',
     ].join('\n');
     setExplainSlot({ phase: 'pending', queued: false });
-    const res = runExplain({ sessionId, task });
+    const res = runExplain({ workspaceId, task });
     if (res.status === 'error') {
       setExplainSlot(null);
       toast.error('Could not explain commit', { description: 'Needs an active, idle session.' });
     }
-  }, [sessionId, files, commit.sha, commit.subject, commit.author, runExplain]);
+  }, [workspaceId, files, commit.sha, commit.subject, commit.author, runExplain]);
 
   const fireReview = useCallback(async () => {
-    if (!sessionId || !workspaceId) {
+    if (!workspaceId) {
       setReviewSlot(null);
-      toast.error('Could not dispatch code-reviewer', { description: 'Needs an active session.' });
+      toast.error('Could not dispatch code-reviewer', { description: 'Needs a workspace.' });
       return;
     }
     setReviewSlot({ phase: 'pending', queued: false });
@@ -155,12 +151,12 @@ export function CommitAiActions({
       '',
       'Report each finding as its own short paragraph starting with the file path it concerns (e.g. `src/foo.ts — ...`). If nothing is wrong, say so briefly.',
     ].join('\n');
-    const res = runReview({ sessionId, agent: 'code-reviewer', task });
+    const res = runReview({ workspaceId, agent: 'code-reviewer', task });
     if (res.status === 'error') {
       setReviewSlot(null);
       toast.error('Could not dispatch code-reviewer', { description: 'Needs an active, idle session.' });
     }
-  }, [sessionId, workspaceId, files, gitSessionId, commit.sha, commit.subject, runReview]);
+  }, [workspaceId, files, gitSessionId, commit.sha, commit.subject, runReview]);
 
   // Settle finished/failed runs into the slot + cache.
   useEffect(() => {

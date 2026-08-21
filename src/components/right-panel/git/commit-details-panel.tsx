@@ -92,7 +92,6 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
         filesLoading={isLoading}
         workspaceId={activeWorkspaceId}
         gitSessionId={gitSessionId}
-        sessionId={activeSessionId}
         onOpenFile={openFile}
       />
 

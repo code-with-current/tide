@@ -151,7 +151,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.on('todos:updated', (_e, data) => callback(data)),
   removeTodosListener: () => ipcRenderer.removeAllListeners('todos:updated'),
   getSession: (id: string) => ipcRenderer.invoke('tide:getSession', id),
-  createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
+  createSession: (workspaceId: string, title: string, modelId: string, opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; kind?: 'main' | 'subagent' }) =>
     ipcRenderer.invoke('tide:createSession', workspaceId, title, modelId, opts),
   updateSessionSettings: (sessionId: string, patch: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max' }) =>
     ipcRenderer.invoke('tide:updateSessionSettings', sessionId, patch),

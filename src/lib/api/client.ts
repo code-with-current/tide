@@ -212,7 +212,7 @@ export async function createSession(
   workspaceId: string,
   title: string,
   modelId: string,
-  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string },
+  opts?: { autonomyMode?: 'ask' | 'plan' | 'edit' | 'full'; thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'extra' | 'max'; providerId?: string; kind?: 'main' | 'subagent' },
 ): Promise<any> {
   if (ipc) return ipc.createSession(workspaceId, title, modelId, opts);
   await delay(200);

@@ -12,11 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export function CommitRow({
-  commit, active = false, pendingAction = false, onSelect, onRevert, onBranch,
+  commit, active = false, pendingAction = false, laneColor, onSelect, onRevert, onBranch,
 }: {
   commit: GitCommit;
   active?: boolean;
   pendingAction?: boolean;
+  /** Lane color from the graph — branch chips pick it up so the label
+   *  visually binds to its lane in the gutter. */
+  laneColor?: string;
   onSelect?: () => void;
   onRevert?: (sha: string) => void;
   onBranch?: (name: string, sha: string) => void;
@@ -40,26 +43,25 @@ export function CommitRow({
           active ? 'bg-primary/10' : 'hover:bg-secondary/40',
         )}
       >
-        <span
-          className="flex size-3.5 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-semibold text-white"
-          style={{ background: `hsl(${hue} 40% 42%)` }}
-        >
-          {initials}
-        </span>
         {(commit.branchHeads?.length ?? 0) > 0 && (
           <span className="flex flex-shrink-0 items-center gap-1 overflow-hidden">
             {commit.branchHeads!.map((name) => (
               <span
                 key={name}
                 className={cn(
-                  'flex max-w-28 items-center gap-0.5 truncate rounded-full px-1.5 py-px text-[9px] leading-none',
+                  'flex max-w-28 items-center gap-1 truncate rounded-md py-px pr-1 text-[0.65rem] leading-none',
                   commit.isHead && name === commit.branchHeads![0]
                     ? 'bg-primary/15 text-primary'
                     : 'bg-secondary text-muted-foreground',
                 )}
                 title={name}
               >
-                <GitBranch className="size-2 flex-shrink-0" />
+                <span
+                  className="flex size-2.5 flex-shrink-0 items-center justify-center rounded-l"
+                  style={laneColor ? { background: laneColor } : undefined}
+                >
+                  <GitBranch className="size-2 text-black" />
+                </span>
                 <span className="truncate font-mono">{name}</span>
               </span>
             ))}
@@ -68,8 +70,22 @@ export function CommitRow({
         <span className="min-w-0 flex-1 truncate text-[0.72rem] text-foreground/90">
           {commit.subject || '(no subject)'}
         </span>
-        <span className="flex-shrink-0 text-[0.62rem] tabular-nums text-muted-foreground/50">
-          {formatRelative(commit.date)}
+        <span className="flex flex-shrink-0 items-center gap-20">
+          <span className="flex items-center gap-1">
+            <span
+              className="flex size-3.5 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-semibold text-white"
+              style={{ background: `hsl(${hue} 40% 42%)` }}
+              title={commit.author}
+            >
+              {initials}
+            </span>
+            <span className="max-w-24 truncate text-[0.62rem] text-muted-foreground/70" title={commit.author}>
+              {commit.author}
+            </span>
+        </span>
+          <span className="text-[0.62rem] tabular-nums text-muted-foreground/50">
+            {formatRelative(commit.date)}
+          </span>
         </span>
       </button>
       {(onRevert || onBranch) && (
