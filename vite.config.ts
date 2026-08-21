@@ -17,4 +17,21 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Keep @pierre/diffs (+shiki) out of the main chunk — it's a large,
+        // lazily-adopted dependency that only diff surfaces pull in.
+        manualChunks(id: string) {
+          if (
+            id.includes('node_modules/@pierre/') ||
+            /node_modules\/(shiki|@shikijs)[/@]/.test(id)
+          ) {
+            return 'pierre-diffs';
+          }
+          return undefined;
+        },
+      },
+    },
+  },
 })
