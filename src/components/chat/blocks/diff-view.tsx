@@ -185,8 +185,9 @@ function SplitDiff({ hunks }: { hunks: DiffHunk[] }) {
 }
 
 /** Unified/Split segmented toggle. Writes the global preference so every
- *  DiffView instance (chat, file viewer, commit details, review) follows. */
-function DiffModeTabs({ mode, onChange }: { mode: 'unified' | 'split'; onChange: (m: 'unified' | 'split') => void }) {
+ *  DiffView instance (chat, file viewer, commit details, review) follows.
+ *  Exported for surfaces that render Pierre diffs but still need the toggle. */
+export function DiffModeTabs({ mode, onChange }: { mode: 'unified' | 'split'; onChange: (m: 'unified' | 'split') => void }) {
   const tabs: { id: 'unified' | 'split'; label: string }[] = [
     { id: 'unified', label: 'Unified' },
     { id: 'split', label: 'Split' },
