@@ -14,25 +14,58 @@ function OpenAiMark({ className }: { className?: string }) {
   );
 }
 
-// Anthropic A-serif mark — viewBox 0 0 24 24.
-function AnthropicMark({ className }: { className?: string }) {
+// Brand marks keyed by provider preset id, simple-icons convention
+// (viewBox 0 0 24 24, single path, fill=currentColor). simple-icons was
+// not available in the local pnpm store and inventing path data is not
+// acceptable, so only paths already verified in this file are listed;
+// every other preset id renders the LetterMark fallback until real
+// simple-icons paths are sourced.
+const PRESET_MARKS: Record<string, { d: string; label: string }> = {
+  anthropic: {
+    d: 'M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z',
+    label: 'Anthropic',
+  },
+};
+
+function BrandMark({ mark, className }: { mark: { d: string; label: string }; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden role="img">
-      <title>Anthropic</title>
-      <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
+      <title>{mark.label}</title>
+      <path d={mark.d} />
     </svg>
+  );
+}
+
+function LetterMark({ presetId, className }: { presetId: string; className?: string }) {
+  return (
+    <span
+      className={`${className ?? ''} inline-flex items-center justify-center font-bold leading-none`}
+      aria-hidden
+    >
+      {presetId.charAt(0).toUpperCase()}
+    </span>
   );
 }
 
 export function ProviderLogo({
   apiStyle,
+  presetId,
   className = 'size-4 text-white',
 }: {
   apiStyle: 'anthropic' | 'openai';
+  presetId?: string;
   className?: string;
 }) {
+  if (presetId) {
+    // OpenAiMark uses a 25x25 viewBox with an offset transform, so it cannot
+    // go through the standard 24x24 BrandMark path.
+    if (presetId === 'openai') return <OpenAiMark className={className} />;
+    const mark = PRESET_MARKS[presetId];
+    if (mark) return <BrandMark mark={mark} className={className} />;
+    return <LetterMark presetId={presetId} className={className} />;
+  }
   return apiStyle === 'anthropic' ? (
-    <AnthropicMark className={className} />
+    <BrandMark mark={PRESET_MARKS.anthropic} className={className} />
   ) : (
     <OpenAiMark className={className} />
   );
