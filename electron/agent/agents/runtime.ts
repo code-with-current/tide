@@ -576,10 +576,12 @@ async function synthesizeReport(opts: {
 // ─── Sub-agent stream → nested tool events ──────────────────────────────
 
 /** Block-id carry for translateSubagentPart — mirrors the orchestrator's
- *  turn.currentTextBlockId / turn.reasoningBlockId. Only used when the SDK
- *  part lacks a stable id; tool parts reset both so the next text/reasoning
- *  segment opens a fresh block (one thinking block per model step). */
-interface SubagentBlockIds {
+ *  turn.currentTextBlockId / turn.reasoningBlockId. Ids are always minted
+ *  locally (crypto.randomUUID), never taken from the SDK part: providers
+ *  may reuse one part id across every step of a run. Tool parts reset both
+ *  so the next text/reasoning segment opens a fresh block (one thinking
+ *  block per model step). */
+export interface SubagentBlockIds {
   textBlockId?: string;
   reasoningBlockId?: string;
 }
@@ -591,7 +593,7 @@ interface SubagentBlockIds {
  *  row. Tool lifecycle AND text/reasoning deltas are forwarded — parent-aware
  *  consumers (the Agents panel) render the narration/thinking; the main chat
  *  skips parented blocks. */
-function translateSubagentPart(
+export function translateSubagentPart(
   part: Readonly<{ type: string }>,
   emit: EmitToolEvent,
   parentToolCallId: string,
@@ -603,14 +605,11 @@ function translateSubagentPart(
     case 'text-delta': {
       const text: string = p.text ?? '';
       if (!text) return;
-      // The SDK assigns a stable id per text part — consecutive deltas of
-      // one narration segment share it (append); a tool call intervenes with
-      // a different id (new block). Fall back to synthesizing when absent.
-      if (typeof p.id !== 'string' || !p.id) {
-        if (!ids.textBlockId) ids.textBlockId = crypto.randomUUID();
-      } else {
-        ids.textBlockId = p.id;
-      }
+      // Never trust the SDK part's id here: some providers (z.ai) reuse the
+      // same id across ALL steps of a run, which would merge post-tool
+      // segments back into the pre-tool block (duplicated narration). The
+      // tool cases below null the carry so each segment mints a fresh id.
+      if (!ids.textBlockId) ids.textBlockId = crypto.randomUUID();
       emit({
         type: 'delta',
         parentToolCallId,
@@ -624,11 +623,9 @@ function translateSubagentPart(
       // same shape the orchestrator's translatePart reads.
       const text: string = p.text ?? '';
       if (!text) return;
-      if (typeof p.id !== 'string' || !p.id) {
-        if (!ids.reasoningBlockId) ids.reasoningBlockId = crypto.randomUUID();
-      } else {
-        ids.reasoningBlockId = p.id;
-      }
+      // Same rationale as text-delta: provider part ids are per-run, not
+      // per-step — always mint/reuse our own carry instead.
+      if (!ids.reasoningBlockId) ids.reasoningBlockId = crypto.randomUUID();
       emit({
         type: 'reasoning',
         parentToolCallId,

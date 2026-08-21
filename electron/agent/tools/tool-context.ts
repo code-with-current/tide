@@ -21,7 +21,8 @@ export type EmitToolEvent = (event: {
   delta?: string;
   /** Full text of a 'delta' (sub-agent narration) part. */
   text?: string;
-  /** SDK part id — the text/reasoning block id consecutive deltas share. */
+  /** Block id consecutive text/reasoning deltas share; minted by the
+   *  emitter (never the SDK part id — providers reuse those per run). */
   blockId?: string;
   arguments?: Record<string, unknown>;
   argPreview?: string;
