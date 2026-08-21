@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
-import { BrainCircuit, RefreshCw } from 'lucide-react';
+import { BrainCircuit, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import * as api from '@/lib/api/client';
 import { fetchAndEnrichModels, toResolveFn, type FetchedModel } from '@/lib/fetch-models';
@@ -19,6 +19,7 @@ export function PickModelsStep({
 }) {
   const [status, setStatus] = useState<'loading' | 'error' | 'done'>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const fetchedRef = useRef(false);
 
   const load = async () => {
@@ -50,8 +51,13 @@ export function PickModelsStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const live = state.models.filter((m) => m.matchState === 'live');
-  const available = state.models.filter((m) => m.matchState !== 'live');
+  const q = query.trim().toLowerCase();
+  const live = state.models.filter(
+    (m) => m.matchState === 'live' && (!q || m.modelId.toLowerCase().includes(q)),
+  );
+  const available = state.models.filter(
+    (m) => m.matchState !== 'live' && (!q || m.modelId.toLowerCase().includes(q)),
+  );
   const allSelected =
     state.models.length > 0 && state.selected.length === state.models.length;
 
@@ -118,6 +124,33 @@ export function PickModelsStep({
       )}
 
       {status === 'done' && state.models.length > 0 && (
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search models…"
+            className="w-full h-8 pl-8 pr-8 text-[12px] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground/50 hover:text-foreground"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+
+      {status === 'done' && state.models.length > 0 && live.length + available.length === 0 && (
+        <div className="py-8 text-center text-xs text-muted-foreground">
+          No models match “{query.trim()}”.
+        </div>
+      )}
+
+      {status === 'done' && state.models.length > 0 && live.length + available.length > 0 && (
         <div className="rounded-lg border border-border overflow-hidden max-h-[46vh] overflow-y-auto scroll">
           {live.length > 0 && (
             <FetchSection
