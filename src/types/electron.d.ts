@@ -404,7 +404,7 @@ declare global {
       gitBranchInfo: (workspaceId: string, sessionId?: string) => Promise<{ branch: string | null; headCommit: string | null }>;
       gitRecentBranches: (workspaceId: string, sessionId?: string) => Promise<string[]>;
       gitCheckout: (workspaceId: string, branch: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
-      gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string, sha?: string) => Promise<{ ok: boolean; error?: string }>;
       gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
       gitCommit: (workspaceId: string, message: string, sessionId?: string) => Promise<{ ok: boolean; sha?: string; error?: string }>;
       gitDiff: (workspaceId: string, filePath: string, staged: boolean, sessionId?: string, contextLines?: number) => Promise<any[]>;

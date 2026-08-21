@@ -110,6 +110,12 @@ export interface GitCommit {
   date: string;
   /** First line of the commit message. */
   subject: string;
+  /** Short parent SHAs (same abbreviation rule as `sha`), first-parent first. */
+  parents: string[];
+  /** True when this commit is HEAD. */
+  isHead?: boolean;
+  /** Branch names whose tip is this sha. */
+  branchHeads?: string[];
 }
 
 /** Recent commit history (newest first), limited to `limit` (default 100). */
@@ -117,12 +123,34 @@ export async function getGitLog(rootDir: string, limit = 100): Promise<GitCommit
   try {
     // \x1f (unit separator) delimits fields; %s is single-line so records split cleanly on \n.
     const SEP = '\x1f';
-    const fmt = ['%h', '%an', '%aI', '%s'].join(SEP);
+    const fmt = ['%h', '%an', '%aI', '%s', '%p'].join(SEP);
     const { stdout } = await runGit(['log', `--pretty=format:${fmt}`, '-n', String(limit)], rootDir, 10000);
-    return stdout.split('\n').filter((l) => l.trim()).map((l) => {
-      const [sha, author, date, subject] = l.split(SEP);
-      return { sha, author, date, subject };
+    const commits = stdout.split('\n').filter((l) => l.trim()).map((l) => {
+      const [sha, author, date, subject, parentField] = l.split(SEP);
+      return { sha, author, date, subject, parents: parentField ? parentField.split(' ').filter(Boolean) : [] };
     });
+    // Branch tips per sha + HEAD flag (best-effort — decorations are optional).
+    const headMap = new Map<string, string[]>();
+    try {
+      const { stdout: refs } = await runGit(['for-each-ref', 'refs/heads', `--format=%(refname:short)${SEP}%(objectname:short)`], rootDir, 5000);
+      for (const l of refs.split('\n')) {
+        if (!l.trim()) continue;
+        const [name, refSha] = l.split(SEP);
+        const names = headMap.get(refSha);
+        if (names) names.push(name);
+        else headMap.set(refSha, [name]);
+      }
+    } catch { /* refs unavailable — plain history */ }
+    let headShort: string | undefined;
+    try {
+      const { stdout } = await runGit(['rev-parse', '--short', 'HEAD'], rootDir);
+      headShort = stdout.trim() || undefined;
+    } catch { /* no commits yet */ }
+    return commits.map((c) => ({
+      ...c,
+      isHead: headShort !== undefined && (c.sha === headShort || headShort.startsWith(c.sha)),
+      ...(headMap.get(c.sha) ? { branchHeads: headMap.get(c.sha) } : {}),
+    }));
   } catch {
     return [];
   }
@@ -529,9 +557,9 @@ export async function gitCheckout(rootDir: string, branch: string): Promise<void
   await runGit(['checkout', branch, '--'], rootDir, 10000);
 }
 
-/** Create a new branch from the current HEAD and check it out. */
-export async function gitCreateBranch(rootDir: string, branchName: string): Promise<void> {
-  await runGit(['checkout', '-b', branchName, '--'], rootDir, 10000);
+/** Create a new branch (from `startPoint` when given, else current HEAD) and check it out. */
+export async function gitCreateBranch(rootDir: string, branchName: string, startPoint?: string): Promise<void> {
+  await runGit(['checkout', '-b', branchName, ...(startPoint ? [startPoint] : []), '--'], rootDir, 10000);
 }
 
 /** Resolve the current branch name. */

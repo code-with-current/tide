@@ -363,8 +363,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitRecentBranches', workspaceId, sessionId),
   gitCheckout: (workspaceId: string, branch: string, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitCheckout', workspaceId, branch, sessionId),
-  gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string) =>
-    ipcRenderer.invoke('tide:gitCreateBranch', workspaceId, branchName, sessionId),
+  gitCreateBranch: (workspaceId: string, branchName: string, sessionId?: string, sha?: string) =>
+    ipcRenderer.invoke('tide:gitCreateBranch', workspaceId, branchName, sessionId, sha),
   gitStage: (workspaceId: string, filePath: string, stage: boolean, sessionId?: string) =>
     ipcRenderer.invoke('tide:gitStage', workspaceId, filePath, stage, sessionId),
   gitCommit: (workspaceId: string, message: string, sessionId?: string) =>

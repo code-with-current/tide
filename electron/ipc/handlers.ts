@@ -1359,10 +1359,10 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
   });
 
-  handle('tide:gitCreateBranch', async (_e, workspaceId: string, branchName: string, sessionId?: string) => {
+  handle('tide:gitCreateBranch', async (_e, workspaceId: string, branchName: string, sessionId?: string, sha?: string) => {
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { ok: false, error: 'no workspace' };
-    try { await gitCreateBranch(root, branchName); return { ok: true }; }
+    try { await gitCreateBranch(root, branchName, sha); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
   });
 

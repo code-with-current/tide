@@ -551,11 +551,12 @@ export function useGitCheckout(workspaceId: string, sessionId?: string | null) {
 }
 
 /** gitCreateBranch runs `checkout -b` in the main process — the new branch
- *  is checked out on success (auto-switch). */
+ *  is checked out on success (auto-switch). `sha` branches from an arbitrary
+ *  commit instead of HEAD (History → "Branch from here"). */
 export function useGitCreateBranch(workspaceId: string, sessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (branchName: string) => api.gitCreateBranch(workspaceId, branchName, sessionId ?? undefined),
+    mutationFn: (v: { name: string; sha?: string }) => api.gitCreateBranch(workspaceId, v.name, sessionId ?? undefined, v.sha),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['gitBranch'] });
       qc.invalidateQueries({ queryKey: ['gitStatus'] });

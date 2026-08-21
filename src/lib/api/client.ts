@@ -618,6 +618,12 @@ export interface GitCommit {
   author: string;
   date: string;
   subject: string;
+  /** Short parent SHAs, first-parent first. */
+  parents: string[];
+  /** True when this commit is HEAD. */
+  isHead?: boolean;
+  /** Branch names whose tip is this sha. */
+  branchHeads?: string[];
 }
 
 export async function gitLog(workspaceId: string, sessionId?: string, limit?: number): Promise<GitCommit[]> {
@@ -660,8 +666,8 @@ export async function gitCheckout(workspaceId: string, branch: string, sessionId
   if (ipc) return ipc.gitCheckout(workspaceId, branch, sessionId);
   return { ok: false };
 }
-export async function gitCreateBranch(workspaceId: string, branchName: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
-  if (ipc) return ipc.gitCreateBranch(workspaceId, branchName, sessionId);
+export async function gitCreateBranch(workspaceId: string, branchName: string, sessionId?: string, sha?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitCreateBranch(workspaceId, branchName, sessionId, sha);
   return { ok: false };
 }
 export async function gitStage(workspaceId: string, filePath: string, stage: boolean, sessionId?: string): Promise<{ ok: boolean; error?: string }> {

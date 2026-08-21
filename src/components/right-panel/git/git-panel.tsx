@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff, GitBranch, AlertTriangle } from 'lucide-react';
 import { FolderIcon } from 'react-material-icon-theme';
 import { SkeletonBar, CircleSkeleton } from '@/components/ui/loading-rows';
-import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo, useGitAmend, useConflictFiles, useGitResolveFile, useGitDiscardFile } from '@/lib/queries';
+import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo, useGitAmend, useConflictFiles, useGitResolveFile, useGitDiscardFile, useGitRevert, useGitCreateBranch } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { cn } from '@/lib/utils';
@@ -11,6 +12,8 @@ import { ChangedFileRow } from './changed-file-row';
 import { CommitBar } from './commit-bar';
 import { TabButton } from './tab-button';
 import { CommitRow } from './commit-row';
+import { GraphColumn, ROW_H } from './commit-graph';
+import { assignLanes } from '@/lib/git/lanes';
 import { CollapsibleSection } from './collapsible-section';
 import { buildFileTree, countFiles, type TreeNode } from './file-tree';
 import { BranchMenu, BranchBadges } from '@/components/git/branch-menu';
@@ -52,9 +55,45 @@ export function GitPanel() {
   const conflictQ = useConflictFiles(workspaceId, gitSessionId);
   const conflicts = conflictQ.data ?? NO_CONFLICTS;
   const hasConflicts = conflicts.length > 0;
-  const { data: history, isLoading: historyLoading, isFetching: historyFetching, refetch: refetchHistory } = useGitLog(workspaceId, gitSessionId);
+  const { data: history, isLoading: historyLoading, isFetching: historyFetching, refetch: refetchHistory } = useGitLog(workspaceId, gitSessionId, 500);
   const bulk = useGitBulk(workspaceId, gitSessionId);
   const stashQ = useGitStashList(workspaceId, gitSessionId);
+
+  // History: lane layout + virtualization (fixed 24px rows) so 500-commit
+  // logs scroll smoothly. The graph is one tall svg behind the rows, so
+  // virtualization never slices an edge mid-curve.
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+  const revertMutation = useGitRevert(workspaceId ?? '', gitSessionId);
+  const createBranchMutation = useGitCreateBranch(workspaceId ?? '', gitSessionId);
+  const laidHistory = useMemo(
+    () => assignLanes((history ?? []).map((c) => ({ sha: c.sha, parents: c.parents ?? [], isHead: c.isHead, branchHeads: c.branchHeads }))),
+    [history],
+  );
+  const historyVirtualizer = useVirtualizer({
+    count: laidHistory.length,
+    getScrollElement: () => historyScrollRef.current,
+    estimateSize: () => ROW_H,
+    overscan: 12,
+    getItemKey: (i) => laidHistory[i].commit.sha,
+  });
+  const handleRevertCommit = useCallback((sha: string) => {
+    revertMutation.mutate(sha, {
+      onSuccess: (res) => {
+        if (res?.ok) toastSuccess('Reverted commit');
+        else toastError('Revert failed', { description: res?.error });
+      },
+      onError: () => toastError('Revert failed'),
+    });
+  }, [revertMutation]);
+  const handleBranchFrom = useCallback((name: string, sha: string) => {
+    createBranchMutation.mutate({ name, sha }, {
+      onSuccess: (res) => {
+        if (res?.ok) toastSuccess(`Switched to ${name}`);
+        else toastError('Branch failed', { description: res?.error });
+      },
+      onError: () => toastError('Branch failed'),
+    });
+  }, [createBranchMutation]);
 
   const viewMode = useTabs(s => s.gpViewMode[sessionId ?? 'default'] ?? 'tree') as ViewMode;
   const setViewMode = useCallback((mode: ViewMode) => useTabs.getState().setGpViewMode(sessionId ?? 'default', mode), [sessionId]);
@@ -443,7 +482,7 @@ export function GitPanel() {
               <RefreshCw className={cn('size-3 transition-transform', historyFetching && 'animate-spin')} />
             </Button>
           </div>
-          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
+          <div ref={historyScrollRef} className="relative flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
             {historyLoading ? (
               <div className="px-3 py-2 space-y-3" aria-hidden>
                 {[...Array(6)].map((_, i) => (
@@ -460,20 +499,33 @@ export function GitPanel() {
               <div className="flex items-center justify-center h-full px-4">
                 <span className="text-xs text-muted-foreground">No workspace selected.</span>
               </div>
-            ) : (history?.length ?? 0) === 0 ? (
+            ) : laidHistory.length === 0 ? (
               <div className="flex items-center justify-center h-full px-4">
                 <span className="text-xs text-muted-foreground">No commits yet.</span>
               </div>
             ) : (
-              history?.map((c, i) => (
-                <CommitRow
-                  key={c.sha}
-                  commit={c}
-                  isLast={i === (history?.length ?? 0) - 1}
-                  active={c.sha === commitDetail?.sha}
-                  onSelect={() => setCommitDetail(c)}
-                />
-              ))
+              <div className="relative" style={{ height: historyVirtualizer.getTotalSize() }}>
+                <GraphColumn commits={laidHistory} height={historyVirtualizer.getTotalSize()} />
+                {historyVirtualizer.getVirtualItems().map((row) => {
+                  const commit = history![row.index];
+                  return (
+                    <div
+                      key={commit.sha}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ height: ROW_H, transform: `translateY(${row.start}px)` }}
+                    >
+                      <CommitRow
+                        commit={commit}
+                        active={commit.sha === commitDetail?.sha}
+                        pendingAction={revertMutation.isPending || createBranchMutation.isPending}
+                        onSelect={() => setCommitDetail(commit)}
+                        onRevert={handleRevertCommit}
+                        onBranch={handleBranchFrom}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </>

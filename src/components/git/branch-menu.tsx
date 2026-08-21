@@ -88,7 +88,7 @@ export function BranchMenu({ trigger, align = 'start' }: { trigger: React.ReactE
   const doCreate = async () => {
     const name = newName.trim();
     if (!name) return;
-    const r = await createM.mutateAsync(name);
+    const r = await createM.mutateAsync({ name });
     if (!r.ok) { toastError('Branch not created', { description: r.error }); return; }
     toastSuccess(`Switched to ${name}`);
     setNewName('');
