@@ -51,4 +51,50 @@ describe('stream-store', () => {
     s.apply({ type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'z' } });
     expect(s.textOf('s1', 'p1')).toBe('z');
   });
+
+  it('multi-session isolation: interleaved global seqs advance only their own watermark', () => {
+    const s = createStreamStore();
+    s.apply({ type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'a' }, seq: 1 });
+    s.apply({ type: 'part.delta', sessionId: 's2', messageId: 'm1', partId: 'p1', data: { text: 'x' }, seq: 2 });
+    s.apply({ type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'b' }, seq: 3 });
+    expect(s.lastSeq('s1')).toBe(3); // skipped global seq 2 — watermark is per session
+    expect(s.lastSeq('s2')).toBe(2);
+    expect(s.textOf('s1', 'p1')).toBe('ab');
+    expect(s.textOf('s2', 'p1')).toBe('x');
+    s.apply({ type: 'part.delta', sessionId: 's2', messageId: 'm1', partId: 'p1', data: { text: 'stale' }, seq: 2 });
+    expect(s.textOf('s2', 'p1')).toBe('x');
+  });
+
+  it('unsubscribe stops notifications', () => {
+    const s = createStreamStore();
+    let calls = 0;
+    const unsub = s.subscribe('s1', () => { calls++; });
+    s.apply({ type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'a' }, seq: 1 });
+    expect(calls).toBe(1);
+    unsub();
+    s.apply({ type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'b' }, seq: 2 });
+    expect(calls).toBe(1);
+  });
+
+  it('turn.end drops an uncommitted buffer — textOf falls back to empty', () => {
+    const s = createStreamStore();
+    s.apply({ type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'ab' }, seq: 1 });
+    s.apply({ type: 'turn.end', sessionId: 's1', seq: 2 });
+    expect(s.bufferSize('s1')).toBe(0);
+    expect(s.textOf('s1', 'p1')).toBe('');
+  });
+
+  it('applyBatch notifies once per session, not per event', () => {
+    const s = createStreamStore();
+    const calls = { s1: 0, s2: 0 };
+    s.subscribe('s1', () => { calls.s1++; });
+    s.subscribe('s2', () => { calls.s2++; });
+    s.applyBatch([
+      { type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'a' }, seq: 1 },
+      { type: 'part.delta', sessionId: 's1', messageId: 'm1', partId: 'p1', data: { text: 'b' }, seq: 3 },
+      { type: 'part.delta', sessionId: 's2', messageId: 'm1', partId: 'p1', data: { text: 'x' }, seq: 2 },
+    ]);
+    expect(calls.s1).toBe(1);
+    expect(calls.s2).toBe(1);
+  });
 });
