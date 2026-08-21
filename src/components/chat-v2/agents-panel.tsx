@@ -184,7 +184,7 @@ export function AgentsPanel({ sessionId }: { sessionId: string }) {
               useUi.setState({ agentsPanelRestoreRightPanel: false });
               setAgentsPanelOpen(false);
               if (restore) {
-                useTabs.getState().setActive(sessionId, 'inspector');
+                useTabs.getState().setActive(sessionId, 'files');
                 useUi.getState().setRightPanel(true);
               }
             }}

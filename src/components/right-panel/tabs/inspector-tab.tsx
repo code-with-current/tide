@@ -283,7 +283,7 @@ function OpenChangesButton({ sessionId, changed }: { sessionId: string; changed:
   return (
     <button
       type="button"
-      onClick={() => addTab(sessionId, 'changes')}
+      onClick={() => addTab(sessionId, 'git')}
       title="Open Git Panel tab"
       // Mirrors the mockup's .head-action: a compact bordered pill that reads
       // as a distinct action, not part of the header. Ghost Button blended in.

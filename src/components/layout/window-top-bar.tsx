@@ -72,7 +72,7 @@ export function WindowTopBar() {
   const terminalPorts = useUi((s) => s.terminalPorts);
 
   // ── Right panel view switcher (after activeSessionId is declared) ──
-  const rpFeature = useTabs((s) => s.active[activeSessionId ?? 'default'] ?? 'inspector');
+  const rpFeature = useTabs((s) => s.active[activeSessionId ?? 'default'] ?? 'files');
   const rpSetFeature = useTabs((s) => s.setActive);
   const switchTo = (kind: string) => {
     rpSetFeature(activeSessionId ?? 'default', kind as any);
@@ -402,7 +402,7 @@ export function WindowTopBar() {
                   <div className="w-px bg-border flex-shrink-0" />
                   <button
                     type="button"
-                    onClick={() => { switchTo('changes'); setBranchMenuOpen(false); }}
+                    onClick={() => { switchTo('git'); setBranchMenuOpen(false); }}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[0.7rem] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors"
                   >
                     <GitPullRequestArrow className="size-3" />
@@ -580,9 +580,9 @@ export function WindowTopBar() {
         <ButtonGroup>
           <Tip label="Inspector">
             <Button
-              variant={rpFeature === 'inspector' && rightPanelOpen ? 'outline' : 'outline'}
+              variant={rpFeature === 'files' && rightPanelOpen ? 'outline' : 'outline'}
               size="sm"
-              onClick={() => switchTo('inspector')}
+              onClick={() => switchTo('files')}
             >
               <Info className="size-3.5" />
             </Button>
@@ -598,9 +598,9 @@ export function WindowTopBar() {
           </Tip>
           <Tip label="Git">
             <Button
-              variant={rpFeature === 'changes' && rightPanelOpen ? 'outline' : 'outline'}
+              variant={rpFeature === 'git' && rightPanelOpen ? 'outline' : 'outline'}
               size="sm"
-              onClick={() => switchTo('changes')}
+              onClick={() => switchTo('git')}
             >
               <GitPullRequestArrow className="size-3.5" />
             </Button>

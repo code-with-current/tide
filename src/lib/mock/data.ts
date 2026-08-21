@@ -213,4 +213,4 @@ export const rightPanelDefaultTabs = [
   { kind: 'inspector' as const, locked: true },
 ];
 
-export const rightPanelAddableTabs = ['files', 'review', 'changes', 'terminal'] as const;
+export const rightPanelAddableTabs = ['files', 'git', 'terminal', 'browser', 'agents'] as const;
