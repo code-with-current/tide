@@ -7,13 +7,12 @@
  *  (streams[childSessionId] is never populated live), so the body reads the
  *  dispatch ToolBlock and its nested child blocks from the parent's live
  *  stream blocks, falling back to the persisted message blocks once the live
- *  stream resets on the next turn. Children render interleaved in emission
- *  order via agentStream() — the same anatomy as the main chat's stream
- *  branch, rooted at the dispatch instead of the session. */
+ *  stream resets on the next turn. Children render via StreamBlocks — the
+ *  main chat's stream renderer (block-list's stream branch) rooted at the
+ *  dispatch instead of the session — so spacing and behavior match the chat
+ *  exactly, with the dispatch report as an AnswerBlock last. */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Streamdown } from 'streamdown';
-import remarkGfm from 'remark-gfm';
 import { Bot, Loader2, X } from 'lucide-react';
 import type { Block, Session, ToolBlock } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
@@ -22,13 +21,10 @@ import { useTabs } from '@/lib/stores/tabs';
 import { useSession, useDispatches } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { ThinkingBlock } from './thinking-block';
-import { ToolChips, AgentStatusChip } from './tool-chips';
+import { AgentStatusChip } from './tool-chips';
 import { agentStatusOf } from './agent-status';
-import { flattenRun } from './stream-runs';
-import { agentStream } from './agent-stream';
-
-const NARRATION_CLASSES =
-  'text-[0.85rem] text-card-foreground/80 leading-relaxed mt-[5px] [&_p]:my-0.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-0.5 [&_ul:first-child]:mt-0 [&_ul:last-child]:mb-0 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]';
+import { StreamBlocks } from '@/components/chat/turn/stream-blocks';
+import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 
 function formatSecs(s: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`;
@@ -120,13 +116,25 @@ export function AgentsPanel({ sessionId }: { sessionId: string }) {
   const agentName = d?.agentName ?? String(resolved?.dispatch.arguments?.name ?? 'agent');
   const task = d?.task ?? String(resolved?.dispatch.arguments?.task ?? '');
   const report = d?.report ?? resolved?.dispatch.report ?? resolved?.dispatch.output ?? '';
-  const stream = useMemo(() => agentStream(resolved?.list, focus ?? ''), [resolved, focus]);
-  const toolCount = stream.segments.reduce((n, s) => n + (s.type === 'tools' ? s.run.length : 0), 0);
-  const hasReasoning = stream.segments.some((s) => s.type === 'reasoning');
-  // Mirror of block-list's stream branch: only the last block in the whole
-  // parent list is actively emitting — a later parent block means the child's
-  // reasoning stopped growing.
-  const lastBlockId = resolved ? resolved.list[resolved.list.length - 1]?.id : undefined;
+  // Root-scoped stats over the dispatch's children — drives the header count,
+  // the legacy-reasoning fallback, and the waiting indicator.
+  const root = useMemo(() => {
+    const list = resolved?.list;
+    if (!list) return { tools: 0, reasoning: false, any: false };
+    let tools = 0;
+    let reasoning = false;
+    let any = false;
+    for (const b of list) {
+      if (b.kind !== 'tool' && b.kind !== 'text' && b.kind !== 'reasoning') continue;
+      if ((b.parentToolCallId ?? null) !== focus) continue;
+      any = true;
+      if (b.kind === 'tool') tools++;
+      else if (b.kind === 'reasoning') reasoning = true;
+    }
+    return { tools, reasoning, any };
+  }, [resolved, focus]);
+  const toolCount = root.tools;
+  const hasReasoning = root.reasoning;
 
   return (
     <div className="flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden bg-card">
@@ -200,60 +208,34 @@ export function AgentsPanel({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
-      {/* Body — the dispatch's child stream in emission order: reasoning,
-          narration, and tool runs interleaved exactly like the main stream,
-          with the dispatch report as rich markdown last. Auto-follows while
-          the dispatch runs. */}
-      <div ref={bodyRef} className="flex-1 min-h-0 scroll min-w-0 overflow-y-auto">
+      {/* Body — the dispatch's child stream via StreamBlocks (the main chat's
+          stream renderer rooted at the dispatch), with the dispatch report as
+          an AnswerBlock last. Spacing mirrors the chat: the scroll container
+          carries the timeline's px-6 py-3, the content column TurnBlock's
+          flex flex-col gap-0. Auto-follows while the dispatch runs. */}
+      <div ref={bodyRef} className="flex-1 min-h-0 scroll min-w-0 overflow-y-auto px-6 py-3">
         {resolved ? (
-          <div className="flex flex-col gap-[5px] px-2 py-2">
+          <div className="flex flex-col gap-0">
             {/* Legacy fallback: persisted dispatch displays carry a reasoning
                 summary even when no parented reasoning blocks were recorded. */}
             {d?.reasoning && !hasReasoning && (
               <ThinkingBlock text={d.reasoning} streaming={running} variant="stream" />
             )}
-            {stream.segments.map((seg) => {
-              if (seg.type === 'reasoning') {
-                if (!seg.block.text.trim()) return null;
-                return (
-                  <ThinkingBlock
-                    key={seg.block.id}
-                    text={seg.block.text}
-                    tokens={seg.block.tokens}
-                    ms={seg.block.ms}
-                    streaming={running && seg.block.id === lastBlockId}
-                    variant="stream"
-                  />
-                );
-              }
-              if (seg.type === 'text') {
-                if (!seg.block.text.trim()) return null;
-                return (
-                  <div key={seg.block.id} className={NARRATION_CLASSES}>
-                    <Streamdown mode="static" remarkPlugins={[remarkGfm]} controls={false} animated={false}>
-                      {seg.block.text.trim()}
-                    </Streamdown>
-                  </div>
-                );
-              }
-              return (
-                <ToolChips
-                  key={seg.run[0]?.id}
-                  calls={flattenRun(seg.run, stream.childrenByParent)}
-                  streaming={running}
-                  variant="stream"
-                  sessionId={sessionId}
-                />
-              );
-            })}
+            <StreamBlocks
+              blocks={resolved.list}
+              streaming={running}
+              sessionId={sessionId}
+              rootId={focus}
+            />
             {report && (
-              <div className={cn(NARRATION_CLASSES, 'text-card-foreground')}>
-                <Streamdown mode="static" remarkPlugins={[remarkGfm]} controls={false} animated={false}>
-                  {report}
-                </Streamdown>
-              </div>
+              <AnswerBlock
+                text={report}
+                streaming={running}
+                hasProcessContent={root.any || !!d?.reasoning}
+                elapsedMs={resolved.dispatch.durationMs}
+              />
             )}
-            {running && stream.segments.length === 0 && !d?.reasoning && (
+            {running && !root.any && !d?.reasoning && (
               <div className="flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground/70">
                 <Loader2 className="size-3 animate-spin" />
                 waiting for the agent's first output…
