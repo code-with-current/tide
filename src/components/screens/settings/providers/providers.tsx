@@ -11,9 +11,7 @@ import {
   PlugZap,
   Copy,
   Search,
-  KeyRound,
   RefreshCw,
-  Zap,
   BrainCircuit,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -45,7 +43,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ProviderLogo } from "@/components/primitives/provider-logo";
 import * as api from "@/lib/api/client";
-import { useProviders, useAddProvider } from "@/lib/queries";
+import { useProviders } from "@/lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ApiStyle, Provider } from "@/types";
 import { cn, formatContext } from "@/lib/utils";
@@ -67,6 +65,7 @@ import {
   ModelsTable, appendFetchedModels, rowsToModels, useFollowProtocolEndpoint,
   useModelRows, type Row,
 } from "./models-table";
+import { AddProviderWizard } from "./add-wizard/add-wizard";
 
 export const PROTOCOL = {
   anthropic: {
@@ -191,7 +190,7 @@ export function ProvidersSection() {
       </div>
 
       {dialogOpen && (
-        <ProviderFormDialog
+        <AddProviderWizard
           onClose={() => setDialogOpen(false)}
           onCreated={(id) => {
             setSelectedId(id);
@@ -307,245 +306,7 @@ function EmptyDetail() {
 }
 
 // =============================================================
-// ProviderFormDialog — add a NEW provider (modal). Editing existing providers stays inline (ProviderDetail, auto-save); add goes through this dialog with an explicit Save because the provider doesn't exist yet to auto-save. Composes the same sub-components as the inline form.
-// =============================================================
-
-function ProviderFormDialog({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: (id: string) => void;
-}) {
-  const qc = useQueryClient();
-  const addProvider = useAddProvider();
-  const [saving, setSaving] = useState(false);
-  const [name, setName] = useState("");
-  const [apiStyle, setApiStyle] = useState<ApiStyle>("openai");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [apiKey, setApiKey] = useState("");
-  const { rows, setRows, updateRow, addRow, removeRow } = useModelRows([
-    { alias: "", modelId: "", context: "" },
-  ]);
-  const [detecting, setDetecting] = useState(false);
-  const [detectError, setDetectError] = useState<string | null>(null);
-  const [detected, setDetected] = useState(false);
-
-  useFollowProtocolEndpoint(apiStyle, setBaseUrl);
-
-  const detectProtocol = async () => {
-    if (!baseUrl.trim() || !apiKey.trim()) return;
-    setDetecting(true);
-    setDetectError(null);
-    setDetected(false);
-    try {
-      const result = await window.tideIpc?.detectProviderProtocol({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim() });
-      if (!result) {
-        setDetectError('IPC unavailable.');
-      } else if ('error' in result) {
-        setDetectError(result.error);
-      } else {
-        setApiStyle(result.apiStyle);
-        setDetected(true);
-        if (result.models.length > 0) {
-          setRows(result.models.map((m: any) => ({
-            alias: m.alias ?? m.modelId ?? m.id,
-            modelId: m.modelId ?? m.id,
-            context: m.contextWindow ? String(m.contextWindow) : "",
-            catalogId: m.catalogId,
-            reasoning: m.reasoning,
-            reasoningMandatory: m.reasoningMandatory,
-            supportedEfforts: m.supportedEfforts,
-            priceLabel: m.priceLabel,
-            inputCostPerToken: m.inputCostPerToken,
-            outputCostPerToken: m.outputCostPerToken,
-            cacheReadCostPerToken: m.cacheReadCostPerToken,
-            cacheWriteCostPerToken: m.cacheWriteCostPerToken,
-          })));
-        }
-      }
-    } catch (e: any) {
-      setDetectError(e?.message ?? 'Detection failed.');
-    } finally {
-      setDetecting(false);
-    }
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      // Save exactly what the user typed — no trailing-slash strip, no /v1 auto-append. Provider endpoints vary (z.ai coding relay lives at /api/coding/paas/v4; some gateways want /v1, others don't), so the form must not mutate the input. EndpointPreview shows what the SDK resolves to; the user decides.
-      const baseUrlToSave = baseUrl.trim();
-      const created = await addProvider.mutateAsync({
-        name: name.trim() || "Untitled",
-        apiStyle,
-        baseUrl: baseUrlToSave,
-        apiKey: apiKey.trim() || undefined,
-        models: rowsToModels(rows),
-      });
-      qc.invalidateQueries({ queryKey: ["providers"] });
-      onCreated(created.id);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="min-w-[60%] max-w-3xl p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-5 py-3.5 flex-row items-center gap-3 border-b border-border space-y-0">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{
-              background: "rgba(217,119,87,0.12)",
-              border: "1px solid rgba(217,119,87,0.25)",
-            }}
-          >
-            <KeyRound className="size-4 text-primary" />
-          </div>
-          <div className="flex-1">
-            <DialogTitle className="text-base font-semibold text-left">
-              Add Provider
-            </DialogTitle>
-            <DialogDescription className="text-xs mt-0.5">
-              Configure an OpenAI- or Anthropic-compatible endpoint.
-            </DialogDescription>
-          </div>
-        </DialogHeader>
-
-        <div className="px-5 py-4 space-y-5 max-h-[70vh] overflow-y-auto scroll">
-          <div className="space-y-2">
-            <SectionLabel icon={<Plug className="size-3" />}>
-              API style
-            </SectionLabel>
-            <ApiStylePicker value={apiStyle} onChange={setApiStyle} />
-          </div>
-
-          <EndpointPreview apiStyle={apiStyle} baseUrl={baseUrl} />
-
-          <div className="grid grid-cols-2 gap-4">
-            <FormField id="name" label="Provider name">
-              <Input
-                className="h-8 text-[12.5px]"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="OpenRouter, z.ai, LM Studio…"
-              />
-            </FormField>
-            <FormField id="baseUrl" label="Base URL">
-              <Input
-                className="font-mono text-[12px] h-8"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder={PROTOCOL[apiStyle].baseUrlPlaceholder}
-              />
-            </FormField>
-            <FormField id="key" label="API key">
-              <Input
-                type="password"
-                className="font-mono text-[12px] h-8"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={PROTOCOL[apiStyle].keyPlaceholder}
-              />
-              <p className="text-[10px] text-muted-foreground/50 mt-1 flex items-center gap-1">
-                <ShieldCheck className="size-2.5 text-success" />
-                Sent as{" "}
-                <span className="font-mono">
-                  {PROTOCOL[apiStyle].authHeader}
-                </span>
-                . Stored in the OS keychain.
-              </p>
-            </FormField>
-          </div>
-
-          {/* Auto-detect protocol + fetch models */}
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              disabled={!baseUrl.trim() || !apiKey.trim() || detecting}
-              onClick={detectProtocol}
-            >
-              {detecting ? (
-                <><RefreshCw className="size-3.5 animate-spin" /> Detecting…</>
-              ) : detected ? (
-                <><Check className="size-3.5 text-success" /> Detected: {apiStyle}</>
-              ) : (
-                <><Zap className="size-3.5" /> Auto-Detect Protocol</>
-              )}
-            </Button>
-            {detectError && (
-              <span className="text-[11px] text-destructive/80">{detectError}</span>
-            )}
-            {detected && !detectError && (
-              <span className="text-[11px] text-muted-foreground/60">
-                Protocol + {rowsToModels(rows).length} models auto-filled.
-              </span>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <SectionLabel
-              icon={<BrainCircuit className="size-3" />}
-              count={rowsToModels(rows).length}
-              action={
-                <FetchModelsButton
-                  apiStyle={apiStyle}
-                  baseUrl={baseUrl}
-                  apiKey={apiKey}
-                  onFetched={(models) =>
-                    setRows((prev) => appendFetchedModels(prev, models))
-                  }
-                  existingModelIds={rows.map((r) => r.modelId)}
-                />
-              }
-            >
-              Models
-            </SectionLabel>
-            <ModelsTable
-              rows={rows}
-              onUpdate={updateRow}
-              onAdd={addRow}
-              onRemove={removeRow}
-            />
-          </div>
-        </div>
-
-        <DialogFooter className="px-5 py-3 bg-secondary border-t border-border flex items-center justify-between">
-          <div className="text-[11px] text-muted-foreground/55 flex items-center gap-1.5">
-            <ShieldCheck className="size-3 text-success" /> API key stored in
-            the OS keychain.
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              disabled={saving}
-              onClick={save}
-            >
-              {saving ? (
-                "Saving…"
-              ) : (
-                <>
-                  <Check className="size-3.5" /> Save provider
-                </>
-              )}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// =============================================================
-// ProviderDetail — the inline edit form (auto-save). Selecting a provider in the sidebar renders this; edits persist ~600ms after the last change. Add is handled by ProviderFormDialog.
+// ProviderDetail — the inline edit form (auto-save). Selecting a provider in the sidebar renders this; edits persist ~600ms after the last change. Add is handled by the AddProviderWizard.
 // =============================================================
 
 function ProviderDetail({
