@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
-import { BrainCircuit, RefreshCw, Search } from 'lucide-react';
+import { BrainCircuit, CheckCheck, ListChecks, MoreHorizontal, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import * as api from '@/lib/api/client';
 import { fetchAndEnrichModels, toResolveFn, type FetchedModel } from '@/lib/fetch-models';
 import type { ProviderPreset } from '@/lib/provider-presets';
-import { cn, formatContext } from '@/lib/utils';
+import { formatContext } from '@/lib/utils';
 import { FetchRow, FetchSection, SectionLabel } from '../providers';
 import type { WizardAction, WizardState } from './wizard-reducer';
 
@@ -72,28 +78,38 @@ export function PickModelsStep({
         icon={<BrainCircuit className="size-3" />}
         count={state.selected.length}
         action={
-          <div className="flex items-center gap-1">
-            {state.models.length > 0 && (
-              <button
-                type="button"
-                onClick={() =>
-                  dispatch({ type: allSelected ? 'select-none-models' : 'select-all-models' })
-                }
-                className="text-[11px] text-muted-foreground/60 hover:text-foreground cursor-pointer transition-colors"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={status === 'loading' || state.models.length === 0}
+                className="size-7 p-0 text-muted-foreground hover:text-foreground"
+                title="Model actions"
               >
-                {allSelected ? 'Select none' : 'Select all'}
-              </button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void load()}
-              className="text-[11px] h-7 text-muted-foreground hover:text-foreground"
-            >
-              <RefreshCw className={cn('size-3', status === 'loading' && 'animate-spin')} />
-              {status === 'loading' ? 'Fetching…' : 'Refresh'}
-            </Button>
-          </div>
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[160px]">
+              <DropdownMenuItem onClick={() => void load()} className="text-xs gap-2">
+                <RefreshCw className="size-3.5" /> Refresh models
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={allSelected}
+                onClick={() => dispatch({ type: 'select-all-models' })}
+                className="text-xs gap-2"
+              >
+                <ListChecks className="size-3.5" /> Select all
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={state.selected.length === 0}
+                onClick={() => dispatch({ type: 'select-none-models' })}
+                className="text-xs gap-2"
+              >
+                <CheckCheck className="size-3.5" /> Deselect all
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       >
         Models
