@@ -196,6 +196,7 @@ export const BlockList = memo(function BlockList({
                   tokens={b.tokens}
                   ms={b.ms}
                   streaming={streaming && !!blocks && b.id === blocks[blocks.length - 1]?.id}
+                  variant="stream"
                 />
               );
             case 'tool': {
