@@ -9,6 +9,7 @@ import {
   FolderCode, Info,
   FolderTree,
   GitPullRequestArrow, Check, Plus, Loader2,
+  Bot,
 } from "lucide-react";
 // Square removed — replaced by animate-pulse span for the stop button.
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -603,6 +604,15 @@ export function WindowTopBar() {
               onClick={() => switchTo('changes')}
             >
               <GitPullRequestArrow className="size-3.5" />
+            </Button>
+          </Tip>
+          <Tip label="Agents">
+            <Button
+              variant={rpFeature === 'agents' && rightPanelOpen ? 'outline' : 'outline'}
+              size="sm"
+              onClick={() => switchTo('agents')}
+            >
+              <Bot className="size-3.5" />
             </Button>
           </Tip>
         </ButtonGroup>

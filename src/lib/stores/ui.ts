@@ -268,6 +268,13 @@ interface UiState {
   /** Per-session streaming state (keyed by sessionId) so two sessions can stream in parallel without overwriting each other. Runtime only — not persisted. */
   streams: Record<string, SessionStream>;
 
+  /** Focused sub-agent dispatch per session (the dispatch ToolCall's id) —
+   *  drives the Agents right-panel tab's stream view. Runtime only — not
+   *  persisted. */
+  focusedDispatchId: Record<string, string | null>;
+  /** Focus (or clear, with null) the dispatch whose stream the Agents tab shows. */
+  setFocusedDispatch: (sessionId: string, dispatchId: string | null) => void;
+
   /** Per-session composer controls (kept here so chat and empty-state stay in sync). */
   selectedModelId: string | null;
   /** Provider half of the selection — kept alongside selectedModelId because the same modelId can exist under multiple providers (keying on modelId alone would silently resolve to the first-added). Null when restored from old sessions; callers fall back to first-match. */
@@ -553,6 +560,9 @@ export const useUi = create<UiState>()(
   sessionLastActive: {},
   pendingOptions: {},
   streams: {},
+  focusedDispatchId: {},
+  setFocusedDispatch: (sessionId, dispatchId) =>
+    set((s) => ({ focusedDispatchId: { ...s.focusedDispatchId, [sessionId]: dispatchId } })),
   queue: {},
   preTurnShas: {},
   promptHistory: {},
@@ -782,6 +792,7 @@ export const useUi = create<UiState>()(
     const { [sessionId]: _of, ...restOpenFiles } = state.openFiles;
     const { [sessionId]: _aof, ...restActiveOpenFile } = state.activeOpenFile;
     const { [sessionId]: _s, ...restStream } = state.streams;
+    const { [sessionId]: _fd, ...restFocusedDispatch } = state.focusedDispatchId;
     const { [sessionId]: _la, ...restLastActive } = state.sessionLastActive;
     const { [sessionId]: _ca, ...restComposerAttachments } = state.composerAttachments;
     const { [sessionId]: _cpr, ...restComposerPendingReads } = state.composerPendingReads;
@@ -797,6 +808,7 @@ export const useUi = create<UiState>()(
       openFiles: restOpenFiles,
       activeOpenFile: restActiveOpenFile,
       streams: restStream,
+      focusedDispatchId: restFocusedDispatch,
       sessionLastActive: restLastActive,
       composerAttachments: restComposerAttachments,
       composerPendingReads: restComposerPendingReads,
