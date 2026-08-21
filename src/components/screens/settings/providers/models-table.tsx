@@ -6,6 +6,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { formatContext } from '@/lib/utils';
+import type { FetchedModel } from '@/lib/fetch-models';
 import type { ApiStyle, Model } from '@/types';
 
 export interface Row {
@@ -78,6 +79,34 @@ export function rowsToModels(rows: Row[], providerId = ""): Model[] {
       cacheReadCostPerToken: r.cacheReadCostPerToken,
       cacheWriteCostPerToken: r.cacheWriteCostPerToken,
     }));
+}
+
+/** Append fetched models to the rows, skipping any already present (matched by
+ *  exact modelId). Catalog-matched/live rows carry their catalogId + a locked
+ *  context window + reasoning metadata; unmatched rows keep blank context. */
+export function appendFetchedModels(
+  prev: Row[],
+  incoming: FetchedModel[],
+): Row[] {
+  const existing = new Set(prev.map((r) => r.modelId.trim()).filter(Boolean));
+  const fresh: Row[] = incoming
+    .filter((m) => !existing.has(m.modelId.trim()))
+    .map((m) => ({
+      alias: m.modelId,
+      modelId: m.modelId,
+      context: m.catalogId && m.contextWindow ? String(m.contextWindow) : "",
+      catalogId: m.catalogId,
+      priceLabel: m.priceLabel,
+      inputCostPerToken: m.inputCostPerToken,
+      outputCostPerToken: m.outputCostPerToken,
+      cacheReadCostPerToken: m.cacheReadCostPerToken,
+      cacheWriteCostPerToken: m.cacheWriteCostPerToken,
+      reasoning: m.reasoning,
+      reasoningMandatory: m.reasoningMandatory,
+      supportedEfforts: m.supportedEfforts,
+      vision: m.supportsVision,
+    }));
+  return [...prev, ...fresh];
 }
 
 /** Row state + mutators shared by every form that edits a provider's models. */

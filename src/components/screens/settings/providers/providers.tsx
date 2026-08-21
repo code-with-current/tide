@@ -47,9 +47,14 @@ import { ProviderLogo } from "@/components/primitives/provider-logo";
 import * as api from "@/lib/api/client";
 import { useProviders, useAddProvider } from "@/lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ApiStyle, Provider, ProviderModelMeta } from "@/types";
+import type { ApiStyle, Provider } from "@/types";
 import { cn, formatContext } from "@/lib/utils";
 import { formatPriceRate } from "@/lib/queries";
+import {
+  fetchAndEnrichModels,
+  type FetchedModel,
+  type ResolveFn,
+} from "@/lib/fetch-models";
 import { SettingsHeader } from "../shared";
 
 // =============================================================
@@ -59,8 +64,8 @@ import { SettingsHeader } from "../shared";
 
 // Per-protocol form config — drives placeholders, auth-header hints, and the resolved endpoint path. Centralizing here keeps add + edit forms in sync and makes the protocol↔behavior relationship explicit (the auth header is the z.ai coding-vs-anthropic gotcha — each protocol speaks only one, mixing them 404s).
 import {
-  ModelsTable, rowsToModels, useFollowProtocolEndpoint, useModelRows,
-  type Row,
+  ModelsTable, appendFetchedModels, rowsToModels, useFollowProtocolEndpoint,
+  useModelRows, type Row,
 } from "./models-table";
 
 export const PROTOCOL = {
@@ -868,67 +873,6 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** A fetched model's match state: 'live' (rich OpenRouter response, used directly), 'matched' (single catalog hit, auto-enrich), 'ambiguous' (multiple hits, pick one), 'none' (no catalog data, bare id). */
-export type MatchState = "live" | "matched" | "ambiguous" | "none";
-
-/** A single candidate shown for an ambiguous model (the catalog-resolve path
- *  is currently unused — provider data is preferred — but the type is kept so
-/** A model fetched from the provider, optionally enriched by the catalog or
- *  sourced directly from a rich provider response. */
-export interface FetchedModel {
-  modelId: string;
-  matchState: MatchState;
-  /** Catalog canonical id (matched/selected) OR the provider's model id (live). */
-  catalogId?: string;
-  /** Context window from the catalog or the live provider response. */
-  contextWindow?: number;
-  /** "$in / $out per Mtok" price label. */
-  priceLabel?: string;
-  /** Raw per-token rates for cost calculation (USD). */
-  inputCostPerToken?: number;
-  outputCostPerToken?: number;
-  cacheReadCostPerToken?: number;
-  cacheWriteCostPerToken?: number;
-  /** Whether the model supports reasoning. */
-  reasoning?: boolean;
-  /** True when the model always reasons and cannot be turned off (live only). */
-  reasoningMandatory?: boolean;
-  /** Valid reasoning effort levels the model accepts, e.g. ['high','medium','low'] (live only). */
-  supportedEfforts?: string[];
-  /** Whether the model accepts image input (live only). */
-  supportsVision?: boolean;
-  /** Max output tokens (live only; catalog path derives this separately at runtime). */
-  maxOutputTokens?: number;
-}
-
-/** Append fetched models to the rows, skipping any already present (matched by
- *  exact modelId). Catalog-matched/live rows carry their catalogId + a locked
- *  context window + reasoning metadata; unmatched rows keep blank context. */
-export function appendFetchedModels(
-  prev: Row[],
-  incoming: FetchedModel[],
-): Row[] {
-  const existing = new Set(prev.map((r) => r.modelId.trim()).filter(Boolean));
-  const fresh: Row[] = incoming
-    .filter((m) => !existing.has(m.modelId.trim()))
-    .map((m) => ({
-      alias: m.modelId,
-      modelId: m.modelId,
-      context: m.catalogId && m.contextWindow ? String(m.contextWindow) : "",
-      catalogId: m.catalogId,
-      priceLabel: m.priceLabel,
-      inputCostPerToken: m.inputCostPerToken,
-      outputCostPerToken: m.outputCostPerToken,
-      cacheReadCostPerToken: m.cacheReadCostPerToken,
-      cacheWriteCostPerToken: m.cacheWriteCostPerToken,
-      reasoning: m.reasoning,
-      reasoningMandatory: m.reasoningMandatory,
-      supportedEfforts: m.supportedEfforts,
-      vision: m.supportsVision,
-    }));
-  return [...prev, ...fresh];
-}
-
 /**
  * Debounced catalog enrichment for model rows. Watches for rows with a
  * modelId but no catalogId, resolves each against the models.dev catalog via
@@ -975,64 +919,22 @@ export function useCatalogEnrichment(
   }, [rows]);
 }
 
-/** True when a provider model entry carries rich metadata beyond a bare id.
- *  OpenRouter populates these; OpenAI/Anthropic direct + LM Studio do not. */
-function isRichProviderModel(m: ProviderModelMeta): boolean {
-  return !!(
-    m.context_length ||
-    m.pricing ||
-    m.reasoning ||
-    m.max_completion_tokens ||
-    m.input_modalities
-  );
-}
-
-/** Build a FetchedModel directly from a rich provider response — no catalog
- *  roundtrip. The provider's data is authoritative for its own models. */
-function liveToFetchedModel(m: ProviderModelMeta): FetchedModel {
-  const inTok = m.pricing?.prompt ? parseFloat(m.pricing.prompt) : undefined;
-  const outTok = m.pricing?.completion
-    ? parseFloat(m.pricing.completion)
-    : undefined;
-  const cacheRead = m.pricing?.input_cache_read
-    ? parseFloat(m.pricing.input_cache_read)
-    : undefined;
-  const cacheWrite = m.pricing?.input_cache_write
-    ? parseFloat(m.pricing.input_cache_write)
-    : undefined;
-  const priceLabel =
-    inTok != null &&
-    outTok != null &&
-    !Number.isNaN(inTok) &&
-    !Number.isNaN(outTok)
-      ? formatPriceRate({ inputPerToken: inTok, outputPerToken: outTok })
-      : undefined;
-  // NOTE: reasoning flag comes ONLY from the OpenRouter `reasoning` object — NOT from `supported_parameters.includes('reasoning')` (nearly every model accepts the param without actually being a reasoning model). Brain icon = "reasons by default" (default_enabled) or "always reasons" (mandatory).
-  const reasoningOn =
-    m.reasoning?.default_enabled ?? m.reasoning?.mandatory ?? undefined;
-  return {
-    modelId: m.id,
-    matchState: "live",
-    // OpenRouter ids (e.g. "anthropic/claude-sonnet-4-5") ARE canonical slugs,
-    // so they serve as the catalogId for runtime lookup too.
-    catalogId: m.id,
-    contextWindow: m.context_length,
-    priceLabel,
-    inputCostPerToken:
-      inTok != null && !Number.isNaN(inTok) ? inTok : undefined,
-    outputCostPerToken:
-      outTok != null && !Number.isNaN(outTok) ? outTok : undefined,
-    cacheReadCostPerToken:
-      cacheRead != null && !Number.isNaN(cacheRead) ? cacheRead : undefined,
-    cacheWriteCostPerToken:
-      cacheWrite != null && !Number.isNaN(cacheWrite) ? cacheWrite : undefined,
-    reasoning: reasoningOn,
-    reasoningMandatory: m.reasoning?.mandatory,
-    supportedEfforts: m.reasoning?.supported_efforts,
-    supportsVision: m.input_modalities?.includes("image"),
-    maxOutputTokens: m.max_completion_tokens,
-  };
-}
+/** Adapts api.resolveModelCatalog (nulls for "absent") to ResolveFn (optional fields). */
+const resolveCatalogMeta: ResolveFn = async (input) => {
+  const res = await api.resolveModelCatalog(input);
+  const meta = res?.meta;
+  return meta
+    ? {
+        meta: {
+          resolvedCatalogId: meta.resolvedCatalogId ?? undefined,
+          contextWindow: meta.contextWindow,
+          supportsReasoning: meta.supportsReasoning,
+          supportsVision: meta.supportsVision,
+          pricing: meta.pricing ?? undefined,
+        },
+      }
+    : null;
+};
 
 /** Fetch-models button — probes the provider's /models endpoint, resolves each result against the models.dev catalog, and opens a grouped dialog (✅ MATCHED / ⚠ AMBIGUOUS / — NONE) where the user multi-selects models to add. baseUrl/apiKey come from the form's current state so it works in the add form before the provider is saved. Errors show inline next to the button (no modal). */
 export function FetchModelsButton({
@@ -1066,44 +968,18 @@ export function FetchModelsButton({
 
   const fetchModels = async () => {
     setState({ status: "loading" });
-    const res = await api.probeProviderModels({ apiStyle, baseUrl, apiKey });
-    if (!res.ok) {
-      setState({ status: "error", error: res.error });
+    try {
+      const models = await fetchAndEnrichModels(
+        api.probeProviderModels,
+        resolveCatalogMeta,
+        { apiStyle, baseUrl, apiKey, existingIds: existingModelIds },
+      );
+      setAvailable(models);
+      setSelected({});
+    } catch (e) {
+      setState({ status: "error", error: e instanceof Error ? e.message : "Fetch failed" });
       return;
     }
-    // Filter out models already in the table.
-    const existing = new Set(existingModelIds.map((id) => id.trim()));
-    const probed = res.models.filter((m) => !existing.has(m.id.trim()));
-    // Rich provider responses (OpenRouter) → use live data directly.
-    // Bare-id responses (OpenAI/Anthropic direct, LM Studio) → add as-is
-    // (no catalog fallback; the user can edit context manually).
-    const live = probed.filter(isRichProviderModel).map(liveToFetchedModel);
-    const bareIds = probed.filter((m) => !isRichProviderModel(m));
-    // Enrich bare-id models against the models.dev catalog — bare providers
-    // (z.ai, OpenAI/Anthropic direct, LM Studio) return only an id, but the
-    // catalog can fill in context, reasoning, and pricing so the user sees
-    // metadata immediately in the dialog instead of after adding.
-    const enriched = await Promise.all(
-      bareIds.map(async (m): Promise<FetchedModel> => {
-        const cat = await api.resolveModelCatalog({ modelId: m.id, contextWindow: 0 });
-        if (cat?.meta?.resolvedCatalogId) {
-          return {
-            modelId: m.id,
-            matchState: "none",
-            catalogId: cat.meta.resolvedCatalogId,
-            contextWindow: cat.meta.contextWindow,
-            reasoning: cat.meta.supportsReasoning,
-            supportsVision: cat.meta.supportsVision,
-            priceLabel: cat.meta.pricing ? formatPriceRate(cat.meta.pricing) : undefined,
-            inputCostPerToken: cat.meta.pricing?.inputPerToken,
-            outputCostPerToken: cat.meta.pricing?.outputPerToken,
-          };
-        }
-        return { modelId: m.id, matchState: "none" };
-      }),
-    );
-    setAvailable([...live, ...enriched]);
-    setSelected({});
     setState({ status: "idle" });
   };
 

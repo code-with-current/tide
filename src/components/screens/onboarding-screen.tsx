@@ -21,10 +21,11 @@ import type { GitRepoInfo } from '@/lib/api/client';
 import type { ApiStyle, Workspace, WorkspaceScript } from '@/types';
 import {
   PROTOCOL, ApiStylePicker, EndpointPreview, FetchModelsButton,
-  SectionLabel, FormField, appendFetchedModels, useCatalogEnrichment,
+  SectionLabel, FormField, useCatalogEnrichment,
 } from './settings/providers/providers';
 import {
-  ModelsTable, rowsToModels, useFollowProtocolEndpoint, useModelRows,
+  ModelsTable, appendFetchedModels, rowsToModels, useFollowProtocolEndpoint,
+  useModelRows,
 } from './settings/providers/models-table';
 import { Card, CardContent } from '../ui/card';
 
