@@ -279,6 +279,10 @@ interface UiState {
    *  startup like terminalOpen. Focus is kept on close so reopening returns. */
   agentsPanelOpen: boolean;
   setAgentsPanelOpen: (open: boolean) => void;
+  /** True while the Agents panel displaced the right panel (it was open when
+   *  the dispatch row was clicked) — the panel's close path reads + clears it
+   *  to decide whether to reopen the right panel. Runtime only — not persisted. */
+  agentsPanelRestoreRightPanel: boolean;
 
   /** Per-session composer controls (kept here so chat and empty-state stay in sync). */
   selectedModelId: string | null;
@@ -570,6 +574,7 @@ export const useUi = create<UiState>()(
     set((s) => ({ focusedDispatchId: { ...s.focusedDispatchId, [sessionId]: dispatchId } })),
   agentsPanelOpen: false,
   setAgentsPanelOpen: (open) => set({ agentsPanelOpen: open }),
+  agentsPanelRestoreRightPanel: false,
   queue: {},
   preTurnShas: {},
   promptHistory: {},

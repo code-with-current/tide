@@ -13,6 +13,7 @@ import { Bot, Loader2, X } from 'lucide-react';
 import type { Block, Session, ToolBlock } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
+import { useTabs } from '@/lib/stores/tabs';
 import { useSession, useDispatches } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { ThinkingBlock } from './thinking-block';
@@ -122,7 +123,16 @@ export function AgentsPanel({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             aria-label="Close agents panel"
-            onClick={() => setAgentsPanelOpen(false)}
+            onClick={() => {
+              // Reopen the right panel only if opening this panel displaced it.
+              const restore = useUi.getState().agentsPanelRestoreRightPanel;
+              useUi.setState({ agentsPanelRestoreRightPanel: false });
+              setAgentsPanelOpen(false);
+              if (restore) {
+                useTabs.getState().setActive(sessionId, 'inspector');
+                useUi.getState().setRightPanel(true);
+              }
+            }}
             className="shrink-0 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground"
           >
             <X className="size-3.5" />

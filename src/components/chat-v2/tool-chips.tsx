@@ -1052,7 +1052,13 @@ function ToolChipsImpl({
   const openDispatch = (call: ToolCall) => {
     if (!sessionId) return;
     useUi.getState().setFocusedDispatch(sessionId, call.id);
+    // Sticky OR: clicking a second dispatch row while the panel is already
+    // open must not clear a restore flag captured by the first click.
+    useUi.setState((s) => ({
+      agentsPanelRestoreRightPanel: s.rightPanelOpen || s.agentsPanelRestoreRightPanel,
+    }));
     useUi.getState().setAgentsPanelOpen(true);
+    useUi.getState().setRightPanel(false);
   };
 
   const rowEls = rows.map((call, index) => {
