@@ -13,7 +13,7 @@ import { resolveModelMeta, matchModelToCatalog } from '../agent/model-catalog.js
 import { getActiveCatalog, refreshModelCatalog } from '../agent/model-capabilities.js';
 import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
-import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches, gitAmend, gitRevertCommit, gitFetch, gitPush, gitPull, gitAheadBehind, gitListBranchesDetailed, gitDeleteBranch, gitMergeBranch, gitConflictFiles, gitResolveFile } from './git.js';
+import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches, gitAmend, gitRevertCommit, gitFetch, gitPush, gitPull, gitAheadBehind, gitListBranchesDetailed, gitDeleteBranch, gitMergeBranch, gitConflictFiles, gitResolveFile, gitStagedDiff, gitCommitMessage, gitDiscardFile } from './git.js';
 import { startGitWatcher } from './git-watcher.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
@@ -1476,6 +1476,25 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     const root = await resolveGitCwd(workspaceId, sessionId);
     if (!root) return { ok: false, error: 'no workspace' };
     return await gitResolveFile(root, filePath, side);
+  });
+
+  // Raw staged-diff text — feeds the commit-writer agent's dispatch task.
+  ipcMain.handle('tide:gitStagedDiff', async (_e, workspaceId: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return '';
+    try { return await gitStagedDiff(root); } catch { return ''; }
+  });
+
+  ipcMain.handle('tide:gitCommitMessage', async (_e, workspaceId: string, sha: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return '';
+    try { return await gitCommitMessage(root, sha); } catch { return ''; }
+  });
+
+  handle('tide:gitDiscardFile', async (_e, workspaceId: string, filePath: string, sessionId?: string) => {
+    const root = await resolveGitCwd(workspaceId, sessionId);
+    if (!root) return { ok: false, error: 'no workspace' };
+    return await gitDiscardFile(root, filePath);
   });
 
   // ── RAG (Memory & RAG panel) ────────────────────────────────────

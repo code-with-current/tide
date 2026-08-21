@@ -407,7 +407,11 @@ export function useGitStatus(workspaceId: string | null, sessionId?: string | nu
   useEffect(() => {
     if (!workspaceId) return;
     const onGitChanged = ({ workspaceId: wsId }: { workspaceId: string }) => {
-      if (wsId === workspaceId) qc.invalidateQueries({ queryKey: ['gitStatus', workspaceId] });
+      if (wsId === workspaceId) {
+        qc.invalidateQueries({ queryKey: ['gitStatus', workspaceId] });
+        // Merge/rebase state changes on disk too — keep the conflict band honest.
+        qc.invalidateQueries({ queryKey: ['gitConflictFiles', workspaceId] });
+      }
     };
     const off = window.tideIpc?.onGitChanged?.(onGitChanged);
     return () => { off?.(); };
@@ -654,6 +658,27 @@ export function useGitResolveFile(workspaceId: string, sessionId?: string | null
       qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) });
       qc.invalidateQueries({ queryKey: ['gitConflictFiles', workspaceId] });
     },
+  });
+}
+
+/** Unmerged paths for the conflict band. Keyed with the other git queries so
+ *  resolve mutations + the git watcher invalidate it. */
+export function useConflictFiles(workspaceId: string | null, sessionId?: string | null) {
+  const key = ['gitConflictFiles', workspaceId, sessionId] as const;
+  return useQuery({
+    queryKey: key,
+    queryFn: () => (workspaceId ? api.gitConflictFiles(workspaceId, sessionId ?? undefined) : Promise.resolve([] as api.GitConflictEntry[])),
+    enabled: !!workspaceId,
+    staleTime: 5_000,
+  });
+}
+
+/** Discard one file's working-tree changes (destructive — confirm first). */
+export function useGitDiscardFile(workspaceId: string, sessionId?: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (filePath: string) => api.gitDiscardFile(workspaceId, filePath, sessionId ?? undefined),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gitStatus(workspaceId) }),
   });
 }
 

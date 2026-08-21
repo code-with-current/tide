@@ -451,6 +451,41 @@ export async function gitResolveFile(rootDir: string, filePath: string, side: 'o
   }
 }
 
+/** Raw unified text of everything staged (`git diff --cached`). Empty string
+ *  when nothing is staged. Feeds the commit-writer agent's task verbatim. */
+export async function gitStagedDiff(rootDir: string): Promise<string> {
+  try {
+    const { stdout } = await runGit(['diff', '--cached'], rootDir, 10000);
+    return stdout;
+  } catch { return ''; }
+}
+
+/** Full commit message (subject + body) of one commit. Empty string on failure. */
+export async function gitCommitMessage(rootDir: string, sha: string): Promise<string> {
+  try {
+    const { stdout } = await runGit(['log', '-1', '--pretty=format:%B', sha], rootDir);
+    return stdout.trim();
+  } catch { return ''; }
+}
+
+/** Discard ONE file's working-tree changes (staged content is kept). Untracked
+ *  files are deleted — caller must confirm first. */
+export async function gitDiscardFile(rootDir: string, filePath: string): Promise<{ ok: boolean; error?: string }> {
+  resolveInsideWorkspace(rootDir, filePath);
+  try {
+    const tracked = await runGit(['ls-files', '--error-unmatch', '--', filePath], rootDir).then(() => true, () => false);
+    if (tracked) {
+      await runGit(['restore', '--worktree', '--', filePath], rootDir);
+    } else {
+      const abs = resolveInsideWorkspace(rootDir, filePath);
+      fs.rmSync(abs, { recursive: true, force: true });
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
 // ─── Worktree primitives: per-session isolation via <workspace>/<worktreeLocation>/<branchName>; no remote operations.
 
 /** List local branches for the base-branch select dropdown.

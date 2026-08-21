@@ -421,6 +421,9 @@ declare global {
       gitMergeBranch: (workspaceId: string, name: string, sessionId?: string) => Promise<{ ok: boolean; conflicts?: import('../lib/api/client').GitConflictEntry[]; error?: string }>;
       gitConflictFiles: (workspaceId: string, sessionId?: string) => Promise<import('../lib/api/client').GitConflictEntry[]>;
       gitResolveFile: (workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+      gitStagedDiff: (workspaceId: string, sessionId?: string) => Promise<string>;
+      gitCommitMessage: (workspaceId: string, sha: string, sessionId?: string) => Promise<string>;
+      gitDiscardFile: (workspaceId: string, filePath: string, sessionId?: string) => Promise<{ ok: boolean; error?: string }>;
 
       // ── RAG (Memory & RAG panel) ──
       ragStatus: (workspaceId: string) => Promise<import('./index').RagStatus | { error: string }>;

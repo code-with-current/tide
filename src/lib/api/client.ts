@@ -753,6 +753,18 @@ export async function gitResolveFile(workspaceId: string, filePath: string, side
   if (ipc) return ipc.gitResolveFile(workspaceId, filePath, side, sessionId);
   return { ok: false };
 }
+export async function gitStagedDiff(workspaceId: string, sessionId?: string): Promise<string> {
+  if (ipc) return ipc.gitStagedDiff(workspaceId, sessionId);
+  return '';
+}
+export async function gitCommitMessage(workspaceId: string, sha: string, sessionId?: string): Promise<string> {
+  if (ipc) return ipc.gitCommitMessage(workspaceId, sha, sessionId);
+  return '';
+}
+export async function gitDiscardFile(workspaceId: string, filePath: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc) return ipc.gitDiscardFile(workspaceId, filePath, sessionId);
+  return { ok: false, error: 'IPC unavailable' };
+}
 
 // ============================================================
 // RAG status (Memory & RAG panel)

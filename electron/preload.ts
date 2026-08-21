@@ -397,6 +397,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:gitConflictFiles', workspaceId, sessionId),
   gitResolveFile: (workspaceId: string, filePath: string, side: 'ours' | 'theirs', sessionId?: string) =>
     ipcRenderer.invoke('tide:gitResolveFile', workspaceId, filePath, side, sessionId),
+  gitStagedDiff: (workspaceId: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitStagedDiff', workspaceId, sessionId),
+  gitCommitMessage: (workspaceId: string, sha: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitCommitMessage', workspaceId, sha, sessionId),
+  gitDiscardFile: (workspaceId: string, filePath: string, sessionId?: string) =>
+    ipcRenderer.invoke('tide:gitDiscardFile', workspaceId, filePath, sessionId),
 
   // ── RAG (Memory & RAG panel) ──
   ragStatus: (workspaceId: string) =>
