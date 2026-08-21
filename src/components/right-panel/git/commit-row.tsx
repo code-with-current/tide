@@ -51,7 +51,7 @@ export function CommitRow({
             type="button"
             onClick={onSelect}
         className={cn(
-          'absolute inset-y-0 left-0 right-2 grid grid-cols-[64px_minmax(0,1fr)_auto_auto] items-center gap-x-1.5 rounded-sm px-0 text-left transition-colors',
+          'absolute inset-y-0 left-0 right-2 grid grid-cols-[64px_minmax(0,1fr)_auto_auto] items-center gap-x-1.5 px-0 text-left transition-colors',
           active ? 'bg-primary/10' : 'hover:bg-secondary/40',
         )}
       >
@@ -62,18 +62,19 @@ export function CommitRow({
                 <span
                   key={name}
                   className={cn(
-                    'flex max-w-28 flex-shrink-0 items-center gap-0.5 truncate rounded-md py-px pr-1 text-[0.65rem] leading-none',
+                    'flex max-w-28 flex-shrink-0 items-center gap-1 truncate rounded-sm h-4 pr-1 text-[0.70rem] leading-none border border-[0.5px]',
                     commit.isHead && name === commit.branchHeads![0]
                       ? 'bg-primary/15 text-primary'
                       : 'bg-secondary text-muted-foreground',
                   )}
                   title={name}
+                  style={laneColor ? { borderColor: laneColor } : undefined}
                 >
                   <span
-                    className="flex size-2.5 flex-shrink-0 items-center justify-center rounded-l"
+                    className="flex flex-shrink-0 h-4 min-h-0 items-center rounded-l-sm justify-center"
                     style={laneColor ? { background: laneColor } : undefined}
                   >
-                    <GitBranch className="size-2 text-black" />
+                    <GitBranch className="size-2.5 text-black m-0.5" />
                   </span>
                   <span className="truncate font-mono">{name}</span>
                 </span>
@@ -81,7 +82,7 @@ export function CommitRow({
               {(commit.tags ?? []).map((name) => (
                 <span
                   key={name}
-                  className="flex max-w-24 flex-shrink-0 items-center gap-0.5 truncate rounded-md bg-warning/15 py-px pr-1 text-[0.65rem] leading-none text-warning"
+                  className="flex max-w-24 flex-shrink-0 items-center gap-0.5 truncate rounded-sm bg-warning/15 py-px pr-1 text-[0.70rem] leading-none text-warning"
                   title={`tag ${name}`}
                 >
                   <Tag className="size-2 flex-shrink-0" />
@@ -90,7 +91,7 @@ export function CommitRow({
               ))}
             </>
           )}
-          <span className="min-w-0 flex-1 truncate text-[0.72rem] text-foreground/90">
+          <span className="min-w-0 flex-1 truncate text-[0.80rem] text-foreground/90">
             {commit.subject || '(no subject)'}
           </span>
         </span>
