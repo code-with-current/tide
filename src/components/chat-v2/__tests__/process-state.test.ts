@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { deriveProcessOpen } from '../process-state';
+import type { Block } from '@/types';
+import { answerIsGrowing, deriveProcessOpen } from '../process-state';
+
+const text = (over: Partial<Extract<Block, { kind: 'text' }>>): Block =>
+  ({ kind: 'text', id: 'b', text: '', isAnswer: false, ...over } as Block);
 
 describe('deriveProcessOpen', () => {
   it('open while streaming with process content and no answer yet', () => {
@@ -23,5 +27,33 @@ describe('deriveProcessOpen', () => {
   });
   it('no process content → never open', () => {
     expect(deriveProcessOpen({ streaming: true, hasProcess: false, answerActive: false, userPinned: null })).toBe(false);
+  });
+});
+
+describe('answerIsGrowing', () => {
+  // isAnswer stays false on the live tail — the reducer only flags it on
+  // turn_end (streamReducer.applyTurnEnd). Mid-stream, trailing text after
+  // all tools is the presumptive answer.
+  it('true when the last block is text in a streaming turn', () => {
+    const blocks = [text({ id: 'a1', text: 'hi' })];
+    expect(answerIsGrowing(blocks, true)).toBe(true);
+  });
+  it('false when the last block is a tool (process resumed after answer)', () => {
+    const blocks = [
+      text({ id: 'a1', text: 'hi' }),
+      { kind: 'tool', id: 't1', toolCallId: 't', toolName: 'bash', status: 'executed' } as Block,
+    ];
+    expect(answerIsGrowing(blocks, true)).toBe(false);
+  });
+  it('false when not streaming (finished answer)', () => {
+    expect(answerIsGrowing([text({ id: 'a1', isAnswer: true, text: 'hi' })], false)).toBe(false);
+  });
+  it('false when the last block is reasoning, not text', () => {
+    const blocks = [text({ id: 'a1', text: 'hi' }), { kind: 'reasoning', id: 'r1', text: 'hmm' } as Block];
+    expect(answerIsGrowing(blocks, true)).toBe(false);
+  });
+  it('false for missing or empty block lists', () => {
+    expect(answerIsGrowing(undefined, true)).toBe(false);
+    expect(answerIsGrowing([], true)).toBe(false);
   });
 });
