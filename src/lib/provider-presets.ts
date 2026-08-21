@@ -32,7 +32,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'google', name: 'Google Gemini', group: 'first-party', apiStyle: 'openai',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', requiresKey: true,
     keyUrl: 'https://aistudio.google.com/apikey', keyPlaceholder: 'AIza…',
-    recommended: ['gemini-2.5-pro', 'gemini-2.5-flash'], accent: '#4285f4',
+    recommended: ['gemini-2.5-pro', 'gemini-2.5-flash'], accent: '#ffffff',
   },
   {
     id: 'xai', name: 'xAI Grok', group: 'first-party', apiStyle: 'openai',
@@ -74,13 +74,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'together', name: 'Together', group: 'aggregator', apiStyle: 'openai',
     baseUrl: 'https://api.together.xyz/v1', requiresKey: true,
     keyUrl: 'https://www.together.ai/settings/api-keys', keyPlaceholder: '…',
-    recommended: ['coder'], accent: '#0f6fff',
+    recommended: ['coder'], accent: '#ffffff',
   },
   {
     id: 'fireworks', name: 'Fireworks', group: 'aggregator', apiStyle: 'openai',
     baseUrl: 'https://api.fireworks.ai/inference/v1', requiresKey: true,
     keyUrl: 'https://firework.ai/account/api-keys', keyPlaceholder: 'fw_…',
-    recommended: ['deepseek-v3', 'kimi-k2'], accent: '#ef5da8',
+    recommended: ['deepseek-v3', 'kimi-k2'], accent: '#ffffff',
   },
   {
     id: 'ollama', name: 'Ollama', group: 'local', apiStyle: 'openai',
