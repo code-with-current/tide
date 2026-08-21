@@ -32,6 +32,9 @@ export function deriveLayout(blocks: Block[] | undefined): TurnLayout {
   for (const b of blocks) {
     switch (b.kind) {
       case 'reasoning': {
+        // Sub-agent reasoning nests under its dispatch in the Agents
+        // panel — never folded into the main turn's thinking card.
+        if (b.parentToolCallId) break;
         // The orchestrator now emits one reasoning block per model step
         // (reasoningBlockId resets at each tool call) so stream view can
         // interleave them. Compact view still shows a single thinking card,
@@ -63,6 +66,9 @@ export function deriveLayout(blocks: Block[] | undefined): TurnLayout {
         layout.process.push(b);
         break;
       case 'text':
+        // Sub-agent narration nests under its dispatch in the Agents
+        // panel — excluded from process, answer, and totals.
+        if (b.parentToolCallId) break;
         if (b.isAnswer) {
           if (!layout.answer) layout.answer = b;
           else layout.answer.text += '\n\n' + b.text;

@@ -63,9 +63,11 @@ export const BlockList = memo(function BlockList({
   // position so stream view shows ONE answer, mirroring compact's deriveLayout.
   const answerInfo = useMemo(() => {
     if (!blocks) return null;
-    const answerBlocks = blocks.filter((b): b is TextBlock => b.kind === 'text' && b.isAnswer);
+    // Parented text (sub-agent narration) never joins the consolidated
+    // answer — it renders in the Agents panel under its dispatch.
+    const answerBlocks = blocks.filter((b): b is TextBlock => b.kind === 'text' && b.isAnswer && !b.parentToolCallId);
     if (answerBlocks.length === 0) return null;
-    const firstIdx = blocks.findIndex((b) => b.kind === 'text' && b.isAnswer);
+    const firstIdx = blocks.findIndex((b) => b.kind === 'text' && b.isAnswer && !b.parentToolCallId);
     return { firstIdx, text: answerBlocks.map((b) => b.text).join('\n\n').trim() };
   }, [blocks]);
   // Stream view groups contiguous top-level tool blocks into runs; each run
@@ -144,6 +146,9 @@ export const BlockList = memo(function BlockList({
         {(blocks ?? []).map((b, idx) => {
           switch (b.kind) {
             case 'reasoning':
+              // Sub-agent reasoning renders in the Agents panel under its
+              // dispatch — never as a top-level thinking card.
+              if (b.parentToolCallId) return null;
               // Each reasoning block is one model step. `streaming` is only
               // true for the actively-emitting (last) block, so the previous
               // step's ThinkingBlock collapses via its streaming effect as a
@@ -178,6 +183,9 @@ export const BlockList = memo(function BlockList({
               );
             }
             case 'text':
+              // Sub-agent narration renders in the Agents panel under its
+              // dispatch — never inline in the main chat.
+              if (b.parentToolCallId) return null;
               if (!b.text.trim()) return null;
               if (b.isAnswer) {
                 // Render the consolidated answer ONCE (at the first answer

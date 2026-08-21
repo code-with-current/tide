@@ -7,16 +7,22 @@ import type { RuleSet } from '../permissions/rules.js';
 /** Minimal emit signature — the orchestrator injects a part-shaped event. */
 export type ToolEmit = (event: unknown) => void;
 
-/** Callback a sub-agent uses to surface its internal tool-call lifecycle as
- *  real (nested) AgentEvents. The orchestrator injects this when building the
+/** Callback a sub-agent uses to surface its internal stream as real
+ *  (nested) AgentEvents. The orchestrator injects this when building the
  *  top-level ToolContext; sub-agents read it and call it per part. Each event
- *  is an AgentEvent-shaped object (without seq — the bridge assigns one). */
+ *  is an AgentEvent-shaped object (without seq — the bridge assigns one).
+ *  Tool lifecycle events carry toolCallId; narration/thinking forwards
+ *  text/reasoning deltas with the SDK part's stable block id instead. */
 export type EmitToolEvent = (event: {
-  type: 'tool_call_start' | 'tool_call_delta' | 'tool_call' | 'tool_executing' | 'tool_result';
+  type: 'tool_call_start' | 'tool_call_delta' | 'tool_call' | 'tool_executing' | 'tool_result' | 'delta' | 'reasoning';
   parentToolCallId: string;
-  toolCallId: string;
+  toolCallId?: string;
   toolName?: string;
   delta?: string;
+  /** Full text of a 'delta' (sub-agent narration) part. */
+  text?: string;
+  /** SDK part id — the text/reasoning block id consecutive deltas share. */
+  blockId?: string;
   arguments?: Record<string, unknown>;
   argPreview?: string;
   riskTier?: import('../../../../src/types/index.js').RiskTier;

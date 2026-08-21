@@ -196,6 +196,9 @@ export function useChatStream(): {
 function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStream {
   switch (event.type) {
     case 'delta': {
+      // Parented deltas are sub-agent narration (Agents panel) — the
+      // parent's legacy text/timeline must not accumulate them.
+      if (event.parentToolCallId) return state;
       // Append to legacy `text` + maintain the timeline's last text entry.
       // Clear the compacting flag — compaction finished, the model is now
       // streaming the next step. Content also dismisses the retry indicator —
@@ -204,6 +207,7 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
       return { ...state, text: state.text + event.text, timeline, compacting: false, retry: null };
     }
     case 'reasoning':
+      if (event.parentToolCallId) return state;
       return { ...state, reasoning: state.reasoning + event.delta, retry: null };
     case 'tool_call_start': {
       const toolIndex = state.toolCalls.length;

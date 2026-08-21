@@ -27,6 +27,11 @@ export interface TextBlock extends BaseBlock {
    *  it in the array). Computed by the reducer on `turn_end`. False
    *  during streaming for the active block. */
   isAnswer: boolean;
+  /** When set, this text was emitted inside a sub-agent dispatched by the
+   *  named parent dispatch_agent tool call. Parent-aware consumers (the
+   *  Agents panel) render it; the main chat skips it. Undefined for
+   *  top-level narration. */
+  parentToolCallId?: string;
 }
 
 export interface ReasoningBlock extends BaseBlock {
@@ -34,6 +39,9 @@ export interface ReasoningBlock extends BaseBlock {
   text: string;
   tokens?: number;
   ms?: number;
+  /** When set, this reasoning was emitted inside a sub-agent — see
+   *  TextBlock.parentToolCallId. */
+  parentToolCallId?: string;
 }
 
 export interface ToolBlock extends BaseBlock {

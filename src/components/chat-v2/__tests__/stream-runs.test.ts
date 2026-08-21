@@ -39,6 +39,20 @@ describe('groupToolRuns — session root (null)', () => {
     expect(childrenByParent.get('p')).toEqual([child]);
   });
 
+  it('parented text blocks never surface — not as runs, not indexed', () => {
+    // Sub-agent narration interleaved with the parent's stream: ToolChips'
+    // flattenRun only maps tool blocks, so parented text can only ever
+    // break a run (same as any non-tool block), never render.
+    const parent = tool({ id: 'p', toolCallId: 'p' });
+    const childText = { kind: 'text', id: 'ct', text: 'child narration', isAnswer: false, parentToolCallId: 'p' } as unknown as Block;
+    const next = tool({ id: 'n', toolCallId: 'n' });
+    const { runs, childrenByParent } = groupToolRuns([parent, childText, next], null);
+    expect(runs).toEqual([[parent], [next]]);
+    expect(childrenByParent.size).toBe(0);
+    const out = flattenRun(runs[0], childrenByParent);
+    expect(out.map((c) => c.id)).toEqual(['p']);
+  });
+
   it('undefined blocks → empty', () => {
     expect(groupToolRuns(undefined, null)).toEqual({ runs: [], childrenByParent: new Map() });
   });

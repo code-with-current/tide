@@ -34,15 +34,22 @@ export function deriveProcessOpen(input: ProcessOpenInput): boolean {
 export function answerIsGrowing(blocks: Block[] | undefined, streaming: boolean): boolean {
   if (!streaming || !blocks || blocks.length === 0) return false;
   const last = blocks[blocks.length - 1];
-  return last.kind === 'text';
+  // Parented text is sub-agent narration — it never counts as the parent
+  // turn's answer (the dispatch row is still running, not answering).
+  return last.kind === 'text' && !last.parentToolCallId;
 }
 
 /** Number of process steps (reasoning + tool blocks) in a block list — the
- * container header's "· N steps" count. */
+ *  container header's "· N steps" count. Parented reasoning is excluded
+ *  (sub-agent thinking nests in the Agents panel); parented tool blocks are
+ *  counted — they already were before sub-agent text/reasoning forwarding. */
 export function stepsCount(blocks: Block[] | undefined): number {
   if (!blocks) return 0;
   let n = 0;
-  for (const b of blocks) if (b.kind === 'reasoning' || b.kind === 'tool') n++;
+  for (const b of blocks) {
+    if (b.kind === 'reasoning') { if (!b.parentToolCallId) n++; continue; }
+    if (b.kind === 'tool') n++;
+  }
   return n;
 }
 

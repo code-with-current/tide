@@ -42,7 +42,11 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
 function applyDelta(state: SessionStream, e: Extract<AgentEvent, { type: 'delta' }>): SessionStream {
   const blocks = state.blocks ?? [];
   const last = blocks[blocks.length - 1];
-  if (last && last.kind === 'text' && last.id === e.blockId) {
+  // Merge requires same id AND same parentage — a parented child segment
+  // arriving between parent segments must open its own block, never graft
+  // onto the parent's (ids are provider/uuid-scoped, this is belt+braces).
+  if (last && last.kind === 'text' && last.id === e.blockId
+    && (last.parentToolCallId ?? undefined) === e.parentToolCallId) {
     // Append to the active text block — same id means same segment.
     const updated: TextBlock = {
       ...last, text: last.text + e.text, modifiedAtSeq: e.seq,
@@ -53,6 +57,7 @@ function applyDelta(state: SessionStream, e: Extract<AgentEvent, { type: 'delta'
   const block: TextBlock = {
     id: e.blockId, kind: 'text', text: e.text,
     createdAtSeq: e.seq, modifiedAtSeq: e.seq, isAnswer: false,
+    ...(e.parentToolCallId ? { parentToolCallId: e.parentToolCallId } : {}),
   };
   return { ...state, blocks: [...blocks, block] };
 }
@@ -61,7 +66,8 @@ function applyDelta(state: SessionStream, e: Extract<AgentEvent, { type: 'delta'
 
 function applyReasoning(state: SessionStream, e: Extract<AgentEvent, { type: 'reasoning' }>): SessionStream {
   const blocks = state.blocks ?? [];
-  const existing = blocks.find(b => b.id === e.blockId);
+  const existing = blocks.find(b => b.id === e.blockId && b.kind === 'reasoning'
+    && (b.parentToolCallId ?? undefined) === e.parentToolCallId);
   if (existing && existing.kind === 'reasoning') {
     const updated: ReasoningBlock = {
       ...existing, text: existing.text + e.delta, modifiedAtSeq: e.seq,
@@ -71,6 +77,7 @@ function applyReasoning(state: SessionStream, e: Extract<AgentEvent, { type: 're
   const block: ReasoningBlock = {
     id: e.blockId, kind: 'reasoning', text: e.delta,
     createdAtSeq: e.seq, modifiedAtSeq: e.seq,
+    ...(e.parentToolCallId ? { parentToolCallId: e.parentToolCallId } : {}),
   };
   return { ...state, blocks: [...blocks, block] };
 }
@@ -243,7 +250,9 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
     if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
   }
   for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
+    const b = blocks[i];
+    // Parented text is sub-agent narration — never the parent's deliverable.
+    if (b.kind === 'text' && !b.parentToolCallId) (b as TextBlock).isAnswer = true;
   }
 
   return {

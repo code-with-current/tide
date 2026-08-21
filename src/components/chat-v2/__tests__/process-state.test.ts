@@ -52,6 +52,10 @@ describe('answerIsGrowing', () => {
     const blocks = [text({ id: 'a1', text: 'hi' }), { kind: 'reasoning', id: 'r1', text: 'hmm' } as Block];
     expect(answerIsGrowing(blocks, true)).toBe(false);
   });
+  it('false when the last block is parented text — child narration is not the parent answer', () => {
+    const blocks = [text({ id: 'c1', text: 'child narration', parentToolCallId: 'd1' })];
+    expect(answerIsGrowing(blocks, true)).toBe(false);
+  });
   it('false for missing or empty block lists', () => {
     expect(answerIsGrowing(undefined, true)).toBe(false);
     expect(answerIsGrowing([], true)).toBe(false);
@@ -78,6 +82,14 @@ describe('stepsCount', () => {
       { kind: 'text', id: 'a1' },
     ] as never;
     expect(stepsCount(blocks)).toBe(3);
+  });
+  it('parented reasoning is not counted — sub-agent thinking nests in the Agents panel', () => {
+    const blocks = [
+      { kind: 'reasoning', id: 'r1' },
+      { kind: 'reasoning', id: 'rc1', parentToolCallId: 'd1' },
+      { kind: 'tool', id: 't1' },
+    ] as never;
+    expect(stepsCount(blocks)).toBe(2);
   });
   it('zero on undefined', () => {
     expect(stepsCount(undefined)).toBe(0);
