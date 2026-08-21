@@ -16,6 +16,7 @@ import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { TerminalPanel } from "@/components/terminal/terminal-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
+import { AgentsPanel } from "@/components/chat-v2/agents-panel";
 import { useRightPanelOverlay } from '@/lib/right-panel-layout';
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
@@ -82,6 +83,9 @@ export function MainScreen() {
   const mainView = useUi((s) => s.mainView);
   // The right panel is hidden on the new-session screen — it shows session-specific data (Inspector, files, terminal) that doesn't exist before the first message creates a session. Derived locally (NOT written to the store) so the user's rightPanelOpen preference is preserved when they return to chat.
   const showRightPanel = rightPanelOpen && mainView !== "new";
+  // Docked Agents panel — runtime-only flag flipped by dispatch-row clicks;
+  // the panel renders its own header X (keeps focus) to close.
+  const agentsOpen = useUi((s) => s.agentsPanelOpen);
   // Narrow windows: the right panel becomes a Sheet overlay instead of competing
   // with the chat column for in-flow space (t3code-style inline↔overlay switch).
   const rightPanelOverlay = useRightPanelOverlay();
@@ -1179,6 +1183,18 @@ export function MainScreen() {
               <RightPanel />
               <FloatingPermissionCard sessionId={activeSessionId} />
             </ResizablePanel>
+          )}
+
+          {/* Agents panel — docked sub-agent stream, opened only by
+              dispatch-row clicks. Sized in % of the panel group (strings —
+              numbers are px in react-resizable-panels), capped at 60%. */}
+          {agentsOpen && !workspaceMissing && activeSessionId && (
+            <>
+              <ResizableHandle />
+              <ResizablePanel id="agents" defaultSize="30" minSize="20" maxSize="60" className="min-h-0">
+                <AgentsPanel sessionId={activeSessionId} />
+              </ResizablePanel>
+            </>
           )}
         </ResizablePanelGroup>
 

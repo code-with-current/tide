@@ -269,11 +269,16 @@ interface UiState {
   streams: Record<string, SessionStream>;
 
   /** Focused sub-agent dispatch per session (the dispatch ToolCall's id) —
-   *  drives the Agents right-panel tab's stream view. Runtime only — not
+   *  drives the docked Agents panel's stream view. Runtime only — not
    *  persisted. */
   focusedDispatchId: Record<string, string | null>;
-  /** Focus (or clear, with null) the dispatch whose stream the Agents tab shows. */
+  /** Focus (or clear, with null) the dispatch whose stream the Agents panel shows. */
   setFocusedDispatch: (sessionId: string, dispatchId: string | null) => void;
+  /** Docked Agents panel visibility. Opened only by dispatch-row clicks,
+   *  closed by its header X. Runtime only — not persisted; forced false on
+   *  startup like terminalOpen. Focus is kept on close so reopening returns. */
+  agentsPanelOpen: boolean;
+  setAgentsPanelOpen: (open: boolean) => void;
 
   /** Per-session composer controls (kept here so chat and empty-state stay in sync). */
   selectedModelId: string | null;
@@ -563,6 +568,8 @@ export const useUi = create<UiState>()(
   focusedDispatchId: {},
   setFocusedDispatch: (sessionId, dispatchId) =>
     set((s) => ({ focusedDispatchId: { ...s.focusedDispatchId, [sessionId]: dispatchId } })),
+  agentsPanelOpen: false,
+  setAgentsPanelOpen: (open) => set({ agentsPanelOpen: open }),
   queue: {},
   preTurnShas: {},
   promptHistory: {},
@@ -1336,6 +1343,9 @@ export const useUi = create<UiState>()(
         ...current,
         ...(persistedState as Partial<UiState>),
         terminalOpen: {},
+        // Same for the Agents panel — it opens only via an explicit
+        // dispatch-row click, never auto-restored.
+        agentsPanelOpen: false,
         // Sessions can't still be running after a restart — the orchestrator
         // died with the app. Force the running set empty so a stale persisted
         // blob can't restore running indicators for dead turns.

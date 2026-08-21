@@ -9,7 +9,6 @@ import { useTabs } from '@/lib/stores/tabs';
 import { useSession } from '@/lib/queries';
 import { InspectorTab } from './tabs/inspector-tab';
 import { FileExplorerTab } from './tabs/file-explorer-tab';
-import { AgentsTab } from './tabs/agents-tab';
 import { GitPanel } from '@/components/git/git-panel';
 import { InspectorSkeleton } from './inspector-skeleton';
 
@@ -44,8 +43,6 @@ export function RightPanel() {
           <FileExplorerTab />
         ) : feature === 'changes' ? (
           <div className="flex-1 overflow-y-auto scroll"><GitPanel /></div>
-        ) : feature === 'agents' && session ? (
-          <AgentsTab session={session} />
         ) : null}
       </div>
     </aside>

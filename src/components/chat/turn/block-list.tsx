@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
-import type { Block, TextBlock, ToolBlock, ToolCall } from '@/types';
+import type { Block, TextBlock, ToolBlock } from '@/types';
 import { deriveLayout } from './block-layout';
 import { TurnHeader } from './turn-header';
 import { summarizeFileChanges } from '@/lib/stream/block-state';
@@ -10,10 +10,10 @@ import { FileChanges } from '@/components/chat/blocks/file-changes';
 import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
 import { ProcessContainer } from '@/components/chat-v2/process-container';
 import { answerIsGrowing, lastPhaseLabel } from '@/components/chat-v2/process-state';
+import { groupToolRuns, flattenRun } from '@/components/chat-v2/stream-runs';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 import { FollowupPrompt } from '@/components/chat/blocks/followup-prompt';
 import { CompactingIndicator } from '@/components/chat/blocks/compacting-indicator';
-import { toolBlockToToolCall } from '@/components/chat/turn/block-adapter';
 import { useUi } from '@/lib/stores/ui';
 
 /** Look up the tool block for a followup and check if it has terminal status.
@@ -25,19 +25,6 @@ function isFollowupResolved(blocks: Block[] | undefined, toolCallId: string): bo
   if (!tool || tool.kind !== 'tool') return false;
   return tool.status === 'executed' || tool.status === 'rejected' ||
          tool.status === 'failed' || tool.status === 'aborted';
-}
-
-/** v2 ToolChips input: tool calls with dispatch_agent children flattened
- *  directly after their parent row. */
-function flattenCalls(tools: ToolBlock[], childrenByParent: Map<string, ToolBlock[]>): ToolCall[] {
-  const out: ToolCall[] = [];
-  for (const b of tools) {
-    out.push(toolBlockToToolCall(b));
-    for (const child of childrenByParent.get(b.toolCallId) ?? []) {
-      out.push(toolBlockToToolCall(child));
-    }
-  }
-  return out;
 }
 
 interface BlockListProps {
@@ -81,43 +68,16 @@ export const BlockList = memo(function BlockList({
     const firstIdx = blocks.findIndex((b) => b.kind === 'text' && b.isAnswer);
     return { firstIdx, text: answerBlocks.map((b) => b.text).join('\n\n').trim() };
   }, [blocks]);
-  // Index child tool blocks by their parentToolCallId so ProcessSection can
-  // pass each dispatch_agent's children to its ToolRow for nested
-  // rendering. Children are excluded from layout.process by deriveLayout.
-  const childrenByParent = useMemo(() => {
-    const map = new Map<string, ToolBlock[]>();
-    for (const b of blocks ?? []) {
-      if (b.kind === 'tool' && b.parentToolCallId) {
-        const arr = map.get(b.parentToolCallId);
-        if (arr) arr.push(b);
-        else map.set(b.parentToolCallId, [b]);
-      }
-    }
-    return map;
-  }, [blocks]);
-
-  const chipCalls = useMemo(
-    () => flattenCalls(layout.process.filter((b): b is ToolBlock => b.kind === 'tool'), childrenByParent),
-    [layout.process, childrenByParent],
-  );
-
   // Stream view groups contiguous top-level tool blocks into runs; each run
   // renders as one ToolChips section — the same anatomy as compact's single
-  // grouped section, split where reasoning/text interrupts tooling.
-  const toolRuns = useMemo(() => {
-    const runs: ToolBlock[][] = [];
-    let prevWasTopLevelTool = false;
-    for (const b of blocks ?? []) {
-      const isTopLevelTool = b.kind === 'tool' && !b.parentToolCallId;
-      if (isTopLevelTool) {
-        const run = prevWasTopLevelTool ? runs[runs.length - 1] : undefined;
-        if (run) run.push(b);
-        else runs.push([b]);
-      }
-      prevWasTopLevelTool = isTopLevelTool;
-    }
-    return runs;
-  }, [blocks]);
+  // grouped section, split where reasoning/text interrupts tooling. Shared
+  // with the Agents panel (rooted at a dispatch instead of the session).
+  const { runs: toolRuns, childrenByParent } = useMemo(() => groupToolRuns(blocks, null), [blocks]);
+
+  const chipCalls = useMemo(
+    () => flattenRun(layout.process.filter((b): b is ToolBlock => b.kind === 'tool'), childrenByParent),
+    [layout.process, childrenByParent],
+  );
 
   // Refs for scroll-preservation math during the streaming → completed transition.
   const thinkingRef = useRef<HTMLDivElement>(null);
@@ -208,7 +168,7 @@ export const BlockList = memo(function BlockList({
               return (
                 <ToolChips
                   key={b.id}
-                  calls={flattenCalls(toolRuns.find((r) => r[0]?.id === b.id) ?? [], childrenByParent)}
+                  calls={flattenRun(toolRuns.find((r) => r[0]?.id === b.id) ?? [], childrenByParent)}
                   streaming={streaming}
                   variant="stream"
                   sessionId={sessionId}

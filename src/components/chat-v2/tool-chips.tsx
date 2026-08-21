@@ -37,7 +37,6 @@ import { cn } from '@/lib/utils';
 import { toolLabel } from '@/lib/tool-labels';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { useUi } from '@/lib/stores/ui';
-import { useTabs } from '@/lib/stores/tabs';
 import { agentStatusOf, type AgentStatus } from './agent-status';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
@@ -1053,9 +1052,7 @@ function ToolChipsImpl({
   const openDispatch = (call: ToolCall) => {
     if (!sessionId) return;
     useUi.getState().setFocusedDispatch(sessionId, call.id);
-    useTabs.getState().addTab(sessionId, 'agents');
-    useTabs.getState().setActive(sessionId, 'agents');
-    useUi.setState({ rightPanelOpen: true });
+    useUi.getState().setAgentsPanelOpen(true);
   };
 
   const rowEls = rows.map((call, index) => {
