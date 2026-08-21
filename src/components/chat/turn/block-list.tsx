@@ -210,6 +210,7 @@ export const BlockList = memo(function BlockList({
                   key={b.id}
                   calls={flattenCalls(toolRuns.find((r) => r[0]?.id === b.id) ?? [], childrenByParent)}
                   streaming={streaming}
+                  variant="stream"
                   onViewFile={onViewFile}
                   onViewDiff={onViewFileDiff}
                 />

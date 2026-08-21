@@ -2,7 +2,7 @@
  * Mockup-derived layout, but driven by real ToolCall data and Tide's design
  * tokens. Lives alongside (not replacing) the v1 tool-row. */
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   FileSearch,
@@ -35,6 +35,7 @@ import {
 import type { DiffHunk, DiffLine, ToolCall, ToolName } from '@/types';
 import { cn } from '@/lib/utils';
 import { toolLabel } from '@/lib/tool-labels';
+import { useFollowScroll } from '@/hooks/use-follow-scroll';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
   read_file: <FileSearch className="size-3" />,
@@ -948,6 +949,7 @@ function AgentDetail({
   toggleRow,
   onViewFile,
   onViewDiff,
+  streaming,
 }: {
   call: ToolCall;
   childCalls: ToolCall[];
@@ -955,11 +957,17 @@ function AgentDetail({
   toggleRow: (id: string) => void;
   onViewFile?: (path: string) => void;
   onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
+  streaming?: boolean;
 }) {
   const d = call.display?.kind === 'agent' ? call.display : undefined;
   const agentName = d?.agentName ?? String(call.arguments?.name ?? 'agent');
   const task = d?.task ?? String(call.arguments?.task ?? '');
   const report = d?.report ?? call.report ?? call.output ?? '';
+  // Background dispatches keep streaming children after the turn ends, so
+  // follow the dispatch's own status rather than the turn's streaming flag.
+  const childStreamRunning = call.status ? call.status === 'running' : !!streaming;
+  const childRowsRef = useRef<HTMLDivElement>(null);
+  useFollowScroll(childRowsRef, childStreamRunning);
   return (
     <div className="flex flex-col gap-[5px] py-1">
       <div className="flex items-center gap-1.5">
@@ -999,9 +1007,11 @@ function AgentDetail({
       {task && (
         <p className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.6] text-muted-foreground">{task}</p>
       )}
-      {childCalls.map((c) => (
-        <ChipRow key={c.id} call={c} isChild rowOpen={openRows.has(c.id)} onToggle={toggleRow} onViewFile={onViewFile} onViewDiff={onViewDiff} />
-      ))}
+      <div ref={childRowsRef} className={cn('flex flex-col gap-[5px]', childStreamRunning && 'max-h-[420px] overflow-y-auto')}>
+        {childCalls.map((c) => (
+          <ChipRow key={c.id} call={c} isChild rowOpen={openRows.has(c.id)} onToggle={toggleRow} onViewFile={onViewFile} onViewDiff={onViewDiff} />
+        ))}
+      </div>
       {report && (
         <p className="whitespace-pre-wrap rounded-md bg-secondary/40 px-2 py-1.5 text-[12px] leading-[1.65] text-foreground/85">
           {report}
@@ -1014,17 +1024,24 @@ function AgentDetail({
 function ToolChipsImpl({
   calls,
   streaming = false,
+  variant = 'header',
   onViewFile,
   onViewDiff,
 }: {
   calls: ToolCall[];
   streaming?: boolean;
+  variant?: 'header' | 'stream';
   onViewFile?: (path: string) => void;
   onViewDiff?: (entry: { path: string; hunks?: DiffHunk[] }) => void;
 }) {
   const [openState, setOpenState] = useState(true);
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   const open = openState;
+
+  // Follow lives on the stream variant's rows container only — compact keeps
+  // its uncapped layout inside ProcessContainer.
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useFollowScroll(rowsRef, streaming);
 
   const toggleRow = (id: string) =>
     setOpenRows((current) => {
@@ -1040,6 +1057,43 @@ function ToolChipsImpl({
   const rows = calls.filter(
     (c) => !(c.parentToolCallId && calls.some((p) => p.id === c.parentToolCallId && isAgentCall(p))),
   );
+
+  const rowEls = rows.map((call, index) => {
+    const isAgent = isAgentCall(call);
+    const childCalls = isAgent ? calls.filter((c) => c.parentToolCallId === call.id) : [];
+    return (
+      <div key={call.id} style={{ animation: 'fade-up 300ms cubic-bezier(0.23,1,0.32,1) both', animationDelay: done ? undefined : `${Math.min(index, 8) * 60}ms` }}>
+        <ChipRow
+          call={call}
+          rowOpen={openRows.has(call.id)}
+          onToggle={toggleRow}
+          onViewFile={onViewFile}
+          onViewDiff={onViewDiff}
+          agentBody={isAgent ? (
+            <AgentDetail
+              call={call}
+              childCalls={childCalls}
+              openRows={openRows}
+              toggleRow={toggleRow}
+              onViewFile={onViewFile}
+              onViewDiff={onViewDiff}
+              streaming={streaming}
+            />
+          ) : undefined}
+        />
+      </div>
+    );
+  });
+
+  if (variant === 'stream') {
+    return (
+      <div className="w-full mt-[5px]">
+        <div ref={rowsRef} className={cn('mt-[5px] flex flex-col gap-[5px]', streaming && 'max-h-[420px] overflow-y-auto')}>
+          {rowEls}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full mt-[5px]">
@@ -1065,31 +1119,7 @@ function ToolChipsImpl({
       >
         <div className="overflow-hidden">
           <div className="mt-[5px] flex flex-col gap-[5px]">
-            {rows.map((call, index) => {
-              const isAgent = isAgentCall(call);
-              const childCalls = isAgent ? calls.filter((c) => c.parentToolCallId === call.id) : [];
-              return (
-                <div key={call.id} style={{ animation: 'fade-up 300ms cubic-bezier(0.23,1,0.32,1) both', animationDelay: done ? undefined : `${Math.min(index, 8) * 60}ms` }}>
-                  <ChipRow
-                    call={call}
-                    rowOpen={openRows.has(call.id)}
-                    onToggle={toggleRow}
-                    onViewFile={onViewFile}
-                    onViewDiff={onViewDiff}
-                    agentBody={isAgent ? (
-                      <AgentDetail
-                        call={call}
-                        childCalls={childCalls}
-                        openRows={openRows}
-                        toggleRow={toggleRow}
-                        onViewFile={onViewFile}
-                        onViewDiff={onViewDiff}
-                      />
-                    ) : undefined}
-                  />
-                </div>
-              );
-            })}
+            {rowEls}
           </div>
         </div>
       </div>
