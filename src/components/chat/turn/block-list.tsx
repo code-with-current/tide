@@ -8,6 +8,8 @@ import { summarizeFileChanges } from '@/lib/stream/block-state';
 import { ToolChips } from '@/components/chat-v2/tool-chips';
 import { FileChanges } from '@/components/chat/blocks/file-changes';
 import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
+import { ProcessContainer } from '@/components/chat-v2/process-container';
+import { answerIsGrowing, lastPhaseLabel } from '@/components/chat-v2/process-state';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 import { FollowupPrompt } from '@/components/chat/blocks/followup-prompt';
 import { CompactingIndicator } from '@/components/chat/blocks/compacting-indicator';
@@ -278,29 +280,39 @@ export const BlockList = memo(function BlockList({
     );
   }
 
+  // Virtual start timestamp: reconstructs "now - duration" so the container's
+  // finished-turn Elapsed reads ≈ totalMs. Only rendered when !streaming (the
+  // spinner replaces it live), so the Date.now() call per render is inert for
+  // history rows until they re-render; turns without persisted totalMs
+  // (pre-field legacy) degrade to ~0s.
+  const startedAtMs = Date.now() - (totalMs ?? 0);
+
   return (
     <>
-      {layout.thinking && (
-        <div ref={thinkingRef}>
+      <ProcessContainer
+        streaming={streaming}
+        blocks={blocks}
+        answerActive={answerIsGrowing(blocks, streaming)}
+        startedAt={startedAtMs}
+        phaseHint={lastPhaseLabel(layout.thinking?.text)}
+      >
+        <div ref={thinkingRef}>{layout.thinking && (
           <ThinkingBlock
             text={layout.thinking.text}
             tokens={layout.thinking.tokens}
             ms={layout.thinking.ms}
             streaming={streaming}
           />
-        </div>
-      )}
-
-      {chipCalls.length > 0 && (
-        <div ref={processRef}>
+        )}</div>
+        <div ref={processRef}>{chipCalls.length > 0 && (
           <ToolChips
             calls={chipCalls}
             streaming={streaming}
             onViewFile={onViewFile}
             onViewDiff={onViewFileDiff}
           />
-        </div>
-      )}
+        )}</div>
+      </ProcessContainer>
 
       {/* Compaction indicator — renders inline between the process section
           and the answer so the user sees *where* the pause is happening.

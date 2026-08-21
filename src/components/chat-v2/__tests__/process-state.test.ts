@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Block } from '@/types';
-import { answerIsGrowing, deriveProcessOpen } from '../process-state';
+import { answerIsGrowing, deriveProcessOpen, lastPhaseLabel, stepsCount } from '../process-state';
 
 const text = (over: Partial<Extract<Block, { kind: 'text' }>>): Block =>
   ({ kind: 'text', id: 'b', text: '', isAnswer: false, ...over } as Block);
@@ -55,5 +55,31 @@ describe('answerIsGrowing', () => {
   it('false for missing or empty block lists', () => {
     expect(answerIsGrowing(undefined, true)).toBe(false);
     expect(answerIsGrowing([], true)).toBe(false);
+  });
+});
+
+describe('lastPhaseLabel', () => {
+  it('returns the label of the last phase for phased text', () => {
+    const text = 'First I will plan.\nNow searching for files.\nImplementing the fix now.';
+    expect(['Planning', 'Search', 'Coding', 'Verifying', 'Reasoning']).toContain(lastPhaseLabel(text));
+  });
+  it('returns null for empty text', () => {
+    expect(lastPhaseLabel('')).toBeNull();
+    expect(lastPhaseLabel(undefined)).toBeNull();
+  });
+});
+
+describe('stepsCount', () => {
+  it('counts reasoning + tool blocks', () => {
+    const blocks = [
+      { kind: 'reasoning', id: 'r1' },
+      { kind: 'tool', id: 't1' },
+      { kind: 'tool', id: 't2' },
+      { kind: 'text', id: 'a1' },
+    ] as never;
+    expect(stepsCount(blocks)).toBe(3);
+  });
+  it('zero on undefined', () => {
+    expect(stepsCount(undefined)).toBe(0);
   });
 });

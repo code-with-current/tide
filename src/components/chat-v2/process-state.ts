@@ -3,6 +3,7 @@
  * streams, re-opens if process resumes after an answer stretch. The user's
  * click during a turn pins their choice (returned unchanged until reset). */
 import type { Block } from '@/types';
+import { derivePhases } from '@/components/chat/blocks/reasoning-phases';
 
 export interface ProcessOpenInput {
   streaming: boolean;
@@ -34,4 +35,21 @@ export function answerIsGrowing(blocks: Block[] | undefined, streaming: boolean)
   if (!streaming || !blocks || blocks.length === 0) return false;
   const last = blocks[blocks.length - 1];
   return last.kind === 'text';
+}
+
+/** Number of process steps (reasoning + tool blocks) in a block list — the
+ * container header's "· N steps" count. */
+export function stepsCount(blocks: Block[] | undefined): number {
+  if (!blocks) return 0;
+  let n = 0;
+  for (const b of blocks) if (b.kind === 'reasoning' || b.kind === 'tool') n++;
+  return n;
+}
+
+/** Label of the most recent reasoning phase — the container header's live
+ * hint. Null when there is no phased content yet. */
+export function lastPhaseLabel(text: string | undefined): string | null {
+  if (!text) return null;
+  const phases = derivePhases(text);
+  return phases.length > 0 ? phases[phases.length - 1].label : null;
 }
