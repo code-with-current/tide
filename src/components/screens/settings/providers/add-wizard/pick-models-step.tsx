@@ -73,7 +73,7 @@ export function PickModelsStep({
       : m.priceLabel;
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col h-full min-h-0 gap-2">
       <SectionLabel
         icon={<BrainCircuit className="size-3" />}
         count={state.selected.length}
@@ -167,7 +167,7 @@ export function PickModelsStep({
       )}
 
       {status === 'done' && state.models.length > 0 && live.length + available.length > 0 && (
-        <div className="rounded-lg border border-border overflow-hidden max-h-[46vh] overflow-y-auto scroll">
+        <div className="flex-1 min-h-0 rounded-lg border border-border overflow-hidden overflow-y-auto scroll">
           {live.length > 0 && (
             <FetchSection
               icon="🟢"
@@ -216,7 +216,7 @@ export function PickModelsStep({
         </div>
       )}
 
-      <p className="text-[10px] text-muted-foreground/45">
+      <p className="shrink-0 text-[10px] text-muted-foreground/45">
         {preset?.recommended.length
           ? 'Recommended models are pre-checked — adjust as you like.'
           : 'Check the models you want available.'}
