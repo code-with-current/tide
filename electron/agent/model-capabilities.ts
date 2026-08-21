@@ -140,6 +140,18 @@ export function resolveMaxOutputTokens(modelId: string, modelEntry?: Model): num
   return 8192;
 }
 
+const MIN_CLAMPED_OUTPUT = 4096;
+
+/** Endpoints reject requests where input + max_tokens > context. Some catalog
+ *  entries list output == context (the model's theoretical ceiling), which
+ *  overflows on any nonzero input and zeroes the compaction input budget.
+ *  Cap the effective output at half the context window, floored so tiny
+ *  windows still get a usable output budget. */
+export function clampOutputForContext(maxOutput: number, contextWindow: number | undefined): number {
+  if (!contextWindow || contextWindow <= 0) return maxOutput;
+  return Math.max(MIN_CLAMPED_OUTPUT, Math.min(maxOutput, Math.floor(contextWindow / 2)));
+}
+
 /** Enrich a provider-config model with authoritative values from the catalog.
  *  One-time migration: sets catalogId + fills contextWindow, max output,
  *  maxInputTokens, reasoning, and pricing from the catalog when the stored

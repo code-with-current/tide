@@ -7,6 +7,7 @@ import {
   contextWindowSize,
   setCatalog,
   resolveMaxOutputTokens,
+  clampOutputForContext,
   enrichModelFromCatalog,
 } from '../agent/model-capabilities.js';
 import type { CatalogMap } from '../agent/model-catalog.js';
@@ -202,5 +203,26 @@ describe('refreshModelCatalog', () => {
     // The refreshed catalog was persisted for the next boot.
     const cached = JSON.parse(fs.readFileSync(path.join(tmpDir, 'model-prices.json'), 'utf8'));
     expect(cached.count).toBe(150);
+  });
+});
+
+describe('clampOutputForContext', () => {
+  it('passes through output limits that already leave input headroom', () => {
+    expect(clampOutputForContext(8192, 128000)).toBe(8192);
+    expect(clampOutputForContext(65536, 200000)).toBe(65536);
+  });
+
+  it('clamps output == context to half the window (input + max_tokens must fit)', () => {
+    expect(clampOutputForContext(128000, 128000)).toBe(64000);
+    expect(clampOutputForContext(262144, 262144)).toBe(131072);
+  });
+
+  it('keeps a sane floor when the context window is tiny', () => {
+    expect(clampOutputForContext(128000, 6000)).toBeGreaterThanOrEqual(4096);
+  });
+
+  it('returns the limit unchanged when the context window is unknown', () => {
+    expect(clampOutputForContext(128000, 0)).toBe(128000);
+    expect(clampOutputForContext(128000, undefined)).toBe(128000);
   });
 });

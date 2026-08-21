@@ -21,7 +21,7 @@ import { createConfigStore } from '../configStore.js';
 import { createTurnController, type TurnController } from './turn-controller.js';
 import { loadHookConfig, type HookConfig } from './hooks/hook-config.js';
 import { shouldCompact, compactConversation, isContextOverflow } from './context/auto-compact.js';
-import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts } from './model-capabilities.js';
+import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts, clampOutputForContext } from './model-capabilities.js';
 import { mediaMimeFor } from './tools/read-media-file.js';
 import type { ToolResult } from './tools/types.js';
 import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
@@ -294,7 +294,10 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const turnController = createTurnController(effectiveMaxSteps);
   const knownCtxWindow = contextWindowSize(modelId, modelEntry);
   const knownMaxInput = resolveMaxInputTokens(modelId, modelEntry) ?? knownCtxWindow;
-  const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
+  const knownMaxOutput = clampOutputForContext(
+    resolveMaxOutputTokens(modelId, modelEntry),
+    knownCtxWindow,
+  );
   const compactionEnabled = agentSettings.compactionEnabled ?? true;
   const compactionThreshold = Math.min(0.95, Math.max(0.5, agentSettings.compactionThreshold ?? 0.75));
   const compactionKeepTurns = Math.max(1, Math.floor(agentSettings.compactionKeepTurns ?? 3));
