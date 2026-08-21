@@ -17,13 +17,15 @@ import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { TerminalPanel } from "@/components/terminal/terminal-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
 import { useRightPanelOverlay } from '@/lib/right-panel-layout';
+import { InspectorColumn } from "@/components/chat/inspector-column";
+import { useInspectorColumnVisible } from "@/lib/inspector-visibility";
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SheetResizeHandle } from "@/components/ui/sheet-resize-handle";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
 import { useUi, terminalScopeKey } from "@/lib/stores/ui";
-import { useModelOption, useWorkspaces, useSessions } from "@/lib/queries";
+import { useModelOption, useWorkspaces, useSessions, useSession } from "@/lib/queries";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import * as api from "@/lib/api/client";
 import { stripCommandPrefix } from "@/lib/session-title";
@@ -213,6 +215,16 @@ export function MainScreen() {
   // mainView changes; cleared on success so the normal chat/new view returns.
   const activeWorkspace = workspaces?.find((w) => w.id === activeWorkspaceId);
   const [workspaceMissing, setWorkspaceMissing] = useState(false);
+  // Permanent inspector column — full InspectorTab pinned beside the chat
+  // when the window is wide and the unified right panel is closed. Guarded by
+  // mainView because setMainView alone can leave a stale activeSessionId on
+  // the new-session screen (store-level transitions null it, this covers the
+  // MissingWorkspaceScreen restore path).
+  const inspectorColumnVisible = useInspectorColumnVisible(
+    showRightPanel,
+    mainView !== "new" && !!activeSessionId,
+  );
+  const { data: inspectorSession } = useSession(mainView !== "new" ? activeSessionId : null);
   useEffect(() => {
     if (!activeWorkspace) { setWorkspaceMissing(false); return; }
     let cancelled = false;
@@ -978,8 +990,11 @@ export function MainScreen() {
                   terminal. The terminal panel stays mounted when collapsed so
                   xterm/PTY state survives hide/show + chat↔new-session switches. */}
               <ResizablePanelGroup orientation="vertical" className="flex-1 min-h-0">
-                <ResizablePanel id="chat-body" minSize="40" className="min-h-0">
-                  <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
+                {/* chat-body panel doubles as a row: the chat column flexes,
+                    the permanent inspector column (wide windows, panel closed)
+                    sits as its right-side sibling. */}
+                <ResizablePanel id="chat-body" minSize="40" className="min-h-0 flex">
+                  <div className="flex h-full w-full flex-col min-h-0 overflow-hidden flex-1 min-w-0">
                 {!activeWorkspaceId ? (
                   <NoWorkspaceState />
                 ) : workspaceMissing && activeWorkspace ? (
@@ -1144,6 +1159,9 @@ export function MainScreen() {
                   />
                 )}
                   </div>
+                  {inspectorColumnVisible && !workspaceMissing && inspectorSession && (
+                    <InspectorColumn session={inspectorSession} />
+                  )}
                 </ResizablePanel>
 
                 {/* Terminal — collapsible panel (stays mounted → PTY preserved).
