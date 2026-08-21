@@ -26,6 +26,7 @@ export const qk = {
   fileTree: (workspaceId: string) => ['fileTree', workspaceId] as const,
   terminal: (sessionId: string) => ['terminal', sessionId] as const,
   gitStatus: (workspaceId: string) => ['gitStatus', workspaceId] as const,
+  sessionMessagesV2: (sessionId: string) => ['session-messages-v2', sessionId] as const,
   ragStatus: (workspaceId: string) => ['ragStatus', workspaceId] as const,
   agentSettings: ['agentSettings'] as const,
 };
@@ -83,6 +84,16 @@ export function useSession(id: string | null) {
     queryFn: () => (id ? api.getSession(id) : Promise.resolve(undefined)),
     enabled: !!id,
   });
+}
+
+/** Hard-evict a session's windowed v2 timeline. removeQueries, not
+ *  invalidateQueries — on re-entry the window must refetch from the newest
+ *  page instead of flashing a stale copy, and cached per-session windows
+ *  would otherwise accumulate across every session the user visits. Called
+ *  from useSessionMessagesV2's switch/unmount cleanup. */
+export function evictSessionMessagesV2(sessionId: string | null): void {
+  if (!sessionId) return;
+  queryClient.removeQueries({ queryKey: qk.sessionMessagesV2(sessionId) });
 }
 
 /** Archived-session headers only (no message bodies) — drives the Archived section. */

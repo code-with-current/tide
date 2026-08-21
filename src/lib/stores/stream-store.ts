@@ -15,13 +15,13 @@ interface SessionState {
 }
 
 // ref-stable miss path — useSyncExternalStore loops on fresh [] per snapshot
-const EMPTY_PARTS: PartV2[] = [];
+const EMPTY_PARTS: readonly PartV2[] = Object.freeze([] as PartV2[]);
 
 export interface StreamStore {
   apply(e: SinkEventV2): PartV2 | undefined; // returns the part on part.commit
   applyBatch(events: SinkEventV2[]): void;
   textOf(sessionId: string, partId: string): string;
-  turnParts(sessionId: string): PartV2[];
+  turnParts(sessionId: string): readonly PartV2[];
   bufferSize(sessionId: string): number;
   lastSeq(sessionId: string): number;
   clear(sessionId: string): void;
