@@ -6,6 +6,7 @@
  *  stage-alls first, then commits. */
 
 import { useEffect, useRef, useState } from 'react';
+import { useUi } from '@/lib/stores/ui';
 import { GitCommitHorizontal, Loader2, Sparkles, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -46,9 +47,33 @@ export function CommitBar({
   onStageAll: () => Promise<void>;
   disabled?: boolean;
 }) {
-  const [summary, setSummary] = useState('');
-  const [description, setDescription] = useState('');
-  const [amend, setAmend] = useState(false);
+  // Draft persists in the ui store (survives tab switch / panel close /
+  // restart, keyed by workspace). Local state seeds from it and syncs back.
+  const commitDraft = useUi((s) => s.commitDrafts[workspaceId]);
+  const setCommitDraft = useUi((s) => s.setCommitDraft);
+  const clearCommitDraft = useUi((s) => s.clearCommitDraft);
+  const [summary, setSummary] = useState(commitDraft?.summary ?? '');
+  const [description, setDescription] = useState(commitDraft?.description ?? '');
+  const [amend, setAmend] = useState(commitDraft?.amend ?? false);
+  const hydratedRef = useRef(false);
+  // Re-seed when the workspace switches (different draft) — but never while
+  // mounted on the same workspace; typing must not clobber itself.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+  }, []);
+  useEffect(() => {
+    setSummary(commitDraft?.summary ?? '');
+    setDescription(commitDraft?.description ?? '');
+    setAmend(commitDraft?.amend ?? false);
+    hydratedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (!summary && !description && !amend) clearCommitDraft(workspaceId);
+    else setCommitDraft(workspaceId, { summary, description, amend });
+  }, [summary, description, amend, workspaceId, setCommitDraft, clearCommitDraft]);
   const [busy, setBusy] = useState(false);
   const [flashSha, setFlashSha] = useState<string | null>(null);
   // Suggestion is live (streaming or just finished) until the user types.
@@ -134,6 +159,7 @@ export function CommitBar({
       if (res.ok && res.sha) {
         setFlashSha(res.sha);
         setTimeout(() => setFlashSha(null), 1500);
+        clearCommitDraft(workspaceId);
         setSummary('');
         setDescription('');
         setAmend(false);

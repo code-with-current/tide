@@ -346,6 +346,11 @@ interface UiState {
    *  session switches. Persisted to localStorage so drafts survive restarts. */
   composerDrafts: Record<string, string>;
 
+  /** Commit-bar draft (summary/description/amend), keyed by workspace id —
+   *  survives Git tab switches, panel close, and app restarts. Cleared on
+   *  successful commit/amend. Persisted. */
+  commitDrafts: Record<string, { summary: string; description: string; amend: boolean }>;
+
   /** Draft (unsent) sessions, keyed by draft id. Each entry's text lives in
    *  `composerDrafts[id]`; this map holds only list metadata. Persisted. */
   draftSessions: Record<string, DraftSession>;
@@ -377,6 +382,8 @@ interface UiState {
   clearComposerAttachments: (key: string) => void;
   bumpComposerPendingReads: (key: string, delta: number) => void;
   setComposerDraft: (key: string, text: string) => void;
+  setCommitDraft: (workspaceId: string, draft: { summary: string; description: string; amend: boolean }) => void;
+  clearCommitDraft: (workspaceId: string) => void;
 
   // Draft (unsent) session lifecycle — backs the "Drafts" section of the
   // session list. Text is stored in composerDrafts[id]; these manage the
@@ -578,6 +585,7 @@ export const useUi = create<UiState>()(
   composerAttachments: {},
   composerPendingReads: {},
   composerDrafts: {},
+  commitDrafts: {},
   draftSessions: {},
   dismissedTodoSignatures: {},
   pendingFork: null,
@@ -624,6 +632,10 @@ export const useUi = create<UiState>()(
     })),
   setComposerDraft: (key, text) =>
     set((s) => ({ composerDrafts: { ...s.composerDrafts, [key]: text } })),
+  setCommitDraft: (workspaceId, draft) =>
+    set((s) => ({ commitDrafts: { ...s.commitDrafts, [workspaceId]: draft } })),
+  clearCommitDraft: (workspaceId) =>
+    set((s) => { const rest = { ...s.commitDrafts }; delete rest[workspaceId]; return { commitDrafts: rest }; }),
 
   startNewDraft: () => {
     const workspaceId = get().activeWorkspaceId;
@@ -1300,6 +1312,7 @@ export const useUi = create<UiState>()(
         // restores the last real session on startup, not a draft slot.
         draftSessions: s.draftSessions,
         composerDrafts: s.composerDrafts,
+        commitDrafts: s.commitDrafts,
         dismissedTodoSignatures: s.dismissedTodoSignatures,
         browserUrls: s.browserUrls,
         // shortcutOverrides is intentionally NOT persisted here — it lives in
