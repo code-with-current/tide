@@ -5,11 +5,12 @@
  *  hover/active backgrounds start after it so they never cover the graph.
  *  The ⋯ popover carries per-commit actions (revert, copy sha, branch). */
 import { useState } from 'react';
-import { GitBranch, Copy, RotateCcw, MoreHorizontal, CornerUpRight, Tag } from 'lucide-react';
+import { GitBranch, GitCommitHorizontal, Copy, RotateCcw, MoreHorizontal, CornerUpRight, Tag } from 'lucide-react';
 import type { GitCommit } from '@/lib/api/client';
 import { cn, formatRelative } from '@/lib/utils';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -18,7 +19,7 @@ import { Input } from '@/components/ui/input';
 export const HISTORY_GRID = 'grid grid-cols-[64px_minmax(0,1fr)_auto_auto] items-center gap-x-1.5';
 
 export function CommitRow({
-  commit, active = false, pendingAction = false, laneColor, onSelect, onRevert, onBranch,
+  commit, active = false, pendingAction = false, laneColor, onSelect, onRevert, onBranch, onCheckout, onCopySha,
 }: {
   commit: GitCommit;
   active?: boolean;
@@ -29,6 +30,8 @@ export function CommitRow({
   onSelect?: () => void;
   onRevert?: (sha: string) => void;
   onBranch?: (name: string, sha: string) => void;
+  onCheckout?: (sha: string) => void;
+  onCopySha?: (sha: string) => void;
 }) {
   const initials = commit.author
     .split(/\s+/)
@@ -41,10 +44,12 @@ export function CommitRow({
   const hasChips = (commit.branchHeads?.length ?? 0) + (commit.tags?.length ?? 0) > 0;
 
   return (
-    <div className={cn(HISTORY_GRID, 'group relative h-6 pr-2')}>
-      <button
-        type="button"
-        onClick={onSelect}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className={cn(HISTORY_GRID, 'group relative h-6 cursor-default pr-2')}>
+          <button
+            type="button"
+            onClick={onSelect}
         className={cn(
           'absolute inset-y-0 left-0 right-2 grid grid-cols-[64px_minmax(0,1fr)_auto_auto] items-center gap-x-1.5 rounded-sm px-0 text-left transition-colors',
           active ? 'bg-primary/10' : 'hover:bg-secondary/40',
@@ -105,10 +110,39 @@ export function CommitRow({
           </span>
         </span>
       </button>
-      {(onRevert || onBranch) && (
-        <RowActions commit={commit} pendingAction={pendingAction} onRevert={onRevert} onBranch={onBranch} />
-      )}
-    </div>
+          {(onRevert || onBranch) && (
+            <RowActions commit={commit} pendingAction={pendingAction} onRevert={onRevert} onBranch={onBranch} />
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onSelect}>
+          <GitCommitHorizontal className="size-3.5" /> View details
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => navigator.clipboard.writeText(commit.sha).then(() => toastSuccess('Copied sha'), () => toastError('Copy failed'))}>
+          <Copy className="size-3.5" /> Copy sha
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onCopySha?.(`${commit.sha} — ${commit.subject}`)}>
+          <Copy className="size-3.5" /> Copy reference
+        </ContextMenuItem>
+        {onBranch && (
+          <ContextMenuItem onClick={() => onBranch(commit.branchHeads?.[0] ?? `from-${commit.sha}`, commit.sha)}>
+            <CornerUpRight className="size-3.5" /> Branch from here…
+          </ContextMenuItem>
+        )}
+        {onCheckout && (
+          <ContextMenuItem onClick={() => onCheckout(commit.sha)}>
+            <GitBranch className="size-3.5" /> Checkout (detached)
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        {onRevert && (
+          <ContextMenuItem variant="destructive" onClick={() => onRevert(commit.sha)}>
+            <RotateCcw className="size-3.5" /> Revert commit…
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

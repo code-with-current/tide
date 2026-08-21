@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { RefreshCw, ChevronRight, CheckCircle2, List, ListTree, RotateCcw, Archive, ArchiveRestore, Eye, MinusCircle, PlusCircle, Diff, GitBranch, AlertTriangle } from 'lucide-react';
 import { FolderIcon } from 'react-material-icon-theme';
 import { SkeletonBar, CircleSkeleton } from '@/components/ui/loading-rows';
-import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo, useGitAmend, useConflictFiles, useGitResolveFile, useGitDiscardFile, useGitRevert, useGitCreateBranch } from '@/lib/queries';
+import { useGitStatus, useGitLog, useGitStage, useGitCommit, useGitBulk, useGitStashList, useSession, useGitBranchInfo, useGitAmend, useConflictFiles, useGitResolveFile, useGitDiscardFile, useGitRevert, useGitCreateBranch, useGitCheckout } from '@/lib/queries';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { cn } from '@/lib/utils';
@@ -64,6 +64,7 @@ export function GitPanel() {
   // virtualization never slices an edge mid-curve.
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const revertMutation = useGitRevert(workspaceId ?? '', gitSessionId);
+  const checkoutMutation = useGitCheckout(workspaceId ?? '', gitSessionId);
   const createBranchMutation = useGitCreateBranch(workspaceId ?? '', gitSessionId);
   const laidHistory = useMemo(
     () => assignLanes((history ?? []).map((c) => ({ sha: c.sha, parents: c.parents ?? [], isHead: c.isHead, branchHeads: c.branchHeads }))),
@@ -528,6 +529,12 @@ export function GitPanel() {
                         onSelect={() => setCommitDetail(commit)}
                         onRevert={handleRevertCommit}
                         onBranch={handleBranchFrom}
+                        onCheckout={(sha) =>
+                          checkoutMutation.mutate(sha, {
+                            onSuccess: (res) => { if (res?.ok) toastSuccess('Checked out (detached)'); else toastError('Checkout failed', { description: res?.error }); },
+                            onError: () => toastError('Checkout failed'),
+                          })
+                        }
                       />
                     </div>
                   );
