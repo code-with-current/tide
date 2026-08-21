@@ -668,7 +668,7 @@ function translatePart(
       patchToolBlock(turn, toolCallId, { status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
       send(wc, sessionId, { type: 'tool_result', sessionId, seq: nextSeq(sessionId), toolCallId, status, output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta });
       if (turn.v2) {
-        emitSink(turn, { type: 'tool-end', toolName, input, output: tr.output, status, durationMs: tr.durationMs }, newV2PartId(), turn.v2.partIndex);
+        emitSink(turn, { type: 'tool-end', toolName, input, output: tr.output, status, durationMs: tr.durationMs }, newV2PartId());
         turn.v2.partIndex++;
       }
       break;
