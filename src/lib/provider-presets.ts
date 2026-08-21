@@ -44,7 +44,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'openrouter', name: 'OpenRouter', group: 'aggregator', apiStyle: 'openai',
     baseUrl: 'https://openrouter.ai/api/v1', requiresKey: true,
     keyUrl: 'https://openrouter.ai/keys', keyPlaceholder: 'sk-or-v1-…',
-    recommended: ['claude-sonnet', 'gpt-5', 'gemini-2.5-pro'], accent: '#6467f2',
+    recommended: ['claude-sonnet', 'gpt-5', 'gemini-2.5-pro'], accent: '#ffffff',
   },
   {
     id: 'zai', name: 'z.ai', group: 'aggregator', apiStyle: 'anthropic',
@@ -80,7 +80,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'fireworks', name: 'Fireworks', group: 'aggregator', apiStyle: 'openai',
     baseUrl: 'https://api.fireworks.ai/inference/v1', requiresKey: true,
     keyUrl: 'https://firework.ai/account/api-keys', keyPlaceholder: 'fw_…',
-    recommended: ['deepseek-v3', 'kimi-k2'], accent: '#ffffff',
+    recommended: ['deepseek-v3', 'kimi-k2'], accent: '#f3f3f3',
   },
   {
     id: 'ollama', name: 'Ollama', group: 'local', apiStyle: 'openai',
