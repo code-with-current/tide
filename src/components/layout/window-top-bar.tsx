@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useUi, terminalScopeKey } from "@/lib/stores/ui";
 import { useTabs } from "@/lib/stores/tabs";
+import { openTerminalTab, toggleTerminalTab } from "@/lib/terminal-tab";
 import { useWorkspaces, useSession, useGitBranchInfo, useGitRecentBranches } from "@/lib/queries";
 import * as api from "@/lib/api/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -57,7 +58,6 @@ export function WindowTopBar() {
   }, [mainView]);
 
   // ── Panel toggles ──
-  const toggleTerminal = useUi((s) => s.toggleTerminal);
   const toggleRightPanel = useUi((s) => s.toggleRightPanel);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
@@ -229,6 +229,7 @@ export function WindowTopBar() {
   const runScriptInTerminal = useCallback((cmd: string) => {
     const sid = terminalScopeKey(useUi.getState());
     addTerminal(sid, cmd.slice(0, 40), cmd);
+    openTerminalTab();
   }, [addTerminal]);
 
   const toggleScript = useCallback(async (cmd: string) => {
@@ -249,6 +250,7 @@ export function WindowTopBar() {
         return;
       }
       addTerminal(terminalScopeKey(useUi.getState()), `Run: ${cmd.slice(0, 30)}`);
+      openTerminalTab();
     }
   }, [activeWorkspaceId, isRunning, addTerminal]);
 
@@ -571,7 +573,7 @@ export function WindowTopBar() {
         <OpenInAppMenu />
 
         <Tip label="Terminal Panel">
-          <Button variant="outline" size="sm" className="p-1.5" onClick={toggleTerminal}>
+          <Button variant="outline" size="sm" className="p-1.5" onClick={toggleTerminalTab}>
             <Terminal className="size-3.5" />
           </Button>
         </Tip>

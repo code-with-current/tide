@@ -224,8 +224,6 @@ interface UiState {
   activeWorkspaceId: string | null;
   activeSessionId: string | null;
 
-  /** Panel visibility, keyed per terminal scope (session id / draft id) so each session remembers its own open state. */
-  terminalOpen: Record<string, boolean>;
   /** Native window fullscreen state, bridged from main. The macOS
    *  traffic-light spacer collapses to zero while fullscreen (buttons hide). */
   isFullScreen: boolean;
@@ -254,10 +252,6 @@ interface UiState {
    *  lets the panel react via a useEffect on the change. Bump → focus. */
   sessionSearchFocus: number;
   focusSessionSearch: () => void;
-
-  /** Terminal panel height in pixels per scope — draggable from its top edge. */
-  terminalHeight: Record<string, number>;
-  setTerminalHeight: (h: number) => void;
 
   /** Modal visibility. */
   dialogs: Dialogs;
@@ -402,7 +396,6 @@ interface UiState {
   /** Purge all session-specific data (terminals, tabs, openFiles, streams).
    *  Kills PTYs via IPC. Called on session delete. */
   clearSessionData: (sessionId: string) => void;
-  toggleTerminal: () => void;
   toggleRightPanel: () => void;
   /** Explicit open/close (the toggle needs to know current state; this doesn't). */
   setRightPanel: (open: boolean) => void;
@@ -533,12 +526,7 @@ export const useUi = create<UiState>()(
   mainView: 'new',
   activeWorkspaceId: null,
   activeSessionId: null,
-  terminalOpen: {},
   isFullScreen: false,
-  // 220 matches the long-standing fixed height — first-run default before
-  // the user drags. Clamped to [120, 720] on resize (see TerminalPanel).
-  terminalHeight: {},
-  setTerminalHeight: (h: number) => set((s) => ({ terminalHeight: { ...s.terminalHeight, [terminalScopeKey(s)]: h } })),
   rightPanelOpen: true,
   fileViewerOpen: false,
   sheetWidth: 40,
@@ -822,28 +810,6 @@ export const useUi = create<UiState>()(
       sessionSettings: restSessionSettings,
     });
   },
-  toggleTerminal: () =>
-    set((s) => {
-      const scope = terminalScopeKey(s);
-      const turningOn = !s.terminalOpen[scope];
-      // Auto-seed a terminal for the active session the first time the panel
-      // is opened with zero terminals — saves the user an extra click.
-      if (turningOn && s.activeSessionId) {
-        const list = s.terminals[s.activeSessionId] ?? [];
-        if (list.length === 0) {
-          const id = `t_${Math.random().toString(36).slice(2, 9)}`;
-          return {
-            terminalOpen: { ...s.terminalOpen, [scope]: true },
-            terminals: {
-              ...s.terminals,
-              [s.activeSessionId]: [{ id, name: 'Terminal 1', createdAt: Date.now() }],
-            },
-            activeTerminal: { ...s.activeTerminal, [s.activeSessionId]: id },
-          };
-        }
-      }
-      return { terminalOpen: { ...s.terminalOpen, [scope]: turningOn } };
-    }),
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   setRightPanel: (open) => set({ rightPanelOpen: open }),
   toggleFileViewer: () => set((s) => ({ fileViewerOpen: !s.fileViewerOpen })),
@@ -1106,12 +1072,6 @@ export const useUi = create<UiState>()(
             ? list[list.length - 1].id
             : undefined
           : currentActive;
-      // Auto-collapse the panel when the active session runs out of
-      // terminals. Scoped to the active session — closing terminals in a
-      // background session (which the panel isn't showing anyway) shouldn't
-      // collapse the panel out from under the user.
-      const collapsePanel =
-        list.length === 0 && s.activeSessionId === sessionId;
       return {
         terminals: { ...s.terminals, [sessionId]: list },
         activeTerminal: { ...s.activeTerminal, [sessionId]: newActive },
@@ -1120,7 +1080,6 @@ export const useUi = create<UiState>()(
         ...(s.terminalPorts[id]
           ? { terminalPorts: Object.fromEntries(Object.entries(s.terminalPorts).filter(([k]) => k !== id)) }
           : {}),
-        ...(collapsePanel ? { terminalOpen: { ...s.terminalOpen, [sessionId]: false } } : {}),
       };
     }),
   setActiveTerminal: (sessionId, id) =>
@@ -1317,7 +1276,6 @@ export const useUi = create<UiState>()(
         rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         sheetWidth: s.sheetWidth,
-        terminalHeight: typeof s.terminalHeight === 'object' && s.terminalHeight !== null ? s.terminalHeight : {},
         terminals: s.terminals,
         fontScale: s.fontScale,
         reduceMotion: s.reduceMotion,
@@ -1340,12 +1298,9 @@ export const useUi = create<UiState>()(
       }),
       // Don't restore screen — splash always routes first to validate providers/workspaces.
       // mainView is also runtime state — start at 'new' each load.
-      // terminalOpen is forced false on every startup — the terminal should
-      // only open via the explicit Terminal button, never auto-restored.
       merge: (persistedState, current) => ({
         ...current,
         ...(persistedState as Partial<UiState>),
-        terminalOpen: {},
         // Sessions can't still be running after a restart — the orchestrator
         // died with the app. Force the running set empty so a stale persisted
         // blob can't restore running indicators for dead turns.

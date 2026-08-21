@@ -54,6 +54,32 @@ function queueOutput(terminalId: string, data: string) {
   }
 }
 
+// ── IPC listeners (registered at module scope) ──────────────────
+// Each terminal's output/exit/ports events are routed by terminalId — the
+// handlers look up the xterm instance in the module-level `registry` at
+// event time (avoiding the per-terminal listener leak). Module scope, NOT
+// component lifecycle: the panel fully unmounts whenever the right panel
+// switches tabs, closes, or crosses the inline↔Sheet breakpoint.
+// Component-scoped listeners would drop every PTY byte emitted while the
+// panel was unmounted; the registry terms keep accepting writes (their
+// scrollback lives in ghostty-web's WASM buffer, repainted on re-attach).
+if (ipc) {
+  ipc.removeAllTerminalListeners();
+  ipc.onTerminalOutput(({ terminalId, data }: { terminalId: string; data: string }) => {
+    // Batched flush (rAF) — see queueOutput. Keeps the UI responsive under
+    // high-throughput PTY output instead of writing per-IPC-event.
+    queueOutput(terminalId, data);
+  });
+  ipc.onTerminalExit(({ terminalId, code }: { terminalId: string; code: number | null }) => {
+    // Route through the same buffer so the exit line stays ordered after
+    // any pending output (a direct write could land before buffered chunks).
+    queueOutput(terminalId, `\r\n\x1b[31m[Process exited with code ${code}]\x1b[0m\r\n`);
+  });
+  ipc.onTerminalPorts(({ terminalId, ports }: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => {
+    useUi.getState().setTerminalPorts(terminalId, ports);
+  });
+}
+
 // ── File-path link provider ──────────────────────────────────────
 // Detects absolute paths (and path:line / path:line:col) in terminal output and reveals them in the OS file manager on click. xterm calls provideLinks per visible line as the user hovers; we scan that line for path matches and return ILink objects with the buffer range + activate handler. Path pattern: an absolute POSIX path (starts with /) OR a Windows path (drive letter:\), optionally suffixed with :line and :col. We deliberately require a leading slash / drive to avoid matching arbitrary "foo:bar" text.
 const PATH_PATTERN = /(?:\/[\w./@-]+|[A-Za-z]:\\[\w\\./-]+)(?::(\d+))?(?::(\d+))?/g;
@@ -144,11 +170,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
   // Keying everything by session id here but 'default' there let one session's
   // draft-phase terminals reappear in every later new-session screen.
   const sessionId = useUi(terminalScopeKey);
-  const terminalOpen = useUi((s) => !!s.terminalOpen[sessionId]);
-  // MainScreen is always-mounted now; the panel survives Settings visits but
-  // its box measures zero-size while hidden. This flag re-fits on return.
+  // MainScreen is always-mounted; the panel survives Settings visits (hidden,
+  // zero-size box) as long as the terminal tab stays active. This flag
+  // re-fits on return.
   const screenActive = useUi((s) => s.screen === "main");
-  const toggle = useUi((s) => s.toggleTerminal);
+  const closePanel = useUi((s) => s.toggleRightPanel);
   const terminalTheme = useUi((s) => s.terminalTheme);
   const terminalFontSize = useUi((s) => s.terminalFontSize);
   const allTerminals = useUi((s) => s.terminals);
@@ -211,33 +237,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   // focus from the user mid-keystroke whenever MainScreen re-renders.
   const prevActiveRef = useRef<string | null | undefined>(undefined);
 
-  // ── IPC listeners (registered ONCE, not per-terminal) ──────────────
-  // Each terminal's output/exit/ports events are routed by terminalId — the handlers look up the xterm instance in the module-level `registry` at event time. This avoids adding a new listener per terminal creation, which caused MaxListenersExceededWarning after ~11 terminals.
-  useEffect(() => {
-    if (!ipc) return;
-
-    const onOutput = ({ terminalId, data }: { terminalId: string; data: string }) => {
-      // Batched flush (rAF) — see queueOutput. Keeps the UI responsive under
-      // high-throughput PTY output instead of writing per-IPC-event.
-      queueOutput(terminalId, data);
-    };
-    const onExit = ({ terminalId, code }: { terminalId: string; code: number | null }) => {
-      // Route through the same buffer so the exit line stays ordered after
-      // any pending output (a direct write could land before buffered chunks).
-      queueOutput(terminalId, `\r\n\x1b[31m[Process exited with code ${code}]\x1b[0m\r\n`);
-    };
-    const onPorts = ({ terminalId, ports }: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => {
-      useUi.getState().setTerminalPorts(terminalId, ports);
-    };
-
-    ipc.onTerminalOutput(onOutput);
-    ipc.onTerminalExit(onExit);
-    ipc.onTerminalPorts(onPorts);
-
-    return () => {
-      ipc.removeAllTerminalListeners();
-    };
-  }, []);
+  // ── IPC listeners live at module scope (see top of file) ──────────
 
   // Sync the registry with the store. Only runs when the terminal id set
   // or the active id actually changes — NOT on every parent re-render.
@@ -251,7 +251,20 @@ export const TerminalPanel = memo(function TerminalPanel() {
 
     // ── Create terminals that don't exist yet ──
     for (const { sessionId: sid, terminalId: tid } of allEntries) {
-      if (registry.has(tid)) continue;
+      const existing = registry.get(tid);
+      if (existing) {
+        // Re-attach: the panel unmounts entirely when the right panel
+        // switches tabs, closes, or crosses the inline↔Sheet breakpoint —
+        // React removed the old mount div, taking the wrapper (and its
+        // canvas) into a detached tree. Move the SAME wrapper into the
+        // fresh mount: term identity, scrollback, and the PTY are all
+        // untouched; forceRedraw below repaints the canvas.
+        if (existing.wrapper.parentElement !== mount) {
+          mount.appendChild(existing.wrapper);
+          if (tid === active) createdActive = true;
+        }
+        continue;
+      }
 
       const themeColors = getTerminalTheme(terminalTheme);
 
@@ -323,6 +336,10 @@ export const TerminalPanel = memo(function TerminalPanel() {
 
       // Resize
       const resizeObserver = new ResizeObserver(() => {
+        // Skip 0×0 boxes (panel hidden, or the wrapper's tree detached
+        // during an unmount window) — fitting there clears the canvas
+        // bitmap for nothing; the re-attach/forceRedraw path repaints.
+        if (wrapper.clientWidth === 0 || wrapper.clientHeight === 0) return;
         try { fit.fit(); ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
       });
       resizeObserver.observe(wrapper);
@@ -393,15 +410,15 @@ export const TerminalPanel = memo(function TerminalPanel() {
     }
   }, [terminalTheme, terminalFontSize]);
 
-  // Refit on expand OR on screen return. The panel is always mounted (so
-  // terminal state survives collapse + Settings visits), but its outer div has
-  // display:none while collapsed/hidden — the ResizeObserver can't measure a
-  // zero-size box, so the active terminal's last fit() ran against the
-  // pre-hide dimensions. When the user re-opens the panel or returns from
-  // Settings, refit + refocus + force a redraw so the canvas matches the new
-  // visible size. The redraw matters: fit() early-returns when the size hasn't
-  // changed (open/switch-back to an identical-sized panel), so without it the
-  // bitmap is blank until the next PTY data arrives.
+  // Refit on mount/re-attach OR on screen return. The panel lives in the
+  // right panel's terminal tab — it unmounts on tab switch/close (the
+  // registry terms survive; see the re-attach path in the sync effect) and
+  // its box measures zero-size while MainScreen is hidden for Settings.
+  // Either way the last fit() ran against stale/pre-hide dimensions, so on
+  // (re)mount and Settings return, refit + refocus + force a redraw so the
+  // canvas matches the visible size. The redraw matters: fit() early-returns
+  // when the size hasn't changed, so without it the bitmap is blank until
+  // the next PTY data arrives.
   const forceRedraw = (live: LiveTerminal | undefined) => {
     if (!live) return;
     try {
@@ -415,16 +432,15 @@ export const TerminalPanel = memo(function TerminalPanel() {
     } catch { /* */ }
   };
   useEffect(() => {
-    if (!terminalOpen) return;
     if (!screenActive) return;
     if (!active) return;
     const entry = registry.get(active);
     if (!entry) return;
-    // Defer one tick so the browser has laid out the un-hidden panel and
-    // the wrapper has real dimensions again.
+    // Defer one tick so the browser has laid out the (re)attached wrapper
+    // and it has real dimensions again.
     const raf = requestAnimationFrame(() => forceRedraw(entry));
     return () => cancelAnimationFrame(raf);
-  }, [terminalOpen, screenActive, active]);
+  }, [screenActive, active]);
 
   // Redraw on app focus / window visibility regain. ghostty-web drives its
   // canvas via a requestAnimationFrame loop, which the browser PAUSES while the
@@ -454,7 +470,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   }));
 
   return (
-    <div className="flex h-full w-full flex-col border-t border-border">
+    <div className="flex h-full w-full flex-col">
       <ScrollTabs
         value={active ?? ''}
         onValueChange={(id) => setActiveTerminal(sessionId, id)}
@@ -493,7 +509,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
                 <Button
                   variant="ghost"
                   size={'icon-xs'}
-                  onClick={toggle}
+                  onClick={closePanel}
                   className="text-muted-foreground/60 hover:text-foreground p-1 rounded hover:bg-card/40 flex-shrink-0"
                 >
                   <X className="size-3.5" />
