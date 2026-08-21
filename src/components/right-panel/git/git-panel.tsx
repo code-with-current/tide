@@ -11,7 +11,7 @@ import { toastError, toastSuccess } from '@/lib/toast';
 import { ChangedFileRow } from './changed-file-row';
 import { CommitBar } from './commit-bar';
 import { TabButton } from './tab-button';
-import { CommitRow } from './commit-row';
+import { CommitRow, HISTORY_GRID } from './commit-row';
 import { GraphColumn, LANE_COLORS, ROW_H } from './commit-graph';
 import { assignLanes } from '@/lib/git/lanes';
 import { CollapsibleSection } from './collapsible-section';
@@ -481,6 +481,11 @@ export function GitPanel() {
             <Button variant="ghost" size="icon-xs" onClick={() => refetchHistory()} aria-label="Refresh history" title="Refresh">
               <RefreshCw className={cn('size-3 transition-transform', historyFetching && 'animate-spin')} />
             </Button>
+          </div>
+          <div className={cn(HISTORY_GRID, 'px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground/40')}>
+            <span className="col-start-2">Subject</span>
+            <span className="justify-self-end">Date</span>
+            <span className="w-28 text-right">Author</span>
           </div>
           <div ref={historyScrollRef} className="relative flex-1 min-h-0 min-w-0 overflow-y-auto scroll">
             {historyLoading ? (

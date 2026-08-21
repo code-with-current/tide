@@ -624,6 +624,8 @@ export interface GitCommit {
   isHead?: boolean;
   /** Branch names whose tip is this sha. */
   branchHeads?: string[];
+  /** Tags pointing at this sha (annotated tags peeled to the commit). */
+  tags?: string[];
 }
 
 export async function gitLog(workspaceId: string, sessionId?: string, limit?: number): Promise<GitCommit[]> {

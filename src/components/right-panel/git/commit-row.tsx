@@ -1,15 +1,21 @@
-/** One 24px row in the Git Panel → History tab. The first 64px are a
- *  transparent gutter for the SVG lane graph that sits behind the row list;
+/** One 24px row in the Git Panel → History tab — table-aligned via a CSS
+ *  grid shared with the header row: 64px graph gutter | flexible subject
+ *  (with branch/tag chips) | fixed date column | fixed author column. The
+ *  graph SVG sits BEHIND the row list, so the gutter cell is transparent;
  *  hover/active backgrounds start after it so they never cover the graph.
  *  The ⋯ popover carries per-commit actions (revert, copy sha, branch). */
 import { useState } from 'react';
-import { GitBranch, Copy, RotateCcw, MoreHorizontal, CornerUpRight } from 'lucide-react';
+import { GitBranch, Copy, RotateCcw, MoreHorizontal, CornerUpRight, Tag } from 'lucide-react';
 import type { GitCommit } from '@/lib/api/client';
 import { cn, formatRelative } from '@/lib/utils';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+
+/** Shared column template — the header row and every CommitRow use this so
+ *  cells align across rows. Keep in sync with the graph gutter width. */
+export const HISTORY_GRID = 'grid grid-cols-[64px_minmax(0,1fr)_auto_auto] items-center gap-x-1.5';
 
 export function CommitRow({
   commit, active = false, pendingAction = false, laneColor, onSelect, onRevert, onBranch,
@@ -32,59 +38,70 @@ export function CommitRow({
     .join('')
     .toUpperCase();
   const hue = [...commit.sha].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
+  const hasChips = (commit.branchHeads?.length ?? 0) + (commit.tags?.length ?? 0) > 0;
 
   return (
-    <div className="group relative flex h-6 items-stretch pl-[64px] pr-2">
+    <div className={cn(HISTORY_GRID, 'group relative h-6 pr-2')}>
       <button
         type="button"
         onClick={onSelect}
         className={cn(
-          'flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1.5 text-left transition-colors',
+          'absolute inset-y-0 left-0 right-2 grid grid-cols-[64px_minmax(0,1fr)_auto_auto] items-center gap-x-1.5 rounded-sm px-0 text-left transition-colors',
           active ? 'bg-primary/10' : 'hover:bg-secondary/40',
         )}
       >
-        {(commit.branchHeads?.length ?? 0) > 0 && (
-          <span className="flex flex-shrink-0 items-center gap-1 overflow-hidden">
-            {commit.branchHeads!.map((name) => (
-              <span
-                key={name}
-                className={cn(
-                  'flex max-w-28 items-center gap-1 truncate rounded-md py-px pr-1 text-[0.65rem] leading-none',
-                  commit.isHead && name === commit.branchHeads![0]
-                    ? 'bg-primary/15 text-primary'
-                    : 'bg-secondary text-muted-foreground',
-                )}
-                title={name}
-              >
+        <span className="col-start-2 flex min-w-0 items-center gap-1">
+          {hasChips && (
+            <>
+              {(commit.branchHeads ?? []).map((name) => (
                 <span
-                  className="flex size-2.5 flex-shrink-0 items-center justify-center rounded-l"
-                  style={laneColor ? { background: laneColor } : undefined}
+                  key={name}
+                  className={cn(
+                    'flex max-w-28 flex-shrink-0 items-center gap-0.5 truncate rounded-md py-px pr-1 text-[0.65rem] leading-none',
+                    commit.isHead && name === commit.branchHeads![0]
+                      ? 'bg-primary/15 text-primary'
+                      : 'bg-secondary text-muted-foreground',
+                  )}
+                  title={name}
                 >
-                  <GitBranch className="size-2 text-black" />
+                  <span
+                    className="flex size-2.5 flex-shrink-0 items-center justify-center rounded-l"
+                    style={laneColor ? { background: laneColor } : undefined}
+                  >
+                    <GitBranch className="size-2 text-black" />
+                  </span>
+                  <span className="truncate font-mono">{name}</span>
                 </span>
-                <span className="truncate font-mono">{name}</span>
-              </span>
-            ))}
+              ))}
+              {(commit.tags ?? []).map((name) => (
+                <span
+                  key={name}
+                  className="flex max-w-24 flex-shrink-0 items-center gap-0.5 truncate rounded-md bg-warning/15 py-px pr-1 text-[0.65rem] leading-none text-warning"
+                  title={`tag ${name}`}
+                >
+                  <Tag className="size-2 flex-shrink-0" />
+                  <span className="truncate font-mono">{name}</span>
+                </span>
+              ))}
+            </>
+          )}
+          <span className="min-w-0 flex-1 truncate text-[0.72rem] text-foreground/90">
+            {commit.subject || '(no subject)'}
           </span>
-        )}
-        <span className="min-w-0 flex-1 truncate text-[0.72rem] text-foreground/90">
-          {commit.subject || '(no subject)'}
         </span>
-        <span className="flex flex-shrink-0 items-center gap-20">
-          <span className="flex items-center gap-1">
-            <span
-              className="flex size-3.5 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-semibold text-white"
-              style={{ background: `hsl(${hue} 40% 42%)` }}
-              title={commit.author}
-            >
-              {initials}
-            </span>
-            <span className="max-w-24 truncate text-[0.62rem] text-muted-foreground/70" title={commit.author}>
-              {commit.author}
-            </span>
+        <span className="flex-shrink-0 text-[0.62rem] tabular-nums text-muted-foreground/50">
+          {formatRelative(commit.date)}
         </span>
-          <span className="text-[0.62rem] tabular-nums text-muted-foreground/50">
-            {formatRelative(commit.date)}
+        <span className="flex w-28 flex-shrink-0 items-center justify-end gap-1 overflow-hidden">
+          <span
+            className="flex size-3.5 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-semibold text-white"
+            style={{ background: `hsl(${hue} 40% 42%)` }}
+            title={commit.author}
+          >
+            {initials}
+          </span>
+          <span className="min-w-0 truncate text-[0.62rem] text-muted-foreground/70" title={commit.author}>
+            {commit.author}
           </span>
         </span>
       </button>
@@ -132,7 +149,7 @@ function RowActions({
         <button
           type="button"
           aria-label="Commit actions"
-          className="my-auto flex size-4 flex-shrink-0 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
+          className="col-start-4 z-10 my-auto flex size-4 flex-shrink-0 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
         >
           <MoreHorizontal className="size-3.5" />
         </button>
