@@ -12,9 +12,9 @@ import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
 import type { Block, DiffHunk, TextBlock } from '@/types';
 import { TurnHeader } from './turn-header';
-import { ToolChips } from '@/components/chat-v2/tool-chips';
-import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
-import { groupToolRuns, flattenRun } from '@/components/chat-v2/stream-runs';
+import { ToolChips } from '@/components/blocks/tool-chips';
+import { ThinkingBlock } from '@/components/blocks/thinking-block';
+import { groupToolRuns, flattenRun } from '@/components/blocks/stream-runs';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 
 interface StreamBlocksProps {

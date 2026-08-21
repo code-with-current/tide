@@ -2,7 +2,7 @@
  *  content, right-side placement. Visibility (width + panel state) is
  *  derived by the parent via showInspectorColumn. */
 import type { Session } from '@/types';
-import { InspectorTab } from '@/components/right-panel/tabs/inspector-tab';
+import { InspectorTab } from '@/components/chat/inspector/inspector-tab';
 
 export function InspectorColumn({ session }: { session: Session }) {
   return (

@@ -21,9 +21,9 @@ import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { useSession, useDispatches } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
-import { ThinkingBlock } from '@/components/chat-v2/thinking-block';
-import { AgentStatusChip } from '@/components/chat-v2/tool-chips';
-import { agentStatusOf } from '@/components/chat-v2/agent-status';
+import { ThinkingBlock } from '@/components/blocks/thinking-block';
+import { AgentStatusChip } from '@/components/blocks/tool-chips';
+import { agentStatusOf } from '@/components/blocks/agent-status';
 import { StreamBlocks } from '@/components/chat/turn/stream-blocks';
 import { AnswerBlock } from '@/components/chat/blocks/answer-block';
 

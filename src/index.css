@@ -544,7 +544,7 @@ body {
   [style*="pixel-spin"] { animation: none !important; }
 }
 
-/* chat-v2 tool-chips entrance animations */
+/* blocks tool-chips entrance animations */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }

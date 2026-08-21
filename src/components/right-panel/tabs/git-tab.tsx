@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GitPanel } from '@/components/git/git-panel';
+import { GitPanel } from '@/components/right-panel/git/git-panel';
 import { cn } from '@/lib/utils';
 
 /** Git tab: working-tree Changes (default) + Review sub-sections. Local
