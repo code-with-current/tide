@@ -1175,7 +1175,7 @@ export function FetchModelsButton({
 }
 
 /** A section header for the grouped dialog: icon + label + count + hint. */
-function FetchSection({
+export function FetchSection({
   icon,
   tone,
   label,
@@ -1216,7 +1216,7 @@ function FetchSection({
 }
 
 /** A checkable model row (live + matched + none sections). */
-function FetchRow({
+export function FetchRow({
   checked,
   onToggle,
   modelId,
