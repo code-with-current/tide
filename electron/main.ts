@@ -99,6 +99,8 @@ function createWindow() {
       // <webview> for the right-panel Browser tab. The webview runs with its
       // own isolated guest context — no node, no preload bridging.
       webviewTag: true,
+      // Native overlay scrollbars (macOS-style auto-hide) for every frame.
+      enableBlinkFeatures: 'OverlayScrollbars',
     },
   });
 

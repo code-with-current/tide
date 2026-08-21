@@ -279,15 +279,7 @@ export function GitPanel() {
           {activeSession?.worktree && (
             <span className="text-[9px] uppercase tracking-wide opacity-70">worktree</span>
           )}
-          <div className="flex-1" />
-          <Button
-            variant="ghost" size="icon-xs"
-            disabled={bulk.isPending || changesCount === 0}
-            onClick={() => bulk.mutate('stash')}
-            aria-label="Stash all changes" title="Stash All"
-          >
-            <Archive className="size-3" />
-          </Button>
+
         </div>
       )}
       {/* Square, full-width tab bar */}

@@ -404,15 +404,16 @@ export function WindowTopBar() {
       <div className="flex items-center gap-1.5 flex-shrink-0 mr-2  z-50" style={{ paddingRight: CAPTION_PAD }}>
         <OpenInAppMenu />
 
-        <Tip label="Terminal Panel">
-          <Button variant="outline" size="sm" className="p-1.5" onClick={toggleTerminalTab}>
-            <Terminal className="size-3.5" />
-          </Button>
-        </Tip>
+
 
         {/* Right Panel Switcher — click to switch the right panel content */}
         <ButtonGroup>
-          <Tip label="Explorer">
+          <Tip label="Terminal">
+            <Button variant="outline" size="sm" className="p-1.5" onClick={toggleTerminalTab}>
+              <Terminal className="size-3.5" />
+            </Button>
+          </Tip>
+          <Tip label="File Explorer">
             <Button
               variant={rpFeature === 'files' && rightPanelOpen ? 'outline' : 'outline'}
               size="sm"
