@@ -1,6 +1,5 @@
 import {
   Plus,
-  Pencil,
   Trash2,
   ShieldCheck,
   Plug,
@@ -62,10 +61,11 @@ import { SettingsHeader } from "../shared";
 
 // Per-protocol form config — drives placeholders, auth-header hints, and the resolved endpoint path. Centralizing here keeps add + edit forms in sync and makes the protocol↔behavior relationship explicit (the auth header is the z.ai coding-vs-anthropic gotcha — each protocol speaks only one, mixing them 404s).
 import {
-  ModelsTable, appendFetchedModels, rowsToModels, useFollowProtocolEndpoint,
+  ModelsTable, appendFetchedModels, rowsToModels,
   useModelRows, type Row,
 } from "./models-table";
 import { AddProviderWizard } from "./add-wizard/add-wizard";
+import { matchPresetByBaseUrl } from "@/lib/provider-presets";
 
 export const PROTOCOL = {
   anthropic: {
@@ -215,10 +215,8 @@ function ProviderListItem({
   active: boolean;
   onSelect: () => void;
 }) {
-  // Brand tint per protocol — matches StyleAvatar/StyleCard so the list row
-  // reads as the same family as the picker.
-  const isAnthropic = provider.apiStyle === "anthropic";
-  const tint = isAnthropic ? "#d97757" : "#10a37f";
+  const preset = matchPresetByBaseUrl(provider.baseUrl);
+  const tint = preset?.accent ?? (provider.apiStyle === "anthropic" ? "#d97757" : "#10a37f");
   const modelCount = provider.models.length;
   // Short host for the subtitle — strips scheme + path for a compact read.
   const host = provider.baseUrl
@@ -245,14 +243,14 @@ function ProviderListItem({
     >
       {/* Brand avatar — real logo mark on the brand-tinted tile. */}
       <span
-        className="size-5 rounded-md flex items-center justify-center text-white shrink-0"
-        style={
-          isAnthropic
-            ? { background: "linear-gradient(135deg,#d97757,#b8553f)" }
-            : { background: tint }
-        }
+        className="size-5 rounded-md flex items-center justify-center shrink-0"
+        style={tint === "#ffffff" ? undefined : { background: tint }}
       >
-        <ProviderLogo apiStyle={provider.apiStyle} className="size-3" />
+        <ProviderLogo
+          apiStyle={provider.apiStyle}
+          presetId={preset?.id}
+          className={cn("size-3", tint === "#ffffff" ? "text-foreground" : "text-white")}
+        />
       </span>
 
       {/* Name + subtitle (host) — two-line read like the Workspace rows. */}
@@ -284,7 +282,11 @@ function ProviderListItem({
       {provider.enabled ? (
         <span
           className="size-1.5 rounded-full shrink-0"
-          style={{ background: tint, boxShadow: `0 0 6px ${tint}80` }}
+          style={
+            tint === "#ffffff"
+              ? { background: "#34d399", boxShadow: "0 0 6px #34d39980" }
+              : { background: tint, boxShadow: `0 0 6px ${tint}80` }
+          }
           title="Enabled"
         />
       ) : (
@@ -318,7 +320,10 @@ function ProviderDetail({
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState(provider.name);
-  const [apiStyle, setApiStyle] = useState<ApiStyle>(provider.apiStyle);
+  // apiStyle is fixed at edit time — set when the provider was created (via
+  // the wizard); changing it here would silently break the endpoint mapping.
+  const apiStyle: ApiStyle = provider.apiStyle;
+  const detailPreset = matchPresetByBaseUrl(provider.baseUrl);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   // Key field starts EMPTY on edit — the decrypted key is never pre-filled into the DOM. Save omits apiKey from the patch when the field is blank, so an untouched form preserves whatever's in the keychain. Type a new value to replace; there's no explicit "clear key" affordance (delete the provider to clear the key).
   const [apiKey, setApiKey] = useState("");
@@ -342,8 +347,6 @@ function ProviderDetail({
       providerId: m.providerId,
     })),
   );
-
-  useFollowProtocolEndpoint(apiStyle, setBaseUrl);
 
   // Debounced auto-save. Skip the mount so loading the form doesn't write.
   // "New provider" creates a real provider immediately (in the sidebar), so
@@ -380,7 +383,7 @@ function ProviderDetail({
     }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, apiStyle, baseUrl, apiKey, rows]);
+  }, [name, baseUrl, apiKey, rows]);
 
   useCatalogEnrichment(rows, updateRow);
 
@@ -388,15 +391,23 @@ function ProviderDetail({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-border">
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{
-            background: "rgba(217,119,87,0.12)",
-            border: "1px solid rgba(217,119,87,0.25)",
-          }}
+        <span
+          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+          style={
+            detailPreset && detailPreset.accent !== "#ffffff"
+              ? { background: detailPreset.accent }
+              : undefined
+          }
         >
-          <Pencil className="size-4 text-primary" />
-        </div>
+          <ProviderLogo
+            apiStyle={provider.apiStyle}
+            presetId={detailPreset?.id}
+            className={cn(
+              "size-4",
+              detailPreset && detailPreset.accent !== "#ffffff" ? "text-white" : "text-primary",
+            )}
+          />
+        </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold truncate">{provider.name}</div>
           <div className="text-[11px] text-muted-foreground/55">
@@ -412,15 +423,6 @@ function ProviderDetail({
           relationship concrete (kills the recurring "/v1" confusion). */}
       <div className="flex-1 overflow-y-auto scroll">
         <div className="w-[70%] mx-auto px-6 py-5 space-y-6">
-          {/* API style — the most consequential choice (sets protocol + path),
-              so it sits at the top as a prominent selector, not a buried field. */}
-          <div className="space-y-2">
-            <SectionLabel icon={<Plug className="size-3" />}>
-              API style
-            </SectionLabel>
-            <ApiStylePicker value={apiStyle} onChange={setApiStyle} />
-          </div>
-
           <EndpointPreview apiStyle={apiStyle} baseUrl={baseUrl} />
 
           {/* Connection */}

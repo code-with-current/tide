@@ -97,3 +97,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 export function getPreset(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((p) => p.id === id);
 }
+
+const hostOf = (url: string) =>
+  url.replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+
+export function matchPresetByBaseUrl(baseUrl: string): ProviderPreset | undefined {
+  const url = baseUrl.trim().toLowerCase();
+  if (!url) return undefined;
+  const byExact = PROVIDER_PRESETS.find((p) => p.baseUrl.toLowerCase() === url);
+  if (byExact) return byExact;
+  return PROVIDER_PRESETS.find(
+    (p) => hostOf(p.baseUrl) !== '' && hostOf(p.baseUrl) === hostOf(url),
+  );
+}

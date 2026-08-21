@@ -5,13 +5,36 @@ import { SkeletonBar } from '@/components/ui/loading-rows';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ProviderLogo } from '@/components/primitives/provider-logo';
 import { cn, formatContext } from '@/lib/utils';
-import { useModels } from '@/lib/queries';
+import { useModels, useProviders } from '@/lib/queries';
+import { matchPresetByBaseUrl } from '@/lib/provider-presets';
 import { useUi } from '@/lib/stores/ui';
 import type { ModelOption } from '@/lib/queries';
 import { Kbd } from '@/components/ui/kbd';
 
 /** Pseudo-rail id for the pinned Starred section. */
 const STARRED_RAIL = '__starred__';
+
+function ProviderTile({
+  preset,
+  apiStyle,
+}: {
+  preset?: ReturnType<typeof matchPresetByBaseUrl>;
+  apiStyle: 'openai' | 'anthropic';
+}) {
+  const accent = preset?.accent;
+  const branded = !!accent && accent !== '#ffffff';
+  return (
+    <span
+      className={cn(
+        'size-4 rounded flex items-center justify-center shrink-0',
+        branded ? 'text-white' : 'bg-secondary text-foreground',
+      )}
+      style={branded ? { background: accent } : undefined}
+    >
+      <ProviderLogo apiStyle={apiStyle} presetId={preset?.id} className="size-2.5" />
+    </span>
+  );
+}
 
 /** One rail entry: a provider with its (filtered) models. */
 interface RailEntry {
@@ -33,6 +56,10 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
   const starred = useUi((s) => s.starredModels);
   const toggleStar = useUi((s) => s.toggleStarredModel);
   const { models, isLoading } = useModels();
+  const { data: providers } = useProviders();
+  const presetByProvider = new Map(
+    (providers ?? []).map((p) => [p.id, matchPresetByBaseUrl(p.baseUrl)]),
+  );
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -230,18 +257,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
                   setRail(e.id);
                   setActiveIdx(0);
                 }}
-                tile={
-                  <span
-                    className="size-4 rounded flex items-center justify-center text-white shrink-0"
-                    style={
-                      e.apiStyle === 'anthropic'
-                        ? { background: 'linear-gradient(135deg,#d97757,#b8553f)' }
-                        : { background: '#10a37f' }
-                    }
-                  >
-                    <ProviderLogo apiStyle={e.apiStyle} className="size-2.5" />
-                  </span>
-                }
+                tile={<ProviderTile preset={presetByProvider.get(e.id)} apiStyle={e.apiStyle} />}
                 name={e.name}
               />
             ))}
