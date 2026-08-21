@@ -4,12 +4,12 @@
  *  The message list is virtualized (@tanstack/react-virtual): offscreen rows
  *  unmount entirely, so their markdown / diff / mermaid subtrees only exist
  *  for rows near the viewport. The virtual box keeps its full height via
- *  getTotalSize() (measurements are cached per message id and survive row
+ *  getTotalSize() (measurements are cached per row key and survive row
  *  unmount), and the pin-scroll sentinels — [data-timeline-end] and the
  *  100vh spacer from usePinnedTimelineScroll — stay OUTSIDE the box as
  *  always-mounted siblings, so their geometry is stable while rows come and
  *  go. Row heights come from measureElement (ResizeObserver); estimateSize is
- *  only the pre-measure hint. */
+ *  only the pre-measure hint (see row-metrics.ts). */
 
 import { memo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -18,6 +18,7 @@ import type { Message } from '@/types';
 import { ChatMessage } from '../chat-message';
 import { CompactedDivider } from '../blocks/compacted-divider';
 import { usePinnedTimelineScroll } from './usePinnedTimelineScroll';
+import { estimateRowSize, timelineRowKey } from './row-metrics';
 import { cn } from '@/lib/utils';
 
 export interface ChatTimelineProps {
@@ -44,11 +45,10 @@ export interface ChatTimelineProps {
   retryActive?: boolean;
 }
 
-/** Pre-measure height hints. measureElement corrects both on first mount and
- *  caches by message id, so these only shape initial geometry and far-jump
- *  scroll math. 220px matches the containIntrinsicSize hint this replaced. */
-const USER_ROW_ESTIMATE = 88;
-const TURN_ROW_ESTIMATE = 220;
+/** Pre-measure height hints live in row-metrics.ts (user rows are flat;
+ *  turn rows are content-derived). measureElement corrects both on first
+ *  mount and caches by row key, so estimates only shape initial geometry
+ *  and far-jump scroll math. The old containIntrinsicSize hint was 220px. */
 
 function ChatTimelineImpl({
   messages, streamingMessage, isStreaming, pendingToolCallIds, stopReason,
@@ -66,10 +66,11 @@ function ChatTimelineImpl({
     count: listActive ? totalCount : 0,
     getScrollElement: () => scrollRef.current,
     overscan: 8,
-    estimateSize: (i) => (i < messages.length && messages[i].role === 'user' ? USER_ROW_ESTIMATE : TURN_ROW_ESTIMATE),
-    // Stable keys keep the per-id measurement cache valid across unmount —
+    estimateSize: (i) => estimateRowSize(i < messages.length ? messages[i] : streamingMessage ?? undefined),
+    // Stable keys keep the per-key measurement cache valid across unmount —
     // re-measure loops and estimate-flashing scrolls both hinge on this.
-    getItemKey: (i) => (i < messages.length ? messages[i].id : '__streaming__'),
+    // The streaming row's key is session-scoped (see row-metrics.ts).
+    getItemKey: (i) => timelineRowKey(messages, i, sessionId),
   });
 
   return (
@@ -95,10 +96,12 @@ function ChatTimelineImpl({
                           position: 'absolute',
                           top: 0,
                           left: 0,
-                          // Absolute rows establish a formatting context, so
-                          // TurnBlock's mb-6 stays inside the measured
-                          // border-box — with plain static divs that margin
-                          // would collapse out and turns would overlap.
+                          // An abs-pos row with auto height contains its last
+                          // in-flow child's MARGIN box — that is what makes
+                          // measureElement capture TurnBlock's mb-6. Keep
+                          // that margin on the last in-flow child of the row;
+                          // moving it to a wrapper AFTER the measured element
+                          // would silently drop it from the measured height.
                           transform: `translateY(${row.start}px)`,
                         }}
                       >
