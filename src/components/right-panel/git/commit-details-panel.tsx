@@ -1,11 +1,13 @@
 /** CommitDetailsPanel — floating side panel (like the file viewer) showing a
- *  commit's metadata + changed files. Clicking a file opens that file's diff
- *  (at this commit) in the file viewer. Refined git-native styling. */
-import { useMemo, useState } from 'react';
-import { X, GitCommitHorizontal, Loader2, ChevronRight, Copy, Check } from 'lucide-react';
+ *  commit's metadata + changed files. Clicking a file expands its diff (at
+ *  this commit) inline. Enriched: full message body, parent shas (clickable
+ *  → navigate), tags, author avatar, absolute date + relative, and the AI
+ *  explain/review actions. */
+import { useEffect, useMemo, useState } from 'react';
+import { X, GitCommitHorizontal, GitMerge, GitBranch, Tag, Loader2, ChevronRight, Copy, Check } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { SkeletonBar } from '@/components/ui/loading-rows';
-import { useSession, useCommitFiles } from '@/lib/queries';
+import { useSession, useCommitFiles, useGitLog } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import type { GitFileChange } from '@/lib/api/client';
 import type { DiffHunk } from '@/types';
@@ -13,7 +15,16 @@ import { cn, formatRelative } from '@/lib/utils';
 import { DiffView } from '@/components/chat/blocks/diff-view';
 import { CommitAiActions } from './commit-ai-actions';
 
-type CommitDetail = { sha: string; author: string; date: string; subject: string };
+export interface CommitDetail {
+  sha: string;
+  author: string;
+  date: string;
+  subject: string;
+  parents?: string[];
+  tags?: string[];
+  branchHeads?: string[];
+  isHead?: boolean;
+}
 
 const STATUS_TONE: Record<GitFileChange['status'], string> = {
   added: 'text-emerald-500',
@@ -23,6 +34,20 @@ const STATUS_TONE: Record<GitFileChange['status'], string> = {
   untracked: 'text-muted-foreground',
 };
 
+function hueOf(seed: string): number {
+  return [...seed].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
+}
+
+function initialsOf(author: string): string {
+  return author.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+}
+
+function formatAbsolute(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const activeSessionId = useUi((s) => s.activeSessionId);
@@ -31,6 +56,33 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
   const gitSessionId = activeSession?.worktree ? activeSessionId : undefined;
 
   const { data: files, isLoading } = useCommitFiles(activeWorkspaceId, commit.sha, gitSessionId);
+
+  // Full message body (subject line comes in via commit; the body needs
+  // fetching — gitLog only carries the subject).
+  const [body, setBody] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setBody(null);
+    if (activeWorkspaceId) {
+      void api.gitCommitMessage(activeWorkspaceId, commit.sha, gitSessionId ?? undefined).then((msg) => {
+        if (cancelled) return;
+        const full = (msg ?? '').trim();
+        const subject = commit.subject || '';
+        // Strip the subject line (and its newline) — the panel renders it above.
+        const rest = full.startsWith(subject) ? full.slice(subject.length).replace(/^\s+/, '') : full;
+        setBody(rest || '');
+      }).catch(() => { if (!cancelled) setBody(''); });
+    }
+    return () => { cancelled = true; };
+  }, [commit.sha, commit.subject, activeWorkspaceId, gitSessionId]);
+
+  // History index — lets parent-chip clicks jump to any ancestor commit.
+  const { data: history } = useGitLog(activeWorkspaceId, gitSessionId, 500);
+  const bySha = useMemo(() => {
+    const m = new Map<string, typeof history extends readonly (infer T)[] | undefined ? T : never>();
+    for (const c of history ?? []) m.set(c.sha, c);
+    return m;
+  }, [history]);
 
   // Inline-expandable diff: click a file to fetch its diff at this commit and
   // expand a DiffView below the row. Click again (or another file) to toggle.
@@ -67,12 +119,29 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
     });
   };
 
+  const goSha = (sha: string) => {
+    const c = bySha.get(sha);
+    if (c) setCommitDetail(c);
+  };
+
+  const hue = hueOf(commit.author);
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-card overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-input flex-shrink-0">
         <GitCommitHorizontal className="size-3.5 text-muted-foreground/60 flex-shrink-0" />
         <ShaChip sha={commit.sha} />
+        {(commit.tags?.length ?? 0) > 0 && (
+          <span className="flex flex-shrink-0 items-center gap-0.5">
+            {commit.tags!.slice(0, 3).map((t) => (
+              <span key={t} className="flex items-center gap-0.5 rounded bg-warning/15 px-1 py-px font-mono text-[10px] text-warning" title={`tag ${t}`}>
+                <Tag className="size-2.5" />
+                {t}
+              </span>
+            ))}
+          </span>
+        )}
         <div className="flex-1" />
         <button
           type="button"
@@ -85,6 +154,61 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
         </button>
       </div>
 
+      {/* Subject + enriched meta */}
+      <div className="px-3 py-2.5 border-b border-input flex-shrink-0">
+        <div className="text-[13px] font-medium leading-snug text-foreground">{commit.subject || '(no subject)'}</div>
+        {body && (
+          <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-muted-foreground/85">{body}</p>
+        )}
+        <div className="mt-2 flex items-center gap-1.5">
+          <span
+            className="flex size-4 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-semibold text-white"
+            style={{ background: `hsl(${hue} 40% 42%)` }}
+            title={commit.author}
+          >
+            {initialsOf(commit.author)}
+          </span>
+          <span className="truncate text-[11px] text-muted-foreground/80" title={commit.author}>{commit.author}</span>
+          <span className="text-muted-foreground/30">·</span>
+          <span className="flex-shrink-0 text-[11px] text-muted-foreground/60" title={formatAbsolute(commit.date)}>
+            {formatRelative(commit.date)}
+          </span>
+        </div>
+        {(commit.parents?.length ?? 0) > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground/50">
+            {commit.parents!.length > 1 ? <GitMerge className="size-3 flex-shrink-0" /> : <GitCommitHorizontal className="size-3 flex-shrink-0 rotate-90" />}
+            {commit.parents!.map((p, i) => (
+              <span key={p} className="flex items-center gap-1.5">
+                {i > 0 && <span className="text-muted-foreground/30">+</span>}
+                <button
+                  type="button"
+                  onClick={() => goSha(p)}
+                  disabled={!bySha.has(p)}
+                  title={bySha.has(p) ? `Go to ${p}` : `${p} (outside loaded history)`}
+                  className={cn(
+                    'rounded px-0.5 transition-colors',
+                    bySha.has(p) ? 'text-primary/70 hover:text-primary hover:bg-primary/10' : 'cursor-default opacity-60',
+                  )}
+                >
+                  {p}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 flex items-center gap-2 text-[11px] font-mono tabular-nums">
+          <span className="text-muted-foreground/50">{totals.n} {totals.n === 1 ? 'file' : 'files'}</span>
+          <span className="text-emerald-500">+{totals.a}</span>
+          <span className="text-red-500">−{totals.d}</span>
+          <div className="flex-1" />
+          {commit.isHead && (
+            <span className="flex items-center gap-1 rounded bg-primary/15 px-1.5 py-px font-sans text-[10px] text-primary">
+              <GitBranch className="size-2.5" /> HEAD{(commit.branchHeads?.length ?? 0) > 0 ? ` · ${commit.branchHeads![0]}` : ''}
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* AI actions + results (explain card, review findings) */}
       <CommitAiActions
         commit={commit}
@@ -94,21 +218,6 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
         gitSessionId={gitSessionId}
         onOpenFile={openFile}
       />
-
-      {/* Subject + meta */}
-      <div className="px-3 py-2.5 border-b border-input flex-shrink-0">
-        <div className="text-[13px] font-medium leading-snug text-foreground">{commit.subject || '(no subject)'}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/60">
-          <span className="truncate">{commit.author}</span>
-          <span className="text-muted-foreground/30">·</span>
-          <span className="flex-shrink-0">{formatRelative(commit.date)}</span>
-        </div>
-        <div className="mt-2 flex items-center gap-2 text-[11px] font-mono tabular-nums">
-          <span className="text-muted-foreground/50">{totals.n} {totals.n === 1 ? 'file' : 'files'}</span>
-          <span className="text-emerald-500">+{totals.a}</span>
-          <span className="text-red-500">−{totals.d}</span>
-        </div>
-      </div>
 
       {/* Changed files */}
       <div className="flex-1 min-h-0 overflow-y-auto scroll">
