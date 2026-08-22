@@ -706,6 +706,8 @@ export function FetchModelsButton({
   });
   // The fetched + catalog-enriched model list. Null = dialog closed.
   const [available, setAvailable] = useState<FetchedModel[] | null>(null);
+  // Models the provider reports but this apiStyle cannot call — shown dimmed.
+  const [excluded, setExcluded] = useState<FetchedModel[]>([]);
   // Per-model selection state. For matched/none, keyed by modelId (bool).
   // For ambiguous, keyed by `${modelId}` → chosen catalogId (or undefined).
   const [selected, setSelected] = useState<Record<string, string | boolean>>(
@@ -721,9 +723,13 @@ export function FetchModelsButton({
         { apiStyle, baseUrl, apiKey, existingIds: existingModelIds },
       );
       // Route-aware providers (OpenCode Zen) serve different models per wire
-      // endpoint — only offer what this provider's apiStyle can call.
+      // endpoint — selectable rows are what this apiStyle can call; the rest
+      // render dimmed so the full provider catalog stays visible.
       const preset = matchPresetByBaseUrl(baseUrl);
-      setAvailable(filterPresetModels(fetched, preset, apiStyle));
+      const selectable = filterPresetModels(fetched, preset, apiStyle);
+      const selectableIds = new Set(selectable.map((m) => m.modelId));
+      setAvailable(selectable);
+      setExcluded(fetched.filter((m) => !selectableIds.has(m.modelId)));
       setSelected({});
     } catch (e) {
       setState({ status: "error", error: e instanceof Error ? e.message : "Fetch failed" });
@@ -734,6 +740,7 @@ export function FetchModelsButton({
 
   const close = () => {
     setAvailable(null);
+    setExcluded([]);
     setSelected({});
   };
 
@@ -823,7 +830,7 @@ export function FetchModelsButton({
               <RefreshCw className="size-3 animate-spin" /> Resolving models…
             </div>
           ) : !grouped ||
-            grouped.live.length + grouped.available.length === 0 ? (
+            grouped.live.length + grouped.available.length + excluded.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-muted-foreground">
               All available models have been added.
             </div>
@@ -889,6 +896,32 @@ export function FetchModelsButton({
                           ? `${formatContext(m.contextWindow)} ctx${m.priceLabel ? " · " + m.priceLabel : ""}`
                           : m.priceLabel
                       }
+                    />
+                  ))}
+                </FetchSection>
+              )}
+
+              {/* ⊘ OTHER ENDPOINT — provider reports them, but this apiStyle
+                  can't call them (Zen's per-model routing). Visible, dimmed,
+                  not selectable. */}
+              {excluded.length > 0 && (
+                <FetchSection
+                  icon="⊘"
+                  tone="muted"
+                  label="Other endpoint"
+                  count={excluded.length}
+                  hint="switch API style to use"
+                >
+                  {excluded.map((m) => (
+                    <FetchRow
+                      key={m.modelId}
+                      checked={false}
+                      onToggle={() => {}}
+                      modelId={m.modelId}
+                      reasoning={m.reasoning}
+                      vision={m.supportsVision}
+                      disabled
+                      disabledNote={apiStyle === "anthropic" ? "OpenAI style" : "Anthropic style"}
                     />
                   ))}
                 </FetchSection>
@@ -973,6 +1006,8 @@ export function FetchRow({
   vision,
   mandatory,
   meta,
+  disabled,
+  disabledNote,
 }: {
   checked: boolean;
   onToggle: () => void;
@@ -983,7 +1018,43 @@ export function FetchRow({
   /** True when reasoning is mandatory (always on) — shows a lock badge. */
   mandatory?: boolean;
   meta?: string;
+  /** Non-selectable row (model not served on this API style) — rendered dimmed. */
+  disabled?: boolean;
+  /** Shown as a badge on disabled rows, e.g. "OpenAI style only". */
+  disabledNote?: string;
 }) {
+  if (disabled) {
+    return (
+      <div
+        className="w-full flex items-center gap-2 px-4 py-1.5 text-left opacity-55"
+        title={disabledNote}
+      >
+        <span className="size-3.5 rounded border border-border/60 flex items-center justify-center shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1">
+            <code className="font-mono text-[11px] text-foreground/60 truncate">
+              {modelId}
+            </code>
+            {reasoning && <Brain className="size-3 text-reasoning/70 shrink-0" />}
+            {vision && <Eye className="size-3 text-info/70 shrink-0" />}
+            {disabledNote && (
+              <Badge
+                variant="secondary"
+                className="text-[8px] px-1 py-0 uppercase text-muted-foreground/70 shrink-0"
+              >
+                {disabledNote}
+              </Badge>
+            )}
+          </div>
+          {meta && (
+            <div className="text-[10px] text-muted-foreground/45 pl-4 truncate">
+              {meta}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <button
       type="button"

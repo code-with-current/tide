@@ -26,7 +26,9 @@ export function PickModelsStep({
   const [status, setStatus] = useState<'loading' | 'error' | 'done'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [hiddenCount, setHiddenCount] = useState(0);
+  // Models the provider reports but the active API style cannot call
+  // (route-aware providers like OpenCode Zen) — shown dimmed, not selectable.
+  const [excluded, setExcluded] = useState<FetchedModel[]>([]);
   const fetchedRef = useRef(false);
 
   const load = async () => {
@@ -42,11 +44,10 @@ export function PickModelsStep({
           existingIds: [],
         },
       );
-      // Route-aware providers (OpenCode Zen) serve different models per wire
-      // endpoint — only offer what this apiStyle can actually call.
-      const models = filterPresetModels(fetched, preset, state.apiStyle);
-      setHiddenCount(fetched.length - models.length);
-      dispatch({ type: 'models-loaded', models, recommended: preset?.recommended ?? [] });
+      const selectable = filterPresetModels(fetched, preset, state.apiStyle);
+      const selectableIds = new Set(selectable.map((m) => m.modelId));
+      setExcluded(fetched.filter((m) => !selectableIds.has(m.modelId)));
+      dispatch({ type: 'models-loaded', models: selectable, recommended: preset?.recommended ?? [] });
       setStatus('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Fetch failed');
@@ -69,6 +70,7 @@ export function PickModelsStep({
   const available = state.models.filter(
     (m) => m.matchState !== 'live' && (!q || m.modelId.toLowerCase().includes(q)),
   );
+  const excludedShown = excluded.filter((m) => !q || m.modelId.toLowerCase().includes(q));
   const allSelected =
     state.models.length > 0 && state.selected.length === state.models.length;
 
@@ -138,13 +140,13 @@ export function PickModelsStep({
         </div>
       )}
 
-      {status === 'done' && state.models.length === 0 && (
+      {status === 'done' && state.models.length === 0 && excluded.length === 0 && (
         <div className="py-10 text-center text-xs text-muted-foreground">
           No models reported by this endpoint. Continue and add them manually later.
         </div>
       )}
 
-      {status === 'done' && state.models.length > 0 && (
+      {status === 'done' && (state.models.length > 0 || excluded.length > 0) && (
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
           <input
@@ -165,13 +167,15 @@ export function PickModelsStep({
         </div>
       )}
 
-      {status === 'done' && state.models.length > 0 && live.length + available.length === 0 && (
+      {status === 'done' &&
+        (state.models.length > 0 || excluded.length > 0) &&
+        live.length + available.length + excludedShown.length === 0 && (
         <div className="py-8 text-center text-xs text-muted-foreground">
           No models match “{query.trim()}”.
         </div>
       )}
 
-      {status === 'done' && state.models.length > 0 && live.length + available.length > 0 && (
+      {status === 'done' && live.length + available.length + excludedShown.length > 0 && (
         <div className="flex-1 min-h-0 rounded-lg border border-border overflow-hidden overflow-y-auto scroll">
           {live.length > 0 && (
             <FetchSection
@@ -218,6 +222,30 @@ export function PickModelsStep({
               ))}
             </FetchSection>
           )}
+
+          {excludedShown.length > 0 && (
+            <FetchSection
+              icon="⊘"
+              tone="muted"
+              label="Other endpoint"
+              count={excludedShown.length}
+              hint="switch API style to use"
+            >
+              {excludedShown.map((m) => (
+                <FetchRow
+                  key={m.modelId}
+                  checked={false}
+                  onToggle={() => {}}
+                  modelId={m.modelId}
+                  reasoning={m.reasoning}
+                  vision={m.supportsVision}
+                  meta={metaLine(m)}
+                  disabled
+                  disabledNote={state.apiStyle === 'anthropic' ? 'OpenAI style' : 'Anthropic style'}
+                />
+              ))}
+            </FetchSection>
+          )}
         </div>
       )}
 
@@ -226,14 +254,6 @@ export function PickModelsStep({
           ? 'Recommended models are pre-checked — adjust as you like.'
           : 'Check the models you want available.'}
       </p>
-      {hiddenCount > 0 && (
-        <p className="shrink-0 text-[10px] text-muted-foreground/40">
-          {hiddenCount} model{hiddenCount === 1 ? '' : 's'} hidden — not served on this API
-          style. {preset?.modelRouting?.anthropic && preset?.modelRouting?.openai
-            ? 'Switch API style in Connect → Advanced for the other endpoint’s models.'
-            : ''}
-        </p>
-      )}
     </div>
   );
 }
