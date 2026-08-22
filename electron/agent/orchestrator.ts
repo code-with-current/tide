@@ -35,6 +35,7 @@ import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agen
 import type { AutonomyMode, Provider, ToolCall, ToolDisplay, ToolName, Usage } from '../../src/types/index.js';
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
 import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
+import { repairJsonToolInput } from './tool-input-repair.js';
 import { recordEditTurn } from '../rag/edit-journal.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
@@ -421,12 +422,8 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
           repairToolCall: async ({ toolCall }) => {
             const input = toolCall.input;
             if (typeof input !== 'string') return toolCall;
-            const cleaned = input.replace(/<\/?tool_call>/g, '').replace(/<\/?tool_use>/g, '').replace(/<\/?function_call>/g, '').trim();
-            try { JSON.parse(cleaned); return { ...toolCall, input: cleaned }; } catch {
-              const match = cleaned.match(/\{[\s\S]*\}/);
-              if (match) { try { JSON.parse(match[0]); return { ...toolCall, input: match[0] }; } catch {} }
-            }
-            return null;
+            const repaired = repairJsonToolInput(input);
+            return repaired ? { ...toolCall, input: repaired } : null;
           },
 
           onError: ({ error }) => {

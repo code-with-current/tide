@@ -10,6 +10,7 @@ import { effectiveChildTools } from './registry.js';
 import { getToolMeta } from '../tools/tool-meta.js';
 import { currentToolCallId } from '../tools/tool-call-context.js';
 import { categorizeTool } from '../../../src/lib/stream/block-state.js';
+import { repairJsonToolInput } from '../tool-input-repair.js';
 import { createLogger } from '../../logger.js';
 import { getSessionStore } from '../../ipc/sessions.js';
 import type { Provider, Usage, AutonomyMode, ToolName } from '../../../src/types/index.js';
@@ -367,24 +368,8 @@ async function runMultiStepAgent(
       repairToolCall: async ({ toolCall }) => {
         const input = toolCall.input;
         if (typeof input !== 'string') return toolCall;
-        const cleaned = input
-          .replace(/<\/?tool_call>/g, '')
-          .replace(/<\/?tool_use>/g, '')
-          .replace(/<\/?function_call>/g, '')
-          .trim();
-        try {
-          JSON.parse(cleaned);
-          return { ...toolCall, input: cleaned };
-        } catch {
-          const match = cleaned.match(/\{[\s\S]*\}/);
-          if (match) {
-            try {
-              JSON.parse(match[0]);
-              return { ...toolCall, input: match[0] };
-            } catch { /* give up */ }
-          }
-        }
-        return null;
+        const repaired = repairJsonToolInput(input);
+        return repaired ? { ...toolCall, input: repaired } : null;
       },
 
       onError: ({ error }) => {
