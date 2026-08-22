@@ -364,6 +364,8 @@ declare global {
       getTerminalLines(sessionId: string): Promise<any[]>;
       // ── Real terminal (bottom panel) ──
       terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
+      /** Snapshot re-attach: scrollback + seq for a live PTY (alive:false → spawn fresh). */
+      terminalSnapshot: (terminalId: string) => Promise<{ alive: true; data: string; seq: number } | { alive: false }>;
       terminalInput: (terminalId: string, input: string) => Promise<void>;
       terminalKill: (terminalId: string) => Promise<void>;
       terminalStop: (terminalId: string) => Promise<void>;
@@ -372,7 +374,7 @@ declare global {
       terminalGetPid: (terminalId: string) => Promise<number | null>;
       /** Is a process (by pid) still alive? Used for port-liveness + Run/Stop. */
       processIsAlive: (pid: number) => Promise<boolean>;
-      onTerminalOutput(callback: (data: { terminalId: string; data: string }) => void): void;
+      onTerminalOutput(callback: (data: { terminalId: string; data: string; seq?: number }) => void): void;
       onTerminalExit(callback: (data: { terminalId: string; code: number | null }) => void): void;
       onTerminalPorts(callback: (data: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => void): void;
       removeAllTerminalListeners(): void;

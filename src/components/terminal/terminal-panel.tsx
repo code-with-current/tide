@@ -35,6 +35,16 @@ const registry = new Map<string, LiveTerminal>();
 const outputBuffers = new Map<string, string>();
 const pendingFlushes = new Set<string>();
 
+// ── Snapshot re-attach ──────────────────────────────────────────
+// While a snapshot fetch is in flight, live output is PARKED (not queued);
+// when the snapshot lands it is written first, then parked chunks with a
+// newer seq replay. `lastSeq` dedupes anything the snapshot already
+// contains — this is what makes a renderer reload non-destructive: the
+// PTY lives in main, the terminal view is a disposable projection.
+const snapshotPending = new Set<string>();
+const parkedOutput = new Map<string, { seq: number; data: string }[]>();
+const lastSeq = new Map<string, number>();
+
 function flushTerminal(terminalId: string) {
   pendingFlushes.delete(terminalId);
   const buf = outputBuffers.get(terminalId);
@@ -66,7 +76,22 @@ function queueOutput(terminalId: string, data: string) {
 // scrollback lives in ghostty-web's WASM buffer, repainted on re-attach).
 if (ipc) {
   ipc.removeAllTerminalListeners();
-  ipc.onTerminalOutput(({ terminalId, data }: { terminalId: string; data: string }) => {
+  ipc.onTerminalOutput(({ terminalId, data, seq }: { terminalId: string; data: string; seq?: number }) => {
+    // Snapshot in flight — park; the attach path replays newer chunks after
+    // the snapshot lands.
+    if (snapshotPending.has(terminalId)) {
+      const list = parkedOutput.get(terminalId) ?? [];
+      if (seq !== undefined) list.push({ seq, data });
+      else list.push({ seq: Number.MAX_SAFE_INTEGER, data });
+      parkedOutput.set(terminalId, list);
+      return;
+    }
+    // Seq dedupe: chunks at or below the applied seq are already in the
+    // snapshot — drop them.
+    if (seq !== undefined) {
+      if (seq <= (lastSeq.get(terminalId) ?? 0)) return;
+      lastSeq.set(terminalId, seq);
+    }
     // Batched flush (rAF) — see queueOutput. Keeps the UI responsive under
     // high-throughput PTY output instead of writing per-IPC-event.
     queueOutput(terminalId, data);
@@ -306,13 +331,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
       term.registerLinkProvider(new UrlLinkProvider(term));
       term.registerLinkProvider(new FilePathLinkProvider(term));
 
-      // Start PTY (at the provisional size). Await so any pendingCommand is
-      // flushed to a real PTY rather than a not-yet-existing id — without
-      // this, the Run button races ahead of the terminal spawn and the bytes
-      // get dropped.
-      ipc.terminalStart(tid, sid, provisional ?? undefined).then(() => {
-        // Read the pending command from the live store (not the closure,
-        // which would be stale across renders).
+      // Attach to the PTY. Snapshot FIRST: after a renderer reload the PTY
+      // (and its scrollback) is still alive in main — replay it instead of
+      // killing and respawning the shell. Only spawn when nothing is there.
+      // pendingCommand is flushed on both paths once the PTY exists.
+      const flushPending = () => {
         const state = useUi.getState();
         const inst = state.terminals[sid]?.find((t) => t.id === tid);
         const cmd = inst?.pendingCommand;
@@ -329,7 +352,36 @@ export const TerminalPanel = memo(function TerminalPanel() {
             },
           }));
         }
-      });
+      };
+      const attach = async () => {
+        snapshotPending.add(tid);
+        let snap: Awaited<ReturnType<typeof ipc.terminalSnapshot>> | undefined;
+        try {
+          snap = await ipc.terminalSnapshot(tid);
+        } catch { /* fall through to spawn */ }
+        if (snap && snap.alive) {
+          try { term.write(snap.data); } catch { /* disposed mid-attach */ }
+          lastSeq.set(tid, snap.seq);
+          const parked = parkedOutput.get(tid) ?? [];
+          parkedOutput.delete(tid);
+          snapshotPending.delete(tid);
+          for (const p of parked) {
+            if (p.seq <= snap.seq) continue;
+            lastSeq.set(tid, p.seq);
+            queueOutput(tid, p.data);
+          }
+          // The reloaded view may size differently than the pre-reload
+          // renderer — bring the PTY to the current dimensions.
+          try { ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
+          flushPending();
+          return;
+        }
+        snapshotPending.delete(tid);
+        parkedOutput.delete(tid);
+        await ipc.terminalStart(tid, sid, provisional ?? undefined);
+        flushPending();
+      };
+      void attach();
 
       // PTY → terminal: IPC listeners are registered ONCE (see useEffect below)
       // — they look up the terminal by id at event time. Previously each
@@ -366,6 +418,9 @@ export const TerminalPanel = memo(function TerminalPanel() {
       live.inputDisposable.dispose();
       live.resizeObserver.disconnect();
       ipc.terminalKill(tid);
+      snapshotPending.delete(tid);
+      parkedOutput.delete(tid);
+      lastSeq.delete(tid);
       // ghostty-web's dispose() clears `term.element` (=== wrapper) to void 0,
       // so capture the wrapper div BEFORE dispose to remove it from the mount.
       const wrapper = live.wrapper;

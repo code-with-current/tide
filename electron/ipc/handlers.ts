@@ -15,7 +15,7 @@ import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches, gitAmend, gitRevertCommit, gitFetch, gitPush, gitPull, gitAheadBehind, gitListBranchesDetailed, gitDeleteBranch, gitMergeBranch, gitConflictFiles, gitResolveFile, gitStagedDiff, gitCommitMessage, gitDiscardFile } from './git.js';
 import { startGitWatcher } from './git-watcher.js';
-import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
+import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive, snapshotTerminal } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
 import { registerRagHandlers } from './rag.js';
@@ -1239,6 +1239,13 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
 
   ipcMain.handle('terminal:input', async (_e, terminalId: string, input: string) => {
     sendInput(terminalId, input);
+  });
+
+  // Snapshot re-attach: bounded scrollback + seq for a LIVE PTY. The renderer
+  // calls this before spawning — if the PTY survived a renderer reload, it
+  // replays the snapshot instead of killing and respawning the shell.
+  handle('terminal:snapshot', (e, terminalId: string) => {
+    return snapshotTerminal(terminalId, e.sender);
   });
 
   handle('terminal:kill', async (_e, terminalId: string) => {
