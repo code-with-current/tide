@@ -44,6 +44,7 @@ import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
 import { setUserDataPath, appDataDir } from './appPaths.js';
 import { initUpdater, autoCheckForUpdates } from './updater.js';
+import { clearBadge } from './badge.js';
 
 // ESM doesn't provide __dirname — derive it from import.meta.url.
 const __filename = fileURLToPath(import.meta.url);
@@ -125,6 +126,13 @@ function createWindow() {
     mainWindow?.webContents.send('tide:window:fullscreen', true));
   mainWindow.on('leave-full-screen', () =>
     mainWindow?.webContents.send('tide:window:fullscreen', false));
+
+  // Returning to the app reads every completed-turn notification — drop the
+  // dock badge count.
+  mainWindow.on('focus', () => clearBadge());
+  mainWindow.on('show', () => {
+    if (mainWindow?.isFocused()) clearBadge();
+  });
 
   // Block navigation away from the app — except OAuth callbacks.
   mainWindow.webContents.on('will-navigate', (e, url) => {

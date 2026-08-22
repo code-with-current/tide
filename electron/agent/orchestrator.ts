@@ -37,6 +37,7 @@ import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/type
 import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
 import { repairJsonToolInput } from './tool-input-repair.js';
 import { recordEditTurn } from '../rag/edit-journal.js';
+import { incrementBadge } from '../badge.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
 import type { EventSink, SinkEvent } from './event-sink.js';
@@ -897,6 +898,7 @@ function fireTurnEndNotification(wc: WebContents, sessionId: string, stopReason:
   if (stopReason === 'aborted' || win?.isFocused() || !Notification.isSupported()) return;
   try {
     if (!createConfigStore(appDataDir()).getGeneralSettings().notifications) return;
+    incrementBadge();
     const title = stopReason === 'refusal' ? 'Tide — turn failed' : stopReason === 'max_tokens' ? 'Tide — context limit reached' : stopReason === 'iteration_limit' ? 'Tide — step limit reached' : 'Tide — done';
     const body = stopReason === 'refusal' ? 'The turn ended with an error.' : stopReason === 'max_tokens' ? 'The model hit the token limit.' : stopReason === 'iteration_limit' ? 'The agent reached the step cap.' : 'Your request has completed.';
     const notif = new Notification({ title, body, silent: false });
