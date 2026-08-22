@@ -1295,7 +1295,6 @@ export const useUi = create<UiState>()(
         sessionsPanelOpen: s.sessionsPanelOpen,
         sidebarMode: s.sidebarMode,
         sidebarWidth: s.sidebarWidth,
-        rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         sheetWidth: s.sheetWidth,
         terminals: s.terminals,
@@ -1328,6 +1327,10 @@ export const useUi = create<UiState>()(
         // died with the app. Force the running set empty so a stale persisted
         // blob can't restore running indicators for dead turns.
         runningSessionIds: [],
+        // The right panel always starts closed after a restart — it shows
+        // session-scoped data (terminal, files, inspector) that belongs to
+        // the previous app run, not a fresh start.
+        rightPanelOpen: false,
         // Strip 'default'-bucket terminals left by the pre-draft-keying bug:
         // they were draft-phase strays that leaked into every new-session
         // screen. Real buckets are session ids or 'draft:<id>' — never bare.
