@@ -5,17 +5,8 @@ import { Check, ChevronRight, User } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
-import { useProviders } from '@/lib/queries';
+import { ModelPickerPopover } from '@/components/model-picker/model-picker';
 import { cn } from '@/lib/utils';
 
 type UtilityModel = { providerId: string; modelId: string } | null;
@@ -129,9 +120,10 @@ export function GeneralSection() {
               >
                 <div className="flex items-center gap-2">
                   {savingKey === 'titleModel' && <SavedDot />}
-                  <UtilityModelSelect
+                  <ModelPickerPopover
                     value={settings.titleModel}
                     onChange={(v) => update('titleModel', v)}
+                    defaultLabel="Session model (default)"
                   />
                 </div>
               </SettingsRow>
@@ -142,9 +134,10 @@ export function GeneralSection() {
               >
                 <div className="flex items-center gap-2">
                   {savingKey === 'commitMessageModel' && <SavedDot />}
-                  <UtilityModelSelect
+                  <ModelPickerPopover
                     value={settings.commitMessageModel}
                     onChange={(v) => update('commitMessageModel', v)}
+                    defaultLabel="Session model (default)"
                   />
                 </div>
               </SettingsRow>
@@ -217,50 +210,5 @@ function SavedDot() {
     <span className="flex items-center gap-0.5 text-[9px] text-[var(--success)] animate-in fade-in duration-200">
       <Check className="size-2.5" /> saved
     </span>
-  );
-}
-
-/** Model picker for a background task. "Session model" = the session's
- *  current model (default); otherwise a pinned provider+model from every
- *  enabled provider's catalog. */
-function UtilityModelSelect({
-  value,
-  onChange,
-}: {
-  value: UtilityModel;
-  onChange: (v: UtilityModel) => void;
-}) {
-  const { data: providers } = useProviders();
-  const enabled = (providers ?? []).filter((p) => p.enabled && p.models.length > 0);
-  const DEFAULT = '__session_model__';
-  const current = value ? `${value.providerId}:${value.modelId}` : DEFAULT;
-  return (
-    <Select
-      value={current}
-      onValueChange={(v) => {
-        if (v === DEFAULT) return onChange(null);
-        const [providerId, ...rest] = v.split(':');
-        onChange({ providerId, modelId: rest.join(':') });
-      }}
-    >
-      <SelectTrigger size="sm" className="w-[190px] text-xs">
-        <SelectValue placeholder="Session model" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={DEFAULT} className="text-xs">
-          Session model (default)
-        </SelectItem>
-        {enabled.map((p) => (
-          <SelectGroup key={p.id}>
-            <SelectLabel className="text-[10px] uppercase tracking-wide">{p.name}</SelectLabel>
-            {p.models.map((m) => (
-              <SelectItem key={m.id} value={`${p.id}:${m.modelId}`} className="text-xs font-mono">
-                {m.alias || m.modelId}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }
