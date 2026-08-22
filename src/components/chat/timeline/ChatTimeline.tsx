@@ -75,7 +75,17 @@ function ChatTimelineImpl({
 
   return (
     <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} className={cn('h-full overflow-y-auto overflow-x-hidden scroll [scrollbar-gutter:stable] px-6 py-3', className)}>
+      <div
+        ref={scrollRef}
+        className={cn(
+          'h-full overflow-y-auto overflow-x-hidden scroll px-6 py-3',
+          // The pin-scroll spacer mounts a 100vh scroll range for the whole
+          // turn — a scrollbar over that phantom range is noise, so it's
+          // hidden until the spacer collapses and only real overflow stays.
+          (pinned || isStreaming) && 'chat-streaming',
+          className,
+        )}
+      >
         <div className="w-[80%] max-w-3xl mx-auto">
           {sessionLoading && messages.length === 0 ? loadingFallback
             : isEmpty ? emptyState

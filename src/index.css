@@ -34,6 +34,10 @@ html {
 .scroll::-webkit-scrollbar-track { background: transparent; }
 .scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .scroll::-webkit-scrollbar-thumb:hover { background: var(--ring); }
+/* While the chat's pin-scroll spacer is mounted (streaming / pinned turns),
+   the extra 100vh of scroll room is phantom — hide the scrollbar until the
+   spacer collapses and only genuine overflow remains. */
+.chat-streaming::-webkit-scrollbar { display: none; }
 /* ============================================================
    Design tokens — shadcn standard naming as source of truth.
    Each theme overrides the shadcn vars; backward-compat aliases
