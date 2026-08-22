@@ -102,7 +102,7 @@ export function UpdatesSection() {
       {version && status?.releaseNotes && (
         <SettingsGroup title={`Release notes — v${version}`}>
           <Card>
-            <div className="px-4 py-3 max-h-64 overflow-y-auto scroll text-[13px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+            <div className="px-4 py-3 max-h-64 overflow-y-auto scroll text-[0.9286rem] leading-relaxed whitespace-pre-wrap text-muted-foreground">
               {status.releaseNotes}
             </div>
           </Card>
@@ -143,7 +143,7 @@ export function UpdatesSection() {
       </SettingsGroup>
 
       {/* ── Version footer ── */}
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50 pt-1">
+      <div className="flex items-center gap-2 text-[0.7857rem] text-muted-foreground/50 pt-1">
         <ShieldCheck className="size-3" />
         <span>Current version</span>
         <code className="font-mono text-muted-foreground/70">v{currentVersion}</code>
@@ -192,7 +192,7 @@ function StatusHero({
               <div className="text-sm font-semibold">
                 Downloading v{version}
               </div>
-              <div className="text-[11px] text-muted-foreground/60">
+              <div className="text-[0.7857rem] text-muted-foreground/60">
                 {pct}% · installs automatically on quit
               </div>
             </div>
@@ -226,7 +226,7 @@ function StatusHero({
               <div className="text-sm font-semibold text-primary">
                 Update ready — v{version}
               </div>
-              <div className="text-[11px] text-muted-foreground/60">
+              <div className="text-[0.7857rem] text-muted-foreground/60">
                 Restart Tide to apply the update.
               </div>
             </div>
@@ -251,7 +251,7 @@ function StatusHero({
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">Update check failed</div>
-              <div className="text-[11px] text-muted-foreground/60 truncate">
+              <div className="text-[0.7857rem] text-muted-foreground/60 truncate">
                 {error || 'An error occurred. You can download manually.'}
               </div>
             </div>
@@ -279,7 +279,7 @@ function StatusHero({
           </div>
           <div className="flex-1">
             <div className="text-sm font-medium">Checking for updates…</div>
-            <div className="text-[11px] text-muted-foreground/60">Contacting GitHub releases</div>
+            <div className="text-[0.7857rem] text-muted-foreground/60">Contacting GitHub releases</div>
           </div>
         </div>
       </Card>
@@ -300,9 +300,9 @@ function StatusHero({
               <div className="text-sm font-semibold flex items-center gap-2">
                 v{version} is available
                 <ArrowRight className="size-3 text-muted-foreground/40" />
-                <code className="font-mono text-[11px] text-muted-foreground/60">v{currentVersion}</code>
+                <code className="font-mono text-[0.7857rem] text-muted-foreground/60">v{currentVersion}</code>
               </div>
-              <div className="text-[11px] text-muted-foreground/60">
+              <div className="text-[0.7857rem] text-muted-foreground/60">
                 This build is ad-hoc signed and can't self-update — download the new version from GitHub.
               </div>
             </div>
@@ -334,9 +334,9 @@ function StatusHero({
               <div className="text-sm font-semibold flex items-center gap-2">
                 v{version} is available
                 <ArrowRight className="size-3 text-muted-foreground/40" />
-                <code className="font-mono text-[11px] text-muted-foreground/60">v{currentVersion}</code>
+                <code className="font-mono text-[0.7857rem] text-muted-foreground/60">v{currentVersion}</code>
               </div>
-              <div className="text-[11px] text-muted-foreground/60">Starting download…</div>
+              <div className="text-[0.7857rem] text-muted-foreground/60">Starting download…</div>
             </div>
           </div>
         </div>
@@ -356,9 +356,9 @@ function StatusHero({
           <div className="flex-1">
             <div className="text-sm font-semibold flex items-center gap-1.5">
               {state === 'not-available' ? "You're up to date" : 'Tide is ready'}
-              <code className="font-mono text-[11px] text-muted-foreground">v{currentVersion}</code>
+              <code className="font-mono text-[0.7857rem] text-muted-foreground">v{currentVersion}</code>
             </div>
-            <div className="text-[11px] text-muted-foreground/60 flex items-center gap-1 mt-0.5">
+            <div className="text-[0.7857rem] text-muted-foreground/60 flex items-center gap-1 mt-0.5">
               <ShieldCheck className="size-3" />
               {status?.lastCheckedAt
                 ? `Last checked ${timeAgo(status.lastCheckedAt)}`

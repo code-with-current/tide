@@ -55,13 +55,13 @@ export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | un
           className="w-full px-3 py-2 flex items-center gap-2 border-b border-white/10 transition-colors hover:bg-white/[0.03]"
         >
           {active && <Loader2 className="size-3 text-info animate-spin flex-shrink-0" />}
-          <span className="text-[11px] font-semibold text-foreground/90 uppercase tracking-wider flex-shrink-0">
+          <span className="text-[0.7857rem] font-semibold text-foreground/90 uppercase tracking-wider flex-shrink-0">
             Tasks
           </span>
-          <span className="text-[10.5px] font-medium truncate flex-1 min-w-0 text-left text-foreground/70 normal-case tracking-normal">
+          <span className="text-[0.75rem] font-medium truncate flex-1 min-w-0 text-left text-foreground/70 normal-case tracking-normal">
             {headline}
           </span>
-          <span className="text-[10px] text-white/50 font-mono flex-shrink-0">{pct}%</span>
+          <span className="text-[0.7143rem] text-white/50 font-mono flex-shrink-0">{pct}%</span>
           <div className="w-16 h-1 rounded-full bg-white/10 overflow-hidden flex-shrink-0">
             <div
               className={cn('h-full transition-all duration-300', pct === 100 ? 'bg-success/80' : 'bg-primary/80')}
@@ -79,7 +79,7 @@ export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | un
               <TodoRow key={i} item={t} />
             ))}
             {cancelled > 0 && (
-              <div className="px-1.5 pt-1 text-[10px] text-white/30 font-mono">
+              <div className="px-1.5 pt-1 text-[0.7143rem] text-white/30 font-mono">
                 {done}/{total} done · {cancelled} cancelled
               </div>
             )}
@@ -92,7 +92,7 @@ export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | un
           <button
             type="button"
             onClick={() => sessionId && setDismissedTodo(sessionId, signature)}
-            className="w-full px-3 py-2 flex items-center justify-center gap-1.5 border-t border-white/10 text-[10.5px] font-semibold uppercase tracking-wider text-white/50 hover:text-foreground hover:bg-success/10 transition-colors"
+            className="w-full px-3 py-2 flex items-center justify-center gap-1.5 border-t border-white/10 text-[0.75rem] font-semibold uppercase tracking-wider text-white/50 hover:text-foreground hover:bg-success/10 transition-colors"
           >
             Dismiss
           </button>
@@ -109,7 +109,7 @@ function TodoRow({ item }: { item: TodoItem }) {
   return (
     <div
       className={cn(
-        'flex items-start gap-2 px-1.5 py-1 rounded-md text-[11.5px] leading-snug transition-colors',
+        'flex items-start gap-2 px-1.5 py-1 rounded-md text-[0.8214rem] leading-snug transition-colors',
         isActive && 'bg-info/10',
       )}
     >
@@ -137,7 +137,7 @@ function TodoRow({ item }: { item: TodoItem }) {
         {item.content}
       </span>
       {item.priority === 'high' && !isDone && !isCancelled && (
-        <span className="text-[9px] font-mono uppercase text-destructive/80 flex-shrink-0 mt-0.5">
+        <span className="text-[0.6429rem] font-mono uppercase text-destructive/80 flex-shrink-0 mt-0.5">
           high
         </span>
       )}

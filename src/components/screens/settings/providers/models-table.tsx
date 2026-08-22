@@ -166,16 +166,16 @@ export function ModelsTable({
         <Table className="text-xs">
           <TableHeader>
             <TableRow className="border-border hover:bg-transparent">
-              <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">
+              <TableHead className="h-7 text-[0.7143rem] uppercase tracking-wider text-muted-foreground/50 py-1.5">
                 Alias
               </TableHead>
-              <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5">
+              <TableHead className="h-7 text-[0.7143rem] uppercase tracking-wider text-muted-foreground/50 py-1.5">
                 Model ID
               </TableHead>
-              <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-20">
+              <TableHead className="h-7 text-[0.7143rem] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-20">
                 Context
               </TableHead>
-              <TableHead className="h-7 text-[10px] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-28">
+              <TableHead className="h-7 text-[0.7143rem] uppercase tracking-wider text-muted-foreground/50 py-1.5 w-28">
                 Price
               </TableHead>
               <TableHead className="w-8" />
@@ -187,7 +187,7 @@ export function ModelsTable({
                 <TableCell className="py-1 pr-1">
                   <div className="flex items-center gap-1">
                     <input
-                      className="w-full bg-transparent border-0 outline-none text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
+                      className="w-full bg-transparent border-0 outline-none text-[0.8214rem] focus:bg-secondary/40 rounded px-1 py-0.5"
                       value={row.alias}
                       onChange={(e) => onUpdate(i, { alias: e.target.value })}
                       placeholder="Alias"
@@ -202,7 +202,7 @@ export function ModelsTable({
                 </TableCell>
                 <TableCell className="py-1 pr-1">
                   <input
-                    className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
+                    className="w-full bg-transparent border-0 outline-none font-mono text-[0.8214rem] focus:bg-secondary/40 rounded px-1 py-0.5"
                     value={row.modelId}
                     onChange={(e) => onUpdate(i, modelIdChangePatch(row, e.target.value))}
                     placeholder="model-id"
@@ -214,19 +214,19 @@ export function ModelsTable({
                       className="flex items-center gap-1 px-1 py-0.5"
                       title={`Catalog: ${row.catalogId}`}
                     >
-                      <span className="font-mono text-[11.5px] text-muted-foreground">
+                      <span className="font-mono text-[0.8214rem] text-muted-foreground">
                         {row.context ? formatContext(parseInt(row.context, 10)) : "—"}
                       </span>
                       <Badge
                         variant="secondary"
-                        className="text-[8px] px-1 py-0 uppercase tracking-wide text-success/80"
+                        className="text-[0.5714rem] px-1 py-0 uppercase tracking-wide text-success/80"
                       >
                         cat
                       </Badge>
                     </div>
                   ) : (
                     <input
-                      className="w-full bg-transparent border-0 outline-none font-mono text-[11.5px] focus:bg-secondary/40 rounded px-1 py-0.5"
+                      className="w-full bg-transparent border-0 outline-none font-mono text-[0.8214rem] focus:bg-secondary/40 rounded px-1 py-0.5"
                       value={row.context}
                       onChange={(e) => onUpdate(i, { context: e.target.value })}
                       placeholder="200000"
@@ -235,11 +235,11 @@ export function ModelsTable({
                 </TableCell>
                 <TableCell className="py-1 pr-1">
                   {row.priceLabel ? (
-                    <span className="font-mono text-[10.5px] text-muted-foreground/70">
+                    <span className="font-mono text-[0.75rem] text-muted-foreground/70">
                       {row.priceLabel}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-muted-foreground/30">
+                    <span className="text-[0.7143rem] text-muted-foreground/30">
                       —
                     </span>
                   )}
@@ -260,7 +260,7 @@ export function ModelsTable({
               <TableRow>
                 <TableCell
                   colSpan={5}
-                  className="text-center text-[11px] text-muted-foreground/50 py-6"
+                  className="text-center text-[0.7857rem] text-muted-foreground/50 py-6"
                 >
                   No models. Add a row to define one.
                 </TableCell>
@@ -274,7 +274,7 @@ export function ModelsTable({
           variant="ghost"
           size="sm"
           onClick={onAdd}
-          className="text-[11px] h-7 text-muted-foreground hover:text-foreground"
+          className="text-[0.7857rem] h-7 text-muted-foreground hover:text-foreground"
         >
           <Plus className="size-3" /> Add row
         </Button>

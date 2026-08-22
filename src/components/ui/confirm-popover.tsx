@@ -42,9 +42,9 @@ export function ConfirmPopover({
       <PopoverContent align={align} className="w-64 p-3">
         <div className="space-y-3">
           <div>
-            <p className="text-[13px] font-semibold">{title}</p>
+            <p className="text-[0.9286rem] font-semibold">{title}</p>
             {description && (
-              <p className="text-[11px] text-muted-foreground/60 mt-1 leading-relaxed">
+              <p className="text-[0.7857rem] text-muted-foreground/60 mt-1 leading-relaxed">
                 {description}
               </p>
             )}
@@ -53,7 +53,7 @@ export function ConfirmPopover({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-[11px]"
+              className="h-7 text-[0.7857rem]"
               onClick={() => setOpen(false)}
             >
               {cancelLabel}
@@ -61,7 +61,7 @@ export function ConfirmPopover({
             <Button
               variant={destructive ? 'destructive' : 'default'}
               size="sm"
-              className="h-7 text-[11px]"
+              className="h-7 text-[0.7857rem]"
               onClick={() => {
                 setOpen(false);
                 onConfirm();

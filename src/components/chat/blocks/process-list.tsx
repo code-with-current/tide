@@ -93,7 +93,7 @@ export function ProcessList({
               if (item.kind === 'text') {
                 if (!item.block.text.trim()) return null;
                 return (
-                  <div key={`t_${i}`} className="text-[0.85rem] text-card-foreground/80 leading-relaxed py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px] [&_table]:text-[11px] [&_th]:text-[10px] [&_td]:text-[11px]">
+                  <div key={`t_${i}`} className="text-[0.85rem] text-card-foreground/80 leading-relaxed py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem] [&_table]:text-[0.7857rem] [&_th]:text-[0.7143rem] [&_td]:text-[0.7857rem]">
                     <Streamdown
                       mode="static"
                       remarkPlugins={[remarkGfm]}

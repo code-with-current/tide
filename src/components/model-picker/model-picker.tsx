@@ -186,7 +186,7 @@ export function ModelPickerPopover({
             className="w-full bg-transparent border-0 outline-none text-[0.75rem] text-foreground placeholder:text-muted-foreground/50"
           />
           {searching && (
-            <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
+            <span className="text-[0.7143rem] font-mono text-muted-foreground/50 shrink-0">
               {filtered.length} match{filtered.length === 1 ? '' : 'es'}
             </span>
           )}
@@ -212,7 +212,7 @@ export function ModelPickerPopover({
                 setActiveIdx(0);
               }}
               tile={
-                <span className="size-4 rounded flex items-center justify-center bg-secondary text-muted-foreground shrink-0 text-[9px] font-semibold">
+                <span className="size-4 rounded flex items-center justify-center bg-secondary text-muted-foreground shrink-0 text-[0.6429rem] font-semibold">
                   ∀
                 </span>
               }
@@ -284,7 +284,7 @@ export function ModelPickerPopover({
             )}
 
             {rows.length === 0 && !isLoading && (
-              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center">
+              <div className="px-2 py-6 text-[0.7857rem] text-muted-foreground/60 text-center">
                 {q ? (
                   <>No models match &quot;{query}&quot;.</>
                 ) : (
@@ -299,7 +299,7 @@ export function ModelPickerPopover({
           </div>
         </div>
 
-        <div className="shrink-0 px-2 py-1 border-t border-border/60 text-[10px] text-muted-foreground/60 flex items-center gap-3">
+        <div className="shrink-0 px-2 py-1 border-t border-border/60 text-[0.7143rem] text-muted-foreground/60 flex items-center gap-3">
           <span><Kbd className='py-0.5'>←→</Kbd> Provider</span>
           <span><Kbd>↑↓</Kbd> Navigate</span>
           <span><Kbd>↵</Kbd> Select</span>
@@ -336,8 +336,8 @@ function RailItem({
       )}
     >
       {tile}
-      <span className="flex-1 min-w-0 truncate text-[10.5px] font-medium">{name}</span>
-      <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">{count}</span>
+      <span className="flex-1 min-w-0 truncate text-[0.75rem] font-medium">{name}</span>
+      <span className="text-[0.6429rem] font-mono text-muted-foreground/50 shrink-0">{count}</span>
     </button>
   );
 }

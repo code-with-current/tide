@@ -47,13 +47,13 @@ export function ChooseProviderStep({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search providers…"
-          className="w-full h-8 pl-8 pr-8 text-[12px] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+          className="w-full h-8 pl-8 pr-8 text-[0.8571rem] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
         />
         {query && (
           <button
             type="button"
             onClick={() => setQuery('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground/50 hover:text-foreground"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[0.7857rem] text-muted-foreground/50 hover:text-foreground"
           >
             ✕
           </button>
@@ -94,7 +94,7 @@ export function ChooseProviderStep({
         </div>
       )}
 
-      <p className="text-[10px] text-muted-foreground/45">
+      <p className="text-[0.7143rem] text-muted-foreground/45">
         {existingNames.length > 0
           ? 'Providers you add again get a numbered name — multi-account is fine.'
           : 'Pick a provider to pre-fill its endpoint and key format.'}
@@ -138,15 +138,15 @@ function PresetTile({
         />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] font-semibold tracking-tight text-foreground/80">
+        <div className="text-[0.8929rem] font-semibold tracking-tight text-foreground/80">
           {preset.name}
         </div>
-        <div className="text-[10px] text-muted-foreground/55 font-mono mt-0.5 truncate">
+        <div className="text-[0.7143rem] text-muted-foreground/55 font-mono mt-0.5 truncate">
           {host}
         </div>
       </div>
       {added && (
-        <Badge variant="secondary" className="text-[8px] uppercase px-1.5 py-0 shrink-0">
+        <Badge variant="secondary" className="text-[0.5714rem] uppercase px-1.5 py-0 shrink-0">
           Added
         </Badge>
       )}
@@ -169,7 +169,7 @@ function CustomTile({ label, onClick }: { label: string; onClick: () => void }) 
         <Plug className="size-4 text-muted-foreground" />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] font-semibold tracking-tight text-foreground/80">
+        <div className="text-[0.8929rem] font-semibold tracking-tight text-foreground/80">
           {label}
         </div>
       </div>

@@ -142,7 +142,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56 p-0 overflow-hidden">
-        <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
+        <DropdownMenuLabel className="text-[0.7857rem] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
           <Brain className={cn('size-3', isOn ? 'text-reasoning' : 'text-muted-foreground/50')} /> Thinking
           <Switch
             size="sm"

@@ -125,7 +125,7 @@ export function OptionsPopup({
                 <MessageCircleQuestion className="size-5 text-warning" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-primary/70 mb-0.5">
+                <div className="text-[0.7143rem] font-semibold uppercase tracking-wider text-primary/70 mb-0.5">
                   Tide is asking
                 </div>
                 <div className="text-sm font-medium text-foreground leading-snug">
@@ -149,7 +149,7 @@ export function OptionsPopup({
                 {/* Selection-mode indicator — tells the user whether they can
                     pick one (radio) or many (checkbox). Matches the mental
                     model of standard form controls. */}
-                <div className="flex items-center gap-1.5 mb-1.5 text-[10px] text-muted-foreground/60">
+                <div className="flex items-center gap-1.5 mb-1.5 text-[0.7143rem] text-muted-foreground/60">
                   {isMultiple ? (
                     <>
                       <CheckCircle2 className="size-3" />
@@ -176,7 +176,7 @@ export function OptionsPopup({
                         disabled={submitted}
                         onClick={() => handleChipClick(option)}
                         className={cn(
-                          'group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-[12px] text-left transition-all',
+                          'group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-[0.8571rem] text-left transition-all',
                           'cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed',
                           isFlashing || isSelected
                             ? 'border-primary/50 bg-primary/10 text-foreground'
@@ -217,7 +217,7 @@ export function OptionsPopup({
                 {/* Multiple-selection submit bar */}
                 {isMultiple && selected.size > 0 && (
                   <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-[0.7857rem] text-muted-foreground">
                       {selected.size} selected
                     </span>
                     <Button
@@ -225,7 +225,7 @@ export function OptionsPopup({
                       size="sm"
                       disabled={submitted}
                       onClick={handleMultipleSubmit}
-                      className="h-7 text-[11px] gap-1.5"
+                      className="h-7 text-[0.7857rem] gap-1.5"
                     >
                       <Send className="size-3" /> Submit
                     </Button>
@@ -273,9 +273,9 @@ export function OptionsPopup({
                 }}
                 disabled={submitted}
                 placeholder={opts.options.length > 0 ? 'Or type your own answer…' : 'Type your answer…'}
-                className="h-8 text-[12.5px] flex-1 bg-background/50"
+                className="h-8 text-[0.8929rem] flex-1 bg-background/50"
               />
-              <span className="hidden sm:flex items-center gap-1 text-[10px] text-muted-foreground/40 flex-shrink-0">
+              <span className="hidden sm:flex items-center gap-1 text-[0.7143rem] text-muted-foreground/40 flex-shrink-0">
                 <Kbd className="font-mono">
                   <CornerDownLeft className="size-3" />
                 </Kbd>

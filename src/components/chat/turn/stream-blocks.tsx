@@ -151,7 +151,7 @@ export const StreamBlocks = memo(function StreamBlocks({
             return (
               <div
                 key={b.id}
-                className="text-[0.85rem] text-card-foreground/80 leading-relaxed mt-[5px] [&_p]:my-0.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-0.5 [&_ul:first-child]:mt-0 [&_ul:last-child]:mb-0 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]"
+                className="text-[0.85rem] text-card-foreground/80 leading-relaxed mt-[5px] [&_p]:my-0.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-0.5 [&_ul:first-child]:mt-0 [&_ul:last-child]:mb-0 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem]"
               >
                 <Streamdown mode="static" remarkPlugins={[remarkGfm]} controls={false} animated={false}>
                   {b.text.trim()}

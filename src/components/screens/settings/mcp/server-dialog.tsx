@@ -197,10 +197,10 @@ export function McpServerDialog({
             <Plug className="size-4 text-primary" />
           </div>
           <div className="flex-1">
-            <DialogTitle className="text-[15px] font-semibold text-left tracking-tight">
+            <DialogTitle className="text-[1.0714rem] font-semibold text-left tracking-tight">
               {isEdit ? `Edit ${initialName}` : 'Add MCP server'}
             </DialogTitle>
-            <DialogDescription className="text-[11px] text-muted-foreground/60 mt-0.5 text-left">
+            <DialogDescription className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 text-left">
               {isEdit ? 'Update the server configuration.' : 'Connect a stdio command or remote endpoint.'}
             </DialogDescription>
           </div>
@@ -299,10 +299,10 @@ export function ScopeCard({
         {icon}
       </span>
       <div className="flex-1 min-w-0">
-        <div className={`text-[12.5px] font-semibold tracking-tight ${active ? 'text-foreground' : 'text-foreground/80'}`}>
+        <div className={`text-[0.8929rem] font-semibold tracking-tight ${active ? 'text-foreground' : 'text-foreground/80'}`}>
           {label}
         </div>
-        <div className="text-[10px] text-muted-foreground/55 font-mono mt-0.5 truncate">
+        <div className="text-[0.7143rem] text-muted-foreground/55 font-mono mt-0.5 truncate">
           {hint}
         </div>
       </div>
@@ -331,7 +331,7 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 py-1.5 px-3 rounded-[5px] text-[12px] font-medium text-center transition-all ${
+      className={`flex-1 py-1.5 px-3 rounded-[5px] text-[0.8571rem] font-medium text-center transition-all ${
         active
           ? 'bg-card text-foreground shadow-sm'
           : 'bg-transparent text-muted-foreground hover:text-foreground/80'
@@ -364,7 +364,7 @@ function FormBody({
         <SectionLabel icon={<Server className="size-3" />}>Identity</SectionLabel>
         <FormField id="mcp-name" label="Name">
           <Input
-            className="h-8 text-[12.5px]"
+            className="h-8 text-[0.8929rem]"
             value={form.name}
             disabled={isEdit}
             placeholder="e.g. filesystem"
@@ -389,7 +389,7 @@ function FormBody({
           <SectionLabel icon={<Terminal className="size-3" />}>Command</SectionLabel>
           <FormField id="mcp-command" label="Command">
             <Input
-              className="font-mono text-[12px] h-8"
+              className="font-mono text-[0.8571rem] h-8"
               value={form.command}
               placeholder="e.g. npx"
               onChange={(e) => patch({ command: e.target.value })}
@@ -397,23 +397,23 @@ function FormBody({
           </FormField>
           <FormField id="mcp-args" label="Args">
             <Textarea
-              className="font-mono text-[12px] min-h-[72px] resize-y"
+              className="font-mono text-[0.8571rem] min-h-[72px] resize-y"
               value={form.argsText}
               rows={3}
               placeholder={'-y\n@modelcontextprotocol/server-filesystem\n/Users/me'}
               onChange={(e) => patch({ argsText: e.target.value })}
             />
-            <p className="text-[10px] text-muted-foreground/50 mt-1">One argument per line.</p>
+            <p className="text-[0.7143rem] text-muted-foreground/50 mt-1">One argument per line.</p>
           </FormField>
           <FormField id="mcp-env" label="Environment">
             <Textarea
-              className="font-mono text-[12px] min-h-[72px] resize-y"
+              className="font-mono text-[0.8571rem] min-h-[72px] resize-y"
               value={form.envText}
               rows={3}
               placeholder={'API_KEY=...'}
               onChange={(e) => patch({ envText: e.target.value })}
             />
-            <p className="text-[10px] text-muted-foreground/50 mt-1">KEY=value per line.</p>
+            <p className="text-[0.7143rem] text-muted-foreground/50 mt-1">KEY=value per line.</p>
           </FormField>
         </section>
       ) : (
@@ -421,7 +421,7 @@ function FormBody({
           <SectionLabel icon={<Link2 className="size-3" />}>Endpoint</SectionLabel>
           <FormField id="mcp-url" label="URL">
             <Input
-              className="font-mono text-[12px] h-8"
+              className="font-mono text-[0.8571rem] h-8"
               value={form.url}
               placeholder={
                 form.transport === 'sse'
@@ -432,7 +432,7 @@ function FormBody({
             />
           </FormField>
           <div className="space-y-1.5">
-            <Label className="text-[11px] text-muted-foreground/60">Auth</Label>
+            <Label className="text-[0.7857rem] text-muted-foreground/60">Auth</Label>
             <div className="flex gap-1 bg-secondary rounded-md p-[3px]">
               <TransportTab active={form.auth === 'none'} onClick={() => patch({ auth: 'none' })} label="None" />
               <TransportTab active={form.auth === 'oauth'} onClick={() => patch({ auth: 'oauth' })} icon={<KeyRound className="size-3.5" />} label="OAuth" />
@@ -440,7 +440,7 @@ function FormBody({
           </div>
           <FormField id="mcp-headers" label="Headers (JSON)">
             <Textarea
-              className="font-mono text-[11px] min-h-[60px] resize-y"
+              className="font-mono text-[0.7857rem] min-h-[60px] resize-y"
               value={form.headersText}
               placeholder={"{\n  \"Authorization\": \"Bearer YOUR_KEY\"\n}"}
               onChange={(e) => patch({ headersText: e.target.value })}
@@ -469,7 +469,7 @@ function TransportTab({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 py-1.5 px-3 rounded-[5px] text-[12px] font-medium text-center transition-all flex items-center justify-center gap-1.5 ${
+      className={`flex-1 py-1.5 px-3 rounded-[5px] text-[0.8571rem] font-medium text-center transition-all flex items-center justify-center gap-1.5 ${
         active
           ? 'bg-card text-foreground shadow-sm'
           : 'bg-transparent text-muted-foreground hover:text-foreground/80'
@@ -535,25 +535,25 @@ function JsonBody({
 
       {/* Validation status */}
       {error ? (
-        <div className="flex items-start gap-1.5 text-[11px] text-destructive">
+        <div className="flex items-start gap-1.5 text-[0.7857rem] text-destructive">
           <AlertCircle className="size-3 mt-0.5 shrink-0" />
           <span className="break-all">{error}</span>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+        <div className="flex items-center gap-1.5 text-[0.7857rem] text-emerald-600 dark:text-emerald-400">
           <Check className="size-3" /> Valid
         </div>
       )}
 
       {/* Examples */}
-      <div className="text-[10px] text-muted-foreground/50 space-y-1">
+      <div className="text-[0.7143rem] text-muted-foreground/50 space-y-1">
         <p>Paste a server config — the name is auto-detected from the key.</p>
         <details className="cursor-pointer">
           <summary className="hover:text-muted-foreground/80 transition-colors">Examples</summary>
           <div className="mt-1.5 space-y-2">
             <div>
               <p className="text-muted-foreground/60 mb-0.5">stdio server:</p>
-              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+              <pre className="font-mono text-[0.6429rem] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
   "filesystem": {
     "type": "stdio",
     "command": "npx",
@@ -566,7 +566,7 @@ function JsonBody({
             </div>
             <div>
               <p className="text-muted-foreground/60 mb-0.5">HTTP with headers (type inferred):</p>
-              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+              <pre className="font-mono text-[0.6429rem] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
   "context7": {
     "type": "http",
     "url": "https://mcp.context7.com/mcp",
@@ -578,7 +578,7 @@ function JsonBody({
             </div>
             <div>
               <p className="text-muted-foreground/60 mb-0.5">HTTP (type inferred from url):</p>
-              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+              <pre className="font-mono text-[0.6429rem] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
   "vue-docs": {
     "url": "https://mcp.vue-mcp.org/mcp"
   }
@@ -586,7 +586,7 @@ function JsonBody({
             </div>
             <div>
               <p className="text-muted-foreground/60 mb-0.5">stdio with env (type inferred):</p>
-              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+              <pre className="font-mono text-[0.6429rem] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
   "firecrawl-mcp": {
     "command": "npx",
     "args": ["-y", "firecrawl-mcp"],
@@ -596,7 +596,7 @@ function JsonBody({
             </div>
             <div>
               <p className="text-muted-foreground/60 mb-0.5">OAuth server:</p>
-              <pre className="font-mono text-[9px] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
+              <pre className="font-mono text-[0.6429rem] bg-muted/40 rounded p-1.5 overflow-x-auto">{`{
   "linear": {
     "type": "http",
     "url": "https://mcp.linear.app/sse",

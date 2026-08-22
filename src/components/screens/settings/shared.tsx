@@ -48,7 +48,7 @@ export function SettingsGroup({
             {title}
           </h2>
           {hint && (
-            <span className="text-[11px] text-muted-foreground/60">{hint}</span>
+            <span className="text-[0.7857rem] text-muted-foreground/60">{hint}</span>
           )}
         </div>
       )}
@@ -80,9 +80,9 @@ export function SettingsRow({
       )}
     >
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-medium">{title}</div>
+        <div className="text-[0.9286rem] font-medium">{title}</div>
         {description && (
-          <div className="text-[11px] text-muted-foreground/60 mt-0.5">
+          <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5">
             {description}
           </div>
         )}

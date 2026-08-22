@@ -71,13 +71,13 @@ function PhaseRow({
             style={{ transform: phaseOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className={cn('tool-tint shrink-0 text-[12px] font-medium', PHASE_COLOR[phase.label])}>
+        <span className={cn('tool-tint shrink-0 text-[0.8571rem] font-medium', PHASE_COLOR[phase.label])}>
           {phase.label}
         </span>
-        <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11px] text-muted-foreground">
+        <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.7857rem] text-muted-foreground">
           {phaseStreaming ? '…' : phase.text.trim().split('\n')[0]?.slice(0, 80)}
         </span>
-        <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground/60">
+        <span className="shrink-0 font-mono text-[0.75rem] tabular-nums text-muted-foreground/60">
           ~{phase.estTokens.toLocaleString()} tok
         </span>
         {phaseStreaming ? (
@@ -90,7 +90,7 @@ function PhaseRow({
       >
         <div className="min-h-0 overflow-hidden">
           <div className="mt-[5px] ml-[13px] border-l border-border py-0.5 pl-3">
-            <pre ref={preRef} className="scroll max-h-[352px] overflow-y-auto whitespace-pre-wrap py-1 pl-1 pr-2 font-mono text-[11px] leading-[1.6] text-muted-foreground">
+            <pre ref={preRef} className="scroll max-h-[352px] overflow-y-auto whitespace-pre-wrap py-1 pl-1 pr-2 font-mono text-[0.7857rem] leading-[1.6] text-muted-foreground">
               {phase.text}
             </pre>
           </div>
@@ -167,7 +167,7 @@ function ThinkingBlockImpl({
     </div>
   ) : (
     <div className="mt-[5px] ml-[13px] border-l border-border py-0.5 pl-3">
-      <div ref={flatRef} className="scroll max-h-[368px] overflow-y-auto text-[11.5px] leading-[1.6] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]">
+      <div ref={flatRef} className="scroll max-h-[368px] overflow-y-auto text-[0.8214rem] leading-[1.6] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem]">
         {lines.map((line, i) => (
           <p key={i}>{line}</p>
         ))}
@@ -196,16 +196,16 @@ function ThinkingBlockImpl({
             style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className="shrink-0 text-[12.5px] font-medium text-foreground/80">
+        <span className="shrink-0 text-[0.8929rem] font-medium text-foreground/80">
           Thinking
         </span>
         {headerSnippet || streaming ? (
-          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11.5px] text-muted-foreground">
+          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.8214rem] text-muted-foreground">
             {headerSnippet ?? '…'}
           </span>
         ) : null}
         {meta && (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 font-mono text-[0.7857rem] tabular-nums text-muted-foreground/70">
             {meta}
           </span>
         )}

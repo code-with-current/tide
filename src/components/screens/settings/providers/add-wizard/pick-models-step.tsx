@@ -131,7 +131,7 @@ export function PickModelsStep({
       {status === 'error' && (
         <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
           <span className="text-xs text-destructive">{error}</span>
-          <span className="text-[11px] text-muted-foreground/55">
+          <span className="text-[0.7857rem] text-muted-foreground/55">
             You can retry, or continue and add models later in Settings.
           </span>
           <Button variant="outline" size="sm" onClick={() => void load()}>
@@ -153,13 +153,13 @@ export function PickModelsStep({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search models…"
-            className="w-full h-8 pl-8 pr-8 text-[12px] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+            className="w-full h-8 pl-8 pr-8 text-[0.8571rem] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground/50 hover:text-foreground"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[0.7857rem] text-muted-foreground/50 hover:text-foreground"
             >
               ✕
             </button>
@@ -249,7 +249,7 @@ export function PickModelsStep({
         </div>
       )}
 
-      <p className="shrink-0 text-[10px] text-muted-foreground/45">
+      <p className="shrink-0 text-[0.7143rem] text-muted-foreground/45">
         {preset?.recommended.length
           ? 'Recommended models are pre-checked — adjust as you like.'
           : 'Check the models you want available.'}

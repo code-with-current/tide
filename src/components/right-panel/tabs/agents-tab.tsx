@@ -42,7 +42,7 @@ function LiveElapsed() {
     return () => clearInterval(i);
   }, []);
   return (
-    <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
+    <span className="shrink-0 font-mono text-[0.75rem] tabular-nums text-muted-foreground">
       {formatSecs(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))}
     </span>
   );
@@ -146,33 +146,33 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             {resolved ? (
               <>
-                <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10.5px] font-medium text-primary">
+                <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[0.75rem] font-medium text-primary">
                   {agentName}
                 </span>
                 {!!resolved.dispatch.arguments?.resumeFrom && (
-                  <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground">↻ resumed</span>
+                  <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[0.75rem] text-muted-foreground">↻ resumed</span>
                 )}
                 <AgentStatusChip status={status} />
                 {running ? (
                   <LiveElapsed />
                 ) : resolved.dispatch.durationMs != null ? (
-                  <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
+                  <span className="shrink-0 font-mono text-[0.75rem] tabular-nums text-muted-foreground">
                     {formatSecs(Math.round(resolved.dispatch.durationMs / 1000))}
                   </span>
                 ) : null}
                 {toolCount > 0 && (
-                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                  <span className="shrink-0 text-[0.7857rem] text-muted-foreground">
                     · {toolCount} tool {toolCount === 1 ? 'call' : 'calls'}
                   </span>
                 )}
                 {!!d?.usage && (
-                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+                  <span className="shrink-0 font-mono text-[0.75rem] text-muted-foreground">
                     {(d.usage.inputTokens / 1000).toFixed(1)}k in · {(d.usage.outputTokens / 1000).toFixed(1)}k out
                   </span>
                 )}
               </>
             ) : (
-              <span className="text-[12px] font-medium text-foreground/80">Agents</span>
+              <span className="text-[0.8571rem] font-medium text-foreground/80">Agents</span>
             )}
           </div>
           <button
@@ -193,7 +193,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
             onClick={() => setTaskExpanded((v) => !v)}
             title={task}
             className={cn(
-              'min-w-0 text-left font-mono text-[11.5px] leading-[1.6] text-muted-foreground transition-colors hover:text-foreground/80',
+              'min-w-0 text-left font-mono text-[0.8214rem] leading-[1.6] text-muted-foreground transition-colors hover:text-foreground/80',
               !taskExpanded && 'line-clamp-2',
             )}
           >
@@ -230,7 +230,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
               />
             )}
             {running && !root.any && !d?.reasoning && (
-              <div className="flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground/70">
+              <div className="flex items-center gap-1.5 px-1 text-[0.7857rem] text-muted-foreground/70">
                 <Loader2 className="size-3 animate-spin" />
                 waiting for the agent's first output…
               </div>
@@ -239,7 +239,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
         ) : (
           <div className="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
             <Bot className="size-4 text-muted-foreground/50" />
-            <p className="text-[11.5px] leading-snug text-muted-foreground/70">
+            <p className="text-[0.8214rem] leading-snug text-muted-foreground/70">
               Click a dispatch row to view its stream.
             </p>
           </div>
@@ -265,16 +265,16 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                   )}
                 >
                   <Bot className="tool-tint size-3 shrink-0 text-purple-400" />
-                  <span className="min-w-0 shrink-0 truncate text-[12px] font-medium text-foreground/80">
+                  <span className="min-w-0 shrink-0 truncate text-[0.8571rem] font-medium text-foreground/80">
                     {block ? name : h.title}
                   </span>
                   {rowTask && (
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/80">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[0.7857rem] text-muted-foreground/80">
                       {rowTask}
                     </span>
                   )}
                   {block && <AgentStatusChip status={agentStatusOf(block)} />}
-                  <span className="shrink-0 text-[10.5px] text-muted-foreground/70">
+                  <span className="shrink-0 text-[0.75rem] text-muted-foreground/70">
                     {formatRelative(h.updatedAt)}
                   </span>
                 </button>

@@ -73,7 +73,7 @@ export function ShortcutCapture({ keys, onCapture, onClear, disabled, className 
         type="button"
         className={cn(
           'inline-flex items-center gap-1 h-6 px-2 rounded border border-warning/60 bg-warning/10',
-          'text-[10.5px] font-medium text-warning animate-pulse',
+          'text-[0.75rem] font-medium text-warning animate-pulse',
           className,
         )}
       >
@@ -94,7 +94,7 @@ export function ShortcutCapture({ keys, onCapture, onClear, disabled, className 
         'inline-flex items-center gap-1 rounded transition-colors',
         'hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
         disabled && 'opacity-50 cursor-not-allowed',
-        keys.length === 0 && 'px-2 py-0.5 text-[10.5px] text-muted-foreground italic',
+        keys.length === 0 && 'px-2 py-0.5 text-[0.75rem] text-muted-foreground italic',
         className,
       )}
     >

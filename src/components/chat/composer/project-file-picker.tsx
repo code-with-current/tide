@@ -24,12 +24,12 @@ export function ProjectFilePicker({
       aria-label="Project files"
       className="rounded-md border border-border bg-popover shadow-lg overflow-hidden"
     >
-      <div className="px-3 py-1.5 border-b border-input text-[10px] uppercase tracking-wider text-muted-foreground/60">
+      <div className="px-3 py-1.5 border-b border-input text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60">
         Project files
       </div>
       <div className="max-h-[260px] overflow-y-auto overflow-x-hidden scroll py-1">
         {items.length === 0 && (
-          <div className="px-3 py-6 text-center text-[11px] text-muted-foreground/60">
+          <div className="px-3 py-6 text-center text-[0.7857rem] text-muted-foreground/60">
             No files found. Press Esc to keep typing.
           </div>
         )}
@@ -53,12 +53,12 @@ export function ProjectFilePicker({
           );
         })}
       </div>
-      <div className="px-3 py-1.5 border-t border-input text-[10px] text-muted-foreground/80 flex items-center gap-2">
-        <kbd className="font-mono text-[10px] px-1 py-0 bg-primary text-primary-foreground border border-border rounded">↑↓</kbd>
+      <div className="px-3 py-1.5 border-t border-input text-[0.7143rem] text-muted-foreground/80 flex items-center gap-2">
+        <kbd className="font-mono text-[0.7143rem] px-1 py-0 bg-primary text-primary-foreground border border-border rounded">↑↓</kbd>
         Navigate
-        <kbd className="font-mono text-[10px] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">↵</kbd>
+        <kbd className="font-mono text-[0.7143rem] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">↵</kbd>
         Select
-        <kbd className="font-mono text-[10px] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">esc</kbd>
+        <kbd className="font-mono text-[0.7143rem] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">esc</kbd>
         Dismiss
       </div>
     </div>

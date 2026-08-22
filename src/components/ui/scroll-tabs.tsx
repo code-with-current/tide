@@ -236,7 +236,7 @@ export function ScrollTabsTrigger({
       className={cn(
         'scroll-tabs-trigger',
         'group relative flex items-center gap-1.5 px-3 py-1.5 mb-[-1px]',
-        'text-[11.5px] font-medium whitespace-nowrap flex-shrink-0',
+        'text-[0.8214rem] font-medium whitespace-nowrap flex-shrink-0',
         'rounded-t-md',
         'text-muted-foreground hover:text-foreground',
         'transition-colors outline-none',

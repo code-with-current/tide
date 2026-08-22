@@ -166,7 +166,7 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
                   <span className="text-muted-foreground/50">· ~{p.estTokens.toLocaleString()} tok</span>
                 </span>
                 {open && (
-                  <pre className="text-[0.82rem] px-3 pb-2 pl-7 text-card-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px] [&_table]:text-[11px] [&_th]:text-[10px] [&_td]:text-[11px]">
+                  <pre className="text-[0.82rem] px-3 pb-2 pl-7 text-card-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem] [&_table]:text-[0.7857rem] [&_th]:text-[0.7143rem] [&_td]:text-[0.7857rem]">
                     {p.text}
                   </pre>
                 )}

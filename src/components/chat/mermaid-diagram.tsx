@@ -152,7 +152,7 @@ function DiagramZoomOverlay({
         </button>
         <span
           data-zoom-control
-          className="text-[11px] font-mono text-white/50 tabular-nums min-w-[3rem] text-center select-none"
+          className="text-[0.7857rem] font-mono text-white/50 tabular-nums min-w-[3rem] text-center select-none"
         >
           {Math.round(zoom * 100)}%
         </span>
@@ -171,7 +171,7 @@ function DiagramZoomOverlay({
           onClick={reset}
           title="Reset to 100% (press 0)"
         >
-          <span className="text-[10px] font-medium">Fit</span>
+          <span className="text-[0.7143rem] font-medium">Fit</span>
         </button>
       </div>
 
@@ -371,11 +371,11 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   if (error) {
     return (
       <div className="rounded-lg border border-warning/20 bg-warning/[0.04] overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-warning/15 text-[11px] text-warning/80">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-warning/15 text-[0.7857rem] text-warning/80">
           <AlertTriangle className="size-3.5 shrink-0" />
           <span>Diagram syntax error — showing source</span>
         </div>
-        <pre className="text-[11px] text-muted-foreground/60 font-mono whitespace-pre-wrap break-words p-3 max-h-[300px] overflow-y-auto scroll">
+        <pre className="text-[0.7857rem] text-muted-foreground/60 font-mono whitespace-pre-wrap break-words p-3 max-h-[300px] overflow-y-auto scroll">
           {code}
         </pre>
       </div>
@@ -384,7 +384,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
 
   if (!svg) {
     return (
-      <div className={cn('flex items-center justify-center py-8 text-[11px] text-muted-foreground/50', className)}>
+      <div className={cn('flex items-center justify-center py-8 text-[0.7857rem] text-muted-foreground/50', className)}>
         rendering diagram…
       </div>
     );
@@ -402,7 +402,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
       >
         <div className="mermaid-svg-host" dangerouslySetInnerHTML={{ __html: svg }} />
         {streaming && (
-          <span className="pointer-events-none absolute bottom-1.5 right-2 rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/60">
+          <span className="pointer-events-none absolute bottom-1.5 right-2 rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.7143rem] text-muted-foreground/60">
             rendering…
           </span>
         )}

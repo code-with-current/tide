@@ -81,7 +81,7 @@ function renderUserBody(content: string, mentions?: Message['mentions']): ReactN
         <span
           key={i}
           title={`${meta.description ?? name}${meta.filePath ? `\n${meta.filePath}` : ''}`}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 bg-primary/15 text-primary-foreground/70 rounded-md text-[11px] font-mono align-middle cursor-help"
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 bg-primary/15 text-primary-foreground/70 rounded-md text-[0.7857rem] font-mono align-middle cursor-help"
         >
           /{name}
         </span>
@@ -200,7 +200,7 @@ function ChatMessageImpl({
           {/* Bottom row: hover-revealed copy + timestamp. Kept outside the
               bubble so the time stays muted and doesn't compete with the
               message text. The whole row fades in on hover. */}
-          <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground/60 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1.5 px-1 text-[0.7143rem] text-muted-foreground/60 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
             <span>{formatTime(message.createdAt)}</span>
             <button
               type="button"

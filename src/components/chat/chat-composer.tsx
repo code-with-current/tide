@@ -86,7 +86,7 @@ function mentionBlock(m: Mention): string {
 
 /** Chip class lookup — kind drives the tint, source drives the border style. */
 function chipClasses(_m: Mention): string {
-  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[11px] font-mono align-middle select-none rounded-md bg-foreground/10 text-foreground/70';
+  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[0.7857rem] font-mono align-middle select-none rounded-md bg-foreground/10 text-foreground/70';
 
   return `${base}`;
 }
@@ -938,7 +938,7 @@ export function ChatComposer({
               {attachments.map((a) => (
                 <span
                   key={a.path}
-                  className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[11px] font-mono rounded-md border-border bg-foreground/15 text-foreground/70"
+                  className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[0.7857rem] font-mono rounded-md border-border bg-foreground/15 text-foreground/70"
                   title={a.kind === 'paste' ? a.content : a.path}
                 >
                   {a.kind === 'paste' && <ClipboardPaste className="size-3 shrink-0" />}
@@ -1000,7 +1000,7 @@ export function ChatComposer({
               <Chip className="ml-1">{chipCount} mentioned</Chip>
             )}
             {!compact && (
-              <span className="ml-2 text-[11px] text-muted-foreground/60 font-mono">
+              <span className="ml-2 text-[0.7857rem] text-muted-foreground/60 font-mono">
                 {editorText.length} chars
               </span>
             )}

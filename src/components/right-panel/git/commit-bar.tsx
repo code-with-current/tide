@@ -243,7 +243,7 @@ export function CommitBar({
           aria-pressed={amend}
           title="Amend the last commit instead of creating a new one"
           className={cn(
-            'flex-shrink-0 h-6 px-1.5 rounded-md text-[11px] transition-colors',
+            'flex-shrink-0 h-6 px-1.5 rounded-md text-[0.7857rem] transition-colors',
             amend
               ? 'bg-destructive/15 text-destructive font-medium'
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
@@ -251,7 +251,7 @@ export function CommitBar({
         >
           ⌥ Amend
         </button>
-        <span className="flex-shrink-0 text-[11px] font-mono tabular-nums text-muted-foreground whitespace-nowrap">
+        <span className="flex-shrink-0 text-[0.7857rem] font-mono tabular-nums text-muted-foreground whitespace-nowrap">
           {staged.length} staged · <span className="text-success">+{stagedAdd}</span> <span className="text-destructive">−{stagedDel}</span>
         </span>
         <div className="flex-1" />
@@ -277,7 +277,7 @@ export function CommitBar({
       </div>
 
       {hasConflicts && (
-        <p className="text-[11px] text-destructive/90">
+        <p className="text-[0.7857rem] text-destructive/90">
           Resolve merge conflicts before committing.
         </p>
       )}

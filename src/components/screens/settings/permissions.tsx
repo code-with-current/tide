@@ -168,24 +168,24 @@ export function AutonomyCapsSection() {
                       <Check className="size-2.5 text-black" />
                     </span>
                   ) : m.recommended ? (
-                    <span className="text-[8.5px] uppercase tracking-wide font-semibold text-muted-foreground/55">
+                    <span className="text-[0.6071rem] uppercase tracking-wide font-semibold text-muted-foreground/55">
                       recommended
                     </span>
                   ) : null}
                 </div>
                 <div className="mt-2.5 flex items-center gap-1.5">
-                  <span className={cn('text-[12.5px] font-semibold', active && 'text-foreground')}>
+                  <span className={cn('text-[0.8929rem] font-semibold', active && 'text-foreground')}>
                     {m.label}
                   </span>
                   {m.value === 'full' && <Lock className={cn('size-3', active ? s.text : 'text-muted-foreground/50')} />}
                 </div>
-                <div className="text-[10.5px] text-muted-foreground/65 mt-0.5 leading-snug">{m.hint}</div>
+                <div className="text-[0.75rem] text-muted-foreground/65 mt-0.5 leading-snug">{m.hint}</div>
               </button>
             );
           })}
         </div>
         {savingKey === 'defaultAutonomy' && (
-          <div className="mt-1.5 text-[10px] text-[var(--success)] flex items-center gap-1">
+          <div className="mt-1.5 text-[0.7143rem] text-[var(--success)] flex items-center gap-1">
             <Check className="size-2.5" /> Saved
           </div>
         )}
@@ -324,10 +324,10 @@ export function AutonomyCapsSection() {
 
       {/* ── Footnote: what each tier actually gates ── */}
       <div className="mt-2 rounded-lg border border-border/60 bg-secondary/20 px-3.5 py-3">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground/80 mb-1.5">
+        <div className="flex items-center gap-1.5 text-[0.7857rem] font-semibold text-muted-foreground/80 mb-1.5">
           <ScrollText className="size-3" /> How permissions escalate
         </div>
-        <p className="text-[11px] leading-relaxed text-muted-foreground/60">
+        <p className="text-[0.7857rem] leading-relaxed text-muted-foreground/60">
           <span className="text-[var(--info)]">Plan</span> only proposes.{' '}
           <span className="text-[var(--success)]">Ask</span> confirms every edit and shell call.{' '}
           <span className="text-[var(--warning)]">Edit</span> auto-edits but still gates the shell.{' '}
@@ -340,7 +340,7 @@ export function AutonomyCapsSection() {
       {settings.defaultAutonomy === 'full' && !settings.auditShellCommands && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-[var(--error)]/30 bg-[var(--error)]/5 px-3 py-2">
           <AlertTriangle className="size-3.5 text-[var(--error)] mt-px shrink-0" />
-          <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+          <p className="text-[0.7857rem] leading-relaxed text-muted-foreground/80">
             Full Access is on without an audit log. Consider enabling the audit log above so every
             shell command is recorded.
           </p>
@@ -389,7 +389,7 @@ function NumberField({
         />
         <span
           className={cn(
-            'text-[10px] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded',
+            'text-[0.7143rem] uppercase tracking-wide font-medium px-1.5 py-0.5 rounded',
             disabled ? 'text-muted-foreground/40 bg-secondary' : 'text-muted-foreground/70 bg-secondary',
           )}
         >
@@ -403,7 +403,7 @@ function NumberField({
 
 function SavedDot() {
   return (
-    <span className="flex items-center gap-0.5 text-[9px] text-[var(--success)] animate-in fade-in duration-200">
+    <span className="flex items-center gap-0.5 text-[0.6429rem] text-[var(--success)] animate-in fade-in duration-200">
       <Check className="size-2.5" /> saved
     </span>
   );

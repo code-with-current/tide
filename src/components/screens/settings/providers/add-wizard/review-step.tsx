@@ -39,14 +39,14 @@ export function ReviewStep({
           />
         </span>
         <span className="text-sm font-semibold truncate">{state.name}</span>
-        <Badge variant="secondary" className="ml-auto text-[9px] uppercase shrink-0">
+        <Badge variant="secondary" className="ml-auto text-[0.6429rem] uppercase shrink-0">
           {state.apiStyle === 'openai' ? 'OpenAI' : 'Anthropic'}
         </Badge>
       </div>
 
       <EndpointPreview apiStyle={state.apiStyle} baseUrl={state.baseUrl} />
 
-      <div className="flex items-center gap-1.5 text-[11px]">
+      <div className="flex items-center gap-1.5 text-[0.7857rem]">
         {state.apiKey.trim() ? (
           <>
             <ShieldCheck className="size-3 text-success shrink-0" />
@@ -62,7 +62,7 @@ export function ReviewStep({
           Models
         </SectionLabel>
         {selected.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground/55">
+          <p className="text-[0.7857rem] text-muted-foreground/55">
             No models selected — you can add them later in Settings.
           </p>
         ) : (
@@ -72,11 +72,11 @@ export function ReviewStep({
                 key={m.modelId}
                 className="rounded-md border border-border bg-card px-2 py-1 flex items-center gap-1.5"
               >
-                <code className="font-mono text-[11px]">{m.modelId}</code>
+                <code className="font-mono text-[0.7857rem]">{m.modelId}</code>
                 {m.reasoning && <Brain className="size-3 text-reasoning shrink-0" />}
                 {m.supportsVision && <Eye className="size-3 text-info shrink-0" />}
                 {metaLine(m) && (
-                  <span className="text-[10px] text-muted-foreground/55">{metaLine(m)}</span>
+                  <span className="text-[0.7143rem] text-muted-foreground/55">{metaLine(m)}</span>
                 )}
               </span>
             ))}

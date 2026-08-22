@@ -208,7 +208,7 @@ export function GeneralSection() {
 
 function SavedDot() {
   return (
-    <span className="flex items-center gap-0.5 text-[9px] text-[var(--success)] animate-in fade-in duration-200">
+    <span className="flex items-center gap-0.5 text-[0.6429rem] text-[var(--success)] animate-in fade-in duration-200">
       <Check className="size-2.5" /> Saved
     </span>
   );

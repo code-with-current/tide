@@ -116,7 +116,7 @@ export function EmptyChatState({
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 gap-6 min-h-full">
         {/* Workspace context strip */}
         {workspace && (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+          <div className="flex items-center gap-2 text-[0.7857rem] text-muted-foreground/60">
             <FolderGit2 className="size-3" />
             <span className="text-muted-foreground">{workspace.name}</span>
             {workspace.branch && (
@@ -149,7 +149,7 @@ export function EmptyChatState({
             <button
               type="button"
               onClick={() => useUi.getState().setPendingFork(null)}
-              className="text-[11px] text-muted-foreground/60 hover:text-foreground underline underline-offset-2 transition-colors"
+              className="text-[0.7857rem] text-muted-foreground/60 hover:text-foreground underline underline-offset-2 transition-colors"
             >
               Start a blank session Instead
             </button>
@@ -165,7 +165,7 @@ export function EmptyChatState({
         {/* Fork source strip — mirrors the workspace strip above, but names
             the session this fork continues from. */}
         {/*{pendingFork && (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 -mt-3">
+          <div className="flex items-center gap-2 text-[0.7857rem] text-muted-foreground/60 -mt-3">
             <GitFork className="size-3" />
             <span className="truncate max-w-[24rem]">forked from “{pendingFork.sourceTitle}”</span>
             <span>·</span>
@@ -286,7 +286,7 @@ function WorktreePanel({
         <GitBranch className="size-3.5 text-muted-foreground/60" />
         <span className="text-xs font-medium flex-1">Worktree</span>
         <Toggle enabled={enabled} onClick={(v) => { onToggle(v); }} />
-        <span className={cn('text-[10px] font-mono', enabled ? 'text-success' : 'text-muted-foreground/60')}>
+        <span className={cn('text-[0.7143rem] font-mono', enabled ? 'text-success' : 'text-muted-foreground/60')}>
           {enabled ? 'isolated' : 'off'}
         </span>
       </button>
@@ -295,8 +295,8 @@ function WorktreePanel({
       {showSettings && (
         <div className="px-3 pb-3 pt-1 space-y-2 border-t border-input">
           {/* Branch name */}
-          <label className="flex items-center gap-3 text-[11px]">
-            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">branch</span>
+          <label className="flex items-center gap-3 text-[0.7857rem]">
+            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">branch</span>
             <input
               type="text"
               value={branchName}
@@ -308,8 +308,8 @@ function WorktreePanel({
           </label>
 
           {/* Base branch select */}
-          <label className="flex items-center gap-3 text-[11px]">
-            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">base</span>
+          <label className="flex items-center gap-3 text-[0.7857rem]">
+            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">base</span>
             <select
               value={baseBranch}
               onChange={(e) => onBaseBranch(e.target.value)}
@@ -328,14 +328,14 @@ function WorktreePanel({
           {/* Config files — copied into the worktree after creation.
               Pre-seeded with detected .env files; user can add custom
               paths (relative to workspace root). Chips are removable. */}
-          <div className="flex flex-col gap-1.5 text-[11px]">
+          <div className="flex flex-col gap-1.5 text-[0.7857rem]">
             <div className="flex items-center gap-2">
-              <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">copy</span>
+              <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">copy</span>
               <div className="flex-1 flex flex-wrap items-center gap-1">
                 {configFiles.map((f) => (
                   <span
                     key={f}
-                    className="inline-flex items-center gap-1 rounded bg-secondary border border-border pl-1.5 pr-0.5 py-0.5 text-[10px] font-mono"
+                    className="inline-flex items-center gap-1 rounded bg-secondary border border-border pl-1.5 pr-0.5 py-0.5 text-[0.7143rem] font-mono"
                   >
                     {f}
                     <button
@@ -350,7 +350,7 @@ function WorktreePanel({
                   </span>
                 ))}
                 {configFiles.length === 0 && (
-                  <span className="text-[10px] text-muted-foreground/60 italic">none — add .env or other config paths</span>
+                  <span className="text-[0.7143rem] text-muted-foreground/60 italic">none — add .env or other config paths</span>
                 )}
               </div>
             </div>
@@ -372,12 +372,12 @@ function WorktreePanel({
                 name="path"
                 placeholder=".env.local, config/secrets.json…"
                 disabled={!enabled}
-                className="flex-1 h-6 px-2 text-[10px] font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                className="flex-1 h-6 px-2 text-[0.7143rem] font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
               />
               <button
                 type="submit"
                 disabled={!enabled}
-                className="text-[10px] text-muted-foreground/60 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[0.7143rem] text-muted-foreground/60 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 + add
               </button>
@@ -385,9 +385,9 @@ function WorktreePanel({
           </div>
 
           {/* Location — read-only, derived from workspace config */}
-          <div className="flex items-center gap-3 text-[11px]">
-            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[10px] font-semibold">location</span>
-            <code className="flex-1 text-[10px] font-mono text-muted-foreground/60 truncate">
+          <div className="flex items-center gap-3 text-[0.7857rem]">
+            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">location</span>
+            <code className="flex-1 text-[0.7143rem] font-mono text-muted-foreground/60 truncate">
               {joinPath(worktreeLocation || '.agent/worktrees/', branchName || 'session')}
             </code>
             <Settings2
@@ -397,7 +397,7 @@ function WorktreePanel({
           </div>
 
           {/* Hint */}
-          <div className="text-[10px] text-muted-foreground/60 pt-1 border-t border-input/60">
+          <div className="text-[0.7143rem] text-muted-foreground/60 pt-1 border-t border-input/60">
             Tool calls run inside the worktree — your main checkout stays clean.
             Branch + worktree are removed when the session is deleted.
           </div>

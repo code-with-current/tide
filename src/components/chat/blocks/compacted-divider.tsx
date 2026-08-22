@@ -13,7 +13,7 @@ export const CompactedDivider = memo(function CompactedDivider({
   return (
     <div className="flex items-center gap-3 py-3 select-none">
       <div className="flex-1 h-px bg-border" />
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60 font-mono">
+      <div className="flex items-center gap-1.5 text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60 font-mono">
         <Minimize2 className="size-3" />
         <span>Compacted</span>
         <span className="text-muted-foreground/40">

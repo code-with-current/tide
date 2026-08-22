@@ -32,7 +32,7 @@ export function BranchBadges() {
   const { data } = useGitAheadBehind(workspaceId, gitSessionId);
   if (!data || (data.ahead <= 0 && data.behind <= 0)) return null;
   return (
-    <span className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums leading-none select-none">
+    <span className="inline-flex items-center gap-1 font-mono text-[0.7143rem] tabular-nums leading-none select-none">
       {data.behind > 0 && <span className="text-muted-foreground">↓{data.behind}</span>}
       {data.ahead > 0 && <span className="text-success">↑{data.ahead}</span>}
     </span>
@@ -149,11 +149,11 @@ export function BranchMenu({ trigger, align = 'start' }: { trigger: React.ReactE
         <span className={cn('font-mono text-xs truncate', isCurrent ? 'text-foreground font-medium' : 'text-muted-foreground group-hover:text-foreground')}>
           {b.name}
         </span>
-        {(b.behind ?? 0) > 0 && <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70 flex-shrink-0">↓{b.behind}</span>}
-        {(b.ahead ?? 0) > 0 && <span className="font-mono text-[10px] tabular-nums text-success flex-shrink-0">↑{b.ahead}</span>}
+        {(b.behind ?? 0) > 0 && <span className="font-mono text-[0.7143rem] tabular-nums text-muted-foreground/70 flex-shrink-0">↓{b.behind}</span>}
+        {(b.ahead ?? 0) > 0 && <span className="font-mono text-[0.7143rem] tabular-nums text-success flex-shrink-0">↑{b.ahead}</span>}
         {checkingOut && <Loader2 className="size-3 animate-spin text-primary flex-shrink-0" />}
         {/* Meta on idle, actions on hover — the two swap without layout shift. */}
-        <span className="ml-auto flex items-center gap-1.5 min-w-0 text-[10px] text-muted-foreground/60 group-hover:hidden">
+        <span className="ml-auto flex items-center gap-1.5 min-w-0 text-[0.7143rem] text-muted-foreground/60 group-hover:hidden">
           <span className="font-mono flex-shrink-0">{b.shortSha}</span>
           <span className="flex-shrink-0">{formatRelative(new Date(b.lastCommitUnix * 1000).toISOString())}</span>
           <span className="truncate">{b.subject}</span>
@@ -224,7 +224,7 @@ export function BranchMenu({ trigger, align = 'start' }: { trigger: React.ReactE
                 {[...Array(5)].map((_, i) => <SkeletonBar key={i} className="h-4" style={{ width: `${50 + i * 9}%` }} />)}
               </div>
             ) : locals.length === 0 && remotes.length === 0 ? (
-              <div className="py-6 text-center text-[11px] text-muted-foreground/50">
+              <div className="py-6 text-center text-[0.7857rem] text-muted-foreground/50">
                 {lower ? 'No matching branches' : 'No branches'}
               </div>
             ) : (
@@ -268,7 +268,7 @@ export function BranchMenu({ trigger, align = 'start' }: { trigger: React.ReactE
 
 function SectionLabel({ count, remote }: { count: number; remote: boolean }) {
   return (
-    <div className="px-2 pt-1.5 pb-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/40 font-semibold sticky top-0 bg-popover">
+    <div className="px-2 pt-1.5 pb-0.5 text-[0.6429rem] uppercase tracking-wider text-muted-foreground/40 font-semibold sticky top-0 bg-popover">
       {remote ? 'Remote' : 'Local'} · {count}
     </div>
   );

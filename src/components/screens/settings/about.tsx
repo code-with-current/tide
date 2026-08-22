@@ -58,7 +58,7 @@ export function AboutSection() {
               <div className="text-xl font-semibold">Tide</div>
               <div className="text-foreground/60 font-semibold">- Code with the current</div>
             </div>
-            <div className="text-[11px] text-muted-foreground/60 mt-1.5">
+            <div className="text-[0.7857rem] text-muted-foreground/60 mt-1.5">
               Version <span className="font-mono">{diag?.appVersion ?? '—'}</span>
             </div>
           </div>
@@ -94,32 +94,32 @@ export function AboutSection() {
       <SettingsGroup title="Diagnostics">
         <Card>
           <SettingsRow title="Version">
-            <code className="font-mono text-[11px] text-muted-foreground">
+            <code className="font-mono text-[0.7857rem] text-muted-foreground">
               {diag?.appVersion ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Electron">
-            <code className="font-mono text-[11px] text-muted-foreground">
+            <code className="font-mono text-[0.7857rem] text-muted-foreground">
               {diag?.electron ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Chromium">
-            <code className="font-mono text-[11px] text-muted-foreground">
+            <code className="font-mono text-[0.7857rem] text-muted-foreground">
               {diag?.chrome ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Node">
-            <code className="font-mono text-[11px] text-muted-foreground">
+            <code className="font-mono text-[0.7857rem] text-muted-foreground">
               {diag?.node ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Platform">
-            <code className="font-mono text-[11px] text-muted-foreground">
+            <code className="font-mono text-[0.7857rem] text-muted-foreground">
               {diag?.platform ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Data location">
-            <code className="font-mono text-[10px] text-muted-foreground/80 max-w-[16rem] truncate block">
+            <code className="font-mono text-[0.7143rem] text-muted-foreground/80 max-w-[16rem] truncate block">
               {diag?.userDataPath ?? '—'}
             </code>
           </SettingsRow>
@@ -138,7 +138,7 @@ export function AboutSection() {
         </Card>
       </SettingsGroup>
 
-      <div className="text-center text-[11px] text-muted-foreground/60 py-4 flex items-center justify-center gap-1.5">
+      <div className="text-center text-[0.7857rem] text-muted-foreground/60 py-4 flex items-center justify-center gap-1.5">
         Made with <Heart className="size-3 text-primary fill-accent" /> for developers.
       </div>
     </>
@@ -171,8 +171,8 @@ function LinkRow({
     >
       <span className="text-muted-foreground">{icon}</span>
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-medium">{label}</div>
-        <div className="text-[11px] text-muted-foreground/60">{detail}</div>
+        <div className="text-[0.9286rem] font-medium">{label}</div>
+        <div className="text-[0.7857rem] text-muted-foreground/60">{detail}</div>
       </div>
     </button>
   );

@@ -168,8 +168,8 @@ export function WorkspaceColumn({
               ◈
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-medium">Enable RAG</div>
-              <div className="text-[11px] text-muted-foreground/60 mt-0.5">
+              <div className="text-[0.9286rem] font-medium">Enable RAG</div>
+              <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5">
                 Indexes this workspace. The agent can then search it
                 semantically.
               </div>
@@ -211,7 +211,7 @@ export function WorkspaceColumn({
                 >
                   {meta.icon} {meta.label}
                 </div>
-                <p className="text-[11px] text-muted-foreground/60 mb-2">
+                <p className="text-[0.7857rem] text-muted-foreground/60 mb-2">
                   {meta.hint}
                 </p>
                 <Input
@@ -263,7 +263,7 @@ export function WorkspaceColumn({
               <div className="text-sm font-medium text-destructive">
                 Delete this workspace
               </div>
-              <div className="text-[11px] text-muted-foreground/60 mt-0.5">
+              <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5">
                 Removes from Tide. Disk repo untouched.
               </div>
             </div>

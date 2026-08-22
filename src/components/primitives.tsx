@@ -30,7 +30,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border whitespace-nowrap',
+        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.7857rem] font-medium border whitespace-nowrap',
         chipToneClass[tone],
         className,
       )}
@@ -69,7 +69,7 @@ export function Tag({ children, className }: { children: ReactNode; className?: 
   return (
     <code
       className={cn(
-        'font-mono text-[11px] px-1.5 py-0.5 bg-secondary rounded text-muted-foreground',
+        'font-mono text-[0.7857rem] px-1.5 py-0.5 bg-secondary rounded text-muted-foreground',
         className,
       )}
     >
@@ -91,7 +91,7 @@ export function Avatar({
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center rounded-full text-[11px] font-semibold flex-shrink-0',
+        'inline-flex items-center justify-center rounded-full text-[0.7857rem] font-semibold flex-shrink-0',
         className,
       )}
       style={style}

@@ -35,7 +35,7 @@ export function FloatingPermissionCard({ sessionId }: { sessionId: string | null
     <div className="absolute top-0 left-0 right-0 z-50 pointer-events-none">
       <div className="pointer-events-auto">
         {/* Header badge */}
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-warning font-medium bg-background p-4">
+        <div className="flex items-center justify-center gap-1.5 text-[0.7857rem] text-warning font-medium bg-background p-4">
           <ShieldAlert className="size-3.5" />
           {pending.length} action{pending.length > 1 ? 's' : ''} awaiting your review
         </div>

@@ -168,19 +168,19 @@ function PermissionRow({
         <div className="text-sm font-medium text-foreground flex items-center gap-1.5">
           {title}
           {granted === true && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-500">
+            <span className="inline-flex items-center gap-0.5 text-[0.7143rem] font-medium text-emerald-500">
               <CheckCircle2 className="size-3" />
               Authorized
             </span>
           )}
           {granted === false && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-500">
+            <span className="inline-flex items-center gap-0.5 text-[0.7143rem] font-medium text-amber-500">
               <AlertTriangle className="size-3" />
               Not granted
             </span>
           )}
         </div>
-        <div className="text-[11px] text-muted-foreground/70 leading-snug">{description}</div>
+        <div className="text-[0.7857rem] text-muted-foreground/70 leading-snug">{description}</div>
       </div>
       <Button
         variant="outline"

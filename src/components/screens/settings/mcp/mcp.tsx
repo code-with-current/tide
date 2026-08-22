@@ -250,7 +250,7 @@ export function McpSection() {
               <Download className="size-3.5" />
               <span className="flex-1">Import</span>
               {importBadge > 0 && (
-                <Badge className="p-1 py-0.5 text-[10px] border-none">
+                <Badge className="p-1 py-0.5 text-[0.7143rem] border-none">
                   {importBadge}
                 </Badge>
               )}
@@ -400,15 +400,15 @@ function ServerCard({
           as siblings of the Skills/Agents cards. */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border/60">
         <span className="shrink-0 text-muted-foreground/50">{icon}</span>
-        <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium flex-1">
+        <h3 className="text-[0.7857rem] uppercase tracking-wide text-muted-foreground/60 font-medium flex-1">
           {label}
         </h3>
         {hint && (
-          <code className="hidden sm:block text-[10px] text-muted-foreground/40 font-mono truncate max-w-[40%]">
+          <code className="hidden sm:block text-[0.7143rem] text-muted-foreground/40 font-mono truncate max-w-[40%]">
             {hint}
           </code>
         )}
-        <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+        <span className="text-[0.7143rem] text-muted-foreground/50 font-mono tabular-nums">
           {servers.length}
         </span>
       </div>
@@ -438,7 +438,7 @@ function ServerCard({
       {/* Pagination footer */}
       {showPagination && (
         <div className="flex items-center justify-between px-4 py-2 border-t border-border/60 bg-muted/20">
-          <span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums">
+          <span className="text-[0.7143rem] text-muted-foreground/60 font-mono tabular-nums">
             Showing {rangeStart}–{rangeEnd} of {servers.length}
           </span>
           <div className="flex items-center gap-1">
@@ -451,7 +451,7 @@ function ServerCard({
             >
               <ChevronLeft className="size-3.5" />
             </button>
-            <span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums min-w-[3rem] text-center">
+            <span className="text-[0.7143rem] text-muted-foreground/60 font-mono tabular-nums min-w-[3rem] text-center">
               {clampedPage} / {totalPages}
             </span>
             <button

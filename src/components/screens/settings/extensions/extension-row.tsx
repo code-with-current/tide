@@ -98,7 +98,7 @@ function SourceBadge({ source }: { source: 'builtin' | 'project' | 'user' }) {
   };
   return (
     <span
-      className={`text-[9px] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[source]}`}
+      className={`text-[0.6429rem] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[source]}`}
     >
       {source}
     </span>

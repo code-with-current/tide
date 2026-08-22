@@ -55,7 +55,7 @@ export const ChangedFileRow = memo(function ChangedFileRow({
     >
       {/* Status letter badge */}
       <span
-        className={cn('flex-shrink-0 w-3.5 text-center font-mono text-[10px] font-bold select-none', badge.cls)}
+        className={cn('flex-shrink-0 w-3.5 text-center font-mono text-[0.7143rem] font-bold select-none', badge.cls)}
         title={change.status}
       >
         {badge.letter}
@@ -66,7 +66,7 @@ export const ChangedFileRow = memo(function ChangedFileRow({
         <span className="text-foreground/90 font-medium truncate">{fileName}</span>
         {showPath && dirPath && (
           <span
-            className="hidden @sm:inline text-muted-foreground/60 text-[10px] flex-shrink min-w-0"
+            className="hidden @sm:inline text-muted-foreground/60 text-[0.7143rem] flex-shrink min-w-0"
             title={dirPath}
           >
             {middleTruncate(dirPath)}
@@ -76,7 +76,7 @@ export const ChangedFileRow = memo(function ChangedFileRow({
 
       {/* +/− numstat chips */}
       {hasStats && (
-        <span className="hidden @sm:flex flex-shrink-0 items-center gap-0.5 text-[10px] tabular-nums font-mono">
+        <span className="hidden @sm:flex flex-shrink-0 items-center gap-0.5 text-[0.7143rem] tabular-nums font-mono">
           {change.additions > 0 && (
             <span className="text-success bg-success/10 rounded px-0.5">+{change.additions}</span>
           )}

@@ -82,7 +82,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
   // Mode 3 — blank.
   if (mode.kind === 'blank') {
     return (
-      <div className="flex items-center gap-2 py-1 text-[12px] font-mono text-muted-foreground/60">
+      <div className="flex items-center gap-2 py-1 text-[0.8571rem] font-mono text-muted-foreground/60">
         <Loader2 className="size-3 animate-spin" />
         <MessageCircleQuestionMark className="size-3" />
         <span>preparing question…</span>
@@ -123,7 +123,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
         <span className="text-xs text-muted-foreground flex-1 leading-snug">
           {question}
         </span>
-        <span className="flex items-center gap-1 text-[11px] text-primary font-medium flex-shrink-0">
+        <span className="flex items-center gap-1 text-[0.7857rem] text-primary font-medium flex-shrink-0">
           <MessageCircleReply className="size-3" />
           Answer
         </span>
@@ -134,7 +134,7 @@ export const FollowupPrompt = memo(function FollowupPrompt({
   // Active (popup is showing or about to show)
   if (mode.kind === 'question') {
     return (
-      <div className="text-[11px] text-muted-foreground/60 italic pt-[5px]">
+      <div className="text-[0.7857rem] text-muted-foreground/60 italic pt-[5px]">
         awaiting your reply ↓
       </div>
     );

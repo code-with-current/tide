@@ -196,7 +196,7 @@ function RowBody({ call, onViewFile, childToolCalls }: { call: ToolCall; onViewF
   if (d?.kind === 'diff') {
     return (
       <div className="py-2">
-        <div className="text-[11px] text-muted-foreground/60 mb-1.5 font-mono">
+        <div className="text-[0.7857rem] text-muted-foreground/60 mb-1.5 font-mono">
           {d.path} · +{d.additions} −{d.deletions}
         </div>
         <DiffView hunks={d.hunks} />
@@ -204,7 +204,7 @@ function RowBody({ call, onViewFile, childToolCalls }: { call: ToolCall; onViewF
           <button
             role="button"
             onClick={() => onViewFile(d.path)}
-            className="mt-2 text-[11px] text-muted-foreground hover:text-primary"
+            className="mt-2 text-[0.7857rem] text-muted-foreground hover:text-primary"
           >
             open file →
           </button>
@@ -223,9 +223,9 @@ function RowBody({ call, onViewFile, childToolCalls }: { call: ToolCall; onViewF
   if (d?.kind === 'text') {
     const { body, note } = capOutput(d.text);
     return (
-      <pre className="py-2 text-[12px] text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto scroll">
+      <pre className="py-2 text-[0.8571rem] text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto scroll">
         {body}
-        {note && <span className="block text-[11px] text-muted-foreground/50 pt-1">{note}</span>}
+        {note && <span className="block text-[0.7857rem] text-muted-foreground/50 pt-1">{note}</span>}
       </pre>
     );
   }
@@ -237,13 +237,13 @@ function RowBody({ call, onViewFile, childToolCalls }: { call: ToolCall; onViewF
             role="button"
             key={i}
             onClick={() => onViewFile?.(p)}
-            className="block text-[12px] font-mono text-muted-foreground hover:text-primary text-left truncate w-full"
+            className="block text-[0.8571rem] font-mono text-muted-foreground hover:text-primary text-left truncate w-full"
           >
             {p}
           </button>
         ))}
         {d.paths.length > 50 && (
-          <div className="text-[11px] text-muted-foreground/60 pt-1">+{d.paths.length - 50} more</div>
+          <div className="text-[0.7857rem] text-muted-foreground/60 pt-1">+{d.paths.length - 50} more</div>
         )}
       </div>
     );
@@ -255,9 +255,9 @@ function RowBody({ call, onViewFile, childToolCalls }: { call: ToolCall; onViewF
   if (call.output) {
     const { body, note } = capOutput(call.output);
     return (
-      <pre className="py-2 text-[12px] text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto scroll">
+      <pre className="py-2 text-[0.8571rem] text-muted-foreground whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto scroll">
         {body}
-        {note && <span className="block text-[11px] text-muted-foreground/50 pt-1">{note}</span>}
+        {note && <span className="block text-[0.7857rem] text-muted-foreground/50 pt-1">{note}</span>}
       </pre>
     );
   }
@@ -286,8 +286,8 @@ function AgentBody({ d, childToolCalls, onViewFile }: {
     <div className="py-2 space-y-2">
       {/* Task line — always visible. */}
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">task</div>
-        <div className="text-[12px] text-muted-foreground whitespace-pre-wrap">{d.task}</div>
+        <div className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60 mb-1">task</div>
+        <div className="text-[0.8571rem] text-muted-foreground whitespace-pre-wrap">{d.task}</div>
       </div>
 
       {/* Sub-agent tool calls — nested, live-streaming. Each child is a full
@@ -300,7 +300,7 @@ function AgentBody({ d, childToolCalls, onViewFile }: {
             variant="outline"
             size="sm"
             onClick={() => setShowToolCalls(s => !s)}
-            className="text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
+            className="text-[0.7143rem] uppercase tracking-wider inline-flex items-center gap-1"
           >
             <ChevronRight className={cn('size-2.5 transition-transform', showToolCalls && 'rotate-90')} />
             tool calls · {childToolCalls!.length}
@@ -321,13 +321,13 @@ function AgentBody({ d, childToolCalls, onViewFile }: {
           <Button
 
             onClick={() => setShowReasoning(s => !s)}
-            className="text-[10px] uppercase tracking-wider text-muted-foreground/60 hover:text-muted inline-flex items-center gap-1"
+            className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60 hover:text-muted inline-flex items-center gap-1"
           >
             <ChevronRight className={cn('size-2.5 transition-transform', showReasoning && 'rotate-90')} />
             reasoning · {d.reasoning.length.toLocaleString()} chars
           </Button>
           {showReasoning && (
-            <pre className="mt-1 text-[11.5px] text-muted-foreground/60 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll border-l border-input pl-2.5">
+            <pre className="mt-1 text-[0.8214rem] text-muted-foreground/60 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll border-l border-input pl-2.5">
               {d.reasoning}
             </pre>
           )}
@@ -341,13 +341,13 @@ function AgentBody({ d, childToolCalls, onViewFile }: {
             variant="outline"
             size="sm"
             onClick={() => setShowReport(s => !s)}
-            className="text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
+            className="text-[0.7143rem] uppercase tracking-wider inline-flex items-center gap-1"
           >
             <ChevronRight className={cn('size-2.5 transition-transform', showReport && 'rotate-90')} />
             report · {d.report.length.toLocaleString()} chars
           </Button>
           {showReport && (
-            <pre className="mt-1 text-[12px] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-[400px] overflow-y-auto scroll">
+            <pre className="mt-1 text-[0.8571rem] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-[400px] overflow-y-auto scroll">
               {d.report}
             </pre>
           )}
@@ -356,7 +356,7 @@ function AgentBody({ d, childToolCalls, onViewFile }: {
 
       {/* Usage chip — compact, only if there were tokens. */}
       {u && totalTokens > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-mono text-muted-foreground/60 pt-0.5">
+        <div className="flex flex-wrap items-center gap-1.5 text-[0.75rem] font-mono text-muted-foreground/60 pt-0.5">
           <span className="inline-flex items-center gap-1 rounded border border-input px-1.5 py-0.5">
             <Coins className="size-2.5" />
             {(u.inputTokens ?? 0).toLocaleString()} in
@@ -381,17 +381,17 @@ function FileLoadedBody({ d }: { d: Extract<ToolDisplay, { kind: 'file_loaded' }
   const { body, note } = capOutput(d.body);
   return (
     <div className="py-2 space-y-1.5">
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-[0.7857rem]">
         <FileText className="size-3.5 text-primary flex-shrink-0" />
         <span className="font-mono text-foreground truncate flex-1">{d.path}</span>
         <span className="text-muted-foreground/55 font-mono flex-shrink-0">{d.lines}L · {bytes}</span>
       </div>
       {d.description && (
-        <div className="text-[12px] text-muted-foreground italic truncate pl-6">{d.description}</div>
+        <div className="text-[0.8571rem] text-muted-foreground italic truncate pl-6">{d.description}</div>
       )}
-      <pre className="text-[12px] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-[400px] overflow-y-auto scroll border-l border-input pl-2.5">
+      <pre className="text-[0.8571rem] text-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-[400px] overflow-y-auto scroll border-l border-input pl-2.5">
         {body}
-        {note && <span className="block text-[11px] text-muted-foreground/50 pt-1">{note}</span>}
+        {note && <span className="block text-[0.7857rem] text-muted-foreground/50 pt-1">{note}</span>}
       </pre>
     </div>
   );
@@ -447,15 +447,15 @@ function FollowupToolBody({ call }: { call: ToolCall }) {
       {/* Question */}
       {question && (
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">question</div>
-          <div className="text-[12.5px] text-foreground leading-snug whitespace-pre-wrap">{question}</div>
+          <div className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60 mb-1">question</div>
+          <div className="text-[0.8929rem] text-foreground leading-snug whitespace-pre-wrap">{question}</div>
         </div>
       )}
 
       {/* Options — highlight the picked one(s) */}
       {options.length > 0 && (
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1">
+          <div className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/60 mb-1">
             options{multiple ? ' (pick any)' : ' (pick one)'}
           </div>
           <div className="space-y-0.5">
@@ -465,7 +465,7 @@ function FollowupToolBody({ call }: { call: ToolCall }) {
                 <div
                   key={i}
                   className={cn(
-                    'flex items-start gap-2 px-2 py-1 rounded text-[12px]',
+                    'flex items-start gap-2 px-2 py-1 rounded text-[0.8571rem]',
                     picked ? 'bg-primary/10 text-foreground' : 'text-muted-foreground',
                   )}
                 >
@@ -483,7 +483,7 @@ function FollowupToolBody({ call }: { call: ToolCall }) {
                   <div className="flex-1 min-w-0">
                     <div className="leading-snug">{opt.label}</div>
                     {opt.description && (
-                      <div className="text-[11px] text-muted-foreground/60 leading-snug mt-0.5">{opt.description}</div>
+                      <div className="text-[0.7857rem] text-muted-foreground/60 leading-snug mt-0.5">{opt.description}</div>
                     )}
                   </div>
                 </div>
@@ -495,14 +495,14 @@ function FollowupToolBody({ call }: { call: ToolCall }) {
 
       {/* Answer footer */}
       {wasAnswered && (
-        <div className="flex items-center gap-2 pt-1 text-[11.5px]">
+        <div className="flex items-center gap-2 pt-1 text-[0.8214rem]">
           <Check className="size-3 text-success flex-shrink-0" />
           <span className="text-muted-foreground/60">answered:</span>
           <span className="text-foreground font-medium truncate">{answerText}</span>
         </div>
       )}
       {wasRejected && (
-        <div className="flex items-center gap-2 pt-1 text-[11.5px]">
+        <div className="flex items-center gap-2 pt-1 text-[0.8214rem]">
           <X className="size-3 text-muted-foreground/60 flex-shrink-0" />
           <span className="text-muted-foreground/60 italic">
             {call.status === 'aborted' ? 'aborted — user stopped the turn' : 'unanswered — dismissed or timed out'}
@@ -510,7 +510,7 @@ function FollowupToolBody({ call }: { call: ToolCall }) {
         </div>
       )}
       {call.status === 'awaiting_input' && (
-        <div className="flex items-center gap-2 pt-1 text-[11.5px]">
+        <div className="flex items-center gap-2 pt-1 text-[0.8214rem]">
           <Loader2 className="size-3 text-primary animate-spin flex-shrink-0" />
           <span className="text-primary">awaiting your choice…</span>
         </div>
@@ -589,7 +589,7 @@ export const ToolRow = memo(function ToolRow({
         disabled={!expandable}
         onClick={() => expandable && setOpen((o) => !o)}
         className={cn(
-          'w-full flex items-center gap-2 py-1 text-[12.5px] font-mono',
+          'w-full flex items-center gap-2 py-1 text-[0.8929rem] font-mono',
           expandable && 'hover:bg-secondary/40 -mx-1 px-1 rounded cursor-pointer',
         )}
       >
@@ -599,7 +599,7 @@ export const ToolRow = memo(function ToolRow({
         {isChild && (
           <span
             title="run by sub-agent"
-            className="flex-shrink-0 -ml-1 text-[11px] leading-none text-primary/60 select-none"
+            className="flex-shrink-0 -ml-1 text-[0.7857rem] leading-none text-primary/60 select-none"
           >
             ↳
           </span>
@@ -618,7 +618,7 @@ export const ToolRow = memo(function ToolRow({
             agent from a direct tool call. Renders after the label, before the
             target, mirroring how status tags sit on other rows. */}
         {isSubagent && (
-          <span className="inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9.5px] uppercase tracking-wider text-primary/70 flex-shrink-0">
+          <span className="inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[0.6786rem] uppercase tracking-wider text-primary/70 flex-shrink-0">
             subagent
           </span>
         )}
@@ -636,11 +636,11 @@ export const ToolRow = memo(function ToolRow({
         {/* Meta (orchestrator-supplied): "25 entries", "12 hits", etc.
          *  Skip for bash/git — their meta ("exit 0 · 26314ms") is already
          *  split into the statusLabel (exit code) + ms (duration) below. */}
-        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[11px] truncate min-w-0 max-w-[40%]">{call.meta}</span>}
+        {call.meta && !isBashLike(call.toolName) && <span className="text-muted-foreground/60 text-[0.7857rem] truncate min-w-0 max-w-[40%]">{call.meta}</span>}
         {/* Status label: "exit 0", "end_turn", "12 hits", "failed", etc. */}
         {statusLabel && (
           <span className={cn(
-            'text-[11px] tabular-nums flex-shrink-0',
+            'text-[0.7857rem] tabular-nums flex-shrink-0',
             call.status === 'failed' || call.status === 'rejected' || call.status === 'timeout' || call.status === 'aborted'
               ? 'text-destructive/80'
               : call.status === 'executed'
@@ -650,7 +650,7 @@ export const ToolRow = memo(function ToolRow({
             {statusLabel}
           </span>
         )}
-        {ms && <span className="text-muted-foreground/60 text-[11px] tabular-nums flex-shrink-0">{ms}</span>}
+        {ms && <span className="text-muted-foreground/60 text-[0.7857rem] tabular-nums flex-shrink-0">{ms}</span>}
         {expandable && (
           <ChevronRight className={cn('size-3 text-muted-foreground/60 transition-transform', open && 'rotate-90')} />
         )}
@@ -664,7 +664,7 @@ export const ToolRow = memo(function ToolRow({
             variant="outline"
             size="xs"
             onClick={() => setOpen(false)}
-            className="mt-1 mb-2 text-[10px] uppercase tracking-wider gap-1"
+            className="mt-1 mb-2 text-[0.7143rem] uppercase tracking-wider gap-1"
           >
             <ChevronUp  className="size-3"/>
             collapse
@@ -810,7 +810,7 @@ export const ExploringGroup = memo(function ExploringGroup({
       <button
         role="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 py-1 text-[12.5px] font-mono hover:bg-secondary/40 -mx-1 px-1 rounded"
+        className="w-full flex items-center gap-2 py-1 text-[0.8929rem] font-mono hover:bg-secondary/40 -mx-1 px-1 rounded"
       >
         <ChevronRight className={cn('size-3 text-muted-foreground/60 transition-transform', open && 'rotate-90')} />
         <FileSearch className="size-3 text-muted-foreground/60" />
@@ -818,7 +818,7 @@ export const ExploringGroup = memo(function ExploringGroup({
         <span className="text-muted-foreground/60">
           ({done}/{calls.length})
         </span>
-        {failCount > 0 && <span className="text-destructive/70 text-[11px]">{failCount} failed</span>}
+        {failCount > 0 && <span className="text-destructive/70 text-[0.7857rem]">{failCount} failed</span>}
         <span className="flex-1" />
         {streaming && !allDone && <Loader2 className="size-3 text-muted-foreground animate-spin" />}
       </button>

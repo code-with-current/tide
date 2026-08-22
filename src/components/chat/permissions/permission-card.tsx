@@ -117,7 +117,7 @@ export function PermissionCard({
     <div
       role="alertdialog"
       aria-label={`${tone.label}: ${call.toolName}`}
-      className={`bg-card border ${tone.border} rounded-lg overflow-hidden text-[13px] animate-slide-up shadow-sm @container`}
+      className={`bg-card border ${tone.border} rounded-lg overflow-hidden text-[0.9286rem] animate-slide-up shadow-sm @container`}
     >
       {/* Header — tone band. Icon + label carry the meaning; color reinforces. */}
       <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 ${tone.bar} border-b border-input`}>
@@ -128,7 +128,7 @@ export function PermissionCard({
         </Chip>
         {/* ml-auto (not a flex-1 spacer) plays well with flex-wrap: when the
             chip + countdown don't fit one line, the countdown wraps right-aligned. */}
-        <span className="ml-auto text-muted-foreground text-[11px] flex items-center gap-1 tabular-nums">
+        <span className="ml-auto text-muted-foreground text-[0.7857rem] flex items-center gap-1 tabular-nums">
           <Timer className="size-2.5" aria-hidden="true" /> {tone.expire} {mm}:{ss}
         </span>
       </div>
@@ -287,7 +287,7 @@ export function PermissionCard({
                 the primary row. Hidden in blocked state (the only forward path
                 there is mode escalation, already in the primary row). */}
             {!blocked && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] mt-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7857rem] mt-1">
                 <button
                   type="button"
                   onClick={() => setExplaining((v) => !v)}

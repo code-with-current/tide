@@ -131,7 +131,7 @@ export function AgentStatusChip({ status }: { status: AgentStatus }) {
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10.5px] text-muted-foreground',
+        'flex shrink-0 items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[0.75rem] text-muted-foreground',
         status === 'done' && 'text-success',
         status === 'error' && 'text-destructive',
       )}
@@ -229,7 +229,7 @@ function FollowupBody({ q }: { q: NonNullable<ReturnType<typeof followupBodyOf>>
   const matchedAnOption = q.options.some((o) => picked.includes(o.label));
   return (
     <div className="flex flex-col gap-2 py-0.5 pr-1">
-      <p className="break-words text-[12.5px] font-medium leading-snug text-foreground">
+      <p className="break-words text-[0.8929rem] font-medium leading-snug text-foreground">
         {q.question}
       </p>
       {q.options.length > 0 && (
@@ -240,7 +240,7 @@ function FollowupBody({ q }: { q: NonNullable<ReturnType<typeof followupBodyOf>>
               <div
                 key={o.label}
                 className={cn(
-                  'flex items-start gap-2 rounded-lg border px-2 py-1.5 text-[12px] leading-snug',
+                  'flex items-start gap-2 rounded-lg border px-2 py-1.5 text-[0.8571rem] leading-snug',
                   isPicked
                     ? 'border-primary/50 bg-primary/10 text-foreground'
                     : 'border-border bg-background/60 text-muted-foreground/70',
@@ -257,7 +257,7 @@ function FollowupBody({ q }: { q: NonNullable<ReturnType<typeof followupBodyOf>>
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="break-words font-medium">{o.label}</span>
                   {o.description && (
-                    <span className="break-words text-[11px] leading-snug text-muted-foreground/70">
+                    <span className="break-words text-[0.7857rem] leading-snug text-muted-foreground/70">
                       {o.description}
                     </span>
                   )}
@@ -271,20 +271,20 @@ function FollowupBody({ q }: { q: NonNullable<ReturnType<typeof followupBodyOf>>
         <div className="flex items-start gap-2 rounded-lg bg-secondary/70 px-2 py-1.5">
           <MessageCircleReply className="mt-[3px] size-3.5 shrink-0 text-primary" />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+            <span className="text-[0.6786rem] font-semibold uppercase tracking-wider text-muted-foreground/60">
               your answer
             </span>
-            <span className="break-words text-[12px] font-medium leading-snug text-foreground">
+            <span className="break-words text-[0.8571rem] font-medium leading-snug text-foreground">
               {q.answer}
             </span>
           </div>
         </div>
       )}
       {q.finished && q.answer == null && (
-        <p className="text-[11px] italic text-muted-foreground/60">no answer</p>
+        <p className="text-[0.7857rem] italic text-muted-foreground/60">no answer</p>
       )}
       {!q.finished && (
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+        <p className="flex items-center gap-1.5 text-[0.7857rem] text-muted-foreground/70">
           <span className="size-1.5 animate-pulse rounded-full bg-primary" />
           waiting for your reply…
         </p>
@@ -335,7 +335,7 @@ function TodoBody({ todos }: { todos: NonNullable<ReturnType<typeof todoBodyOf>>
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground">
+        <span className="shrink-0 text-[0.75rem] tabular-nums text-muted-foreground">
           {done}/{todos.length} done{cancelled ? ` · ${cancelled} cancelled` : ''}
         </span>
       </div>
@@ -345,7 +345,7 @@ function TodoBody({ todos }: { todos: NonNullable<ReturnType<typeof todoBodyOf>>
           const isActive = t.status === 'in_progress';
           const isCancelled = t.status === 'cancelled';
           return (
-            <div key={i} className="flex items-start gap-2 text-[12px] leading-snug">
+            <div key={i} className="flex items-start gap-2 text-[0.8571rem] leading-snug">
               <span
                 className={cn(
                   'mt-[1px] flex size-3.5 shrink-0 items-center justify-center rounded-[3px]',
@@ -461,7 +461,7 @@ function MediaBody({ dataUrl, mimeType, path }: { dataUrl: string; mimeType: str
       {isAudio && <audio controls src={dataUrl} className="w-full max-w-md" />}
       {isVideo && <video controls src={dataUrl} className="max-h-72 max-w-full rounded-lg border border-border" />}
       {((!isImage && !isAudio && !isVideo) || broken) && (
-        <div className="flex w-fit items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        <div className="flex w-fit items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1.5 text-[0.7857rem] text-muted-foreground">
           <FileWarning className="size-3.5 shrink-0" />
           {mimeType}
           {broken ? ' — could not be displayed' : ' — no inline preview'}
@@ -472,7 +472,7 @@ function MediaBody({ dataUrl, mimeType, path }: { dataUrl: string; mimeType: str
           type="button"
           onClick={copyPath}
           title={path}
-          className="flex w-fit max-w-full items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          className="flex w-fit max-w-full items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1 text-[0.7857rem] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
         >
           <span className="truncate font-mono">{path}</span>
           {copied ? (
@@ -517,7 +517,7 @@ function ReadBody({ src }: { src: string }) {
   const lines = src.split('\n');
   const w = String(lines.length).length;
   return (
-    <div className="flex min-w-0 flex-col font-mono text-[11.5px] leading-[1.6] text-foreground/80">
+    <div className="flex min-w-0 flex-col font-mono text-[0.8214rem] leading-[1.6] text-foreground/80">
       {lines.map((l, i) => (
         <div key={i} className="flex items-start">
           <span
@@ -565,7 +565,7 @@ function BodyActionButton({ icon, label, onClick }: { icon: React.ReactNode; lab
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-6 w-fit items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+      className="inline-flex h-6 w-fit items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 text-[0.7857rem] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
     >
       {icon}
       {label}
@@ -589,11 +589,11 @@ function BashBody({ b }: { b: { output: string; durationMs?: number } }) {
   return (
     <div className="flex flex-col gap-1 py-0.5">
       {b.durationMs != null && (
-        <span className="text-[10.5px] tabular-nums text-muted-foreground">
+        <span className="text-[0.75rem] tabular-nums text-muted-foreground">
           {(b.durationMs / 1000).toFixed(b.durationMs < 10_000 ? 2 : 1)}s
         </span>
       )}
-      <pre className="whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.6] text-foreground/80">
+      <pre className="whitespace-pre-wrap break-words font-mono text-[0.8214rem] leading-[1.6] text-foreground/80">
         {b.output}
       </pre>
     </div>
@@ -623,7 +623,7 @@ function SearchBody({ results }: { results: NonNullable<ReturnType<typeof search
           <div key={i} className="flex flex-col gap-1 rounded-lg border border-border bg-background/60 px-2.5 py-2">
             <div className="flex min-w-0 items-center gap-2">
               {host && (
-                <span className="shrink-0 rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                <span className="shrink-0 rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-[0.7143rem] text-muted-foreground">
                   {host}
                 </span>
               )}
@@ -631,13 +631,13 @@ function SearchBody({ results }: { results: NonNullable<ReturnType<typeof search
                 href={r.url}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-0 break-words text-[12.5px] font-medium leading-snug text-primary hover:underline"
+                className="min-w-0 break-words text-[0.8929rem] font-medium leading-snug text-primary hover:underline"
               >
                 {r.title}
               </a>
               <ExternalLink className="size-3 shrink-0 text-muted-foreground/50" />
             </div>
-            <p className="break-words text-[11.5px] leading-snug text-muted-foreground">{r.snippet}</p>
+            <p className="break-words text-[0.8214rem] leading-snug text-muted-foreground">{r.snippet}</p>
           </div>
         );
       })}
@@ -683,21 +683,21 @@ function grepBodyOf(call: ToolCall):
 function GrepBody({ groups, total, re }: { groups: NonNullable<ReturnType<typeof grepBodyOf>>['groups']; total: number; re?: RegExp }) {
   return (
     <div className="flex flex-col gap-2 py-0.5 pr-1">
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-[0.7857rem] text-muted-foreground">
         {total} match{total === 1 ? '' : 'es'} · {groups.length} file{groups.length === 1 ? '' : 's'}
       </p>
       {groups.map((g) => (
         <div key={g.path} className="flex flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/80">
+            <span className="min-w-0 truncate font-mono text-[0.8214rem] font-medium text-foreground/80">
               {g.path}
             </span>
-            <span className="shrink-0 rounded-full bg-secondary/70 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+            <span className="shrink-0 rounded-full bg-secondary/70 px-1.5 text-[0.7143rem] tabular-nums text-muted-foreground">
               {g.matches.length}
             </span>
           </div>
           {g.matches.map((m, i) => (
-            <div key={i} className="flex items-start gap-2 font-mono text-[11.5px] leading-[1.6]">
+            <div key={i} className="flex items-start gap-2 font-mono text-[0.8214rem] leading-[1.6]">
               <span className="w-9 shrink-0 select-none text-right tabular-nums text-muted-foreground/50">
                 {m.line}
               </span>
@@ -760,21 +760,21 @@ function MemoryBody({ mem }: { mem: NonNullable<ReturnType<typeof memoryBodyOf>>
   return (
     <div className="flex flex-col gap-1.5 py-0.5 pr-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="min-w-0 break-words text-[12.5px] font-medium leading-snug text-foreground/90">
+        <span className="min-w-0 break-words text-[0.8929rem] font-medium leading-snug text-foreground/90">
           “{mem.query}”
         </span>
-        <span className="shrink-0 rounded-full bg-secondary/70 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-secondary/70 px-1.5 text-[0.7143rem] tabular-nums text-muted-foreground">
           {mem.hits.length} of {mem.total.toLocaleString()} chunks
         </span>
       </div>
       {mem.hits.map((h, i) => (
         <div key={i} className="flex flex-col gap-1 rounded-lg border border-border bg-background/60 px-2.5 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/80">
+            <span className="min-w-0 truncate font-mono text-[0.8214rem] font-medium text-foreground/80">
               {h.path}:{h.line}
             </span>
             {h.symbol && (
-              <span className="shrink-0 rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <span className="shrink-0 rounded bg-secondary/70 px-1.5 py-0.5 font-mono text-[0.7143rem] text-muted-foreground">
                 {h.symbol}
               </span>
             )}
@@ -782,7 +782,7 @@ function MemoryBody({ mem }: { mem: NonNullable<ReturnType<typeof memoryBodyOf>>
               <span
                 title="similarity"
                 className={cn(
-                  'shrink-0 rounded-full px-1.5 text-[10px] tabular-nums',
+                  'shrink-0 rounded-full px-1.5 text-[0.7143rem] tabular-nums',
                   h.sim >= 80 ? 'bg-success/15 text-success' : h.sim >= 60 ? 'bg-warning/15 text-warning' : 'bg-secondary/70 text-muted-foreground',
                 )}
               >
@@ -790,7 +790,7 @@ function MemoryBody({ mem }: { mem: NonNullable<ReturnType<typeof memoryBodyOf>>
               </span>
             )}
           </div>
-          <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.6] text-muted-foreground">
+          <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-[0.7857rem] leading-[1.6] text-muted-foreground">
             {h.body.trim()}
           </pre>
         </div>
@@ -854,25 +854,25 @@ function ChipRow({
         <span className={cn('tool-tint flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
           {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
         </span>
-        <span className="tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium text-purple-400">
+        <span className="tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[0.8929rem] font-medium text-purple-400">
           {d?.agentName ?? toolLabel(call.toolName, call.status)}
         </span>
         {summary && (
           <span
             title={d?.task ?? call.argPreview}
-            className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 font-mono text-[11.5px] text-muted-foreground"
+            className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 font-mono text-[0.8214rem] text-muted-foreground"
           >
             {summary}
           </span>
         )}
         <AgentStatusChip status={agentStatusOf(call)} />
         {call.durationMs != null && (
-          <span className="shrink-0 text-[10.5px] tabular-nums text-muted-foreground">
+          <span className="shrink-0 text-[0.75rem] tabular-nums text-muted-foreground">
             {(call.durationMs / 1000).toFixed(call.durationMs < 10_000 ? 2 : 1)}s
           </span>
         )}
         {!!d?.usage && (
-          <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+          <span className="shrink-0 font-mono text-[0.75rem] text-muted-foreground">
             {(d.usage.inputTokens / 1000).toFixed(1)}k in · {(d.usage.outputTokens / 1000).toFixed(1)}k out
           </span>
         )}
@@ -932,11 +932,11 @@ function ChipRow({
             style={{ transform: rowOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium text-foreground/80">
+        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[0.8929rem] font-medium text-foreground/80">
           {toolLabel(call.toolName, call.status)}
         </span>
         {target && (
-          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 font-mono text-[11.5px] text-muted-foreground">
+          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 font-mono text-[0.8214rem] text-muted-foreground">
             {target}
           </span>
         )}
@@ -948,7 +948,7 @@ function ChipRow({
               e.stopPropagation();
               onViewDiff({ path: filePathOf(call), hunks: diff });
             }}
-            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[0.7857rem] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
           >
             <GitCompareArrows className="size-3" />
             Review
@@ -994,11 +994,11 @@ function ChipRow({
                 <ReadBody src={read} />
               </div>
             ) : treeSrc != null ? (
-              <pre className="whitespace-pre font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
+              <pre className="whitespace-pre font-mono text-[0.8214rem] leading-[1.6] text-muted-foreground">
                 {treeSrc}
               </pre>
             ) : details.map((line, i) => (
-              <span key={i} className="whitespace-pre-wrap break-all font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
+              <span key={i} className="whitespace-pre-wrap break-all font-mono text-[0.8214rem] leading-[1.6] text-muted-foreground">
                 {line}
               </span>
             ))}
@@ -1090,7 +1090,7 @@ function ToolChipsImpl({
         type="button"
         aria-expanded={open}
         onClick={() => setOpenState((o) => !o)}
-        className="-mx-1.5 flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-secondary/60"
+        className="-mx-1.5 flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[0.8929rem] text-muted-foreground transition-colors hover:bg-secondary/60"
       >
         <ChevronDown
           className="size-3 transition-transform duration-200"

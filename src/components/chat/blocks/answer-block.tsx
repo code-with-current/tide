@@ -57,7 +57,7 @@ export const AnswerBlock = memo(function AnswerBlock({
           )}
 
           {stopped && (
-            <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-warning font-mono">
+            <div className="mt-1.5 inline-flex items-center gap-1 text-[0.7143rem] uppercase tracking-wider text-warning font-mono">
               <span className="size-1.5 rounded-full bg-warning" />
               Stopped
             </div>
@@ -68,7 +68,7 @@ export const AnswerBlock = memo(function AnswerBlock({
         {showActions && (
           <div className="flex items-center gap-0.5 px-2 pb-1.5">
             {elapsedMs ? (
-              <span className="flex items-center gap-1 mr-auto text-[11px] font-mono text-muted-foreground/50">
+              <span className="flex items-center gap-1 mr-auto text-[0.7857rem] font-mono text-muted-foreground/50">
                 <Clock className="size-3" />
                 {formatMs(elapsedMs)}
               </span>
@@ -81,7 +81,7 @@ export const AnswerBlock = memo(function AnswerBlock({
                 aria-label={copied ? 'Copied' : 'Copy answer'}
                 title={copied ? 'Copied' : 'Copy'}
                 className={cn(
-                  'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium',
+                  'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[0.7857rem] font-medium',
                   'transition-colors cursor-pointer',
                   copied
                     ? 'text-success bg-success/10'
@@ -98,7 +98,7 @@ export const AnswerBlock = memo(function AnswerBlock({
                   aria-label="Fork from here"
                   title="Fork from here"
                   className={cn(
-                    'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium',
+                    'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[0.7857rem] font-medium',
                     'text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer',
                   )}
                 >

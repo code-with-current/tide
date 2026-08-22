@@ -16,7 +16,7 @@ import { deriveProcessOpen, stepsCount } from './process-state';
 // persisted turn duration. A ticking interval would drift past totalMs.
 function Elapsed({ startedAt }: { startedAt: number }) {
   const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  return <span className="font-mono text-[11px] tabular-nums text-muted-foreground/70">{s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`}</span>;
+  return <span className="font-mono text-[0.7857rem] tabular-nums text-muted-foreground/70">{s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`}</span>;
 }
 
 export const ProcessContainer = memo(function ProcessContainer({
@@ -55,9 +55,9 @@ export const ProcessContainer = memo(function ProcessContainer({
           <ChevronDown className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/agent:opacity-100" style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
         </span>
         <span className="shrink-0 text-[0.85rem] font-medium text-foreground/80">Agent</span>
-        {steps > 0 && <span className="shrink-0 text-[11.5px] text-muted-foreground">· {steps} steps</span>}
+        {steps > 0 && <span className="shrink-0 text-[0.8214rem] text-muted-foreground">· {steps} steps</span>}
         {streaming && open && phaseHint ? (
-          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11.5px] text-muted-foreground">{phaseHint}…</span>
+          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.8214rem] text-muted-foreground">{phaseHint}…</span>
         ) : null}
         {streaming ? <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" /> : <Elapsed startedAt={startedAt} />}
       </button>

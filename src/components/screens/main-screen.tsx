@@ -1024,10 +1024,10 @@ export function MainScreen() {
                             <div className="flex items-start gap-2.5">
                               <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
                               <div className="flex-1 min-w-0">
-                                <div className="text-[12px] font-medium text-destructive">
+                                <div className="text-[0.8571rem] font-medium text-destructive">
                                   Turn Failed
                                 </div>
-                                <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
+                                <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
                                   {error}
                                 </div>
                               </div>

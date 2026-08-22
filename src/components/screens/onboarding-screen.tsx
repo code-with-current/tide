@@ -85,7 +85,7 @@ export function OnboardingScreen() {
             style={{ animation: 'fadeInUp 0.4s ease-out' }}
           >
             <div
-              className="text-[96px] font-extrabold leading-[0.9] font-mono select-none"
+              className="text-[6.8571rem] font-extrabold leading-[0.9] font-mono select-none"
               style={{
                 color: 'transparent',
                 WebkitTextStroke: '1px rgba(238,241,246,0.15)',
@@ -94,11 +94,11 @@ export function OnboardingScreen() {
             >
               {step === 'provider' ? '01' : '02'}
             </div>
-            <div className="text-[26px] font-bold tracking-tight mt-3">
+            <div className="text-[1.8571rem] font-bold tracking-tight mt-3">
               {step === 'provider' ? 'Connect your model' : 'Open a workspace'}
             </div>
             <div className="w-10 h-[3px] rounded-sm mt-4" style={{ background: '#d97757' }} />
-            <div className="text-[13px] text-muted-foreground/40 leading-relaxed mt-3 max-w-[280px]">
+            <div className="text-[0.9286rem] text-muted-foreground/40 leading-relaxed mt-3 max-w-[280px]">
               {step === 'provider'
                 ? 'Works with any Anthropic or OpenAI-compatible endpoint. Your key stays encrypted in the OS keychain.'
                 : 'Point Tide at a git repository. Each session gets its own worktree — your main branch stays untouched.'}
@@ -109,7 +109,7 @@ export function OnboardingScreen() {
           <div className="flex items-center gap-1.5">
             <div className={cn('h-[3px] rounded-sm transition-all duration-300', step === 'provider' ? 'w-7' : 'w-3 bg-muted-foreground/20')} style={step === 'provider' ? { background: '#d97757' } : {}} />
             <div className={cn('h-[3px] rounded-sm transition-all duration-300', step === 'workspace' ? 'w-7' : 'w-3 bg-muted-foreground/20')} style={step === 'workspace' ? { background: '#d97757' } : {}} />
-            <span className="text-[10px] text-muted-foreground/30 ml-2 uppercase tracking-[0.1em]">
+            <span className="text-[0.7143rem] text-muted-foreground/30 ml-2 uppercase tracking-[0.1em]">
               Step {step === 'provider' ? '1' : '2'} of 2
             </span>
           </div>
@@ -117,7 +117,7 @@ export function OnboardingScreen() {
 
         {/* Version tag */}
         <div
-          className="absolute bottom-12 right-12 text-[9px] text-muted-foreground/15 font-mono uppercase tracking-[0.15em]"
+          className="absolute bottom-12 right-12 text-[0.6429rem] text-muted-foreground/15 font-mono uppercase tracking-[0.15em]"
           style={{ writingMode: 'vertical-rl' }}
         >
           v{version}
@@ -381,7 +381,7 @@ function WorkspaceStep({
           </div>
         )}
         <div className="text-center mt-5">
-          <div className="text-[14px] font-medium">
+          <div className="text-[1rem] font-medium">
             {phase === 'creating' && 'Creating workspace…'}
             {phase === 'indexing' && (initProgress ? phaseLabelLocal(initProgress.phase) : 'Indexing codebase…')}
             {phase === 'done' && 'All set! Opening…'}
@@ -423,7 +423,7 @@ function WorkspaceStep({
 
                     {/* Stats line */}
                     {ip && !failed && (
-                      <div className="text-[11px] text-muted-foreground/60 font-mono flex items-center justify-center gap-3 tabular-nums">
+                      <div className="text-[0.7857rem] text-muted-foreground/60 font-mono flex items-center justify-center gap-3 tabular-nums">
                         {ip.phase === 'walking' && <span>{ip.filesSeen} files</span>}
                         {ip.phase === 'chunking' && (<><span>{ip.chunksTotal} chunks</span><span>{ip.filesSeen} files</span></>)}
                         {ip.phase === 'embedding' && ip.chunksTotal > 0 && (
@@ -436,21 +436,21 @@ function WorkspaceStep({
                       </div>
                     )}
                     {!ip && (
-                      <div className="text-[11px] text-muted-foreground/40">
+                      <div className="text-[0.7857rem] text-muted-foreground/40">
                         Starting indexer…
                       </div>
                     )}
 
                     {/* Current file */}
                     {ip && !failed && ip.currentFile && (
-                      <div className="text-[10px] text-muted-foreground/40 font-mono truncate text-center max-w-[320px] mx-auto" title={ip.currentFile}>
+                      <div className="text-[0.7143rem] text-muted-foreground/40 font-mono truncate text-center max-w-[320px] mx-auto" title={ip.currentFile}>
                         {ip.currentFile}
                       </div>
                     )}
 
                     {/* Error */}
                     {failed && ip?.error && (
-                      <div className="text-[11px] text-destructive/70 font-mono text-left bg-destructive/5 rounded-md p-2 break-words">
+                      <div className="text-[0.7857rem] text-destructive/70 font-mono text-left bg-destructive/5 rounded-md p-2 break-words">
                         {ip.error}
                       </div>
                     )}
@@ -461,7 +461,7 @@ function WorkspaceStep({
           )}
 
           {phase === 'error' && error && (
-            <div className="text-[11px] text-destructive/60 mt-1.5 max-w-[300px] font-mono">{error}</div>
+            <div className="text-[0.7857rem] text-destructive/60 mt-1.5 max-w-[300px] font-mono">{error}</div>
           )}
         </div>
         {phase === 'error' && (
@@ -496,7 +496,7 @@ function WorkspaceStep({
           {source === 'local' && (
             <Field label="Repository path">
               <div className="flex gap-2 mb-2">
-                <Input className="font-mono text-[12px] flex-1 h-[36px] bg-secondary/60 border-border/60" value={localPath}
+                <Input className="font-mono text-[0.8571rem] flex-1 h-[36px] bg-secondary/60 border-border/60" value={localPath}
                   onChange={e => setLocalPath(e.target.value)} placeholder="/path/to/repo" />
                 <Button variant="secondary" size="sm" className="h-[36px] gap-1.5" onClick={() => handleBrowse('local')}>
                   <Folder className="size-3.5" /> Browse
@@ -505,11 +505,11 @@ function WorkspaceStep({
               {!localPath && <Hint icon={<Folder className="size-3.5" />}>Browse for a folder with a .git directory.</Hint>}
               {localPath && gitChecking && <Hint loading><Loader2 className="size-3.5 animate-spin" /> Checking git…</Hint>}
               {localPath && !gitChecking && gitInfo && (
-                <div className="rounded-lg px-3 py-2 flex items-center gap-2 text-[11px] border flex-wrap"
+                <div className="rounded-lg px-3 py-2 flex items-center gap-2 text-[0.7857rem] border flex-wrap"
                   style={{ background: 'rgba(52,211,153,0.05)', borderColor: 'rgba(52,211,153,0.15)', color: 'var(--success)' }}>
                   <CheckCircle2 className="size-3.5" /> Git detected
                   <span className="opacity-40">·</span>
-                  <code className="font-mono text-[10px] opacity-70">{gitInfo.branch} @ {gitInfo.headCommit}</code>
+                  <code className="font-mono text-[0.7143rem] opacity-70">{gitInfo.branch} @ {gitInfo.headCommit}</code>
                 </div>
               )}
               {localPath && !gitChecking && gitError && (
@@ -518,8 +518,8 @@ function WorkspaceStep({
                     <TriangleAlert className="size-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-semibold">{gitError}</div>
-                    <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                    <div className="text-[0.8571rem] font-semibold">{gitError}</div>
+                    <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed">
                       Initialize git repo on this folder.
                     </div>
                   </div>
@@ -533,12 +533,12 @@ function WorkspaceStep({
           {source === 'remote' && (
             <>
               <Field label="Git URL">
-                <Input className="font-mono text-[12px] h-[36px] bg-secondary/60 border-border/60" value={remoteUrl}
+                <Input className="font-mono text-[0.8571rem] h-[36px] bg-secondary/60 border-border/60" value={remoteUrl}
                   onChange={e => setRemoteUrl(e.target.value)} placeholder="https://github.com/owner/repo.git" />
               </Field>
               <Field label="Clone destination">
                 <div className="flex gap-2">
-                  <Input className="font-mono text-[12px] flex-1 h-[36px] bg-secondary/60 border-border/60" value={cloneDir}
+                  <Input className="font-mono text-[0.8571rem] flex-1 h-[36px] bg-secondary/60 border-border/60" value={cloneDir}
                     onChange={e => setCloneDir(e.target.value)} placeholder="/parent/directory" />
                   <Button variant="secondary" size="sm" className="h-[36px] gap-1.5" onClick={() => handleBrowse('clone')}>
                     <Folder className="size-3.5" /> Browse
@@ -557,25 +557,25 @@ function WorkspaceStep({
                   <Terminal className="size-4" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold">Add script</div>
-                  <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">
+                  <div className="text-[0.8571rem] font-semibold">Add script</div>
+                  <div className="text-[0.7857rem] text-muted-foreground/50 mt-0.5 leading-relaxed">
                     Bind install & run commands to this workspace.
                   </div>
                   {addScript && (
                     <div className="grid grid-cols-2 gap-2 mt-3">
                       <div>
-                        <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Install</label>
+                        <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Install</label>
                         <Input
-                          className="font-mono text-[12px] h-[34px]"
+                          className="font-mono text-[0.8571rem] h-[34px]"
                           value={installCmd}
                           onChange={(e) => setInstallCmd(e.target.value)}
                           placeholder="npm install"
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Running</label>
+                        <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Running</label>
                         <Input
-                          className="font-mono text-[12px] h-[34px]"
+                          className="font-mono text-[0.8571rem] h-[34px]"
                           value={runCmd}
                           onChange={(e) => setRunCmd(e.target.value)}
                           placeholder="npm run dev"
@@ -594,11 +594,11 @@ function WorkspaceStep({
                   borderColor: enableRag ? 'rgba(52,211,153,0.25)' : 'rgba(52,211,153,0.12)',
                 }}>
                 <div className="flex items-start gap-3">
-                  <div className="size-8 rounded-lg flex items-center justify-center shrink-0 text-[15px]"
+                  <div className="size-8 rounded-lg flex items-center justify-center shrink-0 text-[1.0714rem]"
                     style={{ background: 'rgba(52,211,153,0.08)', color: '#34d399' }}>◈</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-semibold">Enable RAG</div>
-                    <div className="text-[11px] text-muted-foreground/50 mt-0.5 leading-relaxed">
+                    <div className="text-[0.8571rem] font-semibold">Enable RAG</div>
+                    <div className="text-[0.7857rem] text-muted-foreground/50 mt-0.5 leading-relaxed">
                       Indexes your codebase locally for semantic search.
                     </div>
                   </div>
@@ -608,7 +608,7 @@ function WorkspaceStep({
                   <div className="mt-3 pt-3 border-t" style={{ borderColor: 'rgba(52,211,153,0.12)' }}>
                     <div className="flex items-start gap-2">
                       <Download className="size-3.5 text-emerald-400/70 mt-0.5 shrink-0" />
-                      <div className="text-[11px] text-muted-foreground/60 leading-relaxed">
+                      <div className="text-[0.7857rem] text-muted-foreground/60 leading-relaxed">
                         A <span className="font-medium text-muted-foreground/80">22 MB</span> embedding model
                         (all-MiniLM-L6-v2) downloads from{' '}
                         <span className="font-mono text-muted-foreground/70">huggingface.co</span>{' '}
@@ -622,7 +622,7 @@ function WorkspaceStep({
                         <Button
                           variant="secondary"
                           size="sm"
-                          className="h-[28px] text-[11px] gap-1.5"
+                          className="h-[28px] text-[0.7857rem] gap-1.5"
                           onClick={handleDownloadModel}
                         >
                           <Download className="size-3" />
@@ -642,7 +642,7 @@ function WorkspaceStep({
                               }}
                             />
                           </div>
-                          <div className="text-[10px] text-muted-foreground/50 font-mono flex items-center gap-1.5">
+                          <div className="text-[0.7143rem] text-muted-foreground/50 font-mono flex items-center gap-1.5">
                             <Loader2 className="size-2.5 animate-spin" />
                             {downloadProgress && downloadProgress.total > 0
                               ? `${(downloadProgress.received / 1048576).toFixed(1)} / ${(downloadProgress.total / 1048576).toFixed(1)} MB`
@@ -651,7 +651,7 @@ function WorkspaceStep({
                         </div>
                       )}
                       {dlState === 'done' && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+                        <div className="flex items-center gap-1.5 text-[0.7857rem] text-emerald-400/80">
                           <CheckCircle2 className="size-3.5" />
                           Model ready
                           <span className="text-muted-foreground/30 font-mono ml-1">
@@ -661,14 +661,14 @@ function WorkspaceStep({
                       )}
                       {dlState === 'error' && (
                         <div className="space-y-1.5">
-                          <div className="flex items-center gap-1.5 text-[11px] text-destructive/70">
+                          <div className="flex items-center gap-1.5 text-[0.7857rem] text-destructive/70">
                             <AlertCircle className="size-3.5" />
                             {dlError ?? 'Download failed'}
                           </div>
                           <Button
                             variant="secondary"
                             size="sm"
-                            className="h-[24px] text-[10px] gap-1.5"
+                            className="h-[24px] text-[0.7143rem] gap-1.5"
                             onClick={handleDownloadModel}
                           >
                             <Download className="size-2.5" />
@@ -706,7 +706,7 @@ function WorkspaceStep({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/40 block mb-2">{label}</label>
+      <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground/40 block mb-2">{label}</label>
       {children}
     </div>
   );
@@ -715,7 +715,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Hint({ children, icon, loading, warn }: { children: React.ReactNode; icon?: React.ReactNode; loading?: boolean; warn?: boolean }) {
   return (
     <div className={cn(
-      'rounded-lg px-3 py-2 flex items-center gap-2 text-[11px] border',
+      'rounded-lg px-3 py-2 flex items-center gap-2 text-[0.7857rem] border',
       warn
         ? 'text-warning border-warning/15 bg-warning/[0.04]'
         : loading
@@ -763,7 +763,7 @@ function SourceTab({
   return (
     <button onClick={onClick}
       className={cn(
-        'flex-1 py-1.5 px-3 rounded-[6px] text-[12px] font-medium text-center transition-all flex items-center justify-center gap-1.5',
+        'flex-1 py-1.5 px-3 rounded-[6px] text-[0.8571rem] font-medium text-center transition-all flex items-center justify-center gap-1.5',
         active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground/80',
       )}>
       {icon}

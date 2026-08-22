@@ -74,7 +74,7 @@ function PresetConnectStep({
 
       <FormField id="wizard-name" label="Provider name">
         <Input
-          className="h-8 text-[12.5px]"
+          className="h-8 text-[0.8929rem]"
           value={state.name}
           onChange={(e) => dispatch({ type: 'patch', patch: { name: e.target.value } })}
         />
@@ -84,7 +84,7 @@ function PresetConnectStep({
         <FormField id="wizard-key" label="API key">
           <Input
             type="password"
-            className="font-mono text-[12px] h-8"
+            className="font-mono text-[0.8571rem] h-8"
             value={state.apiKey}
             placeholder={preset.keyPlaceholder}
             onChange={(e) => dispatch({ type: 'patch', patch: { apiKey: e.target.value } })}
@@ -97,7 +97,7 @@ function PresetConnectStep({
                   href={preset.keyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[10px] text-primary/70 hover:text-primary shrink-0"
+                  className="text-[0.7143rem] text-primary/70 hover:text-primary shrink-0"
                 >
                   Get a key ↗
                 </a>
@@ -106,21 +106,21 @@ function PresetConnectStep({
           />
         </FormField>
       ) : (
-        <p className="text-[11px] text-muted-foreground/60 flex items-center gap-1.5">
+        <p className="text-[0.7857rem] text-muted-foreground/60 flex items-center gap-1.5">
           <Server className="size-3" />
           No key needed — Tide talks to {host} locally.
         </p>
       )}
 
       {test.status === 'error' && test.error && (
-        <p className="text-[11px] text-destructive">{test.error}</p>
+        <p className="text-[0.7857rem] text-destructive">{test.error}</p>
       )}
 
       <div>
         <button
           type="button"
           onClick={() => setAdvanced((a) => !a)}
-          className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
+          className="flex items-center gap-1 text-[0.7857rem] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
         >
           {advanced ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
           Advanced
@@ -133,7 +133,7 @@ function PresetConnectStep({
             </div>
             <FormField id="wizard-base-url" label="Base URL">
               <Input
-                className="font-mono text-[12px] h-8"
+                className="font-mono text-[0.8571rem] h-8"
                 value={state.baseUrl}
                 placeholder={PROTOCOL[state.apiStyle].baseUrlPlaceholder}
                 onChange={(e) => dispatch({ type: 'patch', patch: { baseUrl: e.target.value } })}
@@ -207,7 +207,7 @@ function CustomConnectStep({
 
         <FormField id="wizard-name" label="Provider name">
           <Input
-            className="h-8 text-[12.5px]"
+            className="h-8 text-[0.8929rem]"
             value={state.name}
             placeholder="OpenRouter, z.ai, LM Studio…"
             onChange={(e) => dispatch({ type: 'patch', patch: { name: e.target.value } })}
@@ -216,7 +216,7 @@ function CustomConnectStep({
 
         <FormField id="wizard-base-url" label="Base URL">
           <Input
-            className="font-mono text-[12px] h-8"
+            className="font-mono text-[0.8571rem] h-8"
             value={state.baseUrl}
             placeholder={PROTOCOL[state.apiStyle].baseUrlPlaceholder}
             onChange={(e) => dispatch({ type: 'patch', patch: { baseUrl: e.target.value } })}
@@ -226,7 +226,7 @@ function CustomConnectStep({
         <FormField id="wizard-key" label="API key">
           <Input
             type="password"
-            className="font-mono text-[12px] h-8"
+            className="font-mono text-[0.8571rem] h-8"
             value={state.apiKey}
             placeholder={PROTOCOL[state.apiStyle].keyPlaceholder}
             onChange={(e) => dispatch({ type: 'patch', patch: { apiKey: e.target.value } })}
@@ -257,11 +257,11 @@ function CustomConnectStep({
               </>
             )}
           </Button>
-          {detectError && <span className="text-[11px] text-destructive">{detectError}</span>}
+          {detectError && <span className="text-[0.7857rem] text-destructive">{detectError}</span>}
         </div>
 
         {test.status === 'error' && test.error && (
-          <p className="text-[11px] text-destructive">{test.error}</p>
+          <p className="text-[0.7857rem] text-destructive">{test.error}</p>
         )}
       </section>
     </div>
@@ -271,7 +271,7 @@ function CustomConnectStep({
 function KeychainHint({ apiStyle, action }: { apiStyle: ApiStyle; action?: ReactNode }) {
   return (
     <div className="flex items-center justify-between mt-1 gap-2">
-      <p className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
+      <p className="text-[0.7143rem] text-muted-foreground/50 flex items-center gap-1">
         <ShieldCheck className="size-2.5 text-success" />
         Sent as <span className="font-mono">{PROTOCOL[apiStyle].authHeader}</span>. Stored in the
         OS keychain.

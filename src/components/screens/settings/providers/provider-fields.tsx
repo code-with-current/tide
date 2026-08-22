@@ -48,17 +48,17 @@ export function EndpointPreview({
     <div className="rounded-lg border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent p-3.5">
       <div className="flex items-center gap-2 mb-2">
         <Plug className="size-3.5 text-primary" />
-        <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/60">
+        <span className="text-[0.7143rem] uppercase tracking-wider font-semibold text-muted-foreground/60">
           Resolved endpoint
         </span>
         <Badge
           variant="secondary"
-          className="ml-auto text-[9px] uppercase tracking-wide"
+          className="ml-auto text-[0.6429rem] uppercase tracking-wide"
         >
           {apiStyle === "openai" ? "OpenAI" : "Anthropic"}
         </Badge>
       </div>
-      <code className="font-mono text-[12px] text-foreground break-all leading-relaxed block min-h-[1.1em]">
+      <code className="font-mono text-[0.8571rem] text-foreground break-all leading-relaxed block min-h-[1.1em]">
         {full || (
           <span className="text-muted-foreground/40">
             Enter a base URL to preview the endpoint…
@@ -74,7 +74,7 @@ export function EndpointPreview({
         )}
       </code>
       <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-border/50">
-        <span className="text-[10px] text-muted-foreground/45">
+        <span className="text-[0.7143rem] text-muted-foreground/45">
           SDK posts tool-calling requests here
         </span>
         {full && <CopyButton text={full} />}
@@ -97,11 +97,11 @@ export function SectionLabel({
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-muted-foreground/55">{icon}</span>
-      <h3 className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/60">
+      <h3 className="text-[0.7143rem] uppercase tracking-wider font-semibold text-muted-foreground/60">
         {children}
       </h3>
       {count != null && (
-        <Badge variant="secondary" className="text-[9px] font-mono">
+        <Badge variant="secondary" className="text-[0.6429rem] font-mono">
           {count}
         </Badge>
       )}
@@ -125,7 +125,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={copy}
-      className="flex items-center gap-1 text-[10px] text-muted-foreground/55 hover:text-foreground cursor-pointer transition-colors"
+      className="flex items-center gap-1 text-[0.7143rem] text-muted-foreground/55 hover:text-foreground cursor-pointer transition-colors"
     >
       {copied ? (
         <>
@@ -165,14 +165,14 @@ export function FetchSection({
   return (
     <div className="border-b border-border/60 last:border-b-0">
       <div className="flex items-center gap-1.5 px-4 py-1.5 sticky top-0 bg-popover/95 backdrop-blur z-[1]">
-        <span className={cn("text-[11px]", toneClass)}>{icon}</span>
-        <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+        <span className={cn("text-[0.7857rem]", toneClass)}>{icon}</span>
+        <span className="text-[0.7143rem] uppercase tracking-wider font-semibold text-muted-foreground/70">
           {label}
         </span>
-        <Badge variant="secondary" className="text-[8px] px-1 py-0 font-mono">
+        <Badge variant="secondary" className="text-[0.5714rem] px-1 py-0 font-mono">
           {count}
         </Badge>
-        <span className="text-[9px] text-muted-foreground/40 ml-auto lowercase">
+        <span className="text-[0.6429rem] text-muted-foreground/40 ml-auto lowercase">
           {hint}
         </span>
       </div>
@@ -216,7 +216,7 @@ export function FetchRow({
         <span className="size-3.5 rounded border border-border/60 flex items-center justify-center shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1">
-            <code className="font-mono text-[11px] text-foreground/60 truncate">
+            <code className="font-mono text-[0.7857rem] text-foreground/60 truncate">
               {modelId}
             </code>
             {reasoning && <Brain className="size-3 text-reasoning/70 shrink-0" />}
@@ -224,14 +224,14 @@ export function FetchRow({
             {disabledNote && (
               <Badge
                 variant="secondary"
-                className="text-[8px] px-1 py-0 uppercase text-muted-foreground/70 shrink-0"
+                className="text-[0.5714rem] px-1 py-0 uppercase text-muted-foreground/70 shrink-0"
               >
                 {disabledNote}
               </Badge>
             )}
           </div>
           {meta && (
-            <div className="text-[10px] text-muted-foreground/45 pl-4 truncate">
+            <div className="text-[0.7143rem] text-muted-foreground/45 pl-4 truncate">
               {meta}
             </div>
           )}
@@ -258,7 +258,7 @@ export function FetchRow({
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1">
-          <code className="font-mono text-[11px] text-foreground/80 truncate">
+          <code className="font-mono text-[0.7857rem] text-foreground/80 truncate">
             {modelId}
           </code>
           {reasoning && <Brain className="size-3 text-reasoning shrink-0" />}
@@ -266,7 +266,7 @@ export function FetchRow({
           {mandatory && (
             <Badge
               variant="secondary"
-              className="text-[8px] px-1 py-0 uppercase text-reasoning/80 shrink-0"
+              className="text-[0.5714rem] px-1 py-0 uppercase text-reasoning/80 shrink-0"
               title="reasoning always on"
             >
               always
@@ -274,7 +274,7 @@ export function FetchRow({
           )}
         </div>
         {meta && (
-          <div className="text-[10px] text-muted-foreground/55 pl-4 truncate">
+          <div className="text-[0.7143rem] text-muted-foreground/55 pl-4 truncate">
             {meta}
           </div>
         )}
@@ -294,7 +294,7 @@ export function FormField({
 }) {
   return (
     <div className="space-y-1">
-      <Label htmlFor={id} className="text-[11px] text-muted-foreground/60">
+      <Label htmlFor={id} className="text-[0.7857rem] text-muted-foreground/60">
         {label}
       </Label>
       {children}
@@ -371,13 +371,13 @@ function StyleCard({
       <div className="flex-1 min-w-0">
         <div
           className={cn(
-            "text-[12.5px] font-semibold tracking-tight",
+            "text-[0.8929rem] font-semibold tracking-tight",
             active ? "text-foreground" : "text-foreground/80",
           )}
         >
           {title}
         </div>
-        <div className="text-[10px] text-muted-foreground/55 font-mono mt-0.5 truncate">
+        <div className="text-[0.7143rem] text-muted-foreground/55 font-mono mt-0.5 truncate">
           {detail}
         </div>
       </div>

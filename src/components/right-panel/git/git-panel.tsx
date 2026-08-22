@@ -266,7 +266,7 @@ export function GitPanel() {
             trigger={
               <button
                 type="button"
-                className="flex items-center gap-1.5 h-6 px-1.5 rounded-md text-[11px] hover:bg-secondary/60 transition-colors min-w-0"
+                className="flex items-center gap-1.5 h-6 px-1.5 rounded-md text-[0.7857rem] hover:bg-secondary/60 transition-colors min-w-0"
                 title="Switch branch"
               >
                 <GitBranch className="size-3 flex-shrink-0" />
@@ -277,7 +277,7 @@ export function GitPanel() {
           />
           <BranchBadges />
           {activeSession?.worktree && (
-            <span className="text-[9px] uppercase tracking-wide opacity-70">worktree</span>
+            <span className="text-[0.6429rem] uppercase tracking-wide opacity-70">worktree</span>
           )}
 
         </div>
@@ -294,7 +294,7 @@ export function GitPanel() {
         <>
           { changesCount === 0 ? null : <div className="flex items-center gap-1.5 px-2 py-1.5 flex-shrink-0 bg-card">
             {/* Changes summary */}
-            {<span className="text-[11px] flex gap-1 items-center font-mono tabular-nums whitespace-nowrap">
+            {<span className="text-[0.7857rem] flex gap-1 items-center font-mono tabular-nums whitespace-nowrap">
               <Diff className="size-3" />
               <span>Diff</span>
               <span className="text-emerald-400">+{totalAdd}</span>
@@ -387,12 +387,12 @@ export function GitPanel() {
                         className="flex items-center gap-1.5 px-3 py-1 text-[0.78rem] min-w-0 hover:bg-destructive/10 transition-colors"
                       >
                         <span className="min-w-0 flex-1 truncate font-mono text-foreground/80" title={c.path}>{c.path}</span>
-                        <span className="flex-shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        <span className="flex-shrink-0 text-[0.7143rem] uppercase tracking-wide text-muted-foreground">
                           {c.state.replaceAll('-', ' ')}
                         </span>
                         <Button
                           variant="outline" size="xs"
-                          className="h-5 px-1.5 text-[10px]"
+                          className="h-5 px-1.5 text-[0.7143rem]"
                           disabled={resolveMutation.isPending}
                           onClick={() => handleResolve(c.path, 'ours')}
                         >
@@ -400,7 +400,7 @@ export function GitPanel() {
                         </Button>
                         <Button
                           variant="outline" size="xs"
-                          className="h-5 px-1.5 text-[10px]"
+                          className="h-5 px-1.5 text-[0.7143rem]"
                           disabled={resolveMutation.isPending}
                           onClick={() => handleResolve(c.path, 'theirs')}
                         >
@@ -469,13 +469,13 @@ export function GitPanel() {
       ) : (
         <>
           <div className="flex items-center gap-0.5 px-2 py-1 flex-shrink-0">
-            <span className="text-[11px] text-muted-foreground/50 px-1">{history?.length ?? 0} commits</span>
+            <span className="text-[0.7857rem] text-muted-foreground/50 px-1">{history?.length ?? 0} commits</span>
             <div className="flex-1" />
             <Button variant="ghost" size="icon-xs" onClick={() => refetchHistory()} aria-label="Refresh history" title="Refresh">
               <RefreshCw className={cn('size-3 transition-transform', historyFetching && 'animate-spin')} />
             </Button>
           </div>
-          <div className={cn(HISTORY_GRID, 'px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground/40')}>
+          <div className={cn(HISTORY_GRID, 'px-2 pb-1 text-[0.7143rem] uppercase tracking-wide text-muted-foreground/40')}>
             <span className="col-start-2">Subject</span>
             <span className="justify-self-end">Date</span>
             <span className="w-28 text-right">Author</span>

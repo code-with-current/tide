@@ -113,7 +113,7 @@ export function ProvidersSection() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search providers…"
-              className="w-full h-7 pl-7 pr-2 text-[11.5px] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+              className="w-full h-7 pl-7 pr-2 text-[0.8214rem] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
             />
           </div>
           <Button
@@ -123,11 +123,11 @@ export function ProvidersSection() {
             <Plus className="size-3.5" /> Add Provider
           </Button>
           <div className="flex items-center justify-between px-1 pt-1">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/55 font-semibold">
+            <span className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/55 font-semibold">
               Providers
             </span>
             {filtered && filtered.length > 0 && (
-              <Badge variant="secondary" className="font-mono text-[9px]">
+              <Badge variant="secondary" className="font-mono text-[0.6429rem]">
                 {filtered.length}
               </Badge>
             )}
@@ -243,12 +243,12 @@ function ProviderListItem({
       {/* Name + subtitle (host) — two-line read like the Workspace rows. */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-[11.5px] font-medium truncate">
+          <span className="text-[0.8214rem] font-medium truncate">
             {provider.name}
           </span>
         </div>
         {host && (
-          <span className="block text-[9.5px] text-muted-foreground/45 font-mono truncate -mt-0.5">
+          <span className="block text-[0.6786rem] text-muted-foreground/45 font-mono truncate -mt-0.5">
             {host}
           </span>
         )}
@@ -258,7 +258,7 @@ function ProviderListItem({
       {modelCount > 0 && (
         <Badge
           variant="secondary"
-          className="font-mono text-[9px] px-1 py-0 shrink-0"
+          className="font-mono text-[0.6429rem] px-1 py-0 shrink-0"
           title={`${modelCount} model${modelCount === 1 ? "" : "s"}`}
         >
           {modelCount}
@@ -277,7 +277,7 @@ function ProviderListItem({
           title="Enabled"
         />
       ) : (
-        <span className="text-[9px] text-muted-foreground/45 shrink-0" title="Disabled">
+        <span className="text-[0.6429rem] text-muted-foreground/45 shrink-0" title="Disabled">
           off
         </span>
       )}
@@ -397,7 +397,7 @@ function ProviderDetail({
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold truncate">{provider.name}</div>
-          <div className="text-[11px] text-muted-foreground/55">
+          <div className="text-[0.7857rem] text-muted-foreground/55">
             Edits save automatically.
           </div>
         </div>
@@ -419,7 +419,7 @@ function ProviderDetail({
             </SectionLabel>
             <FormField id="name" label="Provider name">
               <Input
-                className="h-8 text-[12.5px]"
+                className="h-8 text-[0.8929rem]"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="OpenRouter, z.ai, LM Studio…"
@@ -428,12 +428,12 @@ function ProviderDetail({
 
             <FormField id="baseUrl" label="Base URL">
               <Input
-                className="font-mono text-[12px] h-8"
+                className="font-mono text-[0.8571rem] h-8"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 placeholder={PROTOCOL[apiStyle].baseUrlPlaceholder}
               />
-              <p className="text-[10px] text-muted-foreground/50 mt-1">
+              <p className="text-[0.7143rem] text-muted-foreground/50 mt-1">
                 {apiStyle === "anthropic" ? (
                   <>
                     Official:{" "}
@@ -455,7 +455,7 @@ function ProviderDetail({
             <FormField id="key" label="API key">
               <Input
                 type="password"
-                className="font-mono text-[12px] h-8"
+                className="font-mono text-[0.8571rem] h-8"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder={
@@ -465,7 +465,7 @@ function ProviderDetail({
                 }
               />
               <div className="flex items-center justify-between mt-1 gap-2">
-                <p className="text-[10px] text-muted-foreground/50 flex items-center gap-1">
+                <p className="text-[0.7143rem] text-muted-foreground/50 flex items-center gap-1">
                   <ShieldCheck className="size-2.5 text-success" />
                   Sent as{" "}
                   <span className="font-mono">
@@ -474,11 +474,11 @@ function ProviderDetail({
                   . Stored in the OS keychain.
                 </p>
                 {hasStoredKey ? (
-                  <span className="text-[10px] text-success flex items-center gap-0.5 shrink-0">
+                  <span className="text-[0.7143rem] text-success flex items-center gap-0.5 shrink-0">
                     <Check className="size-2.5" /> Key on file
                   </span>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground/45 shrink-0">
+                  <span className="text-[0.7143rem] text-muted-foreground/45 shrink-0">
                     No key set
                   </span>
                 )}
@@ -662,7 +662,7 @@ export function FetchModelsButton({
       <div className="flex items-center gap-2 min-w-0">
         {state.status === "error" && state.error && (
           <span
-            className="text-[10px] text-destructive truncate max-w-[280px]"
+            className="text-[0.7143rem] text-destructive truncate max-w-[280px]"
             title={state.error}
           >
             {state.error}
@@ -673,7 +673,7 @@ export function FetchModelsButton({
           size="sm"
           disabled={disabled}
           onClick={fetchModels}
-          className="text-[11px] h-7 text-muted-foreground hover:text-foreground shrink-0"
+          className="text-[0.7857rem] h-7 text-muted-foreground hover:text-foreground shrink-0"
           title={
             disabled && !baseUrl.trim()
               ? "Enter a base URL first"
@@ -702,12 +702,12 @@ export function FetchModelsButton({
               <Brain className="size-4 text-primary" /> Fetch models
               <Badge
                 variant="secondary"
-                className="ml-auto text-[9px] uppercase"
+                className="ml-auto text-[0.6429rem] uppercase"
               >
                 {apiStyle === "anthropic" ? "Anthropic" : "OpenAI"}
               </Badge>
             </DialogTitle>
-            <DialogDescription className="text-[11px] mt-0.5">
+            <DialogDescription className="text-[0.7857rem] mt-0.5">
               Live data from the provider where available; auto-matched against
               the models.dev catalog otherwise.
             </DialogDescription>
@@ -818,7 +818,7 @@ export function FetchModelsButton({
           )}
 
           <DialogFooter className="px-4 py-2.5 border-t border-border bg-secondary/30 flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted-foreground/60">
+            <span className="text-[0.7857rem] text-muted-foreground/60">
               {selectedCount > 0
                 ? `${selectedCount} selected`
                 : "Select models to add"}
@@ -869,7 +869,7 @@ function EnableToggle({ provider }: { provider: Provider }) {
   };
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[10px] text-muted-foreground/55">
+      <span className="text-[0.7143rem] text-muted-foreground/55">
         {on ? "on" : "off"}
       </span>
       <Switch checked={on} disabled={busy} onCheckedChange={toggle} />
@@ -910,7 +910,7 @@ function DeleteProviderAction({
         <Button
           variant="ghost"
           size="sm"
-          className="text-[11px] h-7 text-muted-foreground/55 hover:text-destructive px-2"
+          className="text-[0.7857rem] h-7 text-muted-foreground/55 hover:text-destructive px-2"
         >
           <Trash2 className="size-3" /> Delete
         </Button>

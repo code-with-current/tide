@@ -54,11 +54,11 @@ export function RagIndexProgress({ event }: { event: RagInitProgressEvent | null
         ) : (
           <Loader2 className="size-3.5 animate-spin text-emerald-400 shrink-0" />
         )}
-        <span className={cn('text-[12px] font-semibold flex-1 min-w-0 truncate', failed && 'text-destructive')}>
+        <span className={cn('text-[0.8571rem] font-semibold flex-1 min-w-0 truncate', failed && 'text-destructive')}>
           {phaseLabel(event.phase)}
         </span>
         {determinate && (
-          <span className="text-[11px] font-mono text-muted-foreground tabular-nums">{pct}%</span>
+          <span className="text-[0.7857rem] font-mono text-muted-foreground tabular-nums">{pct}%</span>
         )}
       </div>
 
@@ -73,21 +73,21 @@ export function RagIndexProgress({ event }: { event: RagInitProgressEvent | null
 
       {/* Error body (failed only). */}
       {failed && event.error && (
-        <pre className="text-[10px] leading-relaxed text-destructive/80 whitespace-pre-wrap break-words font-mono bg-destructive/5 rounded-md p-2">
+        <pre className="text-[0.7143rem] leading-relaxed text-destructive/80 whitespace-pre-wrap break-words font-mono bg-destructive/5 rounded-md p-2">
           {event.error}
         </pre>
       )}
 
       {/* Current file — surfaced for the first time (was unused before). */}
       {!failed && event.currentFile && (
-        <div className="text-[10px] text-muted-foreground/60 font-mono truncate" title={event.currentFile}>
+        <div className="text-[0.7143rem] text-muted-foreground/60 font-mono truncate" title={event.currentFile}>
           {event.currentFile}
         </div>
       )}
 
       {/* Counts line. */}
       {!failed && counts && (
-        <div className="text-[11px] text-muted-foreground/70 font-mono">{counts}</div>
+        <div className="text-[0.7857rem] text-muted-foreground/70 font-mono">{counts}</div>
       )}
     </div>
   );

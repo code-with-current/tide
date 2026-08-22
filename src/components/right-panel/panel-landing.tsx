@@ -42,7 +42,7 @@ function LandingTile({
       >
         {icon}
       </span>
-      <span className="text-[11.5px] font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+      <span className="text-[0.8214rem] font-medium text-muted-foreground group-hover:text-foreground transition-colors">
         {title}
       </span>
     </button>

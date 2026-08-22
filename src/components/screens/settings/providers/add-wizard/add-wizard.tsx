@@ -126,7 +126,7 @@ export function AddProviderWizard({
             >
               <span
                 className={cn(
-                  'size-6 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-mono font-semibold',
+                  'size-6 rounded-lg flex items-center justify-center shrink-0 text-[0.7143rem] font-mono font-semibold',
                   current
                     ? 'bg-primary text-primary-foreground'
                     : completed
@@ -142,7 +142,7 @@ export function AddProviderWizard({
               </span>
               <span
                 className={cn(
-                  'text-[12px]',
+                  'text-[0.8571rem]',
                   current
                     ? 'text-foreground font-semibold'
                     : completed
@@ -188,17 +188,17 @@ export function AddProviderWizard({
       </Button>
       <div className="flex items-center gap-2.5 min-w-0">
         {state.step === 'connect' && test.status === 'ok' && (
-          <span className="text-[11px] text-success flex items-center gap-1 shrink-0">
+          <span className="text-[0.7857rem] text-success flex items-center gap-1 shrink-0">
             <Check className="size-3" /> Connection verified
           </span>
         )}
         {state.step === 'connect' && test.status === 'error' && test.error && (
-          <span className="text-[11px] text-destructive truncate max-w-[280px]" title={test.error}>
+          <span className="text-[0.7857rem] text-destructive truncate max-w-[280px]" title={test.error}>
             {test.error}
           </span>
         )}
         {saveError && (
-          <span className="text-[11px] text-destructive truncate max-w-[280px]" title={saveError}>
+          <span className="text-[0.7857rem] text-destructive truncate max-w-[280px]" title={saveError}>
             {saveError}
           </span>
         )}
