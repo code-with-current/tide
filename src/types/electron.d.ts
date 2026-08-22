@@ -232,7 +232,7 @@ declare global {
       clearAllSessions: () => Promise<{ ok: boolean }>;
       renameSession(sessionId: string, title: string): Promise<void>;
       generateSessionTitle(sessionId: string): Promise<string | null>;
-      getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
+      getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean; utilityModel?: { providerId: string; modelId: string } | null }>;
       updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
       getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
       updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;

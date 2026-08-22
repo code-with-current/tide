@@ -68,25 +68,36 @@ interface ActiveDispatch {
 }
 const activeDispatch = new Map<string, ActiveDispatch>();
 
-/** Find-or-create this workspace's hidden git-tools session. Model settings
- *  copy the active session (or the composer's selected model) so the turn
- *  bills to the provider the user actually uses. */
+/** Find-or-create this workspace's hidden git-tools session. The settings'
+ *  utility-model override (if set) pins the provider+model so commit-message
+ *  generation doesn't bill to / depend on the session's chat model; the
+ *  default copies the active session (or the composer's selected model). */
 async function ensureUtilitySession(workspaceId: string): Promise<string> {
   const cached = utilitySessions.get(workspaceId);
   if (cached) return cached;
   const created = (async () => {
     let modelId = '';
     let providerId: string | undefined;
-    const activeId = useUi.getState().activeSessionId;
-    if (activeId) {
-      const s = await api.getSession(activeId).catch(() => null);
-      modelId = s?.modelId ?? '';
-      providerId = s?.providerId ?? undefined;
-    }
+    try {
+      const s = await window.tideIpc?.getAgentSettings();
+      const utility = s?.utilityModel as { providerId: string; modelId: string } | undefined;
+      if (utility?.providerId && utility.modelId) {
+        modelId = utility.modelId;
+        providerId = utility.providerId;
+      }
+    } catch { /* fall through to session default */ }
     if (!modelId) {
-      const ui = useUi.getState();
-      modelId = ui.selectedModelId ?? '';
-      providerId = ui.selectedProviderId ?? undefined;
+      const activeId = useUi.getState().activeSessionId;
+      if (activeId) {
+        const s = await api.getSession(activeId).catch(() => null);
+        modelId = s?.modelId ?? '';
+        providerId = s?.providerId ?? undefined;
+      }
+      if (!modelId) {
+        const ui = useUi.getState();
+        modelId = ui.selectedModelId ?? '';
+        providerId = ui.selectedProviderId ?? undefined;
+      }
     }
     const s = await api.createSession(workspaceId, '✨ Git tools', modelId, {
       kind: 'subagent',

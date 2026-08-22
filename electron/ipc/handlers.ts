@@ -902,16 +902,26 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       if (!firstUser || !firstUser.content) return null;
       // Resolve the session's chat provider — same path as the orchestrator.
       const providers = store.listProviders();
-      let provider = providers.find((p) => p.id === session.providerId);
-      if (!provider && session.modelId) {
-        provider = providers.find(
-          (p) => p.enabled && p.models.some((m) => m.modelId === session.modelId),
-        );
+      // Settings override: a pinned utility model wins for title generation.
+      const utility = store.getAgentSettings().utilityModel;
+      let modelId = session.modelId;
+      let provider = utility
+        ? providers.find((p) => p.id === utility.providerId && p.enabled)
+        : undefined;
+      if (utility && provider) {
+        modelId = utility.modelId;
+      } else {
+        provider = providers.find((p) => p.id === session.providerId);
+        if (!provider && session.modelId) {
+          provider = providers.find(
+            (p) => p.enabled && p.models.some((m) => m.modelId === session.modelId),
+          );
+        }
       }
       if (!provider) return null;
       const title = await generateSessionTitle(String(firstUser.content), {
         provider,
-        modelId: session.modelId,
+        modelId,
       });
       if (title) sessions.renameSession(sessionId, title);
       return title;

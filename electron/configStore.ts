@@ -55,6 +55,9 @@ export interface AgentSettings {
   /** Experimental: allow dispatch_agent to run sub-agents in the background,
    *  detached from the turn (results arrive as synthetic queued messages). */
   experimentalBackgroundDispatch: boolean;
+  /** Model override for background utility tasks (session-title generation,
+   *  commit-message generation). Absent = the session's current model. */
+  utilityModel?: { providerId: string; modelId: string };
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
