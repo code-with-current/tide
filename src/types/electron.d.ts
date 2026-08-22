@@ -232,6 +232,8 @@ declare global {
       clearAllSessions: () => Promise<{ ok: boolean }>;
       renameSession(sessionId: string, title: string): Promise<void>;
       generateSessionTitle(sessionId: string): Promise<string | null>;
+      /** Ask the system model to rewrite a broken mermaid diagram. */
+      mermaidRepair(input: { source: string; error: string }): Promise<{ ok: true; code: string } | { ok: false; error: string }>;
       getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
       updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
       getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean; titleModel?: { providerId: string; modelId: string } | null; commitMessageModel?: { providerId: string; modelId: string } | null }>;

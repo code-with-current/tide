@@ -1,7 +1,7 @@
 /** Mermaid renderer: lazy-loads the library, renders SVG, falls back to a code block on error; click opens a full-screen pan/zoom overlay (rendered via portal to escape overflow-hidden containers). */
 import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, ZoomIn, X, ZoomOut } from 'lucide-react';
+import { AlertTriangle, Loader2, ZoomIn, X, ZoomOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
 
@@ -363,8 +363,12 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const lastRenderAtRef = useRef(0);
   const lastRenderedRef = useRef<string | null>(null);
+  // One model-repair attempt per mounted diagram — a failed repair must not
+  // loop; the error card is the terminal state.
+  const repairedOnceRef = useRef(false);
   // Theme changes re-render (SVGs bake colors in) via the effect's cache key.
   const appTheme = useUi((s) => s.appTheme);
 
@@ -377,49 +381,71 @@ export const MermaidDiagram = memo(function MermaidDiagram({
     if (lastRenderedRef.current === cacheKey) return;
 
     // Final render (fence closed or stream ended): authoritative, with the
-    // full sanitize fallback chain.
+    // full sanitize fallback chain — then, if every candidate failed, one
+    // model-driven repair attempt (system model rewrites the diagram with
+    // the parse error in hand) before giving up.
     if (!streaming) {
       let cancelled = false;
       (async () => {
         const mermaid = await loadMermaid();
         if (cancelled) return;
 
-        // Try the original source, then progressively sanitized variants.
-        const candidates = sanitizeMermaid(trimmed);
-        let lastParseError = '';
-        for (const candidate of candidates) {
-          try {
-            const renderId = `mermaid-${++diagramId}`;
-            const { svg: rendered } = await mermaid.render(renderId, candidate);
-            if (!cancelled) {
+        const tryCandidates = async (source: string): Promise<{ svg: string } | { error: string }> => {
+          let lastParseError = '';
+          for (const candidate of sanitizeMermaid(source)) {
+            try {
+              const renderId = `mermaid-${++diagramId}`;
+              const { svg: rendered } = await mermaid.render(renderId, candidate);
               // Clean up DOM artifacts mermaid leaves after a failed render.
               document.querySelectorAll(
                 '[id^="dmermaid"], .mermaid-error, #mermaid-error',
               ).forEach((el) => {
                 if (el.id !== renderId) el.remove();
               });
-              setSvg(rendered);
-              setError(null);
-              if (candidate === trimmed) lastRenderedRef.current = cacheKey;
+              return { svg: rendered };
+            } catch (e) {
+              lastParseError = e instanceof Error ? e.message : String(e);
             }
-            return; // success — stop trying
-          } catch (e) {
-            lastParseError = e instanceof Error ? e.message : String(e);
           }
+          return { error: lastParseError || 'all candidates failed' };
+        };
+
+        const first = await tryCandidates(trimmed);
+        if ('svg' in first) {
+          if (!cancelled) { setSvg(first.svg); setError(null); }
+          lastRenderedRef.current = cacheKey;
+          return;
         }
 
-        // All candidates failed.
+        // Local chain exhausted — ask the model to rewrite the diagram.
+        let finalError = first.error;
+        if (!cancelled && !repairedOnceRef.current) {
+          repairedOnceRef.current = true;
+          setRepairing(true);
+          try {
+            const res = await window.tideIpc?.mermaidRepair({
+              source: trimmed,
+              error: first.error.split('\n')[0]?.slice(0, 300) ?? '',
+            });
+            if (res && 'ok' in res && res.ok) {
+              const second = await tryCandidates(res.code);
+              if ('svg' in second) {
+                if (!cancelled) { setSvg(second.svg); setError(null); }
+                return;
+              }
+              finalError = second.error;
+            }
+          } catch { /* repair unavailable — fall through to the error card */ }
+          finally { if (!cancelled) setRepairing(false); }
+        }
+
+        // Repair failed too — surface the ORIGINAL chain's parse error.
         if (!cancelled) {
-          const firstErr = candidates[0];
-          // Mermaid's parse error names the line/token that broke — far more
-          // actionable than the attempt count. First line only; they ramble.
-          const detail = lastParseError.split('\n')[0]?.slice(0, 200);
+          const detail = finalError.split('\n')[0]?.slice(0, 200);
           setError(
-            firstErr
-              ? detail
-                ? `Diagram syntax error — ${detail}`
-                : `Could not render diagram after ${candidates.length} attempt${candidates.length > 1 ? 's' : ''}`
-              : 'Empty diagram source',
+            detail
+              ? `Diagram syntax error — ${detail}`
+              : 'Could not render diagram',
           );
         }
       })();
@@ -467,7 +493,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
       <div className="rounded-lg border border-warning/20 bg-warning/[0.04] overflow-hidden">
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-warning/15 text-[0.7857rem] text-warning/80">
           <AlertTriangle className="size-3.5 shrink-0" />
-          <span>Diagram syntax error — showing source</span>
+          <span title={error}>{error}</span>
         </div>
         <pre className="text-[0.7857rem] text-muted-foreground/60 font-mono whitespace-pre-wrap break-words p-3 max-h-[300px] overflow-y-auto scroll">
           {code}
@@ -479,7 +505,14 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   if (!svg) {
     return (
       <div className={cn('mermaid-card mermaid-live flex items-center justify-center gap-2 py-6 text-[0.7857rem] text-muted-foreground/50', className)}>
-        rendering diagram…
+        {repairing ? (
+          <>
+            <Loader2 className="size-3 animate-spin" />
+            local fixes failed — asking the model to redraw the diagram…
+          </>
+        ) : (
+          'rendering diagram…'
+        )}
       </div>
     );
   }

@@ -192,6 +192,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:renameSession', sessionId, title),
   generateSessionTitle: (sessionId: string) =>
     ipcRenderer.invoke('tide:generateSessionTitle', sessionId),
+  mermaidRepair: (input: { source: string; error: string }) =>
+    ipcRenderer.invoke('tide:mermaidRepair', input),
   getAgentSettings: () =>
     ipcRenderer.invoke('tide:getAgentSettings'),
   updateAgentSettings: (patch: Record<string, unknown>) =>

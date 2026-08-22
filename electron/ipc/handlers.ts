@@ -17,6 +17,7 @@ import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, g
 import { startGitWatcher } from './git-watcher.js';
 import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive, snapshotTerminal } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
+import { repairMermaidDiagram } from '../agent/mermaid-repair.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
 import { registerRagHandlers } from './rag.js';
 
@@ -1203,6 +1204,13 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
   // The renderer's src/lib/logger.ts calls window.tideIpc.log.send(...).
   ipcMain.handle('tide:log', (_e, input: { level: string; tag: string; msg: string; args?: unknown[] }) => {
     forwardLog(input.level, input.tag, input.msg, input.args);
+  });
+
+  // ── Mermaid auto-repair ───────────────────────────────────────────
+  // Last resort after the renderer's local sanitize chain exhausts all
+  // candidates: ask the system model to rewrite the diagram.
+  handle('tide:mermaidRepair', async (_e, input: { source: string; error: string }) => {
+    return repairMermaidDiagram(input.source, input.error);
   });
 
   // ── Test provider connection ─────────────────────────────────────
