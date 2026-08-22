@@ -997,6 +997,7 @@ export function MainScreen() {
                       panel can anchor to the top-right of the chat column. */}
                     <div className="flex-1 min-h-0 flex flex-col relative">
                       <TodoFloatingPanel sessionId={activeSessionId} />
+                      <FloatingPermissionCard sessionId={activeSessionId} />
                       <ChatTimeline
                         messages={chatHistory}
                         sessionId={historySessionId}
@@ -1158,7 +1159,6 @@ export function MainScreen() {
               className="h-full relative min-w-0"
             >
               <RightPanel />
-              <FloatingPermissionCard sessionId={activeSessionId} />
             </ResizablePanel>
           )}
         </ResizablePanelGroup>
@@ -1178,7 +1178,6 @@ export function MainScreen() {
             style={{ top: '40px', height: 'auto' }}
           >
             <RightPanel />
-            <FloatingPermissionCard sessionId={activeSessionId} />
           </SheetContent>
         </Sheet>
 
