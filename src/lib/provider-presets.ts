@@ -80,10 +80,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     altUrls: { openai: 'https://opencode.ai/zen/v1' },
     modelRouting: {
       anthropic: ['claude', 'qwen'],
-      // Free-tier routing verified live (2026-08-22): x-preview/hy3/nemotron/
-      // laguna/muse-spark work on /chat/completions only; mimo unverified
-      // (rate-limited) but same upstream family; big-pickle unverified.
-      // deepseek-v4-flash-free's upstream is dead — listed but unusable.
+      // OpenAI-style routing verified live (2026-08-22, full 64-model sweep):
+      // x-preview/hy3/nemotron/laguna/muse-spark completed; big-pickle/mimo
+      // returned FreeUsageLimitError (= routed, rate-limited); paid models
+      // (glm/kimi/deepseek/minimax) hit the billing gate pre-routing — docs
+      // based. deepseek-v4-flash-free's upstream is dead on both styles.
       openai: ['glm', 'kimi', 'deepseek', 'minimax', 'big-pickle', 'mimo', 'hy3', 'nemotron', 'laguna', 'x-preview', 'muse-spark'],
     },
   },
