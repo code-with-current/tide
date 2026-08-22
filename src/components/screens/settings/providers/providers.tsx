@@ -65,7 +65,7 @@ import {
   useModelRows, type Row,
 } from "./models-table";
 import { AddProviderWizard } from "./add-wizard/add-wizard";
-import { matchPresetByBaseUrl } from "@/lib/provider-presets";
+import { matchPresetByBaseUrl, filterPresetModels } from "@/lib/provider-presets";
 
 export const PROTOCOL = {
   anthropic: {
@@ -715,12 +715,15 @@ export function FetchModelsButton({
   const fetchModels = async () => {
     setState({ status: "loading" });
     try {
-      const models = await fetchAndEnrichModels(
+      const fetched = await fetchAndEnrichModels(
         api.probeProviderModels,
         toResolveFn(api.resolveModelCatalog),
         { apiStyle, baseUrl, apiKey, existingIds: existingModelIds },
       );
-      setAvailable(models);
+      // Route-aware providers (OpenCode Zen) serve different models per wire
+      // endpoint — only offer what this provider's apiStyle can call.
+      const preset = matchPresetByBaseUrl(baseUrl);
+      setAvailable(filterPresetModels(fetched, preset, apiStyle));
       setSelected({});
     } catch (e) {
       setState({ status: "error", error: e instanceof Error ? e.message : "Fetch failed" });
