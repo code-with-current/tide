@@ -204,78 +204,148 @@ function DiagramZoomOverlay({
   );
 }
 
-/** Sanitize mermaid source for common LLM-emitted parser-breaking patterns; returns candidate sources (original first, progressively cleaned). */
-function sanitizeMermaid(raw: string): string[] {
-  const candidates: string[] = [raw];
+/** Sanitize mermaid source for common LLM-emitted parser-breaking patterns.
+ *  Returns candidate sources CUMULATIVELY — raw first, then each successive
+ *  fix applied on top of the previous variant — because real-world broken
+ *  diagrams usually stack several mistakes at once; independent variants
+ *  rarely combined the right fixes. The renderer tries them in order and
+ *  uses the first that parses. */
+export function sanitizeMermaid(raw: string): string[] {
+  const candidates: string[] = [];
+  let cur = raw.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const push = () => { if (!candidates.includes(cur)) candidates.push(cur); };
+  push();
 
   // 1. Decode HTML entities that confuse the lexer inside labels.
   //    Models often emit &amp; / &lt; / &gt; / &quot; inside node text.
-  if (/&(amp|lt|gt|quot|#\d+);/.test(raw)) {
-    const decoded = raw
+  if (/&(amp|lt|gt|quot|#\d+);/.test(cur)) {
+    cur = cur
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
       .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
-    if (decoded !== raw) candidates.push(decoded);
+    push();
   }
 
   // 2. Strip trailing whitespace on each line — mermaid is whitespace-
   //    sensitive in some diagram types and trailing spaces cause "Parse error".
-  if (/[ \t]+\n/.test(raw) || /[ \t]+$/.test(raw)) {
-    const trimmed = raw
-      .split('\n')
-      .map((l) => l.replace(/[ \t]+$/g, ''))
-      .join('\n');
-    if (!candidates.includes(trimmed)) candidates.push(trimmed);
+  if (/[ \t]+\n/.test(cur) || /[ \t]+$/.test(cur)) {
+    cur = cur.split('\n').map((l) => l.replace(/[ \t]+$/g, '')).join('\n');
+    push();
   }
 
-  // 3. Fix unbalanced quotes in node labels — a common LLM mistake like
-  //    A["some unclosed label. Remove the stray quote.
-  //    Only attempt if there's an odd number of double-quotes on a line
-  //    that looks like a node definition (contains [ or { or (.
-  const hasOddQuotes = raw.split('\n').some(
-    (l) => l.trim().match(/[\[\{\(]/) && (l.match(/"/g)?.length ?? 0) % 2 !== 0,
-  );
-  if (hasOddQuotes) {
-    const balanced = raw
-      .split('\n')
-      .map((l) => {
-        const q = (l.match(/"/g) ?? []).length;
-        if (q % 2 !== 0 && l.match(/[\[\{\(]/)) {
-          // Add closing quote before the bracket close
-          return l.replace(/([\]\}\)])/, '"$1');
-        }
-        return l;
-      })
+  // 3. Strip inline %% comments. Full-line %% comments are legal mermaid;
+  //    a trailing `%% note` after code on the same line is not — the lexer
+  //    eats the rest of the line and usually derails the parse.
+  if (cur.split('\n').some((l) => l.trim() !== '' && !l.trim().startsWith('%%') && l.includes('%%'))) {
+    cur = cur.split('\n')
+      .map((l) => (l.trim().startsWith('%%') || !l.includes('%%')) ? l : l.replace(/%%.*$/, ''))
       .join('\n');
-    if (!candidates.includes(balanced)) candidates.push(balanced);
+    push();
   }
 
   // 4. Remove `init` directives that some models emit — they can conflict
   //    with our own initialize() config.
-  if (/^\s*%%{.*init.*}%%/m.test(raw) || /^init:/m.test(raw)) {
-    const noInit = raw
+  if (/^\s*%%{.*init.*}%%/m.test(cur) || /^init:/m.test(cur)) {
+    cur = cur
       .replace(/^\s*%%{[^}]*init[^}]*}%%\s*\n?/gm, '')
       .replace(/^init:.*\n?/gm, '');
-    if (!candidates.includes(noInit)) candidates.push(noInit);
+    push();
   }
 
-  // 5. Sequence diagrams: braces in message text break the parser (Mermaid treats `{` as a block opener). Fix by stripping braces from arrow/message lines (contain ->> or -->), keeping inner text.
-  if (/^(sequenceDiagram|sd)\b/m.test(raw) && /^[ \t]*\S.*--?>>.*:.*\{/m.test(raw)) {
-    const noBraces = raw
+  // 5. Fix unbalanced quotes in node labels — a common LLM mistake like
+  //    A["some unclosed label. Remove the stray quote.
+  const hasOddQuotes = cur.split('\n').some(
+    (l) => l.trim().match(/[[{(]/) && (l.match(/"/g)?.length ?? 0) % 2 !== 0,
+  );
+  if (hasOddQuotes) {
+    cur = cur
       .split('\n')
       .map((l) => {
-        // Only touch arrow/message lines, not structural keywords.
+        const q = (l.match(/"/g) ?? []).length;
+        if (q % 2 !== 0 && l.match(/[[{(]/)) {
+          return l.replace(/([\]})])/, '"$1');
+        }
+        return l;
+      })
+      .join('\n');
+    push();
+  }
+
+  // 6. Flowchart-family: quote labels containing bracket/paren/brace/colon
+  //    characters. `A[foo (bar)]` and `B{"x": 1}` break the lexer because
+  //    the inner brackets terminate the shape; quoting makes them literal.
+  //    Already-quoted labels are left alone.
+  if (/^(flowchart|graph|stateDiagram-v2?|erDiagram)\b/m.test(cur)) {
+    const quoted = cur.split('\n')
+      .map((l) => l.replace(
+        /(\[[^\]\n]*\]|\{[^}\n]*\}|\([^)\n]*\))/g,
+        (shape) => {
+          const open = shape[0];
+          const inner = shape.slice(1, -1);
+          if (!inner || (inner.startsWith('"') && inner.endsWith('"'))) return shape;
+          if (/["(){}[:#]/.test(inner)) {
+            return `${open}"${inner.replace(/"/g, "'")}"${shape[shape.length - 1]}`;
+          }
+          return shape;
+        },
+      ))
+      .join('\n');
+    if (quoted !== cur) { cur = quoted; push(); }
+
+    // 6b. Reserved word `end` used as a node id — `end[Finish]`, `A --> end`,
+    //     `end --> B` — collides with the subgraph/block terminator and fails
+    //     the whole parse. Rename those ids to `endNode` (bare `end` lines
+    //     that close subgraphs are untouched).
+    if (/\bend\b\s*(\[|\{|\(|-->|->|-\.|==)/.test(cur) || /-->\s*end\b/.test(cur)) {
+      const renamed = cur
+        .replace(/\bend\b(?=\s*(\[|\{|\(|-->|->|-\.|==))/g, 'endNode')
+        .replace(/(-->\s*)end\b/g, '$1endNode');
+      if (renamed !== cur) { cur = renamed; push(); }
+    }
+
+    // 6c. Subgraph titles with spaces need quoting: `subgraph main flow`
+    //     breaks; `subgraph "main flow"` and `subgraph id[title]` are legal.
+    const subgraphFix = cur.split('\n')
+      .map((l) => {
+        const m = l.match(/^(\s*subgraph\s+)(.+)$/);
+        if (!m) return l;
+        const rest = m[2].trim();
+        if (rest.startsWith('"') || rest.includes('[') || rest.includes('(')) return l;
+        if (!rest.includes(' ')) return l;
+        return `${m[1]}"${rest}"`;
+      })
+      .join('\n');
+    if (subgraphFix !== cur) { cur = subgraphFix; push(); }
+  }
+
+  // 7. Sequence diagrams: braces in message text break the parser (Mermaid
+  //    treats `{` as a block opener). Fix by stripping braces from
+  //    arrow/message lines (contain ->> or -->), keeping inner text.
+  if (/^(sequenceDiagram|sd)\b/m.test(cur) && /^[ \t]*\S.*--?>>.*:.*\{/m.test(cur)) {
+    cur = cur
+      .split('\n')
+      .map((l) => {
         if (/^\s*(alt|opt|loop|rect|box|end|else|par|and|note|participant|actor)\b/i.test(l)) return l;
-        // Arrow line with braces in message — strip { and }
         if (/--?>>/.test(l) && l.includes('{') && l.includes('}')) {
           return l.replace(/[{}]/g, '');
         }
         return l;
       })
       .join('\n');
-    if (!candidates.includes(noBraces)) candidates.push(noBraces);
+    push();
+  }
+
+  // 8. Drop styling directives last — `style X ...` / `linkStyle` / `click`
+  //    referencing nodes that don't exist (renamed, dropped, or hallucinated)
+  //    hard-fail the render. Diagram content survives without them.
+  if (/^\s*(style|classDef|class|linkStyle|click)\b/m.test(cur)) {
+    const stripped = cur
+      .split('\n')
+      .filter((l) => !/^\s*(style|classDef|class|linkStyle|click)\b/.test(l))
+      .join('\n');
+    if (stripped.trim() !== '') { cur = stripped; push(); }
   }
 
   return candidates;
@@ -316,6 +386,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
 
         // Try the original source, then progressively sanitized variants.
         const candidates = sanitizeMermaid(trimmed);
+        let lastParseError = '';
         for (const candidate of candidates) {
           try {
             const renderId = `mermaid-${++diagramId}`;
@@ -332,17 +403,22 @@ export const MermaidDiagram = memo(function MermaidDiagram({
               if (candidate === trimmed) lastRenderedRef.current = cacheKey;
             }
             return; // success — stop trying
-          } catch {
-            // Try next candidate; if this was the last, fall through to error.
+          } catch (e) {
+            lastParseError = e instanceof Error ? e.message : String(e);
           }
         }
 
         // All candidates failed.
         if (!cancelled) {
           const firstErr = candidates[0];
+          // Mermaid's parse error names the line/token that broke — far more
+          // actionable than the attempt count. First line only; they ramble.
+          const detail = lastParseError.split('\n')[0]?.slice(0, 200);
           setError(
             firstErr
-              ? `Could not render diagram after ${candidates.length} attempt${candidates.length > 1 ? 's' : ''}`
+              ? detail
+                ? `Diagram syntax error — ${detail}`
+                : `Could not render diagram after ${candidates.length} attempt${candidates.length > 1 ? 's' : ''}`
               : 'Empty diagram source',
           );
         }
