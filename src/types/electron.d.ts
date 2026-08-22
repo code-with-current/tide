@@ -221,7 +221,7 @@ declare global {
       finalizeAssistantMessage(
         sessionId: string,
         messageId: string,
-        message: { content: string; reasoning?: string; reasoningTokens?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
+        message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; totalMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any; compactionInfo?: { tokensBefore: number; tokensAfter: number }; stopReason?: string | null },
       ): Promise<void>;
       addSessionUsage(
         sessionId: string,

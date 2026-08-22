@@ -271,6 +271,7 @@ export async function finalizeAssistantMessage(
   messageId: string,
   message: {
     content: string;
+    blocks?: any[];
     reasoning?: string;
     reasoningTokens?: number;
     reasoningMs?: number;
@@ -278,6 +279,8 @@ export async function finalizeAssistantMessage(
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
+    compactionInfo?: { tokensBefore: number; tokensAfter: number };
+    stopReason?: string | null;
   },
 ): Promise<void> {
   if (ipc && (ipc as any).finalizeAssistantMessage) {

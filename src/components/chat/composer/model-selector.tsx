@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ChevronDown, Check, Brain, Eye, Star, Search, Lock } from 'lucide-react';
+import { ChevronDown, Check, Brain, Eye, Star, Search, Lock, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SkeletonBar } from '@/components/ui/loading-rows';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -26,7 +26,7 @@ function ProviderTile({
   return (
     <span
       className={cn(
-        'size-4 rounded flex items-center justify-center shrink-0',
+        'size-5 rounded flex items-center justify-center shrink-0',
         branded ? 'text-white' : 'bg-secondary text-foreground',
       )}
       style={branded ? { background: accent } : undefined}
@@ -70,6 +70,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
   const selected =
     models.find((m) => m.providerId === selectedProviderId && m.modelId === selectedId) ??
     models.find((m) => m.modelId === selectedId);
+  const selectedPreset = selected ? presetByProvider.get(selected.providerId) : undefined;
 
   const isStarredModel = (m: ModelOption) => starred.includes(`${m.providerId}:${m.modelId}`);
 
@@ -83,6 +84,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
         onClick={onLockedClick}
         title="Model is locked for this session. Click to fork into a new session."
       >
+        {selected && <ProviderTile preset={selectedPreset} apiStyle={selected.apiStyle} />}
         {!compact && (
           <span className="truncate max-w-[160px]">{selected?.alias ?? selectedId ?? 'Unknown'}</span>
         )}
@@ -162,21 +164,24 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
         <Button
           variant="ghost"
           size="sm"
-          className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-input-foreground hover:text-foreground', compact && 'px-1.5')}
+          className={cn('h-8 gap-1 text-[0.85rem] px-2 text-input-foreground hover:text-foreground', compact && 'px-1.5')}
           disabled={isLoading || models.length === 0}
         >
           {!compact &&
             (isLoading ? (
               <SkeletonBar className="h-3 w-16" aria-hidden />
             ) : (
-              <span>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+              <>
+                {selected && <ProviderTile preset={selectedPreset} apiStyle={selected.apiStyle} />}
+                <span className='truncate max-w-[100px]'>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+              </>
             ))}
-          <ChevronDown className="size-4 text-muted-foreground/60" />
+          <ChevronDown className="size-4 text-input-foreground/60" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" side="top" sideOffset={6} className="w-[350px] max-w-[calc(100vw-2rem)] h-[250px] p-0 overflow-hidden flex flex-col">
         {/* ── Search — spans both panes ── */}
-        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60">
+        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 bg-input">
           <Search className="size-3.5 text-muted-foreground/50 shrink-0" />
           <input
             autoFocus
@@ -222,7 +227,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
               onClick={() => setQuery('')}
               className="text-muted-foreground/50 hover:text-foreground text-md shrink-0"
             >
-              ✕
+              <XIcon className="size-3.5" />
             </button>
           )}
         </div>
@@ -344,12 +349,12 @@ function RailItem({
       title={name}
       className={cn(
         'w-full flex items-center gap-1.5 px-2 py-1 text-left transition-colors',
-        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-primary/10',
         dim && 'opacity-40',
       )}
     >
       {tile}
-      <span className="flex-1 min-w-0 truncate text-[0.75rem] font-medium">{name}</span>
+      <span className="flex-1 min-w-0 truncate text-[0.80rem] font-medium">{name}</span>
       <span className="text-[0.6429rem] font-mono text-muted-foreground/50 shrink-0">{count}</span>
     </button>
   );
@@ -387,7 +392,7 @@ function ModelRow({
       onMouseEnter={onHover}
       className={cn(
         'flex items-center gap-1.5 px-2 py-1 cursor-pointer overflow-hidden transition-colors',
-        active ? 'bg-accent/60' : 'hover:bg-accent/40',
+        active ? 'bg-primary/10' : 'hover:bg-primary/30',
       )}
     >
       <button

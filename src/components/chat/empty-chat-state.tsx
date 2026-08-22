@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { GitBranch, GitFork, FolderGit2, ChevronDown, ChevronRight, Settings2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { GitBranch, GitFork, FolderGit2, FolderCode, Plus, Check, ChevronDown } from 'lucide-react';
 import { ChatComposer } from './chat-composer';
-import { useModelOption, useWorkspaces, supportsThinking } from '@/lib/queries';
+import { useModelOption, useWorkspaces, useGitBranchInfo, supportsThinking } from '@/lib/queries';
+import { BranchMenu } from '@/components/git/branch-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { highestThinkingLevelForModel } from './composer/thinking-level-selector';
 import * as api from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
@@ -30,6 +32,10 @@ export function EmptyChatState({
   const touchDraft = useUi((s) => s.touchDraft);
   const { data: workspaces } = useWorkspaces();
   const workspace = workspaces?.find((w) => w.id === activeWorkspaceId);
+  // Live branch for the selector chip — reflects checkouts made through the
+  // branch menu instead of the stale persisted workspace.branch.
+  const { data: branchInfo } = useGitBranchInfo(activeWorkspaceId, undefined);
+  const liveBranch = branchInfo?.branch ?? workspace?.branch;
 
   // Every new session pre-selects the highest thinking level the selected
   // model supports. Keyed on model + published efforts so a late effort load
@@ -68,7 +74,6 @@ export function EmptyChatState({
   const [branchName, setBranchName] = useState('');
   const [baseBranch, setBaseBranch] = useState('');
   const [branchTouched, setBranchTouched] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [composerText, setComposerText] = useState('');
   // Config files to copy into the worktree (e.g., .env, .env.local).
   // Auto-populated from listConfigFiles when settings expand; user can
@@ -89,24 +94,20 @@ export function EmptyChatState({
     setBranchName(slugify(composerText) || 'session');
   }, [composerText, branchTouched]);
 
-  // When settings expand, fire a one-shot auto-detection of likely
-  // config files (.env etc.) and pre-select them. Doesn't re-run on
-  // every render — only when showSettings flips true.
-  const detectedRef = useRef(false);
+  // When worktree isolation is enabled, fire a one-shot auto-detection of
+  // likely config files (.env etc.) and pre-select them. Re-runs on each
+  // enable (fresher than the old once-ever detection); merges so manual
+  // additions survive a toggle cycle.
   useEffect(() => {
-    if (!showSettings || detectedRef.current) return;
-    if (!activeWorkspaceId) return;
-    detectedRef.current = true;
+    if (!worktreeEnabled || !activeWorkspaceId) return;
     api.listConfigFiles(activeWorkspaceId).then((found) => {
-      // Seed the selection with detected files. User can untick them
-      // individually or add custom paths.
       setConfigFiles((cur) => {
         const set = new Set(cur);
         for (const f of found) set.add(f);
         return [...set];
       });
     }).catch(() => { /* IPC failure — leave selection empty */ });
-  }, [showSettings, activeWorkspaceId]);
+  }, [worktreeEnabled, activeWorkspaceId]);
 
   return (
     <div className="flex-1 overflow-y-auto scroll relative">
@@ -114,23 +115,6 @@ export function EmptyChatState({
           now that the top bar is hidden on this screen. */}
       <div className="drag-region absolute inset-x-0 top-0 h-10 z-10" />
       <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 gap-6 min-h-full">
-        {/* Workspace context strip */}
-        {workspace && (
-          <div className="flex items-center gap-2 text-[0.7857rem] text-muted-foreground/60">
-            <FolderGit2 className="size-3" />
-            <span className="text-muted-foreground">{workspace.name}</span>
-            {workspace.branch && (
-              <>
-                <span>·</span>
-                <span className="font-mono inline-flex items-center gap-1">
-                  <GitBranch className="size-2.5" />
-                  {workspace.branch}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
         {/* Hero — fork variant when landing here via initiateFork, so a
             fork never looks identical to a plain new session. */}
         {pendingFork ? (
@@ -173,8 +157,8 @@ export function EmptyChatState({
           </div>
         )}*/}
 
-        {/* Composer */}
-        <div className="w-full max-w-[40rem]">
+        {/* Composer + workspace/branch selector row (bottom-left aligned) */}
+        <div className="w-full max-w-[40rem] flex flex-col gap-2">
           <ChatComposer
             key={activeDraftId ?? '__new__'}
             compact={false}
@@ -198,27 +182,37 @@ export function EmptyChatState({
               setComposerText('');
             }}
           />
+          <div className="mx-5 flex items-center gap-1.5 pl-2 pb-2 border border-input bg-input rounded-xl pt-7 -mt-7">
+            <WorkspaceMenu currentId={workspace?.id} />
+            <BranchMenu
+              trigger={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 h-6 px-2 rounded-md border border-border bg-card text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors cursor-pointer select-none"
+                >
+                  <GitBranch className="size-3 shrink-0" />
+                  <span className="font-mono text-[0.7143rem] truncate max-w-[180px]">{liveBranch ?? 'no branch'}</span>
+                  <ChevronDown className="size-3 shrink-0 opacity-50" />
+                </button>
+              }
+              worktree={{
+                enabled: worktreeEnabled,
+                onToggle: setWorktreeEnabled,
+                branchName,
+                onBranchName: (v) => {
+                  setBranchTouched(true);
+                  setBranchName(v);
+                },
+                baseBranch,
+                onBaseBranch: setBaseBranch,
+                configFiles,
+                onConfigFiles: setConfigFiles,
+                worktreeLocation: workspace?.worktreeLocation,
+                defaultBranch: workspace?.branch,
+              }}
+            />
+          </div>
         </div>
-
-        {/* Worktree panel */}
-        <WorktreePanel
-          enabled={worktreeEnabled}
-          onToggle={setWorktreeEnabled}
-          branchName={branchName}
-          onBranchName={(v) => {
-            setBranchTouched(true);
-            setBranchName(v);
-          }}
-          baseBranch={baseBranch}
-          onBaseBranch={setBaseBranch}
-          configFiles={configFiles}
-          onConfigFiles={setConfigFiles}
-          workspaceId={activeWorkspaceId}
-          defaultBranch={workspace?.branch}
-          worktreeLocation={workspace?.worktreeLocation}
-          showSettings={showSettings}
-          onToggleSettings={() => setShowSettings((s) => !s)}
-        />
 
         {/* Keyboard hint */}
         <div className="text-[0.80rem] text-muted-foreground/60 flex items-center gap-3">
@@ -231,224 +225,71 @@ export function EmptyChatState({
   );
 }
 
-/** Worktree panel: collapsed by default; expand to show branch/base/location and toggle isolation for the upcoming session. */
-function WorktreePanel({
-  enabled,
-  onToggle,
-  branchName,
-  onBranchName,
-  baseBranch,
-  onBaseBranch,
-  configFiles,
-  onConfigFiles,
-  workspaceId,
-  defaultBranch,
-  worktreeLocation,
-  showSettings,
-  onToggleSettings,
-}: {
-  enabled: boolean;
-  onToggle: (v: boolean) => void;
-  branchName: string;
-  onBranchName: (v: string) => void;
-  baseBranch: string;
-  onBaseBranch: (v: string) => void;
-  configFiles: string[];
-  onConfigFiles: (v: string[]) => void;
-  workspaceId: string | null;
-  defaultBranch?: string;
-  worktreeLocation?: string;
-  showSettings: boolean;
-  onToggleSettings: () => void;
-}) {
-  // Local-branches query — only fires when the user expands settings.
-  const { data: branches } = useBranches(showSettings ? workspaceId : null);
-  const branchOptions = useMemo(() => {
-    const set = new Set<string>();
-    if (defaultBranch) set.add(defaultBranch);
-    for (const b of branches ?? []) set.add(b);
-    return [...set].sort();
-  }, [branches, defaultBranch]);
+/** Workspace selector popover — active workspace list (current checked) with
+ *  an "Add Workspace" action pinned at the very bottom. Switching resets the
+ *  screen to a fresh draft via setActiveWorkspace. */
+function WorkspaceMenu({ currentId }: { currentId?: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: workspaces } = useWorkspaces();
+  const openDialog = useUi((s) => s.openDialog);
+  const active = (workspaces ?? []).filter((w) => !w.archivedAt);
 
   return (
-    <div className="w-full max-w-[40rem] rounded-md border border-border bg-card overflow-hidden">
-      {/* Header row — click toggles settings expand */}
-      <button
-        type="button"
-        onClick={onToggleSettings}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/40 transition-colors text-left"
-      >
-        {showSettings ? (
-          <ChevronDown className="size-3.5 text-muted-foreground/60" />
-        ) : (
-          <ChevronRight className="size-3.5 text-muted-foreground/60" />
-        )}
-        <GitBranch className="size-3.5 text-muted-foreground/60" />
-        <span className="text-xs font-medium flex-1">Worktree</span>
-        <Toggle enabled={enabled} onClick={(v) => { onToggle(v); }} />
-        <span className={cn('text-[0.7143rem] font-mono', enabled ? 'text-success' : 'text-muted-foreground/60')}>
-          {enabled ? 'isolated' : 'off'}
-        </span>
-      </button>
-
-      {/* Expanded settings */}
-      {showSettings && (
-        <div className="px-3 pb-3 pt-1 space-y-2 border-t border-input">
-          {/* Branch name */}
-          <label className="flex items-center gap-3 text-[0.7857rem]">
-            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">branch</span>
-            <input
-              type="text"
-              value={branchName}
-              onChange={(e) => onBranchName(e.target.value)}
-              placeholder="session"
-              className="flex-1 h-7 px-2 text-xs font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring"
-              disabled={!enabled}
-            />
-          </label>
-
-          {/* Base branch select */}
-          <label className="flex items-center gap-3 text-[0.7857rem]">
-            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">base</span>
-            <select
-              value={baseBranch}
-              onChange={(e) => onBaseBranch(e.target.value)}
-              disabled={!enabled}
-              className="flex-1 h-7 px-2 text-xs font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              {branchOptions.length === 0 && (
-                <option value="">{defaultBranch ?? 'main'}</option>
-              )}
-              {branchOptions.map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-          </label>
-
-          {/* Config files — copied into the worktree after creation.
-              Pre-seeded with detected .env files; user can add custom
-              paths (relative to workspace root). Chips are removable. */}
-          <div className="flex flex-col gap-1.5 text-[0.7857rem]">
-            <div className="flex items-center gap-2">
-              <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">copy</span>
-              <div className="flex-1 flex flex-wrap items-center gap-1">
-                {configFiles.map((f) => (
-                  <span
-                    key={f}
-                    className="inline-flex items-center gap-1 rounded bg-secondary border border-border pl-1.5 pr-0.5 py-0.5 text-[0.7143rem] font-mono"
-                  >
-                    {f}
-                    <button
-                      type="button"
-                      onClick={() => onConfigFiles(configFiles.filter((x) => x !== f))}
-                      disabled={!enabled}
-                      className="text-muted-foreground/60 hover:text-destructive disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label={`Stop copying ${f}`}
-                    >
-                      <X className="size-2.5" />
-                    </button>
-                  </span>
-                ))}
-                {configFiles.length === 0 && (
-                  <span className="text-[0.7143rem] text-muted-foreground/60 italic">none — add .env or other config paths</span>
-                )}
-              </div>
-            </div>
-            {/* Add custom path */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const input = (e.currentTarget.elements.namedItem('path') as HTMLInputElement);
-                const v = input.value.trim();
-                if (v && !configFiles.includes(v)) {
-                  onConfigFiles([...configFiles, v]);
-                }
-                input.value = '';
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 h-6 px-2 rounded-md border border-border bg-card text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors cursor-pointer select-none"
+        >
+          <FolderGit2 className="size-3 shrink-0" />
+          <span className="text-[0.7143rem] truncate max-w-[140px]">
+            {active.find((w) => w.id === currentId)?.name ?? 'workspace'}
+          </span>
+          <ChevronDown className="size-3 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-0 overflow-hidden">
+        <div className="max-h-[280px] overflow-y-auto scroll py-1">
+          {active.length === 0 && (
+            <div className="px-2 py-3 text-center text-[0.7143rem] text-muted-foreground/50">No workspaces</div>
+          )}
+          {active.map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                if (w.id !== currentId) useUi.getState().setActiveWorkspace(w.id);
               }}
-              className="flex items-center gap-2 pl-[4.4rem]"
+              className={cn(
+                'w-full h-7 flex items-center gap-1.5 px-2 text-left transition-colors',
+                w.id === currentId ? 'bg-primary/10' : 'hover:bg-secondary/40 cursor-pointer',
+              )}
             >
-              <input
-                type="text"
-                name="path"
-                placeholder=".env.local, config/secrets.json…"
-                disabled={!enabled}
-                className="flex-1 h-6 px-2 text-[0.7143rem] font-mono rounded bg-secondary border border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={!enabled}
-                className="text-[0.7143rem] text-muted-foreground/60 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                + add
-              </button>
-            </form>
-          </div>
-
-          {/* Location — read-only, derived from workspace config */}
-          <div className="flex items-center gap-3 text-[0.7857rem]">
-            <span className="w-16 text-muted-foreground/60 uppercase tracking-wider text-[0.7143rem] font-semibold">location</span>
-            <code className="flex-1 text-[0.7143rem] font-mono text-muted-foreground/60 truncate">
-              {joinPath(worktreeLocation || '.agent/worktrees/', branchName || 'session')}
-            </code>
-            <Settings2
-              className="size-3 text-muted-foreground/40 cursor-pointer hover:text-muted-foreground/80"
-              onClick={() => useUi.getState().setScreen('settings')}
-            />
-          </div>
-
-          {/* Hint */}
-          <div className="text-[0.7143rem] text-muted-foreground/60 pt-1 border-t border-input/60">
-            Tool calls run inside the worktree — your main checkout stays clean.
-            Branch + worktree are removed when the session is deleted.
-          </div>
+              {w.id === currentId ? (
+                <Check className="size-3 shrink-0 text-primary" />
+              ) : (
+                <FolderCode className="size-3 shrink-0 text-muted-foreground/50" />
+              )}
+              <span className={cn('text-[0.7857rem] truncate', w.id === currentId ? 'text-foreground font-medium' : 'text-muted-foreground')}>
+                {w.name}
+              </span>
+            </button>
+          ))}
         </div>
-      )}
-    </div>
+        <div className="border-t border-border p-1">
+          <button
+            type="button"
+            onClick={() => { setOpen(false); openDialog('addWorkspace'); }}
+            className="w-full h-7 flex items-center gap-1.5 px-2 rounded text-[0.7143rem] text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors cursor-pointer"
+          >
+            <Plus className="size-3 shrink-0" />
+            Add Workspace
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
-}
-
-/** Tiny pill toggle for the worktree on/off state. */
-function Toggle({ enabled, onClick }: { enabled: boolean; onClick: (v: boolean) => void }) {
-  return (
-    <span
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick(!enabled);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onClick(!enabled);
-        }
-      }}
-      className={cn(
-        'inline-flex items-center h-4 w-7 rounded-full p-0.5 transition-colors cursor-pointer',
-        enabled ? 'bg-primary' : 'bg-muted',
-      )}
-      aria-pressed={enabled}
-      aria-label={enabled ? 'Disable worktree' : 'Enable worktree'}
-    >
-      <span
-        className={cn(
-          'block size-3 rounded-full bg-background transition-transform',
-          enabled ? 'translate-x-3' : 'translate-x-0',
-        )}
-      />
-    </span>
-  );
-}
-
-/** Fetch local branches — only runs when the user opens the settings. */
-function useBranches(workspaceId: string | null) {
-  const [branches, setBranches] = useState<string[] | undefined>(undefined);
-  useEffect(() => {
-    if (!workspaceId) return;
-    api.listBranches(workspaceId).then(setBranches).catch(() => setBranches([]));
-  }, [workspaceId]);
-  return { data: branches };
 }
 
 /** Convert free text into a valid git branch name. Lowercase, ASCII-only,
@@ -461,11 +302,4 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-')
     .slice(0, 40);
-}
-
-/** Join a base path with a name, collapsing double slashes. Handles both
- *  `.agent/worktrees/` (trailing slash) and `.agent/worktrees` (no slash)
- *  without producing `.agent/worktrees//session`. */
-function joinPath(base: string, name: string): string {
-  return `${base.replace(/\/+$/, '')}/${name}`;
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import React from 'react';
 import { answerBlockIds } from '@/lib/stream/block-state';
 import { migrateMessageToBlocks } from '@/lib/stream/block-migration';
 import { reduceStream } from '@/lib/stream/stream-reducer';
@@ -90,5 +91,65 @@ describe('applyTurnEnd (live path)', () => {
     expect((byId.get('b-child') as any).isAnswer).toBe(true);
     expect((byId.get('b-parent') as any).isAnswer).toBe(true);
     expect((byId.get('b-intro') as any).isAnswer).toBe(false);
+  });
+});
+
+describe('finalizeAssistantMessage stopReason persistence (store)', () => {
+  it('persists stopReason and dedupes finalize (append + update paths)', async () => {
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tide-finalize-'));
+    const { createSessionStore } = await import('../../electron/ipc/sessionStore');
+    const store = createSessionStore(dir);
+    store.createSession('ws1', 'test', 'm_test');
+    const sid = store.listSessions('ws1')[0].id;
+    store.addMessage(sid, 'user', 'hi');
+    // Main-side authoritative finalize at turn end (append path — no partial
+    // was flushed for a short turn).
+    store.finalizeAssistantMessage(sid, 'm1', {
+      content: 'done', blocks: [], totalMs: 1000, stopReason: 'end_turn',
+    });
+    const msg = store.getSession(sid)!.messages.find((m) => m.id === 'm1')!;
+    expect(msg.stopReason).toBe('end_turn');
+    expect(msg.totalMs).toBe(1000);
+    // Renderer's duplicate finalize is an idempotent update-in-place.
+    store.finalizeAssistantMessage(sid, 'm1', {
+      content: 'done', blocks: [], totalMs: 1000, stopReason: 'end_turn',
+    });
+    const again = store.getSession(sid)!;
+    expect(again.messages.filter((m) => m.id === 'm1')).toHaveLength(1);
+    expect(again.messages.find((m) => m.id === 'm1')!.stopReason).toBe('end_turn');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('TurnHeader interrupted detection', () => {
+  it('flags a killed partial (running tools) as Interrupted, not Done', async () => {
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { TurnHeader } = await import('@/components/chat/turn/turn-header');
+    const blocks = [
+      { id: 'r1', kind: 'reasoning', text: 'thinking', createdAtSeq: 0, modifiedAtSeq: 0 },
+      { id: 't1', kind: 'tool', toolCallId: 't1', toolName: 'bash', category: 'commands', status: 'running', arguments: {}, argPreview: '', riskTier: 'read_only', createdAtSeq: 0, modifiedAtSeq: 0 },
+    ] as any;
+    const html = renderToStaticMarkup(
+      React.createElement(TurnHeader, { blocks, streaming: false, stopReason: null, totalMs: undefined }),
+    );
+    expect(html).toContain('Interrupted');
+    expect(html).not.toContain('>Done<');
+  });
+
+  it('terminal-tool turns still render Done', async () => {
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { TurnHeader } = await import('@/components/chat/turn/turn-header');
+    const blocks = [
+      { id: 'a1', kind: 'text', text: 'answer', isAnswer: true, createdAtSeq: 0, modifiedAtSeq: 0 },
+      { id: 't1', kind: 'tool', toolCallId: 't1', toolName: 'bash', category: 'commands', status: 'executed', arguments: {}, argPreview: '', riskTier: 'read_only', createdAtSeq: 0, modifiedAtSeq: 0 },
+    ] as any;
+    const html = renderToStaticMarkup(
+      React.createElement(TurnHeader, { blocks, streaming: false, stopReason: 'end_turn', totalMs: 5000 }),
+    );
+    expect(html).toContain('>Done<');
+    expect(html).not.toContain('Interrupted');
   });
 });

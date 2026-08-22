@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import {
   Cpu,
+  Server,
   Shield,
   Repeat,
   GitBranch,
@@ -14,7 +15,8 @@ import {
   DollarSign,
 } from 'lucide-react';
 import type { Session } from '@/types';
-import { Avatar } from '@/components/primitives';
+import { ProviderLogo } from '@/components/primitives/provider-logo';
+import { matchPresetByBaseUrl } from '@/lib/provider-presets';
 import { RagIndexProgress } from '@/components/rag/rag-index-progress';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -27,6 +29,7 @@ import { formatContext, formatNumber, formatRelative, cn } from '@/lib/utils';
 import {
   useModelOption,
   useModels,
+  useProviders,
   useWorkspaces,
   useGitStatus,
   useGitBranchInfo,
@@ -46,6 +49,11 @@ export function InspectorTab({ session }: { session: Session }) {
   const usage = session.usage;
   const { isLoading: modelsLoading } = useModels();
   const model = useModelOption(null, session.modelId);
+  const { data: providers } = useProviders();
+  // Provider record behind the resolved model — its baseUrl re-identifies the
+  // brand preset so the Provider row can show the real logo tile.
+  const provider = model ? providers?.find((p) => p.id === model.providerId) : undefined;
+  const providerPreset = provider ? matchPresetByBaseUrl(provider.baseUrl) : undefined;
   const { data: agentSettings } = useAgentSettings();
   const maxSteps = agentSettings?.maxSteps ?? 100;
 
@@ -108,16 +116,25 @@ export function InspectorTab({ session }: { session: Session }) {
           ) : (
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <Cpu className="size-3 text-muted-foreground" />
-              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Model</span>
-              <div className="flex items-center gap-1.5 text-[0.7857rem]">
-                <Avatar className="size-3.5 text-[0.5714rem] bg-gradient-to-br from-accent to-[#b8553f] text-white">
-                  {(model?.alias ?? session.modelId).charAt(0).toUpperCase()}
-                </Avatar>
-                <span title={session.modelId}>
-                  {model ? `${model.alias} · ${model.providerName}` : session.modelId}
+              <Server className="size-3 text-muted-foreground" />
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Provider</span>
+              <div className="flex items-center gap-1.5 text-[0.7857rem] min-w-0">
+                <ProviderLogoTile
+                  apiStyle={provider?.apiStyle ?? model?.apiStyle ?? 'openai'}
+                  presetId={providerPreset?.id}
+                  accent={providerPreset?.accent}
+                />
+                <span className="truncate max-w-[60%] text-right" title={model?.providerName}>
+                  {model?.providerName ?? '—'}
                 </span>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Cpu className="size-3 text-muted-foreground" />
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Model</span>
+              <span title={session.modelId} className="text-[0.7857rem] truncate max-w-[60%] text-right">
+                {model?.alias ?? session.modelId}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <Shield className="size-3 text-muted-foreground" />
@@ -259,6 +276,31 @@ function autonomyLabel(mode: Session['autonomyMode']) {
 // "Open Changes" header button — switches to the Git Panel tab.
 // addTab is idempotent: creates the tab if absent, then activates it.
 // =============================================================
+
+/** Brand tile for the session's provider — same treatment as the model
+ *  picker's rail tiles (preset accent bg when branded, neutral otherwise). */
+function ProviderLogoTile({
+  apiStyle,
+  presetId,
+  accent,
+}: {
+  apiStyle: 'openai' | 'anthropic';
+  presetId?: string;
+  accent?: string;
+}) {
+  const branded = !!accent && accent !== '#ffffff';
+  return (
+    <span
+      className={cn(
+        'size-3.5 rounded flex items-center justify-center shrink-0',
+        branded ? 'text-white' : 'bg-secondary text-foreground',
+      )}
+      style={branded ? { background: accent } : undefined}
+    >
+      <ProviderLogo apiStyle={apiStyle} presetId={presetId} className="size-2" />
+    </span>
+  );
+}
 
 /** Additions/deletions bar — a proportional green/red strip mirroring the
  *  mockup's .diffstat. Replaces the old plain `+128 −54` text row so the

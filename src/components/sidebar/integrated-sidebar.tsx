@@ -13,6 +13,7 @@ import {
   X,
   MessageCircleQuestion,
   Search,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useQueries } from '@tanstack/react-query';
 import { useUi } from '@/lib/stores/ui';
@@ -35,6 +36,9 @@ import {
   ContextMenuItem, ContextMenuSeparator, ContextMenuSub,
   ContextMenuSubTrigger, ContextMenuSubContent,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 
 interface SessionLite { id: string; title: string; updatedAt: string; createdAt: string; }
 
@@ -183,7 +187,7 @@ function IntegratedSidebarImpl() {
         </Tip>
       </div>
 
-      <div className="px-2 pb-2 flex-shrink-0">
+      <div className="px-2 py-2 flex-shrink-0">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50 pointer-events-none" />
           <Input
@@ -417,25 +421,51 @@ function WorkspaceTreeItem({
             ) : (
               <span className={cn('text-[0.9rem] truncate flex-1 min-w-0', isActive ? 'text-sidebar-foreground font-semibold' : 'text-muted-foreground')}>{ws.name}</span>
             )}
-            {status === 'in_progress' && (
-              <PixelLoader variant="globe" size="xs" className="text-warning"/>
-            )}
-            {/*{status === 'unread' && <Dot tone="ok" />}*/}
-             {(status !== 'in_progress' && status !== 'unread') && <div className="flex items-center flex-shrink-0">
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {status === 'in_progress' && (
+                <PixelLoader variant="globe" size="xs" className="text-warning"/>
+              )}
+              {/*{status === 'unread' && <Dot tone="ok" />}*/}
               {archiveConfirm.confirming ? (
                 <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveWs.mutate(ws.id); }} />
               ) : (
-                <Tip label="Archive" side="top">
-                  <button type="button" aria-label="Archive workspace"
-                    onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
-                    className="hidden group-hover:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
-                    <Archive className="size-3.5" />
-                  </button>
-                </Tip>
+                <>
+                  {/* ⋯ menu — mirrors the right-click context menu 1:1 */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button type="button" aria-label="Workspace actions"
+                        onClick={(e) => e.stopPropagation()}
+                        className="hidden group-hover:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                        <MoreHorizontal className="size-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onNewSession(); }}><Plus className="size-3.5" /> New Session</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setIsRenaming(true)}><Pencil className="size-3.5" /> Rename</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => archiveConfirm.ask()}><Archive className="size-3.5" /> Archive</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  {status !== 'in_progress' && status !== 'unread' && (
+                    <Tip label="Archive" side="top">
+                      <button type="button" aria-label="Archive workspace"
+                        onClick={(e) => { e.stopPropagation(); archiveConfirm.ask(); }}
+                        className="hidden group-hover:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                        <Archive className="size-3.5" />
+                      </button>
+                    </Tip>
+                  )}
+                  {isActive && (
+                    <Tip label="New Session" side="top">
+                      <button type="button" aria-label="New session"
+                        onClick={(e) => { e.stopPropagation(); onNewSession(); }}
+                        className="hidden group-hover:inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-secondary cursor-pointer">
+                        <Plus className="size-3.5" />
+                      </button>
+                    </Tip>
+                  )}
+                </>
               )}
-
             </div>
-             }
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">

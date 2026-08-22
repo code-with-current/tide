@@ -740,8 +740,48 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
     toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
     usage: turn.usage, lastStepUsage: turn.lastStepUsage ?? undefined,
   });
+  persistFinalAssistantMessage(turn, blocks, stopReason);
   journalEditTurn(turn);
   fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+/** Main-side authoritative finalize — mirrors the renderer freeze effect's
+ *  payload. The renderer owns the live chatHistory append, but persistence
+ *  must not depend on it: a renderer reload/HMR mid-turn wipes the stream
+ *  store, the turn_end event is missed, and the session would keep the last
+ *  flushPartial snapshot forever (no stopReason/totalMs/answer). Idempotent
+ *  update-in-place by messageId, so the renderer's later finalize is a
+ *  harmless duplicate. Lazy require avoids the orchestrator↔sessions cycle
+ *  (same pattern as abortAllTurns). */
+function persistFinalAssistantMessage(turn: Turn, blocks: Block[], stopReason: StopReason): void {
+  const isEmpty =
+    !turn.finalText.trim() &&
+    turn.toolCalls.length === 0 &&
+    blocks.length === 0;
+  const isErrorStop =
+    stopReason === 'refusal' || stopReason === 'max_tokens' ||
+    stopReason === 'iteration_limit' || stopReason === 'content_filter';
+  if (isEmpty && !isErrorStop) return;
+  try {
+    const { finalizeAssistantMessage, addUsage } =
+      require('../ipc/sessions.js') as typeof import('../ipc/sessions.js');
+    finalizeAssistantMessage(turn.sessionId, turn.messageId, {
+      content: turn.finalText,
+      blocks,
+      reasoning: turn.finalReasoning || undefined,
+      reasoningTokens: turn.usage.reasoningTokens || undefined,
+      totalMs: Date.now() - turn.startedAt,
+      toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+      timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
+      turn: { stopReason },
+      stopReason,
+    });
+    if (turn.usage.inputTokens > 0 || turn.usage.outputTokens > 0) {
+      addUsage(turn.sessionId, turn.usage, turn.lastStepUsage ?? turn.usage);
+    }
+  } catch (e) {
+    log.warn('main-side finalize failed', { sessionId: turn.sessionId, err: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 /** Message row for the v2 stream lands at turn start (the sink only writes

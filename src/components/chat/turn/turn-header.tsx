@@ -84,34 +84,43 @@ export function TurnHeader({
 
   if (streaming) return null;
 
+  // Interrupted partial: a non-streaming message whose blocks still hold a
+  // running/pending tool. Finalized turns (and legacy messages) only carry
+  // terminal tool statuses — this shape means the app died mid-turn before
+  // any finalize (renderer reload + missed turn_end, killed process).
+  const interrupted = !!blocks?.some(
+    (b) => b.kind === 'tool' && (b.status === 'running' || b.status === 'pending'),
+  );
   const stopped = stopReason === 'aborted';
   const hasContent = blocks
     ? blocks.some((b) => b.kind === 'text' || b.kind === 'tool' || b.kind === 'reasoning')
     : !!(turn?.answer || turn?.commands?.length || turn?.edits?.length || turn?.exploration?.length);
   const failed = stopReason === 'refusal' || (!hasContent && !stopReason && !stopped);
-  const Icon = stopped ? X : failed ? AlertCircle : anyFailed ? AlertTriangle : Check;
-  const tone = stopped
-    ? 'text-destructive'
-    : failed
+  const Icon = interrupted ? AlertCircle : stopped ? X : failed ? AlertCircle : anyFailed ? AlertTriangle : Check;
+  const tone = interrupted
+    ? 'text-warning'
+    : stopped
       ? 'text-destructive'
-      : anyFailed
-        ? 'text-warning'
-        : 'text-success';
+      : failed
+        ? 'text-destructive'
+        : anyFailed
+          ? 'text-warning'
+          : 'text-success';
 
   return (
     <div className="flex items-center gap-1.5 text-[0.85rem] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5 mt-2">
       <Icon className={cn('size-4', tone)} />
       <span className={tone}>
-        {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
+        {interrupted ? 'Interrupted' : stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
       </span>
-      {steps > 0 && <span className="text-muted-foreground/50">· {steps} steps</span>}
-      {wallClock && (
+      {!interrupted && steps > 0 && <span className="text-muted-foreground/50">· {steps} steps</span>}
+      {!interrupted && wallClock && (
         <span className="flex items-center gap-0.5 text-muted-foreground/50">
           <Clock className="size-2.5" />
           {wallClock}
         </span>
       )}
-      {toolDuration && toolDuration !== wallClock && (
+      {!interrupted && toolDuration && toolDuration !== wallClock && (
         <span className="text-muted-foreground/30">· {toolDuration} tools</span>
       )}
     </div>

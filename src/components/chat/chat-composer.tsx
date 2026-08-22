@@ -898,7 +898,9 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-xs focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground">
+      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-2xl
+        focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 z-10 transition-[color,box-shadow]
+        outline-none selection:bg-primary selection:text-primary-foreground shadow-lg">
         {/* ====================================================
             LEFT — vertical toolbar (attach, @).
            ==================================================== */}

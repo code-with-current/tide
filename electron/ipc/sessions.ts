@@ -385,6 +385,8 @@ export function finalizeAssistantMessage(
     toolCalls?: any[];
     timeline?: any[];
     turn?: any;
+    compactionInfo?: { tokensBefore: number; tokensAfter: number };
+    stopReason?: string | null;
   },
 ): void {
   store().finalizeAssistantMessage(sessionId, messageId, message);

@@ -145,6 +145,10 @@ export interface SessionHeader {
   /** Sub-agent linkage — present only on dispatch-created sessions. */
   kind?: 'main' | 'subagent';
   parentId?: string;
+  /** Present when the session runs in an isolated git worktree — lets the
+   *  branch popover group these branches under Worktrees without loading
+   *  full session bodies. */
+  worktree?: { branch: string; path: string; baseCommit: string; baseBranch: string; ahead: number; behind: number };
 }
 
 export interface SessionStore {
@@ -303,6 +307,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       messageCount: s.messages.length,
       ...(s.kind ? { kind: s.kind } : {}),
       ...(s.parentId ? { parentId: s.parentId } : {}),
+      ...(s.worktree ? { worktree: s.worktree } : {}),
     };
   }
 
@@ -311,7 +316,9 @@ export function createSessionStore(rootDir: string): SessionStore {
       fs.mkdirSync(sessionsDir, { recursive: true });
     }
     const tmp = `${indexPath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ entries: Array.from(headers.values()) }, null, 2), 'utf-8');
+    // v2: headers carry `worktree`. Versioned so an older cache without the
+    // field is discarded once and rebuilt from the session files.
+    fs.writeFileSync(tmp, JSON.stringify({ v: 2, entries: Array.from(headers.values()) }, null, 2), 'utf-8');
     fs.renameSync(tmp, indexPath);
   }
 
@@ -320,7 +327,7 @@ export function createSessionStore(rootDir: string): SessionStore {
     if (!fs.existsSync(indexPath)) return;
     try {
       const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-      if (parsed && Array.isArray(parsed.entries)) {
+      if (parsed && parsed.v === 2 && Array.isArray(parsed.entries)) {
         for (const h of parsed.entries) {
           if (h && typeof h.id === 'string') headers.set(h.id, h);
         }
@@ -697,6 +704,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       timeline?: any[];
       turn?: any;
       compactionInfo?: { tokensBefore: number; tokensAfter: number };
+      stopReason?: string | null;
     },
   ): void {
     ensureLoaded();
@@ -715,6 +723,7 @@ export function createSessionStore(rootDir: string): SessionStore {
       if (message.timeline) existing.timeline = message.timeline;
       if (message.turn !== undefined) existing.turn = message.turn;
       if (message.compactionInfo !== undefined) existing.compactionInfo = message.compactionInfo;
+      if (message.stopReason !== undefined) existing.stopReason = message.stopReason ?? undefined;
     } else {
       s.messages.push({
         id: messageId,
@@ -730,6 +739,7 @@ export function createSessionStore(rootDir: string): SessionStore {
         timeline: message.timeline,
         turn: message.turn,
         compactionInfo: message.compactionInfo,
+        stopReason: message.stopReason,
       });
     }
     s.updatedAt = now;

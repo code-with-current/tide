@@ -858,6 +858,7 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     messageId: string,
     message: {
       content: string;
+      blocks?: any[];
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
@@ -865,6 +866,8 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
+      compactionInfo?: { tokensBefore: number; tokensAfter: number };
+      stopReason?: string | null;
     },
   ) => {
     sessions.finalizeAssistantMessage(sessionId, messageId, message);
