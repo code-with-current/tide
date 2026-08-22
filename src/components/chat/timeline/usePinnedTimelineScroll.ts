@@ -342,6 +342,10 @@ export function usePinnedTimelineScroll(
     if (settling.current) return;
     // The chase lags the tail by design, so an in-flight animation keeps
     // the follow alive even when the lag pushes atBottom outside its band.
+    // atBottom-follow is STREAMING-ONLY: after the turn ends it must not
+    // re-target the bottom on every re-render, or expanding a collapsed
+    // container (which grows the content) yanks the viewport away from the
+    // row the user just clicked.
     const target = pinEl.current
       ? Math.max(
           pinEl.current.getBoundingClientRect().top -
@@ -350,7 +354,7 @@ export function usePinnedTimelineScroll(
             PIN_TOP_MARGIN,
           contentMaxScroll(el),
         )
-      : atBottom || animTarget.current !== null
+      : (isStreaming && atBottom) || animTarget.current !== null
         ? contentMaxScroll(el)
         : null;
     if (target !== null) {
