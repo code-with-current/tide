@@ -876,12 +876,15 @@ function ChipRow({
         title="Open this agent's stream in the Agents tab"
         className="group/row flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
       >
-        <span className={cn(
-          'flex h-7 shrink-0 items-center rounded-l-md px-2 text-black tool-bg',
-          'transition-opacity duration-100 group-hover/row:opacity-0',
-          ICON_COLOR[call.toolName] ?? 'bg-muted-foreground',
-        )}>
-          {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
+        <span className="relative flex h-7 shrink-0 items-center justify-center">
+          <span className={cn(
+            'flex h-7 items-center rounded-l-md px-2 text-black tool-bg',
+            'transition-opacity duration-100 group-hover/row:opacity-0',
+            ICON_COLOR[call.toolName] ?? 'bg-muted-foreground',
+          )}>
+            {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
+          </span>
+          <ChevronDown className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/row:opacity-100" style={{ transform: 'rotate(-90deg)' }} />
         </span>
         <span className={cn('tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[0.8929rem] font-medium', TEXT_COLOR[call.toolName] ?? 'text-foreground/80')}>
           {d?.agentName ?? toolLabel(call.toolName, call.status)}
