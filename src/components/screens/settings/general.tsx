@@ -1,11 +1,24 @@
-/** GeneralSection: startup, notifications, and git attribution. */
+/** GeneralSection: startup, notifications, git attribution, and background
+ *  task model. */
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, User } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
+import { useProviders } from '@/lib/queries';
 import { cn } from '@/lib/utils';
+
+type UtilityModel = { providerId: string; modelId: string } | null;
 
 type GeneralSettingsState = {
   startAtLogin: boolean;
@@ -14,6 +27,7 @@ type GeneralSettingsState = {
   gitCoAuthored: boolean;
   gitCoAuthorName: string;
   gitCoAuthorEmail: string;
+  utilityModel: UtilityModel;
 };
 
 export function GeneralSection() {
@@ -31,6 +45,7 @@ export function GeneralSection() {
         gitCoAuthored: (raw.gitCoAuthored as boolean) ?? false,
         gitCoAuthorName: (raw.gitCoAuthorName as string) ?? 'Tide',
         gitCoAuthorEmail: (raw.gitCoAuthorEmail as string) ?? '314188112+tide-codes@users.noreply.github.com',
+        utilityModel: (raw.utilityModel as UtilityModel) ?? null,
       });
     });
   }, []);
@@ -52,7 +67,7 @@ export function GeneralSection() {
     <>
       <SettingsHeader
         title="General"
-        description="Startup, notifications, and git attribution."
+        description="Startup, notifications, git attribution, and background tasks."
       />
 
       <div className="max-w-xl space-y-5">
@@ -98,6 +113,24 @@ export function GeneralSection() {
                   <Switch
                     checked={settings.notificationSound}
                     onCheckedChange={(v) => update('notificationSound', v)}
+                  />
+                </div>
+              </SettingsRow>
+            </Card>
+          </SettingsGroup>
+
+          <SettingsGroup title="Background tasks">
+            <Card>
+              <SettingsRow
+                title="Title & commit-message model"
+                description="Model used for session-title and commit-message generation."
+                last
+              >
+                <div className="flex items-center gap-2">
+                  {savingKey === 'utilityModel' && <SavedDot />}
+                  <UtilityModelSelect
+                    value={settings.utilityModel}
+                    onChange={(v) => update('utilityModel', v)}
                   />
                 </div>
               </SettingsRow>
@@ -170,5 +203,50 @@ function SavedDot() {
     <span className="flex items-center gap-0.5 text-[9px] text-[var(--success)] animate-in fade-in duration-200">
       <Check className="size-2.5" /> saved
     </span>
+  );
+}
+
+/** Model picker for background utility tasks (titles, commit messages).
+ *  "Session model" = the session's current model (default); otherwise a
+ *  pinned provider+model from every enabled provider's catalog. */
+function UtilityModelSelect({
+  value,
+  onChange,
+}: {
+  value: UtilityModel;
+  onChange: (v: UtilityModel) => void;
+}) {
+  const { data: providers } = useProviders();
+  const enabled = (providers ?? []).filter((p) => p.enabled && p.models.length > 0);
+  const DEFAULT = '__session_model__';
+  const current = value ? `${value.providerId}:${value.modelId}` : DEFAULT;
+  return (
+    <Select
+      value={current}
+      onValueChange={(v) => {
+        if (v === DEFAULT) return onChange(null);
+        const [providerId, ...rest] = v.split(':');
+        onChange({ providerId, modelId: rest.join(':') });
+      }}
+    >
+      <SelectTrigger size="sm" className="w-[240px] text-xs">
+        <SelectValue placeholder="Session model" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT} className="text-xs">
+          Session model (default)
+        </SelectItem>
+        {enabled.map((p) => (
+          <SelectGroup key={p.id}>
+            <SelectLabel className="text-[10px] uppercase tracking-wide">{p.name}</SelectLabel>
+            {p.models.map((m) => (
+              <SelectItem key={m.id} value={`${p.id}:${m.modelId}`} className="text-xs font-mono">
+                {m.alias || m.modelId}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

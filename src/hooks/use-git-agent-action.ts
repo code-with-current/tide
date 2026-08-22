@@ -79,8 +79,9 @@ async function ensureUtilitySession(workspaceId: string): Promise<string> {
     let modelId = '';
     let providerId: string | undefined;
     try {
-      const s = await window.tideIpc?.getAgentSettings();
-      const utility = s?.utilityModel as { providerId: string; modelId: string } | undefined;
+      const s = await window.tideIpc?.getGeneralSettings();
+      const utility = (s as { utilityModel?: { providerId: string; modelId: string } | null } | undefined)
+        ?.utilityModel;
       if (utility?.providerId && utility.modelId) {
         modelId = utility.modelId;
         providerId = utility.providerId;

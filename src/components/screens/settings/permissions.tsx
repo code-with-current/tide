@@ -14,17 +14,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
-import { useProviders } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 import type { AutonomyMode } from '@/types';
 
@@ -38,8 +28,6 @@ type AgentSettingsState = {
   compactionThreshold: number;
   compactionKeepTurns: number;
   experimentalBackgroundDispatch: boolean;
-  /** Pinned model for background tasks; null = session's current model. */
-  utilityModel: { providerId: string; modelId: string } | null;
 };
 
 // Risk-tier metadata drives both the visual accent and the helper copy.
@@ -112,7 +100,6 @@ export function AutonomyCapsSection() {
         compactionThreshold: (raw.compactionThreshold as number) ?? 0.75,
         compactionKeepTurns: (raw.compactionKeepTurns as number) ?? 3,
         experimentalBackgroundDispatch: (raw.experimentalBackgroundDispatch as boolean) ?? false,
-        utilityModel: (raw.utilityModel as AgentSettingsState['utilityModel']) ?? null,
       });
     });
   }, []);
@@ -316,25 +303,6 @@ export function AutonomyCapsSection() {
         </Card>
       </SettingsGroup>
 
-      {/* ── Background tasks ── model for utility generations */}
-      <SettingsGroup title="Background tasks">
-        <Card>
-          <SettingsRow
-            title="Title & commit-message model"
-            description="Model used for session-title and commit-message generation."
-            last
-          >
-            <div className="flex items-center gap-2">
-              {savingKey === 'utilityModel' && <SavedDot />}
-              <UtilityModelSelect
-                value={settings.utilityModel}
-                onChange={(v) => update('utilityModel', v)}
-              />
-            </div>
-          </SettingsRow>
-        </Card>
-      </SettingsGroup>
-
       {/* ── Experimental ── */}
       <SettingsGroup title="Experimental">
         <Card>
@@ -438,50 +406,5 @@ function SavedDot() {
     <span className="flex items-center gap-0.5 text-[9px] text-[var(--success)] animate-in fade-in duration-200">
       <Check className="size-2.5" /> saved
     </span>
-  );
-}
-
-/** Model picker for background utility tasks (titles, commit messages).
- *  "" = the session's current model (default); otherwise a pinned
- *  provider+model from every enabled provider's catalog. */
-function UtilityModelSelect({
-  value,
-  onChange,
-}: {
-  value: { providerId: string; modelId: string } | null;
-  onChange: (v: { providerId: string; modelId: string } | null) => void;
-}) {
-  const { data: providers } = useProviders();
-  const enabled = (providers ?? []).filter((p) => p.enabled && p.models.length > 0);
-  const DEFAULT = '__session_model__';
-  const current = value ? `${value.providerId}:${value.modelId}` : DEFAULT;
-  return (
-    <Select
-      value={current}
-      onValueChange={(v) => {
-        if (v === DEFAULT) return onChange(null);
-        const [providerId, ...rest] = v.split(':');
-        onChange({ providerId, modelId: rest.join(':') });
-      }}
-    >
-      <SelectTrigger size="sm" className="w-[240px] text-xs">
-        <SelectValue placeholder="Session model" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={DEFAULT} className="text-xs">
-          Session model (default)
-        </SelectItem>
-        {enabled.map((p) => (
-          <SelectGroup key={p.id}>
-            <SelectLabel className="text-[10px] uppercase tracking-wide">{p.name}</SelectLabel>
-            {p.models.map((m) => (
-              <SelectItem key={m.id} value={`${p.id}:${m.modelId}`} className="text-xs font-mono">
-                {m.alias || m.modelId}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }
