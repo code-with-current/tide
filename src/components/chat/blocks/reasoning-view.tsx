@@ -137,7 +137,7 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
         {/* {chips.length > 0 && (
           <span className="flex items-center gap-1.5 ml-0.5">
             {chips.map((c) => (
-              <span key={c} className={cn('flex items-center gap-0.5', PHASE_COLOR[c])}>
+              <span key={c} className={cn('tool-tint flex items-center gap-0.5', PHASE_COLOR[c])}>
                 <span className="size-1 rounded-full bg-current" />
                 {c}
               </span>
@@ -161,8 +161,8 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
                   className="flex items-center gap-1 font-mono text-[0.78rem] h-auto py-1 px-2 -ml-px"
                 >
                   <ChevronRight className={cn('size-2.5 transition-transform', open && 'rotate-90')} />
-                  <Icon className={cn('size-3', PHASE_COLOR[p.label])} />
-                  <span className={PHASE_COLOR[p.label]}>{p.label}</span>
+                  <Icon className={cn('tool-tint size-3', PHASE_COLOR[p.label])} />
+                  <span className={cn('tool-tint', PHASE_COLOR[p.label])}>{p.label}</span>
                   <span className="text-muted-foreground/50">· ~{p.estTokens.toLocaleString()} tok</span>
                 </span>
                 {open && (

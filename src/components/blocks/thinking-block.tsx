@@ -64,14 +64,14 @@ function PhaseRow({
       >
         <span className="relative flex size-4 shrink-0 items-center justify-center">
           <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/phase:opacity-0">
-            <Icon className={cn('size-3', PHASE_COLOR[phase.label], phaseStreaming && 'animate-pulse')} />
+            <Icon className={cn('tool-tint size-3', PHASE_COLOR[phase.label], phaseStreaming && 'animate-pulse')} />
           </span>
           <ChevronDown
             className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/phase:opacity-100"
             style={{ transform: phaseOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className={cn('shrink-0 text-[12px] font-medium', PHASE_COLOR[phase.label])}>
+        <span className={cn('tool-tint shrink-0 text-[12px] font-medium', PHASE_COLOR[phase.label])}>
           {phase.label}
         </span>
         <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11px] text-muted-foreground">
@@ -187,7 +187,7 @@ function ThinkingBlockImpl({
         onClick={() => setOpen((o) => !o)}
         className="group/row -mx-1.5 flex h-7 w-[calc(100%+12px)] min-w-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-secondary/60"
       >
-        <span className="relative flex size-4 shrink-0 items-center justify-center text-purple-400">
+        <span className="tool-tint relative flex size-4 shrink-0 items-center justify-center text-purple-400">
           <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/row:opacity-0">
             <Brain className={cn('size-3.5', streaming && 'animate-pulse')} />
           </span>

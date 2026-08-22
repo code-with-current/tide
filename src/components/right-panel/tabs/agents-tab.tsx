@@ -264,7 +264,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                       : 'cursor-default opacity-50',
                   )}
                 >
-                  <Bot className="size-3 shrink-0 text-purple-400" />
+                  <Bot className="tool-tint size-3 shrink-0 text-purple-400" />
                   <span className="min-w-0 shrink-0 truncate text-[12px] font-medium text-foreground/80">
                     {block ? name : h.title}
                   </span>
