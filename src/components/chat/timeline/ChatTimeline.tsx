@@ -32,7 +32,7 @@ export interface ChatTimelineProps {
    *  the currently-viewed one. Undefined falls back to activeSessionId. */
   sessionId?: string | null;
   sessionLoading?: boolean;
-  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
+  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean | 'session') => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
   loadingFallback?: React.ReactNode;
   emptyState?: React.ReactNode;

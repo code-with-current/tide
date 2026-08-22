@@ -898,7 +898,7 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-2xl
+      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-lg
         focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 z-10 transition-[color,box-shadow]
         outline-none selection:bg-primary selection:text-primary-foreground shadow-lg">
         {/* ====================================================
@@ -983,7 +983,7 @@ export function ChatComposer({
               className={cn(
                 'chat-composer-editor',
                 'w-full bg-transparent border-0 resize-none outline-none text-sm focus:outline-none',
-                compact ? 'min-h-[4.25rem] py-2 px-3' : 'min-h-[5.25rem] py-3 px-3',
+                compact ? 'min-h-[6rem] py-2 px-3' : 'min-h-[6rem] py-3 px-3',
               )}
           />
 

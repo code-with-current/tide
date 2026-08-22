@@ -27,8 +27,9 @@ export function PermissionCard({
   /** Epoch ms when the orchestrator will auto-reject. Optional. */
   timeoutAt?: number;
   /** Approve, optionally escalating the autonomy mode for the turn and/or
-   *  adding an "always allow" rule (session = runtime, project = .agent/settings.json). */
-  onApprove?: (newMode?: AutonomyMode, remember?: boolean) => void;
+   *  adding an "always allow" rule ('session' = in-memory for this app run,
+   *  true = persisted to .agent/settings.json). */
+  onApprove?: (newMode?: AutonomyMode, remember?: boolean | 'session') => void;
   onReject?: (reason?: string) => void;
 }) {
   const blocked = call.gateDecision === 'blocked';
@@ -171,21 +172,27 @@ export function PermissionCard({
               ]}
             />
             <SplitButton
-              label="Approve"
+              label="Accept"
               onPrimary={() => onApprove?.()}
               variant="default"
               menuAlign="end"
-              toggleAriaLabel="More approve options"
+              toggleAriaLabel="More accept options"
               items={[
                 {
-                  label: 'Approve · full mode',
+                  label: 'Accept this session',
+                  hint: 'Auto-allow this tool until Tide closes',
+                  icon: <FileClock />,
+                  onSelect: () => onApprove?.(undefined, 'session'),
+                },
+                {
+                  label: 'Accept · full mode',
                   hint: 'All tools auto-run for the rest of this turn',
                   icon: <Zap />,
                   onSelect: () => onApprove?.('full'),
                 },
                 {
                   label: 'Always allow',
-                  hint: 'Save a rule to .agent/settings.json',
+                  hint: 'Save a rule to .agents/settings.json',
                   icon: <FileClock />,
                   onSelect: () => onApprove?.(undefined, true),
                 },

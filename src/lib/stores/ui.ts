@@ -150,6 +150,13 @@ export interface PendingFork {
   origin: 'menu' | 'result' | 'model';
 }
 
+/** Worktree intent for the new-session screen — set by the branch popover's
+ *  "Worktrees +" action. EmptyChatState consumes it to pre-enable isolation
+ *  (and preselect the base branch) so the session starts isolated. */
+export interface PendingWorktree {
+  baseBranch?: string;
+}
+
 export interface DraftSession {
   id: string;
   workspaceId: string;
@@ -372,6 +379,10 @@ interface UiState {
    *  on send, dismissal, or any navigation that leaves the fork draft. */
   pendingFork: PendingFork | null;
 
+  /** Worktree intent — see PendingWorktree. Transient; consumed by the
+   *  new-session screen on arrival. */
+  pendingWorktree: PendingWorktree | null;
+
   /** Session ids whose title is currently being LLM-generated. Drives a
    *  shimmer animation on the sidebar title while the fire-and-forget
    *  generateSessionTitle call is in flight. */
@@ -402,6 +413,8 @@ interface UiState {
   deleteDraft: (id: string) => void;
   /** Set/clear the fork intent shown on the new-session screen. */
   setPendingFork: (fork: PendingFork | null) => void;
+  /** Set/clear the worktree intent consumed by the new-session screen. */
+  setPendingWorktree: (wt: PendingWorktree | null) => void;
   /** Title-generation flag actions (shimmer on the sidebar title). */
   addTitleGenerating: (sessionId: string) => void;
   removeTitleGenerating: (sessionId: string) => void;
@@ -593,6 +606,7 @@ export const useUi = create<UiState>()(
   draftSessions: {},
   dismissedTodoSignatures: {},
   pendingFork: null,
+  pendingWorktree: null,
   activeDraftId: null,
   titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
@@ -653,6 +667,7 @@ export const useUi = create<UiState>()(
       activeDraftId: workspaceId ? crypto.randomUUID() : null,
       activeSessionId: null,
       mainView: 'new',
+      pendingWorktree: null,
     });
     get().setPendingFork(null);
   },
@@ -735,6 +750,7 @@ export const useUi = create<UiState>()(
       }
       return patch;
     }),
+  setPendingWorktree: (pendingWorktree) => set({ pendingWorktree }),
   // Set-based add/remove so the sidebar title re-renders (and starts/stops
   // shimmering) the instant the flag flips. New Set identity each update so
   // Zustand's shallow-equality subscribers detect the change.

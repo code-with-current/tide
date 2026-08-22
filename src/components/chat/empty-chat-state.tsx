@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { GitBranch, GitFork, FolderGit2, FolderCode, Plus, Check, ChevronDown } from 'lucide-react';
+import {
+  GitBranch, GitFork, FolderGit2, FolderCode, Plus, Check, ChevronDown,
+  Compass, Bug, FlaskConical, Sparkles, Rocket, FileSearch,
+} from 'lucide-react';
 import { ChatComposer } from './chat-composer';
 import { useModelOption, useWorkspaces, useGitBranchInfo, supportsThinking } from '@/lib/queries';
 import { BranchMenu } from '@/components/git/branch-menu';
@@ -71,10 +74,16 @@ export function EmptyChatState({
   // Disabled by default — worktree isolation is opt-in per session. The user
   // toggles it on when they want branch-scoped edits; most quick chats don't.
   const [worktreeEnabled, setWorktreeEnabled] = useState(false);
-  const [branchName, setBranchName] = useState('');
+  // Random per-draft suggestion (adjective-noun, docker-style); manual edits
+  // stick via branchTouched.
+  const [branchName, setBranchName] = useState(() => randomBranchName());
   const [baseBranch, setBaseBranch] = useState('');
   const [branchTouched, setBranchTouched] = useState(false);
-  const [composerText, setComposerText] = useState('');
+  // Suggestion-gallery seeding: picking a card writes the prompt as the
+  // composer draft and bumps seedVersion — the composer remounts keyed on it
+  // and its mount effect restores the stored draft into the editor.
+  const [seedVersion, setSeedVersion] = useState(0);
+  const [seedText, setSeedText] = useState('');
   // Config files to copy into the worktree (e.g., .env, .env.local).
   // Auto-populated from listConfigFiles when settings expand; user can
   // add custom paths too. Without these, dev servers in the worktree
@@ -86,13 +95,21 @@ export function EmptyChatState({
     if (workspace?.branch) setBaseBranch(workspace.branch);
   }, [workspace?.branch]);
 
-  // Auto-suggest branch name from composer text until the user manually
-  // edits the field. macOS-Save-As-style behavior: typing in the composer
-  // updates the suggestion; focusing + editing the branch field sticks.
+  // Consume the worktree intent armed by the branch popover's "Worktrees +":
+  // pre-enable isolation and preselect the base branch captured at click
+  // time. Reactive (not mount-only) because the screen may already be open
+  // when the intent arrives via the popover on this very screen. A fresh
+  // random branch name is rolled so back-to-back worktrees never collide.
+  const pendingWorktree = useUi((s) => s.pendingWorktree);
   useEffect(() => {
-    if (branchTouched) return;
-    setBranchName(slugify(composerText) || 'session');
-  }, [composerText, branchTouched]);
+    if (!pendingWorktree) return;
+    useUi.getState().setPendingWorktree(null);
+    setWorktreeEnabled(true);
+    setBranchName((cur) => (branchTouched ? cur : randomBranchName()));
+    if (pendingWorktree.baseBranch) setBaseBranch(pendingWorktree.baseBranch);
+    // branchTouched read deliberately: a manual name must survive re-arming.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWorktree]);
 
   // When worktree isolation is enabled, fire a one-shot auto-detection of
   // likely config files (.env etc.) and pre-select them. Re-runs on each
@@ -160,12 +177,12 @@ export function EmptyChatState({
         {/* Composer + workspace/branch selector row (bottom-left aligned) */}
         <div className="w-full max-w-[40rem] flex flex-col gap-2">
           <ChatComposer
-            key={activeDraftId ?? '__new__'}
+            key={`${activeDraftId ?? '__new__'}:${seedVersion}`}
             compact={false}
             placeholder="Describe what you want to build, fix, or explain…"
             inProgress={isStreaming}
+            defaultValue={seedText}
             onChange={(text) => {
-              setComposerText(text);
               touchDraft(activeWorkspaceId ?? '', text);
             }}
             onSubmit={(payload) => {
@@ -179,10 +196,10 @@ export function EmptyChatState({
                   ? { enabled: true, branchName, baseBranch, configFiles }
                   : { enabled: false, branchName, baseBranch },
               });
-              setComposerText('');
             }}
           />
-          <div className="mx-5 flex items-center gap-1.5 pl-2 pb-2 border border-input bg-input rounded-xl pt-7 -mt-7">
+          <div className="mx-5 flex items-center gap-1.5 pl-2 pb-2 border border-input bg-input rounded-xl pt-7 -mt-6
+              focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50">
             <WorkspaceMenu currentId={workspace?.id} />
             <BranchMenu
               trigger={
@@ -192,6 +209,11 @@ export function EmptyChatState({
                 >
                   <GitBranch className="size-3 shrink-0" />
                   <span className="font-mono text-[0.7143rem] truncate max-w-[180px]">{liveBranch ?? 'no branch'}</span>
+                  {worktreeEnabled && (
+                    <span className="inline-flex items-center gap-0.5 text-[0.6429rem] font-sans font-medium text-success">
+                      <GitFork className="size-2.5" /> isolated
+                    </span>
+                  )}
                   <ChevronDown className="size-3 shrink-0 opacity-50" />
                 </button>
               }
@@ -213,6 +235,28 @@ export function EmptyChatState({
             />
           </div>
         </div>
+
+        {/* Prompt suggestion gallery — pick a card to seed the composer */}
+        {!pendingFork && (
+          <div className="w-full max-w-[40rem] flex flex-wrap justify-center gap-2">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => {
+                  setSeedText(s.prompt);
+                  setSeedVersion((v) => v + 1);
+                  touchDraft(activeWorkspaceId ?? '', s.prompt);
+                }}
+                title={s.prompt}
+                className="group flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-card/50 text-[0.7857rem] text-muted-foreground hover:text-foreground hover:border-accent hover:bg-secondary/60 transition-colors cursor-pointer"
+              >
+                <s.icon className="size-3.5 shrink-0 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Keyboard hint */}
         <div className="text-[0.80rem] text-muted-foreground/60 flex items-center gap-3">
@@ -292,14 +336,57 @@ function WorkspaceMenu({ currentId }: { currentId?: string }) {
   );
 }
 
-/** Convert free text into a valid git branch name. Lowercase, ASCII-only,
- *  non-alphanumerics → dashes, trimmed + collapsed. "Fix the auth leak!"
- *  → "fix-the-auth-leak". */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-')
-    .slice(0, 40);
+/** Curated starter prompts for the new-session gallery. Short labels on the
+ *  chips; the full prompt seeds the composer on click. */
+const SUGGESTIONS: { icon: typeof Compass; label: string; prompt: string }[] = [
+  {
+    icon: Compass,
+    label: 'Explore the codebase',
+    prompt: 'Give me a tour of this codebase — the main modules, how they connect, and where the core logic lives.',
+  },
+  {
+    icon: Bug,
+    label: 'Hunt for bugs',
+    prompt: 'Review the most recently changed files for potential bugs, edge cases, or regressions.',
+  },
+  {
+    icon: FlaskConical,
+    label: 'Write tests',
+    prompt: 'Find the most important untested logic in this project and write tests for it.',
+  },
+  {
+    icon: Sparkles,
+    label: 'Refactor something',
+    prompt: 'Pick a module that would benefit from refactoring and propose concrete improvements.',
+  },
+  {
+    icon: FileSearch,
+    label: 'Review changes',
+    prompt: 'Summarize the uncommitted changes and review them for issues.',
+  },
+  {
+    icon: Rocket,
+    label: 'Build a feature',
+    prompt: 'Help me plan and build a new feature. Ask me for the details you need first.',
+  },
+];
+
+/** Random, memorable branch name for worktree sessions —
+ *  adjective-noun-number (docker-style), e.g. "quiet-otter-42". Collisions
+ *  are practically nil with 2-digit range × ~600 combos; a re-roll on each
+ *  new draft keeps consecutive sessions distinct. */
+const BRANCH_ADJECTIVES = [
+  'amber', 'brisk', 'calm', 'deep', 'eager', 'faint', 'gentle', 'hollow',
+  'ivory', 'jolly', 'keen', 'lucid', 'mellow', 'nimble', 'opal', 'plush',
+  'quiet', 'rapid', 'soft', 'tidy', 'urban', 'vast', 'warm', 'zesty',
+];
+const BRANCH_NOUNS = [
+  'otter', 'falcon', 'cedar', 'harbor', 'ember', 'willow', 'comet', 'delta',
+  'fjord', 'grove', 'heron', 'island', 'jasper', 'koala', 'lagoon', 'maple',
+  'nebula', 'orchid', 'puffin', 'quartz', 'raven', 'summit', 'tulip', 'violet',
+];
+
+function randomBranchName(): string {
+  const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+  return `${pick(BRANCH_ADJECTIVES)}-${pick(BRANCH_NOUNS)}-${Math.floor(Math.random() * 90) + 10}`;
 }
