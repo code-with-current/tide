@@ -1,4 +1,4 @@
-import { memo, useMemo, useCallback } from 'react';
+import { memo, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Streamdown, parseMarkdownIntoBlocks } from 'streamdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
@@ -6,6 +6,9 @@ import { remarkFilePaths } from '@/lib/remark/file-paths';
 import { useUi } from '@/lib/stores/ui';
 import { langFromPath } from './turn/turn-block';
 import { MermaidDiagram } from './mermaid-diagram';
+
+const WRAP_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><path d="M3 12h13a4 4 0 0 1 0 8h-3"/><polyline points="16 9 13 12 16 15"/></svg>';
 
 function hashString(s: string): string {
   let hash = 5381;
@@ -62,8 +65,9 @@ const MarkdownBlock = memo(
         parseIncompleteMarkdown={isStreamingBlock}
         normalizeHtmlIndentation
         remarkPlugins={[remarkGfm, remarkFilePaths]}
-        // Copy button only — no download, no header bar (CSS hides the header
-        // and re-surfaces the language as a floating badge). Line numbers on.
+        // Copy button only — no download. Header bar + language live in CSS
+        // (Streamdown ships the header; we un-hide and style it). Line
+        // numbers + per-block wrap toggle on.
         controls={{ code: { copy: true, download: false } }}
         lineNumbers
         animated={
@@ -96,6 +100,34 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   const lastIndex = blockEntries.length - 1;
   const openFile = useUi((s) => s.openFile);
   const activeSessionId = useUi((s) => s.activeSessionId);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Inject the soft-wrap toggle into each code block's actions row. Streamdown
+  // owns this DOM (no custom-control API), so this is post-render enhancement:
+  // guarded by a dataset flag, re-scanned whenever blocks appear (streaming).
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    for (const block of root.querySelectorAll('[data-streamdown="code-block"]')) {
+      const el = block as HTMLElement;
+      if (el.querySelector('.code-wrap-toggle')) continue;
+      const actions = el.querySelector('[data-streamdown="code-block-actions"]');
+      if (!actions) continue;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'code-wrap-toggle';
+      btn.title = 'Toggle soft wrap';
+      btn.setAttribute('aria-label', 'Toggle soft wrap');
+      btn.innerHTML = WRAP_ICON;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = el.getAttribute('data-wrap') === 'on';
+        el.setAttribute('data-wrap', on ? 'off' : 'on');
+        btn.classList.toggle('is-on', !on);
+      });
+      actions.appendChild(btn);
+    }
+  }, [blockEntries]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -111,7 +143,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   );
 
   return (
-    <div className={cn('prose-chat', className)} onClick={handleClick}>
+    <div ref={rootRef} className={cn('prose-chat', className)} onClick={handleClick}>
       {blockEntries.map((entry: { key: string; text: string }, i: number) => {
         const mermaid = extractMermaid(entry.text);
 

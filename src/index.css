@@ -981,24 +981,29 @@ body {
 
 .prose-chat blockquote {
   margin: 0 0 0.85em;
-  padding: 0.6em 0.9em;
-  border-left: 2px solid var(--border);
+  padding: 0.15em 0 0.15em 1em;
+  border-left: 3px solid color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+  border-radius: 0;
   color: var(--muted-foreground);
-  background: color-mix(in srgb, var(--muted) 30%, transparent);
-  border-radius: 0 0.25rem 0.25rem 0;
+  font-size: 0.92em;
 }
 .prose-chat blockquote:last-child { margin-bottom: 0; }
 .prose-chat blockquote p { margin: 0; }
+.prose-chat blockquote blockquote {
+  border-left-color: color-mix(in srgb, var(--muted-foreground) 22%, transparent);
+  margin-top: 0.4em;
+}
 
 .prose-chat hr        { border: 0; border-top: 1px solid var(--color-line-soft); margin: 1.2em 0; }
 
-/* Tables — explicit consistent margin */
+/* Tables — horizontal rules only (no cell grid). */
 .prose-chat table     { margin: 0 0 0.85em; border-collapse: collapse; width: 100%; font-size: 0.85rem; }
 .prose-chat table:last-child { margin-bottom: 0.85em; }
 .prose-chat th,
-.prose-chat td        { border: 1px solid var(--border); padding: 0.4em 0.7em; text-align: left; overflow-wrap: anywhere; }
+.prose-chat td        { border: 0; padding: 0.4em 0.75em; text-align: left; overflow-wrap: anywhere; }
 .prose-chat td code   { overflow-wrap: anywhere; }
-.prose-chat th        { background: var(--muted); font-weight: 600; }
+.prose-chat thead th  { border-bottom: 1px solid var(--border); font-weight: 600; }
+.prose-chat tbody tr:not(:last-child) { border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
 
 /* Inline code — small pill, distinct from the chat surface. */
 .prose-chat code      {
@@ -1011,42 +1016,118 @@ body {
 }
 
 
-/* Outer wrapper — flatten Streamdown's rounded-xl border bg-sidebar p-2. */
+/* ── Code block — card with a quiet header bar ──────────────────────
+   Streamdown DOM:
+     [data-streamdown="code-block"]              outer card
+       ├─ [data-streamdown="code-block-header"]  lang bar (Streamdown ships it; we style it)
+       ├─ div (no attr) > [data-streamdown="code-block-actions"]  copy + wrap toggle
+       └─ [data-streamdown="code-block-body"]     surface (pre > code > span.block) */
 .prose-chat [data-streamdown="code-block"] {
   position: relative;
-  margin: 0 0 0.5em;
+  margin: 0 0 0.75em;
   padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
   gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--card) 55%, var(--background));
+  overflow: hidden;
 }
 .prose-chat [data-streamdown="code-block"]:last-child { margin-bottom: 0; }
-.prose-chat [data-streamdown="code-block-header"] {
-  display: none;
-}
 
-/* The surface — keep Streamdown's border + Shiki bg, refine sizing. */
+/* Header bar — language left, always visible. */
+.prose-chat [data-streamdown="code-block-header"] {
+  display: flex;
+  height: 2.25rem;
+  align-items: center;
+  padding: 0 0.5rem 0 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.prose-chat [data-streamdown="code-block-header"] span { margin-left: 0; }
+/* Incomplete fence with no language yet — no empty bar. */
+.prose-chat [data-streamdown="code-block"][data-language=""] [data-streamdown="code-block-header"] { display: none; }
+
+/* Actions — anchored into the header row (Streamdown ships them in a
+   sticky -mt-10 float; re-anchor to the card). */
+.prose-chat [data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  height: 2.25rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.prose-chat [data-streamdown="code-block-actions"] {
+  margin: 0;
+  padding: 0;
+  gap: 0.125rem;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.prose-chat [data-streamdown="code-block-copy-button"],
+.prose-chat .code-wrap-toggle {
+  margin: 0;
+  padding: 0.3rem;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  opacity: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.prose-chat [data-streamdown="code-block"]:hover [data-streamdown="code-block-copy-button"],
+.prose-chat [data-streamdown="code-block"]:hover .code-wrap-toggle,
+.prose-chat [data-streamdown="code-block-copy-button"]:focus-visible,
+.prose-chat .code-wrap-toggle:focus-visible,
+.prose-chat .code-wrap-toggle.is-on {
+  opacity: 1;
+}
+.prose-chat [data-streamdown="code-block-copy-button"]:hover,
+.prose-chat .code-wrap-toggle:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--secondary) 60%, transparent);
+}
+.prose-chat .code-wrap-toggle.is-on { color: var(--foreground); }
+.prose-chat .code-wrap-toggle svg { display: block; }
+
+/* Body — borderless inside the card; Shiki bg lands on pre via --sdm-bg. */
 .prose-chat [data-streamdown="code-block-body"] {
   position: relative;
+  border: 0;
+  border-radius: 0;
   font-size: 12.5px;
   line-height: 1.6;
-  border-radius: 0.5rem;
-  overflow: hidden;
   max-width: 100%;
+  overflow: hidden;
   overflow-x: auto;
-  scrollbar-gutter: stable;
 }
-/* Tight padding; room at the bottom for the language pill. Wide code
-   scrolls horizontally inside the body — the pre must not wrap or clip. */
 .prose-chat [data-streamdown="code-block-body"] pre {
-  padding: 0.5rem 0.75rem 1.75rem 0.25rem;
   margin: 0;
+  padding: 0.65rem 0.9rem 0.65rem 0.25rem;
   overflow-x: visible;
   white-space: pre;
 }
 
-/* ── Line numbers ─────────────────────────────────────────────────── */
+/* Soft-wrap mode (per-block toggle; button injected by MemoizedMarkdown). */
+.prose-chat [data-streamdown="code-block"][data-wrap="on"] [data-streamdown="code-block-body"] { overflow: visible; }
+.prose-chat [data-streamdown="code-block"][data-wrap="on"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── Line numbers — right-aligned gutter ──────────────────────────── */
 .prose-chat [data-streamdown="code-block-body"] code {
   counter-reset: line;
 }
@@ -1055,14 +1136,14 @@ body {
   counter-increment: line;
   content: counter(line);
   display: inline-block;
-  width: 1.25rem;
-  margin-right: 0.5rem;
+  width: 2.25rem;
+  margin-right: 0.75rem;
   text-align: right;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10.5px;
   line-height: 1.6;
   color: var(--muted-foreground);
-  opacity: 0.35;
+  opacity: 0.45;
   user-select: none;
   pointer-events: none;
   flex-shrink: 0;
@@ -1070,65 +1151,6 @@ body {
 .prose-chat [data-streamdown="code-block-body"] code > span.block,
 .prose-chat [data-streamdown="code-block-body"] code > span[class*="block"] {
   display: block;
-}
-
-/* ── Copy button — inside the container, top-right ────────────────── */
-.prose-chat [data-streamdown="code-block"] > div:first-child:where(:not([data-streamdown])) {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 3;
-  margin: 0;
-  height: auto;
-}
-.prose-chat [data-streamdown="code-block-actions"] {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow: none;
-}
-.prose-chat [data-streamdown="code-block-copy-button"] {
-  margin: 0.35rem 0.5rem 0 0;
-  padding: 0.25rem;
-  border-radius: 0.375rem;
-  background: color-mix(in srgb, var(--background) 60%, transparent);
-  color: var(--muted-foreground);
-  opacity: 0;
-  cursor: pointer;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-.prose-chat [data-streamdown="code-block"]:hover
-  [data-streamdown="code-block-copy-button"],
-.prose-chat [data-streamdown="code-block-copy-button"]:focus-visible {
-  opacity: 1;
-}
-.prose-chat [data-streamdown="code-block-copy-button"]:hover {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--background) 80%, transparent);
-}
-
-/* ── Language pill — bottom-right, always visible ─────────────────── */
-.prose-chat [data-streamdown="code-block-body"][data-language]:not([data-language=""])::after {
-  content: attr(data-language);
-  position: absolute;
-  right: 0.5rem;
-  bottom: 0.4rem;
-  z-index: 1;
-  padding: 0.15rem 0.45rem;
-  border-radius: 0.3rem;
-  background: color-mix(in srgb, var(--background) 50%, transparent);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 9.5px;
-  line-height: 1.2;
-  text-transform: lowercase;
-  letter-spacing: 0.02em;
-  color: var(--muted-foreground);
-  opacity: 0.55;
-  pointer-events: none;
-  user-select: none;
 }
 
 /* ── Resets ─────────────────────────────────────────────────────────
@@ -1158,30 +1180,23 @@ body {
   color: var(--color-ink);
 }
 
-/* ── GFM tables ─────────────────────────────────────────────────────
+/* ── GFM tables — card, horizontal rules, sticky header, hover rows ──
    Streamdown wraps tables in:
-     [data-streamdown="table-wrapper"]  (border + bg-sidebar + p-2 + rounded-lg)
-       ├─ <div>  controls row (copy/download/fullscreen) — no data attr
-       └─ <div>  inner scroll container (border + bg-background)
-            └─ <table data-streamdown="table">
+     [data-streamdown="table-wrapper"]
+       ├─ <div>  controls (copy/download/fullscreen) — hover overlay
+       └─ <div>  inner scroll pane  →  <table data-streamdown="table">   */
 
-   Goal: no wrapper container chrome — the table sits directly in the chat
-   flow with its own border. Controls float top-right and only appear on
-   hover, like the code-block copy button. */
-
-/* Table wrapper — rounded container with subtle background. */
+/* Wrapper — bordered card; the pane inside scrolls both ways. */
 .prose-chat [data-streamdown="table-wrapper"] {
   position: relative;
   margin: 0 0 0.85em;
-  padding: 0.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  background: transparent;
   overflow: hidden;
 }
-/* Controls row → absolute top-right overlay, hidden until hover.
-   This is the <div class="flex items-center justify-end gap-1"> that
-   precedes the inner scroll container. It's always the first child of
-   table-wrapper — target by position, not :has(). */
+/* Controls — absolute top-right overlay, hidden until hover. */
 .prose-chat [data-streamdown="table-wrapper"] > div:first-child {
   position: absolute;
   top: 0;
@@ -1199,8 +1214,6 @@ body {
   opacity: 1;
   pointer-events: auto;
 }
-/* Style each control button as a quiet translucent chip matching the
-   code-block copy button. */
 .prose-chat [data-streamdown="table-wrapper"] > div:first-child button {
   padding: 0.3rem;
   border-radius: 0.375rem;
@@ -1213,18 +1226,17 @@ body {
   color: var(--foreground);
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
-/* Inner scroll container — strip its border/bg/rounding so the table
-   floats bare in the chat. overflow-x for wide tables, but contained
-   so it doesn't cause parent scrollbar glitches. */
+/* Inner pane — the scroll viewport the sticky thead sticks to. Tall
+   tables become a scrollable region (≤60vh); short ones render flat. */
 .prose-chat [data-streamdown="table-wrapper"] > div:last-child {
   border: 0;
   border-radius: 0;
   background: transparent;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 60vh;
   max-width: 100%;
-  scrollbar-gutter: stable;
 }
-/* The table itself — clean, no outer border (container provides it). */
+/* The table — horizontal rules only. */
 .prose-chat [data-streamdown="table"] {
   margin: 0;
   border-collapse: collapse;
@@ -1232,37 +1244,99 @@ body {
   width: 100%;
   max-width: 100%;
 }
+.prose-chat [data-streamdown="table"] thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--background) 82%, transparent);
+  backdrop-filter: blur(4px);
+}
 .prose-chat [data-streamdown="table"] th,
 .prose-chat [data-streamdown="table"] td {
-  border: 1px solid var(--color-line-soft);
-  padding: 0.35em 0.7em;
+  border: 0;
+  padding: 0.4em 0.75em;
   text-align: left;
 }
-.prose-chat [data-streamdown="table"] th {
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
+.prose-chat [data-streamdown="table"] thead th {
+  border-bottom: 1px solid var(--border);
   font-weight: 600;
+}
+.prose-chat [data-streamdown="table"] tbody tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.prose-chat [data-streamdown="table"] tbody tr:last-child { border-bottom: 0; }
+.prose-chat [data-streamdown="table"] tbody tr:hover {
+  background: color-mix(in srgb, var(--secondary) 35%, transparent);
+}
+/* Inline code in cells — plain mono, no pill. */
+.prose-chat [data-streamdown="table"] td code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.9em;
+  color: color-mix(in srgb, var(--foreground) 85%, transparent);
 }
 /* Bare <table> without a Streamdown wrapper — fallback styling. */
 .prose-chat table:not(:where([data-streamdown] *)) {
   margin: 0 0 0.85em;
-  padding: 0.75rem;
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--muted) 20%, transparent);
   border-collapse: collapse;
   font-size: 0.82em;
   width: 100%;
   max-width: 100%;
   overflow: hidden;
+  border-style: hidden; /* collapse-safe radius clip */
+  box-shadow: 0 0 0 1px var(--border);
 }
 .prose-chat table:not(:where([data-streamdown] *)) th,
 .prose-chat table:not(:where([data-streamdown] *)) td {
-  border: 1px solid var(--color-line-soft);
-  padding: 0.35em 0.7em;
+  border: 0;
+  padding: 0.4em 0.75em;
   text-align: left;
 }
-.prose-chat table:not(:where([data-streamdown] *)) th {
-  background: var(--color-surface-2);
+.prose-chat table:not(:where([data-streamdown] *)) thead th {
+  border-bottom: 1px solid var(--border);
   font-weight: 600;
+}
+.prose-chat table:not(:where([data-streamdown] *)) tbody tr:not(:last-child) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+/* ── Mermaid — theme-aware palette + card chrome ───────────────────── */
+:root {
+  --mermaid-theme: dark;
+  --mermaid-bg: #0d0f13;
+  --mermaid-node: #1a1e25;
+  --mermaid-node-alt: #181b21;
+  --mermaid-node-soft: #111317;
+  --mermaid-border: #3a4150;
+  --mermaid-line: #8b94a3;
+  --mermaid-text: #eef1f6;
+}
+[data-theme="bright"] {
+  --mermaid-theme: default;
+  --mermaid-bg: #ffffff;
+  --mermaid-node: #f2f3f5;
+  --mermaid-node-alt: #e9ebef;
+  --mermaid-node-soft: #f8f9fb;
+  --mermaid-border: #d3d7de;
+  --mermaid-line: #667085;
+  --mermaid-text: #1f2430;
+}
+.mermaid-card {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--card) 55%, var(--background));
+  overflow: hidden;
+}
+/* Live-render pulse — signals the diagram is still streaming. */
+.mermaid-card.mermaid-live { animation: mermaid-live-pulse 1.6s ease-in-out infinite; }
+@keyframes mermaid-live-pulse {
+  0%, 100% { border-color: var(--border); }
+  50% { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mermaid-card.mermaid-live { animation: none; }
 }
 /* Each markdown block renders in its own Streamdown root div whose wrapper
    margin (0.6em) is the uniform inter-block gap. Element-level margins at the

@@ -3,33 +3,48 @@ import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, ZoomIn, X, ZoomOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useUi } from '@/lib/stores/ui';
 
-let mermaidLoadPromise: Promise<typeof import('mermaid')['default']> | null = null;
+let mermaidBase: Promise<typeof import('mermaid')['default']> | null = null;
+let configuredFor: string | null = null;
 
+/** Palette from theme CSS vars (--mermaid-*, defined per data-theme in
+ *  index.css) — falls back to the current dark values when unset. */
+function mermaidThemeVariables(): Record<string, string> {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  return {
+    background: v('--mermaid-bg', '#0d0f13'),
+    primaryColor: v('--mermaid-node', '#1a1e25'),
+    primaryTextColor: v('--mermaid-text', '#eef1f6'),
+    primaryBorderColor: v('--mermaid-border', '#3a4150'),
+    lineColor: v('--mermaid-line', '#8b94a3'),
+    secondaryColor: v('--mermaid-node-alt', '#181b21'),
+    tertiaryColor: v('--mermaid-node-soft', '#111317'),
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  };
+}
+
+/** (Re)initialize when the app theme changes — rendered SVGs bake colors in,
+ *  so diagrams re-render on theme switch (keyed in the render effect). */
 async function loadMermaid() {
-  if (!mermaidLoadPromise) {
-    mermaidLoadPromise = import('mermaid').then((m) => {
-      const mermaid = m.default;
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: 'dark',
-        securityLevel: 'loose',
-        suppressErrorRendering: true,
-        themeVariables: {
-          background: '#0d0f13',
-          primaryColor: '#1a1e25',
-          primaryTextColor: '#eef1f6',
-          primaryBorderColor: '#3a4150',
-          lineColor: '#8b94a3',
-          secondaryColor: '#181b21',
-          tertiaryColor: '#111317',
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        },
-      });
-      return mermaid;
-    });
+  if (!mermaidBase) {
+    mermaidBase = import('mermaid').then((m) => m.default);
   }
-  return mermaidLoadPromise;
+  const mermaid = await mermaidBase;
+  const themeKey = document.documentElement.getAttribute('data-theme') ?? '';
+  if (configuredFor !== themeKey) {
+    const cs = getComputedStyle(document.documentElement);
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: (cs.getPropertyValue('--mermaid-theme').trim() || 'dark') as 'dark' | 'default',
+      securityLevel: 'loose',
+      suppressErrorRendering: true,
+      themeVariables: mermaidThemeVariables(),
+    });
+    configuredFor = themeKey;
+  }
+  return mermaid;
 }
 
 let diagramId = 0;
@@ -280,13 +295,16 @@ export const MermaidDiagram = memo(function MermaidDiagram({
   const [zoomOpen, setZoomOpen] = useState(false);
   const lastRenderAtRef = useRef(0);
   const lastRenderedRef = useRef<string | null>(null);
+  // Theme changes re-render (SVGs bake colors in) via the effect's cache key.
+  const appTheme = useUi((s) => s.appTheme);
 
   useEffect(() => {
     const trimmed = code.trim();
     if (!trimmed) return;
-    // Already rendered this exact source — nothing to do (covers the
-    // streaming → done transition after a successful live render).
-    if (lastRenderedRef.current === trimmed) return;
+    const cacheKey = `${appTheme}\u0000${trimmed}`;
+    // Already rendered this exact source under this theme — nothing to do
+    // (covers the streaming → done transition after a successful live render).
+    if (lastRenderedRef.current === cacheKey) return;
 
     // Final render (fence closed or stream ended): authoritative, with the
     // full sanitize fallback chain.
@@ -311,7 +329,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
               });
               setSvg(rendered);
               setError(null);
-              if (candidate === trimmed) lastRenderedRef.current = trimmed;
+              if (candidate === trimmed) lastRenderedRef.current = cacheKey;
             }
             return; // success — stop trying
           } catch {
@@ -353,7 +371,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
               const { svg: rendered } = await mermaid.render(`mermaid-${++diagramId}`, candidate);
               if (cancelled) return;
               lastRenderAtRef.current = Date.now();
-              if (candidate === trimmed) lastRenderedRef.current = trimmed;
+              if (candidate === trimmed) lastRenderedRef.current = cacheKey;
               setSvg(rendered);
               setError(null);
             } catch {
@@ -366,7 +384,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
       Math.max(0, LIVE_THROTTLE_MS - (Date.now() - lastRenderAtRef.current)),
     );
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [code, streaming]);
+  }, [code, streaming, appTheme]);
 
   if (error) {
     return (
@@ -384,7 +402,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
 
   if (!svg) {
     return (
-      <div className={cn('flex items-center justify-center py-8 text-[0.7857rem] text-muted-foreground/50', className)}>
+      <div className={cn('mermaid-card mermaid-live flex items-center justify-center gap-2 py-6 text-[0.7857rem] text-muted-foreground/50', className)}>
         rendering diagram…
       </div>
     );
@@ -393,19 +411,18 @@ export const MermaidDiagram = memo(function MermaidDiagram({
     <>
       <div
         className={cn(
-          'mermaid-render group relative flex justify-center overflow-x-auto py-2 rounded-lg p-3 border border-muted/10 bg-muted/20',
-          'cursor-zoom-in hover:bg-secondary/30 transition-colors',
+          'mermaid-card mermaid-render group relative flex justify-center overflow-x-auto p-3',
+          'cursor-zoom-in hover:bg-secondary/25 transition-colors',
+          streaming && 'mermaid-live',
           className,
         )}
         onClick={() => setZoomOpen(true)}
         title="Click to zoom"
       >
         <div className="mermaid-svg-host" dangerouslySetInnerHTML={{ __html: svg }} />
-        {streaming && (
-          <span className="pointer-events-none absolute bottom-1.5 right-2 rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.7143rem] text-muted-foreground/60">
-            rendering…
-          </span>
-        )}
+        <span className="pointer-events-none absolute bottom-1.5 right-2 flex items-center gap-1 rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[0.7143rem] text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">
+          <ZoomIn className="size-3" /> zoom
+        </span>
       </div>
       {zoomOpen && (
         <DiagramZoomOverlay svg={svg} onClose={() => setZoomOpen(false)} />
