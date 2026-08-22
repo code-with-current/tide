@@ -55,36 +55,17 @@ describe('filterPresetModels (OpenCode Zen routing)', () => {
     expect(ids(out)).toEqual(['claude-sonnet-4-6', 'qwen3.6-plus']);
   });
 
-  it('openai style keeps chat/completions models, hides Responses-only ones', () => {
-    const out = filterPresetModels(
-      [
-        { modelId: 'glm-5.2' },
-        { modelId: 'kimi-k2.7-code' },
-        { modelId: 'deepseek-v4-flash' },
-        { modelId: 'x-preview-f-free' },
-        { modelId: 'gpt-5.5' },
-        { modelId: 'grok-4.6' },
-        { modelId: 'claude-sonnet-4-6' },
-      ],
-      zen,
-      'openai',
-    );
-    expect(ids(out)).toEqual(['glm-5.2', 'kimi-k2.7-code', 'deepseek-v4-flash', 'x-preview-f-free']);
-  });
-
-  it('free tier routes to openai style only (verified live)', () => {
-    const out = filterPresetModels(
-      [
-        { modelId: 'hy3-free' },
-        { modelId: 'nemotron-3.5-lightning-free' },
-        { modelId: 'laguna-s-2.1-free' },
-        { modelId: 'muse-spark-1.2-contributor-free' },
-        { modelId: 'mimo-v2.5-free' },
-      ],
-      zen,
-      'openai',
-    );
-    expect(ids(out)).toEqual(['hy3-free', 'nemotron-3.5-lightning-free', 'laguna-s-2.1-free', 'muse-spark-1.2-contributor-free', 'mimo-v2.5-free']);
+  it('openai style is unfiltered — Zen routes everything through /chat/completions (live sweep)', () => {
+    const input = [
+      { modelId: 'glm-5.2' },
+      { modelId: 'gpt-5.5' },
+      { modelId: 'grok-4.6' },
+      { modelId: 'claude-sonnet-4-6' },
+      { modelId: 'x-preview-f-free' },
+      { modelId: 'gemini-3-flash' },
+    ];
+    const out = filterPresetModels(input, zen, 'openai');
+    expect(out).toBe(input);
   });
 
   it('presets without routing pass everything through', () => {
