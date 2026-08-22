@@ -851,10 +851,10 @@ function ChipRow({
         title="Open this agent's stream in the Agents tab"
         className="flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
       >
-        <span className={cn('flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
+        <span className={cn('tool-tint flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
           {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
         </span>
-        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium text-purple-400">
+        <span className="tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[12.5px] font-medium text-purple-400">
           {d?.agentName ?? toolLabel(call.toolName, call.status)}
         </span>
         {summary && (
@@ -914,7 +914,7 @@ function ChipRow({
           'hover:bg-secondary/60 hover:rounded-lg',
         )}
       >
-        <span className={cn('relative flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
+        <span className={cn('tool-tint relative flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
           <span
             className={cn(
               'transition-opacity duration-100 group-hover/row:opacity-0',

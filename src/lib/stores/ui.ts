@@ -499,7 +499,10 @@ interface UiState {
   terminalTheme: string;
   terminalFontSize: number;
   appTheme: string;
-  setAppearance: (patch: Partial<Pick<UiState, 'fontScale' | 'reduceMotion' | 'terminalTheme' | 'terminalFontSize' | 'appTheme'>>) => void;
+  /** Tool icon/text tinting in the chat stream: 'colorful' (per-category
+   *  palette) or 'monochrome' (muted foreground everywhere). */
+  toolColorMode: 'colorful' | 'monochrome';
+  setAppearance: (patch: Partial<Pick<UiState, 'fontScale' | 'reduceMotion' | 'terminalTheme' | 'terminalFontSize' | 'appTheme' | 'toolColorMode'>>) => void;
 
   // ─── Chat stream ────────────────────────────────────────────
   /** How the reasoning/thinking block renders in the chat stream.
@@ -1222,6 +1225,7 @@ export const useUi = create<UiState>()(
   terminalTheme: 'tide-dark',
   terminalFontSize: 11,
   appTheme: 'tide',
+  toolColorMode: 'colorful',
 
   // ─── Chat stream ──────────────────────────────────────────────
   reasoningView: 'phased',
@@ -1234,6 +1238,9 @@ export const useUi = create<UiState>()(
     }
     if (patch.appTheme !== undefined) {
       document.documentElement.setAttribute('data-theme', state.appTheme);
+    }
+    if (patch.toolColorMode !== undefined) {
+      document.documentElement.setAttribute('data-tool-colors', state.toolColorMode === 'monochrome' ? 'off' : 'on');
     }
     if (patch.reduceMotion !== undefined) {
       document.documentElement.classList.toggle('reduce-motion', patch.reduceMotion);
@@ -1308,6 +1315,7 @@ export const useUi = create<UiState>()(
         terminalTheme: s.terminalTheme,
         terminalFontSize: s.terminalFontSize,
         appTheme: s.appTheme,
+        toolColorMode: s.toolColorMode,
         chatView: s.chatView,
         diffMode: s.diffMode,
         activeTerminal: s.activeTerminal,

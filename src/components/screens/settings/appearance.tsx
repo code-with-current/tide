@@ -61,12 +61,13 @@ export function getTerminalTheme(themeId: string): Record<string, string> {
 
 /** The content without the header. */
 export function AppearanceContent() {
-  const { fontScale, terminalTheme, terminalFontSize, appTheme, setAppearance } = useUi(
+  const { fontScale, terminalTheme, terminalFontSize, appTheme, toolColorMode, setAppearance } = useUi(
     useShallow((s) => ({
       fontScale: s.fontScale,
       terminalTheme: s.terminalTheme,
       terminalFontSize: s.terminalFontSize,
       appTheme: s.appTheme,
+      toolColorMode: s.toolColorMode,
       setAppearance: s.setAppearance,
     })),
   );
@@ -79,7 +80,7 @@ export function AppearanceContent() {
     <>
       <SettingsGroup title="Theme">
         <Card>
-          <SettingsRow title="Base theme" description="Color palette for the entire app." last>
+          <SettingsRow title="Base theme" description="Color palette for the entire app.">
             <div className="flex items-center gap-1.5">
               {THEMES.map((t) => (
                 <button
@@ -96,6 +97,19 @@ export function AppearanceContent() {
                   <span className="size-2 rounded-full" style={{ background: t.accent }} />
                 </button>
               ))}
+            </div>
+          </SettingsRow>
+          <SettingsRow title="Tool colors" description="Chat stream tool icons and labels." last>
+            <div className="flex items-center gap-1">
+              <Segmented
+                size="sm"
+                value={toolColorMode}
+                onChange={(v) => setAppearance({ toolColorMode: v })}
+                options={[
+                  { value: 'colorful', label: 'Colorful' },
+                  { value: 'monochrome', label: 'Monochrome' },
+                ]}
+              />
             </div>
           </SettingsRow>
         </Card>
