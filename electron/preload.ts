@@ -123,7 +123,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
   openExternal: (url: string) => {
     if (/^https?:\/\//i.test(url)) {
       const { shell } = require('electron');
-      shell.openExternal(url);
+      shell.openExternal(url).catch((e) =>
+        console.warn('[tide] openExternal failed', url, e));
     }
   },
   detectGitRepo: (dirPath: string) => ipcRenderer.invoke('tide:detectGitRepo', dirPath),

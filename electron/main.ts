@@ -117,7 +117,10 @@ function createWindow() {
   // Open external links in the OS browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
-      shell.openExternal(url);
+      // Rejection here (no default browser handler, OS refusal) would otherwise
+      // surface as an unhandledRejection — log it instead.
+      shell.openExternal(url).catch((e) =>
+        log.warn('openExternal failed', { url, error: String(e) }));
     }
     return { action: 'deny' };
   });
