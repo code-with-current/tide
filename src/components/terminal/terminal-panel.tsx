@@ -1,7 +1,6 @@
 import { useRef, useEffect, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
-import { init, Terminal, FitAddon } from 'ghostty-web';
-import type { ILink } from 'ghostty-web';
+import type { Terminal as GhosttyTerminal, FitAddon as FitAddonHandle, ILink } from 'ghostty-web';
 import { useUi, terminalScopeKey } from '@/lib/stores/ui';
 import { getTerminalTheme } from '@/components/screens/settings/appearance';
 import { measureTerminalContainer } from '@/lib/terminal-size';
@@ -13,12 +12,29 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } 
 
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
+// ── Lazy ghostty-web ────────────────────────────────────────────
+// 638 KB of JS + the WASM VT would sit in the startup bundle for a panel the
+// user may never open. Dynamic import keeps it in a lazy chunk; init() (WASM
+// bootstrap) runs once, then the resolved module is cached module-level so
+// terminal creation stays synchronous.
+type GhosttyModule = typeof import('ghostty-web');
+let ghosttyModule: GhosttyModule | null = null;
+let ghosttyLoad: Promise<GhosttyModule> | null = null;
+function loadGhostty(): Promise<GhosttyModule> {
+  ghosttyLoad ??= import('ghostty-web').then(async (m) => {
+    await m.init();
+    ghosttyModule = m;
+    return m;
+  });
+  return ghosttyLoad;
+}
+
 // ── Module-level terminal registry ──────────────────────────────
 // xterm instances live OUTSIDE React's reconciliation. React provides a mount div; we imperatively create/destroy terminal canvases inside it. This guarantees terminals survive session switches — the DOM elements are never touched by React's diffing.
 
 interface LiveTerminal {
-  term: Terminal;
-  fit: FitAddon;
+  term: GhosttyTerminal;
+  fit: FitAddonHandle;
   /** The wrapper div we created and passed to term.open(). Stored explicitly
    *  because ghostty-web sets `term.element` TO this wrapper (unlike xterm,
    *  which nested its own element inside it) — so term.element.parentElement
@@ -111,8 +127,8 @@ if (ipc) {
 const PATH_PATTERN = /(?:\/[\w./@-]+|[A-Za-z]:\\[\w\\./-]+)(?::(\d+))?(?::(\d+))?/g;
 
 class FilePathLinkProvider {
-  private term: Terminal;
-  constructor(term: Terminal) {
+  private term: GhosttyTerminal;
+  constructor(term: GhosttyTerminal) {
     this.term = term;
   }
 
@@ -156,8 +172,8 @@ class FilePathLinkProvider {
 const URL_PATTERN = /(https?:\/\/[^\s<>"']+|www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"']*)/gi;
 
 class UrlLinkProvider {
-  private term: Terminal;
-  constructor(term: Terminal) {
+  private term: GhosttyTerminal;
+  constructor(term: GhosttyTerminal) {
     this.term = term;
   }
   provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
@@ -224,11 +240,15 @@ export const TerminalPanel = memo(function TerminalPanel() {
 
   const active = activeId && terminals.some((t) => t.id === activeId) ? activeId : terminals[0]?.id;
 
-  // ghostty-web loads its WASM (embedded base64 fallback) once before any
-  // Terminal can be constructed. Gate terminal creation on this so the first
-  // open doesn't race the WASM init.
-  const [wasmReady, setWasmReady] = useState(false);
-  useEffect(() => { let alive = true; init().then(() => { if (alive) setWasmReady(true); }).catch(() => {}); return () => { alive = false; }; }, []);
+  // ghostty-web (and its WASM) loads lazily on first panel mount — see
+  // loadGhostty. Terminal creation is gated on the resolved module so the
+  // first open doesn't race the WASM init.
+  const [ghosttyReady, setGhosttyReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    loadGhostty().then(() => { if (alive) setGhosttyReady(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // The ACTIVE session's terminals — only these get xterm instances created
   // and shown. Switching sessions must NOT destroy the previous session's
@@ -271,7 +291,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   // updates existing terminals in place via term.options — see below.)
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || !ipc || !wasmReady) return;
+    if (!mount || !ipc || !ghosttyReady || !ghosttyModule) return;
 
     let createdActive = false;
 
@@ -298,7 +318,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       // dimensions while the emulator still initializes (no 80x24 flash).
       const provisional = measureTerminalContainer(mount, terminalFontSize, fontFamily);
 
-      const term = new Terminal({
+      const term = new ghosttyModule.Terminal({
         cursorBlink: true,
         fontSize: terminalFontSize,
         fontFamily,
@@ -306,7 +326,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
         ...(provisional ?? {}),
       });
 
-      const fit = new FitAddon();
+      const fit = new ghosttyModule.FitAddon();
       term.loadAddon(fit);
 
       // Create a wrapper div INSIDE the mount. ghostty-web renders a canvas
@@ -457,7 +477,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       }
     }
     prevActiveRef.current = active;
-  }, [allEntries, activeSessionIds, survivingIds, active, wasmReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allEntries, activeSessionIds, survivingIds, active, ghosttyReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Theme / font-size updates: apply to EXISTING terminals in place via
   // term.options rather than recreating them. Keeps scrollback + PTY state.
