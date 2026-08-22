@@ -120,6 +120,10 @@ interface Turn {
   /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
    *  the turn_end time to compute the persisted `totalMs` (send → result). */
   startedAt: number;
+  /** Wall-clock start per tool call — recorded at tool-input-start so failed
+   *  / errored calls (which carry no durationMs from the executor) can still
+   *  report how long they ran. */
+  toolStartAt: Record<string, number>;
   /** v2 event sequencing for this turn — null until the turn's try opens
    *  (initV2Turn) or when v2 is unavailable; additive, never required. */
   v2: V2TurnTracker | null;
@@ -280,7 +284,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const turn: Turn = {
     sessionId, workspaceId, messageId, controller, autonomyMode,
     blocks: [], currentTextBlockId: null, reasoningBlockId: null,
-    toolBlockIndex: {}, finalText: '', finalReasoning: '',
+    toolBlockIndex: {}, finalText: '', finalReasoning: '', toolStartAt: {},
     toolCalls: [], timeline: [],
     usage: emptyUsage(), lastStepUsage: null,
     stepsCompleted: 0, maxSteps: effectiveMaxSteps,
@@ -602,6 +606,7 @@ function translatePart(
       const toolCallId: string = p.id;
       const toolName = resolveToolName(p.toolName) as ToolName;
       emitSink(turn.v2?.toolStart(toolCallId) ?? []);
+      turn.toolStartAt[toolCallId] = Date.now();
       turn.currentTextBlockId = null;
       // Close the current thinking segment so the next reasoning delta (next
       // model step) opens a NEW reasoning block. This lets the block stream
@@ -645,6 +650,12 @@ function translatePart(
       const tr: ToolResult = part.type === 'tool-result' && p.output && typeof p.output === 'object'
         ? ({ ...(p.output as object) } as ToolResult)
         : { status: 'failed', output: part.type === 'tool-error' ? errMessage(p.error) || 'Tool error' : '(no output)' };
+      // Errored calls never ran the executor — derive duration from the
+      // input-start timestamp so failures still count toward tool time.
+      if (tr.durationMs == null && turn.toolStartAt[toolCallId] != null) {
+        tr.durationMs = Date.now() - turn.toolStartAt[toolCallId];
+      }
+      delete turn.toolStartAt[toolCallId];
       const status = normalizeStatus(tr.status);
       const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: input, argPreview, status, riskTier: meta?.riskTier ?? 'read_only', output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta };
       turn.toolCalls.push(tc);

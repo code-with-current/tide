@@ -138,9 +138,11 @@ export async function executeTool(
       ...result,
     };
   } catch (e: any) {
-    log.error('threw', { tool: name, error: e?.message ?? String(e), durationMs: Date.now() - t0 });
+    const durationMs = Date.now() - t0;
+    log.error('threw', { tool: name, error: e?.message ?? String(e), durationMs });
     return {
       status: 'failed',
+      durationMs,
       output: `Tool threw: ${e?.message || String(e)}`,
     };
   }

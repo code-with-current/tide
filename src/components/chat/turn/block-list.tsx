@@ -208,7 +208,7 @@ export const BlockList = memo(function BlockList({
         <CompactingIndicator />
       )}
 
-      <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} />
+      <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} totalMs={totalMs} />
 
       <div ref={answerRef} data-answer-root>
         <AnswerBlock

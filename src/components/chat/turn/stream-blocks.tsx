@@ -133,7 +133,7 @@ export const StreamBlocks = memo(function StreamBlocks({
               if (!answerInfo || idx !== answerInfo.firstIdx) return null;
               return (
                 <div key={b.id}>
-                  <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} />
+                  <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} totalMs={totalMs} />
                   <AnswerBlock
                     text={answerInfo.text}
                     streaming={streaming}

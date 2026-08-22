@@ -45,32 +45,40 @@ export function TurnHeader({
   streaming,
   stopReason,
   blocks,
+  totalMs: wallClockMs,
 }: {
   turn?: Turn;
   streaming: boolean;
   stopReason?: string | null;
   blocks?: Block[];
+  /** Wall-clock turn duration (send → result) — preferred over turn.totalMs
+   *  so callers that already hold it (block-list / stream-blocks) don't have
+   *  to materialize a Turn. */
+  totalMs?: number;
 }) {
-  let totalMs: number | undefined;
+  let toolMs: number | undefined;
   let anyFailed: boolean | undefined;
   if (blocks) {
     let sum = 0;
     let failed = false;
+    let hasTool = false;
     for (const b of blocks) {
-      if (b.kind === 'tool') {
-        if (b.durationMs != null) sum += b.durationMs;
-        if (isFailedStatus(b.status)) failed = true;
-      }
+      if (b.kind !== 'tool') continue;
+      // Sub-agent children run INSIDE their dispatch_agent's wall time —
+      // counting both double-counts the sub-agent's work.
+      if (b.parentToolCallId) continue;
+      hasTool = true;
+      if (b.durationMs != null) sum += b.durationMs;
+      if (isFailedStatus(b.status)) failed = true;
     }
-    totalMs = sum > 0 ? sum : undefined;
+    toolMs = hasTool ? sum : undefined;
     anyFailed = failed || undefined;
   } else {
-    totalMs = turn?.totalMs;
+    toolMs = turn?.totalMs;
     anyFailed = turn?.anyFailed;
   }
-  const toolDuration = formatDuration(totalMs);
-  // Wall-clock turn time — from Turn.totalMs (includes LLM time + tool time).
-  const wallClock = formatDuration(turn?.totalMs);
+  const toolDuration = formatDuration(toolMs);
+  const wallClock = formatDuration(wallClockMs ?? turn?.totalMs);
 
   if (streaming) return null;
 
@@ -89,7 +97,7 @@ export function TurnHeader({
         : 'text-success';
 
   return (
-    <div className="flex items-center gap-1.5 text-[0.85rem] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
+    <div className="flex items-center gap-1.5 text-[0.85rem] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5 mt-2">
       <Icon className={cn('size-4', tone)} />
       <span className={tone}>
         {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
