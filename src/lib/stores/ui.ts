@@ -603,7 +603,11 @@ export const useUi = create<UiState>()(
       if (keys.length > 50) delete next[keys[0]];
       return { dismissedTodoSignatures: next };
     }),
-  setMainView: (mainView) => set({ mainView }),
+  setMainView: (mainView) =>
+    set((s) => ({
+      mainView,
+      rightPanelOpen: mainView === 'chat' && s.mainView === 'new' ? false : s.rightPanelOpen,
+    })),
   addComposerAttachment: (key, f) =>
     set((state) => {
       const list = state.composerAttachments[key] ?? [];
@@ -779,6 +783,7 @@ export const useUi = create<UiState>()(
       activeDraftId: null,
       mainView: 'chat',
       sessionLastActive,
+      rightPanelOpen: state.mainView === 'new' ? false : state.rightPanelOpen,
     });
     if (activeSessionId) get().setPendingFork(null);
 
