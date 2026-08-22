@@ -79,8 +79,19 @@ export function CommitBar({
   // Suggestion is live (streaming or just finished) until the user types.
   const [suggesting, setSuggesting] = useState(false);
   const dismissedRef = useRef(false);
-  const { run, state: agentState } = useGitAgentAction();
+  // workspaceId lets the hook re-adopt a commit-writer dispatch that survived
+  // a screen/tab switch — the generation keeps running on its hidden session.
+  const { run, state: agentState } = useGitAgentAction(workspaceId);
   const generating = agentState.status === 'running';
+
+  // An adopted dispatch resumed mid-generation — stream it into the fields
+  // again, unless the user left typed text behind (their draft wins).
+  useEffect(() => {
+    if (generating && !suggesting && !summary) {
+      dismissedRef.current = false;
+      setSuggesting(true);
+    }
+  }, [generating, suggesting, summary]);
 
   // Amend ON → prefill from HEAD's full message (subject + body).
   useEffect(() => {
