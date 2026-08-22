@@ -80,8 +80,8 @@ async function ensureUtilitySession(workspaceId: string): Promise<string> {
     let providerId: string | undefined;
     try {
       const s = await window.tideIpc?.getGeneralSettings();
-      const utility = (s as { utilityModel?: { providerId: string; modelId: string } | null } | undefined)
-        ?.utilityModel;
+      const utility = (s as { commitMessageModel?: { providerId: string; modelId: string } | null } | undefined)
+        ?.commitMessageModel;
       if (utility?.providerId && utility.modelId) {
         modelId = utility.modelId;
         providerId = utility.providerId;

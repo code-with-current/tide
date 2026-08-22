@@ -234,7 +234,7 @@ declare global {
       generateSessionTitle(sessionId: string): Promise<string | null>;
       getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
       updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
-      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean; utilityModel?: { providerId: string; modelId: string } | null }>;
+      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean; titleModel?: { providerId: string; modelId: string } | null; commitMessageModel?: { providerId: string; modelId: string } | null }>;
       updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
       archiveSession(sessionId: string): Promise<void>;
       unarchiveSession(sessionId: string): Promise<void>;

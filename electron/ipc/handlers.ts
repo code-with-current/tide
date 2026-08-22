@@ -902,8 +902,8 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       if (!firstUser || !firstUser.content) return null;
       // Resolve the session's chat provider — same path as the orchestrator.
       const providers = store.listProviders();
-      // Settings override: a pinned utility model wins for title generation.
-      const utility = store.getGeneralSettings().utilityModel;
+      // Settings override: a pinned title model wins for title generation.
+      const utility = store.getGeneralSettings().titleModel;
       let modelId = session.modelId;
       let provider = utility
         ? providers.find((p) => p.id === utility.providerId && p.enabled)

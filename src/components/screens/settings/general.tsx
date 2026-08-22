@@ -27,7 +27,8 @@ type GeneralSettingsState = {
   gitCoAuthored: boolean;
   gitCoAuthorName: string;
   gitCoAuthorEmail: string;
-  utilityModel: UtilityModel;
+  titleModel: UtilityModel;
+  commitMessageModel: UtilityModel;
 };
 
 export function GeneralSection() {
@@ -45,7 +46,8 @@ export function GeneralSection() {
         gitCoAuthored: (raw.gitCoAuthored as boolean) ?? false,
         gitCoAuthorName: (raw.gitCoAuthorName as string) ?? 'Tide',
         gitCoAuthorEmail: (raw.gitCoAuthorEmail as string) ?? '314188112+tide-codes@users.noreply.github.com',
-        utilityModel: (raw.utilityModel as UtilityModel) ?? null,
+        titleModel: (raw.titleModel as UtilityModel) ?? null,
+        commitMessageModel: (raw.commitMessageModel as UtilityModel) ?? null,
       });
     });
   }, []);
@@ -70,7 +72,7 @@ export function GeneralSection() {
         description="Startup, notifications, git attribution, and background tasks."
       />
 
-      <div className="max-w-xl space-y-5">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
           <SettingsGroup title="Startup">
             <Card>
               <SettingsRow
@@ -119,18 +121,30 @@ export function GeneralSection() {
             </Card>
           </SettingsGroup>
 
-          <SettingsGroup title="Background tasks">
+          <SettingsGroup title="Background tasks" hint="Defaults follow the session's model">
             <Card>
               <SettingsRow
-                title="Title & commit-message model"
-                description="Model used for session-title and commit-message generation."
+                title="Session title model"
+                description="Model that names new sessions from the first message."
+              >
+                <div className="flex items-center gap-2">
+                  {savingKey === 'titleModel' && <SavedDot />}
+                  <UtilityModelSelect
+                    value={settings.titleModel}
+                    onChange={(v) => update('titleModel', v)}
+                  />
+                </div>
+              </SettingsRow>
+              <SettingsRow
+                title="Commit message model"
+                description="Model behind the Git panel's ✨ commit-message generator."
                 last
               >
                 <div className="flex items-center gap-2">
-                  {savingKey === 'utilityModel' && <SavedDot />}
+                  {savingKey === 'commitMessageModel' && <SavedDot />}
                   <UtilityModelSelect
-                    value={settings.utilityModel}
-                    onChange={(v) => update('utilityModel', v)}
+                    value={settings.commitMessageModel}
+                    onChange={(v) => update('commitMessageModel', v)}
                   />
                 </div>
               </SettingsRow>
@@ -206,9 +220,9 @@ function SavedDot() {
   );
 }
 
-/** Model picker for background utility tasks (titles, commit messages).
- *  "Session model" = the session's current model (default); otherwise a
- *  pinned provider+model from every enabled provider's catalog. */
+/** Model picker for a background task. "Session model" = the session's
+ *  current model (default); otherwise a pinned provider+model from every
+ *  enabled provider's catalog. */
 function UtilityModelSelect({
   value,
   onChange,
@@ -229,7 +243,7 @@ function UtilityModelSelect({
         onChange({ providerId, modelId: rest.join(':') });
       }}
     >
-      <SelectTrigger size="sm" className="w-[240px] text-xs">
+      <SelectTrigger size="sm" className="w-[190px] text-xs">
         <SelectValue placeholder="Session model" />
       </SelectTrigger>
       <SelectContent>

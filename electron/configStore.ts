@@ -91,9 +91,10 @@ export interface GeneralSettings {
   gitCoAuthorName: string;
   /** Co-author email — GitHub no-reply format for attribution. */
   gitCoAuthorEmail: string;
-  /** Model override for background utility tasks (session-title generation,
-   *  commit-message generation). Absent = the session's current model. */
-  utilityModel?: { providerId: string; modelId: string } | null;
+  /** Model override for session-title generation. Absent = session's model. */
+  titleModel?: { providerId: string; modelId: string } | null;
+  /** Model override for commit-message generation. Absent = session's model. */
+  commitMessageModel?: { providerId: string; modelId: string } | null;
   /** Automatically check for app updates on startup (default: true). */
   autoUpdateCheck: boolean;
 }
