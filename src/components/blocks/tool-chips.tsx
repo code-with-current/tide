@@ -941,7 +941,7 @@ function ChipRow({
           onToggle(call.id);
         }}
         className={cn(
-          'flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left transition-colors',
+          'group/row flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left transition-colors',
           expandable ? 'cursor-pointer' : 'cursor-default',
           'hover:bg-secondary/60 hover:rounded-lg',
         )}
