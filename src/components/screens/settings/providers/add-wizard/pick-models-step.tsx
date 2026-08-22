@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import * as api from '@/lib/api/client';
 import { fetchAndEnrichModels, toResolveFn, type FetchedModel } from '@/lib/fetch-models';
-import type { ProviderPreset } from '@/lib/provider-presets';
+import { filterPresetModels, type ProviderPreset } from '@/lib/provider-presets';
 import { formatContext } from '@/lib/utils';
 import { FetchRow, FetchSection, SectionLabel } from '../providers';
 import type { WizardAction, WizardState } from './wizard-reducer';
@@ -26,12 +26,13 @@ export function PickModelsStep({
   const [status, setStatus] = useState<'loading' | 'error' | 'done'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [hiddenCount, setHiddenCount] = useState(0);
   const fetchedRef = useRef(false);
 
   const load = async () => {
     setStatus('loading');
     try {
-      const models = await fetchAndEnrichModels(
+      const fetched = await fetchAndEnrichModels(
         api.probeProviderModels,
         toResolveFn(api.resolveModelCatalog),
         {
@@ -41,6 +42,10 @@ export function PickModelsStep({
           existingIds: [],
         },
       );
+      // Route-aware providers (OpenCode Zen) serve different models per wire
+      // endpoint — only offer what this apiStyle can actually call.
+      const models = filterPresetModels(fetched, preset, state.apiStyle);
+      setHiddenCount(fetched.length - models.length);
       dispatch({ type: 'models-loaded', models, recommended: preset?.recommended ?? [] });
       setStatus('done');
     } catch (e) {
@@ -221,6 +226,14 @@ export function PickModelsStep({
           ? 'Recommended models are pre-checked — adjust as you like.'
           : 'Check the models you want available.'}
       </p>
+      {hiddenCount > 0 && (
+        <p className="shrink-0 text-[10px] text-muted-foreground/40">
+          {hiddenCount} model{hiddenCount === 1 ? '' : 's'} hidden — not served on this API
+          style. {preset?.modelRouting?.anthropic && preset?.modelRouting?.openai
+            ? 'Switch API style in Connect → Advanced for the other endpoint’s models.'
+            : ''}
+        </p>
+      )}
     </div>
   );
 }

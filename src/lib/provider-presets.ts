@@ -13,6 +13,11 @@ export interface ProviderPreset {
   keyPlaceholder?: string;
   recommended: string[];
   accent: string;
+  /** Providers whose models live on DIFFERENT wire endpoints per model
+   *  (OpenCode Zen). Matched (substring, lowercase) model ids are servable
+   *  on that ApiStyle; everything else is hidden from the model picker.
+   *  Absent = every fetched model is offered. */
+  modelRouting?: Partial<Record<ApiStyle, string[]>>;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -59,13 +64,19 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     recommended: ['deepseek-chat', 'deepseek-reasoner'], accent: '#4d6bfe',
   },
   {
-    // Zen's per-model API shapes differ: Claude/Qwen on Anthropic /messages
-    // (this preset), GLM/Kimi/DeepSeek on OpenAI /chat/completions — flip
-    // apiStyle + URL in the wizard's Advanced for those.
+    // Zen routes models per wire endpoint: Claude + Qwen on Anthropic
+    // /messages (this preset's default), GLM/Kimi/DeepSeek/MiniMax + the
+    // free tier on OpenAI /chat/completions (flip API style in Advanced).
+    // GPT/Grok/Muse/Ox models live ONLY on the OpenAI Responses endpoint —
+    // a wire format Tide doesn't speak — so modelRouting hides them.
     id: 'opencode', name: 'OpenCode Zen', group: 'aggregator', apiStyle: 'anthropic',
     baseUrl: 'https://opencode.ai/zen', requiresKey: true,
     keyUrl: 'https://opencode.ai/auth', keyPlaceholder: '…',
     recommended: ['claude-sonnet', 'claude-opus', 'claude-haiku', 'qwen'], accent: '#ffffff',
+    modelRouting: {
+      anthropic: ['claude', 'qwen'],
+      openai: ['glm', 'kimi', 'deepseek', 'minimax', 'big-pickle', 'mimo', 'hy3', 'nemotron', 'laguna'],
+    },
   },
   {
     id: 'groq', name: 'Groq', group: 'aggregator', apiStyle: 'openai',
@@ -105,6 +116,19 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 
 export function getPreset(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((p) => p.id === id);
+}
+
+/** Filter fetched models down to what this preset's apiStyle can serve.
+ *  No routing table = pass-through. */
+export function filterPresetModels<T extends { modelId: string }>(
+  models: T[],
+  preset: ProviderPreset | undefined,
+  apiStyle: ApiStyle,
+): T[] {
+  const matchers = preset?.modelRouting?.[apiStyle];
+  if (!matchers) return models;
+  const rs = matchers.map((m) => m.toLowerCase());
+  return models.filter((m) => rs.some((r) => m.modelId.toLowerCase().includes(r)));
 }
 
 const hostOf = (url: string) =>
