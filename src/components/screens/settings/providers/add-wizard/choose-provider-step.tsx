@@ -1,4 +1,5 @@
-import { Plug } from 'lucide-react';
+import { useState } from 'react';
+import { Plug, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ProviderLogo } from '@/components/primitives/provider-logo';
 import { PROVIDER_PRESETS, type PresetGroup, type ProviderPreset } from '@/lib/provider-presets';
@@ -12,6 +13,11 @@ const GROUPS: { id: PresetGroup; label: string }[] = [
   { id: 'local', label: 'Local' },
 ];
 
+const CUSTOM_LABELS: Record<string, string> = {
+  openai: 'Custom OpenAI-compatible',
+  anthropic: 'Custom Anthropic-compatible',
+};
+
 export function ChooseProviderStep({
   existingNames,
   addedBaseUrls,
@@ -23,29 +29,71 @@ export function ChooseProviderStep({
   onSelect: (preset: ProviderPreset) => void;
   onCustom: (apiStyle: ApiStyle) => void;
 }) {
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const matches = (p: ProviderPreset) =>
+    !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
+  const customMatches = (style: ApiStyle) =>
+    !q || CUSTOM_LABELS[style].toLowerCase().includes(q);
+  const visible = (groupId: PresetGroup) =>
+    PROVIDER_PRESETS.filter((p) => p.group === groupId && matches(p));
+  const anyVisible = GROUPS.some((g) => visible(g.id).length > 0);
+
   return (
-    <div className="space-y-5">
-      {GROUPS.map((g) => (
-        <section key={g.id} className="space-y-2">
-          <SectionLabel icon={<Plug className="size-3" />}>{g.label}</SectionLabel>
-          <div className="grid grid-cols-2 gap-2">
-            {PROVIDER_PRESETS.filter((p) => p.group === g.id).map((p) => (
-              <PresetTile
-                key={p.id}
-                preset={p}
-                added={addedBaseUrls.includes(p.baseUrl)}
-                onClick={() => onSelect(p)}
-              />
-            ))}
-            {g.id === 'local' && (
-              <>
-                <CustomTile label="Custom OpenAI-compatible" onClick={() => onCustom('openai')} />
-                <CustomTile label="Custom Anthropic-compatible" onClick={() => onCustom('anthropic')} />
-              </>
-            )}
-          </div>
-        </section>
-      ))}
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search providers…"
+          className="w-full h-8 pl-8 pr-8 text-[12px] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground/50 hover:text-foreground"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {GROUPS.map((g) => {
+        const presets = visible(g.id);
+        if (presets.length === 0 && !(g.id === 'local' && (customMatches('openai') || customMatches('anthropic')))) {
+          return null;
+        }
+        return (
+          <section key={g.id} className="space-y-2">
+            <SectionLabel icon={<Plug className="size-3" />}>{g.label}</SectionLabel>
+            <div className="grid grid-cols-2 gap-2">
+              {presets.map((p) => (
+                <PresetTile
+                  key={p.id}
+                  preset={p}
+                  added={addedBaseUrls.includes(p.baseUrl)}
+                  onClick={() => onSelect(p)}
+                />
+              ))}
+              {g.id === 'local' && customMatches('openai') && (
+                <CustomTile label={CUSTOM_LABELS.openai} onClick={() => onCustom('openai')} />
+              )}
+              {g.id === 'local' && customMatches('anthropic') && (
+                <CustomTile label={CUSTOM_LABELS.anthropic} onClick={() => onCustom('anthropic')} />
+              )}
+            </div>
+          </section>
+        );
+      })}
+
+      {!anyVisible && !(customMatches('openai') || customMatches('anthropic')) && (
+        <div className="py-8 text-center text-xs text-muted-foreground">
+          No providers match “{query.trim()}”.
+        </div>
+      )}
+
       <p className="text-[10px] text-muted-foreground/45">
         {existingNames.length > 0
           ? 'Providers you add again get a numbered name — multi-account is fine.'
