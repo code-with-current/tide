@@ -9,6 +9,7 @@ import { FileExplorerTab } from './tabs/file-explorer-tab';
 import { GitTab } from './tabs/git-tab';
 import { BrowserTab } from './tabs/browser-tab';
 import { AgentsTab } from './tabs/agents-tab';
+import { PanelLanding } from './panel-landing';
 import { TerminalPanel } from '@/components/terminal/terminal-panel';
 
 export function RightPanel() {
@@ -27,7 +28,9 @@ export function RightPanel() {
       )}
 
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
-        {feature === 'files' ? (
+        {feature === 'home' ? (
+          <PanelLanding />
+        ) : feature === 'files' ? (
           <FileExplorerTab />
         ) : feature === 'git' ? (
           <GitTab />

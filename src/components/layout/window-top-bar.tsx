@@ -59,7 +59,6 @@ export function WindowTopBar() {
   }, [mainView]);
 
   // ── Panel toggles ──
-  const toggleRightPanel = useUi((s) => s.toggleRightPanel);
   const rightPanelOpen = useUi((s) => s.rightPanelOpen);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
   const sidebarMode = useUi((s) => s.sidebarMode);
@@ -434,7 +433,21 @@ export function WindowTopBar() {
         </ButtonGroup>
 
         <Tip label="Right Panel">
-          <Button variant="outline" size="sm" className="p-1.5" onClick={toggleRightPanel}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="p-1.5"
+            onClick={() => {
+              // Opening the panel always lands on the landing view; closing
+              // is a plain toggle.
+              if (rightPanelOpen) {
+                useUi.setState({ rightPanelOpen: false });
+                return;
+              }
+              rpSetFeature(activeSessionId ?? 'default', 'home');
+              useUi.setState({ rightPanelOpen: true });
+            }}
+          >
             <PanelRight className="size-3.5" />
           </Button>
         </Tip>

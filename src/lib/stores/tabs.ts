@@ -22,7 +22,7 @@ const defaultTab: RightTab = { kind: 'files' };
 const ensureList = (bySession: Record<string, RightTab[]>, sessionId: string): RightTab[] =>
   bySession[sessionId] ?? [defaultTab];
 
-export const RIGHT_TAB_KINDS = ['git', 'files', 'agents', 'terminal', 'browser'] as const;
+export const RIGHT_TAB_KINDS = ['home', 'git', 'files', 'agents', 'terminal', 'browser'] as const;
 
 /** Persisted tab kinds from older builds remapped onto the live union.
  *  Unknown values fall back to 'files'. */
