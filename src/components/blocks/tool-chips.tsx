@@ -67,6 +67,31 @@ const ICON: Partial<Record<ToolName, React.ReactNode>> = {
 };
 
 const ICON_COLOR: Partial<Record<ToolName, string>> = {
+  read_file: 'text-sky-300',
+  read_media_file: 'text-sky-300',
+  glob: 'text-sky-300',
+  grep: 'text-sky-300',
+  memory: 'text-muted-foreground',
+  edit_file: 'text-amber-300',
+  multi_edit: 'text-amber-300',
+  write_file: 'text-amber-300',
+  notebook_edit: 'text-amber-300',
+  bash: 'text-green-300',
+  bash_output: 'text-green-300',
+  kill_shell: 'text-green-300',
+  git: 'text-orange-300',
+  dispatch_agent: 'text-purple-300',
+  todo_write: 'text-blue-300',
+  web_fetch: 'text-cyan-300',
+  web_search: 'text-cyan-300',
+  load_skill: 'text-violet-300',
+  ask_followup_question: 'text-warning',
+  exit_plan_mode: 'text-teal-300',
+  compact: 'text-slate-300',
+  mcp: 'text-indigo-300',
+};
+
+const TEXT_COLOR: Partial<Record<ToolName, string>> = {
   read_file: 'text-sky-400',
   read_media_file: 'text-sky-400',
   glob: 'text-sky-400',
@@ -854,7 +879,7 @@ function ChipRow({
         <span className={cn('tool-tint flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
           {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
         </span>
-        <span className="tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[0.8929rem] font-medium text-purple-400">
+        <span className={cn('tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[0.8929rem] font-medium', TEXT_COLOR[call.toolName] ?? 'text-foreground/80')}>
           {d?.agentName ?? toolLabel(call.toolName, call.status)}
         </span>
         {summary && (

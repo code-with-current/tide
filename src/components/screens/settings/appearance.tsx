@@ -99,7 +99,7 @@ export function AppearanceContent() {
               ))}
             </div>
           </SettingsRow>
-          <SettingsRow title="Tool colors" description="Chat stream tool icons and labels." last>
+          <SettingsRow title="Session Chat Colors" description="Chat stream tool icons and labels." last>
             <div className="flex items-center gap-1">
               <Segmented
                 size="sm"
