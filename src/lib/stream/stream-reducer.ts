@@ -3,7 +3,7 @@
 import type { SessionStream, ToolCallStatus } from '@/types';
 import type { Block, FollowupBlock, ReasoningBlock, TextBlock, ToolBlock } from '@/types';
 import type { AgentEvent } from '@/lib/agent/events';
-import { categorizeTool, deriveFollowupMode, isBookkeepingTool } from './block-state';
+import { categorizeTool, deriveFollowupMode, answerBlockIds } from './block-state';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('streamReducer');
@@ -229,8 +229,8 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
   const stopped = e.stopReason === 'aborted';
   const prevBlocks = state.blocks ?? [];
 
-  // Shallow-clone blocks so we can mark isAnswer on the answer-phase text
-  // blocks without mutating the original (state.blocks is shared with prior states).
+  // Shallow-clone blocks so we can mark isAnswer per parent scope without
+  // mutating the original (state.blocks is shared with prior states).
   const blocks: Block[] = prevBlocks.map(b => {
     if (stopped && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')) {
       return { ...b, status: 'aborted' as ToolCallStatus, modifiedAtSeq: e.seq };
@@ -239,20 +239,14 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
     return b;
   });
 
-  // The answer phase begins after the last *work* tool call: text before =
-  // narration, after = deliverable. Bookkeeping tools (todo_write,
-  // ask_followup_question, exit_plan_mode, compact, slash_command, load_skill)
-  // are skipped so a trailing "mark plan done" doesn't demote the report to
-  // narration. Mirrors orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag.
-  let lastToolIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
-  }
-  for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    const b = blocks[i];
-    // Parented text is sub-agent narration — never the parent's deliverable.
-    if (b.kind === 'text' && !b.parentToolCallId) (b as TextBlock).isAnswer = true;
+  // The answer phase is SCOPE-LOCAL: per scope (root / each dispatch), text
+  // after that scope's last work tool is that scope's deliverable. Mirrors
+  // orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag —
+  // a sub-agent's report must flag as its own answer even though the parent
+  // keeps calling tools afterwards.
+  const answers = answerBlockIds(blocks);
+  for (const b of blocks) {
+    if (b.kind === 'text') (b as TextBlock).isAnswer = answers.has(b.id);
   }
 
   return {

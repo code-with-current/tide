@@ -41,6 +41,31 @@ export function isBookkeepingTool(name: string | undefined | null): boolean {
   return !!name && BOOKKEEPING_TOOLS.has(name);
 }
 
+/** Ids of text blocks that are the ANSWER of their parent scope. The answer
+ *  phase is scope-local: per scope (root = null, or a dispatch_agent id), the
+ *  answer is the text trailing that scope's last non-bookkeeping tool. A flat
+ *  "after the globally-last tool" rule never flags a sub-agent's answer — the
+ *  parent keeps calling tools after the dispatch returns, so the child's
+ *  trailing text is never last. Used by the live reducer (applyTurnEnd), the
+ *  persist path (orchestrator.finalizeBlocks), and reload
+ *  (blockMigration.redetermineAnswerFlag) — keep them identical. */
+export function answerBlockIds(blocks: Array<{ id: string; kind: string; parentToolCallId?: string; toolName?: string }>): Set<string> {
+  const scopeKey = (b: { parentToolCallId?: string }) => b.parentToolCallId ?? '';
+  const lastWorkTool: Map<string, number> = new Map();
+  blocks.forEach((b, i) => {
+    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) {
+      lastWorkTool.set(scopeKey(b), i);
+    }
+  });
+  const out = new Set<string>();
+  blocks.forEach((b, i) => {
+    if (b.kind !== 'text') return;
+    const boundary = lastWorkTool.get(scopeKey(b)) ?? -1;
+    if (i > boundary) out.add(b.id);
+  });
+  return out;
+}
+
 // ─── Followup mode derivation ───────────────────────────────────────────
 
 /** Normalize a single option value to a display string. Handles plain

@@ -34,7 +34,7 @@ import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events.
 import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agent/events.js';
 import type { AutonomyMode, Provider, ToolCall, ToolDisplay, ToolName, Usage } from '../../src/types/index.js';
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
-import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
+import { categorizeTool, answerBlockIds } from '../../src/lib/stream/block-state.js';
 import { repairJsonToolInput } from './tool-input-repair.js';
 import { recordEditTurn } from '../rag/edit-journal.js';
 import { incrementBadge } from '../badge.js';
@@ -797,12 +797,13 @@ function finalizeBlocks(turn: Turn, stopReason: StopReason): Block[] {
     stopped && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')
       ? { ...b, status: 'aborted' as const } : b
   );
-  let lastToolIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === 'tool' && !isBookkeepingTool((blocks[i] as ToolBlock).toolName)) { lastToolIdx = i; break; }
-  }
-  for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
+  // Answer flagging is SCOPE-LOCAL (root + each dispatch_agent scope) so a
+  // sub-agent's trailing report persists as its own answer even when the
+  // parent continues calling tools. Mirrors the renderer's applyTurnEnd and
+  // blockMigration.redetermineAnswerFlag via the shared helper.
+  const answers = answerBlockIds(blocks);
+  for (const b of blocks) {
+    if (b.kind === 'text') (b as TextBlock).isAnswer = answers.has(b.id);
   }
   return blocks;
 }

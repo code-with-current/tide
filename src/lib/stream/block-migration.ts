@@ -9,7 +9,7 @@ import type {
   ToolBlock,
   ToolCall,
 } from '@/types';
-import { categorizeTool, deriveFollowupMode, isBookkeepingTool } from './block-state';
+import { categorizeTool, deriveFollowupMode, answerBlockIds } from './block-state';
 
 /** Convert a legacy ToolCall into a ToolBlock. Mirrors the live wire
  *  format (block id = toolCallId). */
@@ -34,20 +34,13 @@ export function toolCallToBlock(call: ToolCall): ToolBlock {
   };
 }
 
-/** Redetermine each text block's `isAnswer` flag (matches streamReducer.applyTurnEnd / orchestrator.finalizeBlocks): the answer phase begins after the last *work* tool call — bookkeeping tools (todo_write, ask_followup_question, etc.) are skipped so a trailing "mark plan done" doesn't demote the report. Idempotent; returns a new message, original untouched. */
+/** Redetermine each text block's `isAnswer` flag (matches streamReducer.applyTurnEnd / orchestrator.finalizeBlocks): the answer phase is SCOPE-LOCAL — per parent scope, the text trailing that scope's last *work* tool call — bookkeeping tools (todo_write, ask_followup_question, etc.) are skipped so a trailing "mark plan done" doesn't demote the report. Idempotent; returns a new message, original untouched. */
 function redetermineAnswerFlag(message: Message): Message {
   if (!message.blocks || message.blocks.length === 0) return message;
+  const answers = answerBlockIds(message.blocks);
   const blocks = message.blocks.map(b =>
-    b.kind === 'text' ? { ...b, isAnswer: false } : b,
+    b.kind === 'text' ? { ...b, isAnswer: answers.has(b.id) } : b,
   );
-  let lastToolIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
-  }
-  for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
-  }
   return { ...message, blocks };
 }
 
@@ -184,17 +177,12 @@ export function migrateMessageToBlocks(message: Message): Message {
     blocks.push(toolCallToBlock(call));
   }
 
-  // 3. Mark the answer: every text block after the last *work* tool call.
-  //    Bookkeeping tools (todo_write etc.) are skipped so a trailing
-  //    "mark plan done" doesn't demote the report to narration. Matches
+  // 3. Mark the answer: per parent scope, every text block after that
+  //    scope's last *work* tool call (bookkeeping skipped). Matches
   //    the live reducer's applyTurnEnd and redetermineAnswerFlag above.
-  let lastToolIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
-  }
-  for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
+  const answers = answerBlockIds(blocks);
+  for (const b of blocks) {
+    if (b.kind === 'text') (b as TextBlock).isAnswer = answers.has(b.id);
   }
 
   // 4. Derive followup blocks for every ask_followup_question call.

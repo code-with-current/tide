@@ -99,8 +99,8 @@ describe('applyReasoning — parentToolCallId', () => {
   });
 });
 
-describe('applyTurnEnd — parented text is never flagged as the parent answer', () => {
-  it('parented text after the last work tool keeps isAnswer false', () => {
+describe('applyTurnEnd — answer flagging is scope-local', () => {
+  it('parented text flags as its dispatch answer, never as the parent answer', () => {
     let s = initial();
     s = reduceStream(s, { type: 'tool_call_start', sessionId: 's', seq: ++seq, messageId: 'm', toolCallId: 'd', toolName: 'dispatch_agent', blockId: 'd' } as AgentEvent);
     s = reduceStream(s, delta('c1', 'child narration', 'd'));
@@ -108,7 +108,25 @@ describe('applyTurnEnd — parented text is never flagged as the parent answer',
     s = reduceStream(s, { type: 'turn_end', sessionId: 's', seq: ++seq, messageId: 'm', stopReason: 'end_turn', content: '' } as AgentEvent);
     const answer = s.blocks!.find((b) => b.kind === 'text' && b.id === 'a1');
     const child = s.blocks!.find((b) => b.kind === 'text' && b.id === 'c1');
+    // Root answer flags at the root…
     expect(answer && answer.kind === 'text' ? answer.isAnswer : undefined).toBe(true);
-    expect(child && child.kind === 'text' ? child.isAnswer : undefined).toBe(false);
+    // …and the parented text flags as the DISPATCH scope's answer (its only
+    // text — it renders as the Agents-panel result block), consolidating
+    // separately from the root answer.
+    expect(child && child.kind === 'text' ? child.isAnswer : undefined).toBe(true);
+  });
+
+  it('parented narration before a child tool stays narration', () => {
+    let s = initial();
+    s = reduceStream(s, { type: 'tool_call_start', sessionId: 's', seq: ++seq, messageId: 'm', toolCallId: 'd', toolName: 'dispatch_agent', blockId: 'd' } as AgentEvent);
+    s = reduceStream(s, delta('c0', 'planning…', 'd'));
+    s = reduceStream(s, { type: 'tool_call_start', sessionId: 's', seq: ++seq, messageId: 'm', toolCallId: 'c-t', toolName: 'read_file', blockId: 'c-t', parentToolCallId: 'd' } as AgentEvent);
+    s = reduceStream(s, { type: 'tool_result', sessionId: 's', seq: ++seq, toolCallId: 'c-t', status: 'executed', output: '' } as AgentEvent);
+    s = reduceStream(s, delta('c1', 'child answer', 'd'));
+    s = reduceStream(s, { type: 'turn_end', sessionId: 's', seq: ++seq, messageId: 'm', stopReason: 'end_turn', content: '' } as AgentEvent);
+    const narration = s.blocks!.find((b) => b.kind === 'text' && b.id === 'c0');
+    const childAnswer = s.blocks!.find((b) => b.kind === 'text' && b.id === 'c1');
+    expect(narration && narration.kind === 'text' ? narration.isAnswer : undefined).toBe(false);
+    expect(childAnswer && childAnswer.kind === 'text' ? childAnswer.isAnswer : undefined).toBe(true);
   });
 });
