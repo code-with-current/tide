@@ -26,6 +26,15 @@ const PHASE_COLOR: Record<PhaseLabel, string> = {
   Reasoning: 'text-purple-400',
 };
 
+
+const BG_COLOR: Record<PhaseLabel, string> = {
+  Planning: 'bg-green-400',
+  Search: 'bg-blue-400',
+  Coding: 'bg-emerald-400',
+  Verifying: 'bg-amber-400',
+  Reasoning: 'bg-purple-400',
+};
+
 const SIGNATURE_RE = /思考中|Signature|redacted/i;
 
 function formatMs(ms?: number): string {
@@ -60,14 +69,23 @@ function PhaseRow({
         type="button"
         aria-expanded={phaseOpen}
         onClick={onToggle}
-        className="flex h-7 min-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-secondary/60"
+        className="group/row flex h-7 min-w-full items-center gap-2 rounded-md text-left transition-colors hover:bg-secondary/60"
       >
-        <span className="relative flex size-4 shrink-0 items-center justify-center">
-          <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/phase:opacity-0">
-            <Icon className={cn('tool-tint size-3', PHASE_COLOR[phase.label], phaseStreaming && 'animate-pulse')} />
+        <span className="relative flex shrink-0 items-center justify-center">
+          <span className={cn(
+            'flex h-7 items-center rounded-l-md px-2 text-black tool-bg',
+            'transition-opacity duration-100 group-hover/row:opacity-0',
+            phaseOpen && 'opacity-0',
+            BG_COLOR[phase.label],
+          )}>
+            <Icon className={cn('size-3', phaseStreaming && 'animate-pulse')} />
           </span>
           <ChevronDown
-            className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/phase:opacity-100"
+            className={cn(
+              'absolute size-3 text-muted-foreground transition-[opacity,transform] duration-150',
+              phaseOpen ? 'opacity-100' : 'opacity-0',
+              'group-hover/row:opacity-100',
+            )}
             style={{ transform: phaseOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>

@@ -412,16 +412,15 @@ html {
    /* ── Tide semantic extras (not in shadcn standard) ── */
    --color-success: var(--success);
    --color-warning: var(--warning);
---color-info: var(--info);
---color-reasoning: var(--reasoning);
+   --color-info: var(--info);
+   --color-reasoning: var(--reasoning);
    --color-openai: var(--openai);
    --color-anthropic: var(--anthropic);
 
 }
 
-/* Monochrome mode — neutralizes the per-category tool tints (`.tool-tint`)
-   anywhere in the chat stream; semantic status colors stay untouched. */
 [data-tool-colors='off'] .tool-tint { color: var(--muted-foreground) !important; }
+[data-tool-colors='off'] .tool-bg { background-color: var(--muted-foreground)!important; color: var(--muted)!important; }
 
 @layer base {
   * {

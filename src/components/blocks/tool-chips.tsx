@@ -67,28 +67,28 @@ const ICON: Partial<Record<ToolName, React.ReactNode>> = {
 };
 
 const ICON_COLOR: Partial<Record<ToolName, string>> = {
-  read_file: 'text-sky-300',
-  read_media_file: 'text-sky-300',
-  glob: 'text-sky-300',
-  grep: 'text-sky-300',
-  memory: 'text-muted-foreground',
-  edit_file: 'text-amber-300',
-  multi_edit: 'text-amber-300',
-  write_file: 'text-amber-300',
-  notebook_edit: 'text-amber-300',
-  bash: 'text-green-300',
-  bash_output: 'text-green-300',
-  kill_shell: 'text-green-300',
-  git: 'text-orange-300',
-  dispatch_agent: 'text-purple-300',
-  todo_write: 'text-blue-300',
-  web_fetch: 'text-cyan-300',
-  web_search: 'text-cyan-300',
-  load_skill: 'text-violet-300',
-  ask_followup_question: 'text-warning',
-  exit_plan_mode: 'text-teal-300',
-  compact: 'text-slate-300',
-  mcp: 'text-indigo-300',
+  read_file: 'bg-sky-300',
+  read_media_file: 'bg-sky-300',
+  glob: 'bg-sky-300',
+  grep: 'bg-sky-300',
+  memory: 'bg-muted-foreground',
+  edit_file: 'bg-amber-300',
+  multi_edit: 'bg-amber-300',
+  write_file: 'bg-amber-300',
+  notebook_edit: 'bg-amber-300',
+  bash: 'bg-green-300',
+  bash_output: 'bg-green-300',
+  kill_shell: 'bg-green-300',
+  git: 'bg-orange-300',
+  dispatch_agent: 'bg-purple-300',
+  todo_write: 'bg-blue-300',
+  web_fetch: 'bg-cyan-300',
+  web_search: 'bg-cyan-300',
+  load_skill: 'bg-violet-300',
+  ask_followup_question: 'bg-warning',
+  exit_plan_mode: 'bg-teal-300',
+  compact: 'bg-slate-300',
+  mcp: 'bg-indigo-300',
 };
 
 const TEXT_COLOR: Partial<Record<ToolName, string>> = {
@@ -874,9 +874,13 @@ function ChipRow({
           onOpenDispatch();
         }}
         title="Open this agent's stream in the Agents tab"
-        className="flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
+        className="group/row flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
       >
-        <span className={cn('tool-tint flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
+        <span className={cn(
+          'flex h-7 shrink-0 items-center rounded-l-md px-2 text-black tool-bg',
+          'transition-opacity duration-100 group-hover/row:opacity-0',
+          ICON_COLOR[call.toolName] ?? 'bg-muted-foreground',
+        )}>
           {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
         </span>
         <span className={cn('tool-tint min-w-0 max-w-[45%] shrink-0 truncate text-[0.8929rem] font-medium', TEXT_COLOR[call.toolName] ?? 'text-foreground/80')}>
@@ -934,23 +938,25 @@ function ChipRow({
           onToggle(call.id);
         }}
         className={cn(
-          'flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md px-1 text-left transition-colors px-1.5',
+          'flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left transition-colors',
           expandable ? 'cursor-pointer' : 'cursor-default',
           'hover:bg-secondary/60 hover:rounded-lg',
         )}
       >
-        <span className={cn('tool-tint relative flex size-4 shrink-0 items-center justify-center', ICON_COLOR[call.toolName] ?? 'text-muted-foreground')}>
+        <span className="relative flex shrink-0 items-center justify-center">
           <span
             className={cn(
+              'flex h-7 items-center rounded-l-md px-2 text-black tool-bg',
               'transition-opacity duration-100 group-hover/row:opacity-0',
               rowOpen && 'opacity-0',
+              ICON_COLOR[call.toolName] ?? 'bg-muted-foreground',
             )}
           >
             {ICON[call.toolName] ?? <Terminal className="size-3.5" />}
           </span>
           <ChevronDown
             className={cn(
-              'absolute size-3 transition-[opacity,transform] duration-150',
+              'absolute size-3 text-muted-foreground transition-[opacity,transform] duration-150',
               rowOpen ? 'opacity-100' : 'opacity-0',
               'group-hover/row:opacity-100',
             )}
