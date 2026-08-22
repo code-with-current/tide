@@ -270,6 +270,7 @@ export function startTerminal(
   terminalId: string,
   sessionId: string,
   wc: WebContents,
+  size?: { cols: number; rows: number },
 ): void {
   // Kill any existing terminal with this ID — but dispose its
   // listeners FIRST so the old process's exit event doesn't leak.
@@ -283,6 +284,10 @@ export function startTerminal(
   const cwd = resolveCwd(sessionId);
   const { cmd, args } = getShell();
   const env = sanitizePtyEnv(process.env);
+  // Provisional size from the renderer's font metrics (avoids the 80x24
+  // spawn flash); bounded like OpenChamber: 2–1000 cols, 1–500 rows.
+  const cols = Math.min(1000, Math.max(2, Math.floor(size?.cols ?? 80)));
+  const rows = Math.min(500, Math.max(1, Math.floor(size?.rows ?? 24)));
 
   const detectedPorts = new Map<number, TrackedPort>();
 
@@ -318,8 +323,8 @@ export function startTerminal(
 
   const ptyProc = pty.spawn(cmd, args, {
     name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
+    cols,
+    rows,
     cwd,
     env,
   });

@@ -291,7 +291,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // ── Terminal seed ──
   getTerminalLines: (sessionId: string) => ipcRenderer.invoke('tide:getTerminalLines', sessionId),
   // ── Real terminal (bottom panel) ──
-  terminalStart: (terminalId: string, sessionId: string) => ipcRenderer.invoke('terminal:start', terminalId, sessionId),
+  terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => ipcRenderer.invoke('terminal:start', terminalId, sessionId, size),
   terminalInput: (terminalId: string, input: string) => ipcRenderer.invoke('terminal:input', terminalId, input),
   terminalKill: (terminalId: string) => ipcRenderer.invoke('terminal:kill', terminalId),
   terminalStop: (terminalId: string) => ipcRenderer.invoke('terminal:stop', terminalId),

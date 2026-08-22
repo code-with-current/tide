@@ -1233,8 +1233,8 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
   });
 
   // ── Real terminal (bottom panel) ────────────────────────────
-  handle('terminal:start', (e, terminalId: string, sessionId: string) => {
-    startTerminal(terminalId, sessionId, e.sender);
+  handle('terminal:start', (e, terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => {
+    startTerminal(terminalId, sessionId, e.sender, size);
   });
 
   ipcMain.handle('terminal:input', async (_e, terminalId: string, input: string) => {

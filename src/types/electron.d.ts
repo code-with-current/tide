@@ -363,7 +363,7 @@ declare global {
       // Terminal seed
       getTerminalLines(sessionId: string): Promise<any[]>;
       // ── Real terminal (bottom panel) ──
-      terminalStart: (terminalId: string, sessionId: string) => Promise<void>;
+      terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
       terminalInput: (terminalId: string, input: string) => Promise<void>;
       terminalKill: (terminalId: string) => Promise<void>;
       terminalStop: (terminalId: string) => Promise<void>;

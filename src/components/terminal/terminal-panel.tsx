@@ -4,6 +4,7 @@ import { init, Terminal, FitAddon } from 'ghostty-web';
 import type { ILink } from 'ghostty-web';
 import { useUi, terminalScopeKey } from '@/lib/stores/ui';
 import { getTerminalTheme } from '@/components/screens/settings/appearance';
+import { measureTerminalContainer } from '@/lib/terminal-size';
 import { Button } from '@/components/ui/button';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
 import { Tip } from '@/components/ui/quick-tooltip';
@@ -267,12 +268,17 @@ export const TerminalPanel = memo(function TerminalPanel() {
       }
 
       const themeColors = getTerminalTheme(terminalTheme);
+      const fontFamily = "'MesloLGS NF', 'MesloLGS Nerd Font', 'JetBrains Mono', Menlo, monospace";
+      // Provisional size from font metrics — the PTY spawns at the right
+      // dimensions while the emulator still initializes (no 80x24 flash).
+      const provisional = measureTerminalContainer(mount, terminalFontSize, fontFamily);
 
       const term = new Terminal({
         cursorBlink: true,
         fontSize: terminalFontSize,
-        fontFamily: "'MesloLGS NF', 'MesloLGS Nerd Font', 'JetBrains Mono', Menlo, monospace",
+        fontFamily,
         theme: themeColors as any,
+        ...(provisional ?? {}),
       });
 
       const fit = new FitAddon();
@@ -300,10 +306,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
       term.registerLinkProvider(new UrlLinkProvider(term));
       term.registerLinkProvider(new FilePathLinkProvider(term));
 
-      // Start PTY. Await so any pendingCommand is flushed to a real PTY
-      // rather than a not-yet-existing id — without this, the Run button
-      // races ahead of the terminal spawn and the bytes get dropped.
-      ipc.terminalStart(tid, sid).then(() => {
+      // Start PTY (at the provisional size). Await so any pendingCommand is
+      // flushed to a real PTY rather than a not-yet-existing id — without
+      // this, the Run button races ahead of the terminal spawn and the bytes
+      // get dropped.
+      ipc.terminalStart(tid, sid, provisional ?? undefined).then(() => {
         // Read the pending command from the live store (not the closure,
         // which would be stale across renders).
         const state = useUi.getState();
