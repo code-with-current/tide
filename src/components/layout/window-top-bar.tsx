@@ -9,6 +9,7 @@ import {
   FolderCode,
   FolderTree,
   GitPullRequestArrow,
+  Globe,
 } from "lucide-react";
 // Square removed — replaced by animate-pulse span for the stop button.
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -428,6 +429,15 @@ export function WindowTopBar() {
               onClick={() => switchTo('git')}
             >
               <GitPullRequestArrow className="size-3.5" />
+            </Button>
+          </Tip>
+          <Tip label="Browser">
+            <Button
+              variant={rpFeature === 'browser' && rightPanelOpen ? 'outline' : 'outline'}
+              size="sm"
+              onClick={() => switchTo('browser')}
+            >
+              <Globe className="size-3.5" />
             </Button>
           </Tip>
         </ButtonGroup>
