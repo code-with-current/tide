@@ -632,6 +632,7 @@ export function translateSubagentPart(
         parentToolCallId,
         toolCallId,
         toolName,
+        blockId: toolCallId,
       });
       return;
     }

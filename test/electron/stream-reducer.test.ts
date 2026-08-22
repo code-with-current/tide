@@ -56,13 +56,13 @@ describe('applyDelta — parentToolCallId', () => {
     s = reduceStream(s, delta('p1', 'before '));        // parent segment 1
     s = reduceStream(s, delta('c1', 'child ', 'd'));    // parented child segment
     s = reduceStream(s, delta('c1', 'text', 'd'));      // child continues
-    s = reduceStream(s, delta('p1', 'after'));          // parent continues — must NOT merge into child
-    expect(s.blocks).toHaveLength(3);
+    s = reduceStream(s, delta('p1', 'after'));          // parent continues — merges back into ITS segment
+    // One block per segment id (the id-scoped merge), not one per interruption.
+    expect(s.blocks).toHaveLength(2);
     const texts = s.blocks!.map((b) => (b.kind === 'text' ? b.text : `!${b.kind}`));
-    expect(texts).toEqual(['before ', 'child text', 'after']);
+    expect(texts).toEqual(['before after', 'child text']);
     expect(s.blocks![0].kind === 'text' ? s.blocks![0].parentToolCallId : undefined).toBeUndefined();
     expect(s.blocks![1].kind === 'text' ? s.blocks![1].parentToolCallId : undefined).toBe('d');
-    expect(s.blocks![2].kind === 'text' ? s.blocks![2].parentToolCallId : undefined).toBeUndefined();
   });
 
   it('same blockId with different parentage never merges (id-collision guard)', () => {
@@ -128,5 +128,37 @@ describe('applyTurnEnd — answer flagging is scope-local', () => {
     const childAnswer = s.blocks!.find((b) => b.kind === 'text' && b.id === 'c1');
     expect(narration && narration.kind === 'text' ? narration.isAnswer : undefined).toBe(false);
     expect(childAnswer && childAnswer.kind === 'text' ? childAnswer.isAnswer : undefined).toBe(true);
+  });
+});
+
+describe('applyDelta — concurrent sub-agent interleaving', () => {
+  it('merges a segment into its own block even when other agents interleave', () => {
+    let s = initial();
+    // Agent A opens narration; agent B and a tool event land between A's deltas.
+    s = reduceStream(s, delta('a-seg', 'Now checking ', 'A'));
+    s = reduceStream(s, delta('b-seg', 'Dual-registry confirmed. ', 'B'));
+    s = reduceStream(s, { type: 'tool_call_start', sessionId: 's', seq: ++seq, messageId: 'm', toolCallId: 'c-t', toolName: 'bash', blockId: 'c-t', parentToolCallId: 'C' } as AgentEvent);
+    s = reduceStream(s, delta('a-seg', 'for dead code.', 'A'));
+    s = reduceStream(s, delta('b-seg', 'Checking legacy path.', 'B'));
+
+    const texts = (s.blocks ?? []).filter((b) => b.kind === 'text');
+    // ONE block per segment id — not a fragment per delta.
+    expect(texts.filter((b) => b.id === 'a-seg')).toHaveLength(1);
+    expect(texts.filter((b) => b.id === 'b-seg')).toHaveLength(1);
+    const a = texts.find((b) => b.id === 'a-seg');
+    const b = texts.find((b) => b.id === 'b-seg');
+    expect(a && a.kind === 'text' ? a.text : '').toBe('Now checking for dead code.');
+    expect(b && b.kind === 'text' ? b.text : '').toBe('Dual-registry confirmed. Checking legacy path.');
+  });
+
+  it('keeps parent and child segments with different ids separate', () => {
+    let s = initial();
+    s = reduceStream(s, delta('root-seg', 'parent text'));
+    s = reduceStream(s, delta('a-seg', 'child text', 'A'));
+    s = reduceStream(s, delta('root-seg', ' more'));
+    const texts = (s.blocks ?? []).filter((b) => b.kind === 'text');
+    expect(texts).toHaveLength(2);
+    expect(texts.find((b) => b.id === 'root-seg')?.kind === 'text' ? (texts.find((b) => b.id === 'root-seg') as any).text : '').toBe('parent text more');
+    expect(texts.find((b) => b.id === 'a-seg')?.kind === 'text' ? (texts.find((b) => b.id === 'a-seg') as any).text : '').toBe('child text');
   });
 });

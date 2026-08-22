@@ -855,6 +855,31 @@ function flushPartial(wc: WebContents, turn: Turn) {
  *  the turn freezes to the persisted message. */
 function mirrorSubagentToolEvent(turn: Turn, e: { type?: string; [k: string]: unknown }): void {
   if (typeof e.parentToolCallId !== 'string' || !e.parentToolCallId) return;
+  // Sub-agent narration/thinking — same merge rule as the renderer's
+  // applyDelta/applyReasoning (last block with same id+parentage), so the
+  // persisted message keeps one block per segment even with concurrent
+  // dispatches interleaving. Without this the reload path loses all child
+  // text (the panel rendered it live from the store only).
+  if (e.type === 'delta' || e.type === 'reasoning') {
+    const id = e.blockId as string | undefined;
+    const text = (e.type === 'delta' ? e.text : e.delta) as string | undefined;
+    if (!id || !text) return;
+    const kind = e.type === 'delta' ? 'text' : 'reasoning';
+    for (let i = turn.blocks.length - 1; i >= 0; i--) {
+      const b = turn.blocks[i];
+      if (b.kind !== kind || b.id !== id) continue;
+      if ((b.parentToolCallId ?? undefined) !== e.parentToolCallId) continue;
+      if (kind === 'text') (b as TextBlock).text += text;
+      else (b as ReasoningBlock).text += text;
+      return;
+    }
+    if (kind === 'text') {
+      turn.blocks.push({ id, kind: 'text', text, createdAtSeq: 0, modifiedAtSeq: 0, isAnswer: false, parentToolCallId: e.parentToolCallId });
+    } else {
+      turn.blocks.push({ id, kind: 'reasoning', text, createdAtSeq: 0, modifiedAtSeq: 0, parentToolCallId: e.parentToolCallId });
+    }
+    return;
+  }
   const toolCallId = e.toolCallId as string;
   if (!toolCallId) return;
   const toolName = resolveToolName((e.toolName as string) ?? 'unknown') as ToolName;

@@ -41,19 +41,22 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
 
 function applyDelta(state: SessionStream, e: Extract<AgentEvent, { type: 'delta' }>): SessionStream {
   const blocks = state.blocks ?? [];
-  const last = blocks[blocks.length - 1];
-  // Merge requires same id AND same parentage — a parented child segment
-  // arriving between parent segments must open its own block, never graft
-  // onto the parent's (ids are provider/uuid-scoped, this is belt+braces).
-  if (last && last.kind === 'text' && last.id === e.blockId
-    && (last.parentToolCallId ?? undefined) === e.parentToolCallId) {
-    // Append to the active text block — same id means same segment.
+  // Merge into the LAST block with the same id AND parentage — not the
+  // array's last block. Concurrent sub-agents interleave parented deltas
+  // (plus tool events) between one agent's deltas, so a segment's block is
+  // almost never globally-last; last-block-only merging fragments every
+  // delta into a duplicate-id block and the panel renders them all.
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.kind !== 'text' || b.id !== e.blockId) continue;
+    if ((b.parentToolCallId ?? undefined) !== e.parentToolCallId) continue;
     const updated: TextBlock = {
-      ...last, text: last.text + e.text, modifiedAtSeq: e.seq,
+      ...b, text: b.text + e.text, modifiedAtSeq: e.seq,
     };
-    return { ...state, blocks: [...blocks.slice(0, -1), updated] };
+    const next = blocks.slice();
+    next[i] = updated;
+    return { ...state, blocks: next };
   }
-  // Different id (or last wasn't text) — push a new block.
   const block: TextBlock = {
     id: e.blockId, kind: 'text', text: e.text,
     createdAtSeq: e.seq, modifiedAtSeq: e.seq, isAnswer: false,
