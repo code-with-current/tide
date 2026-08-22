@@ -548,6 +548,11 @@ export function EndpointPreview({
   baseUrl: string;
 }) {
   const full = baseUrl.trim();
+  // Path the SDK appends at runtime per protocol — shown dimmed so the
+  // style↔endpoint relationship reads at a glance even for providers whose
+  // base URL is identical across styles (OpenCode Zen). The input itself is
+  // still saved verbatim; nonstandard gateways may append differently.
+  const suffix = apiStyle === "openai" ? "/chat/completions" : "/v1/messages";
   return (
     <div className="rounded-lg border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent p-3.5">
       <div className="flex items-center gap-2 mb-2">
@@ -566,6 +571,14 @@ export function EndpointPreview({
         {full || (
           <span className="text-muted-foreground/40">
             Enter a base URL to preview the endpoint…
+          </span>
+        )}
+        {full && (
+          <span
+            className="text-muted-foreground/55"
+            title="Path appended by the SDK at request time — some gateways differ."
+          >
+            {suffix}
           </span>
         )}
       </code>

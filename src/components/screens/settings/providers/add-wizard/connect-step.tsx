@@ -12,9 +12,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ApiStyle } from '@/types';
-import type { ProviderPreset } from '@/lib/provider-presets';
+import { styleFlipPatch, type ProviderPreset } from '@/lib/provider-presets';
 import { ApiStylePicker, EndpointPreview, FormField, PROTOCOL, SectionLabel } from '../providers';
 import type { TestStatus, WizardAction, WizardState } from './wizard-reducer';
+
+const PROTOCOL_DEFAULTS: Record<ApiStyle, string> = {
+  anthropic: PROTOCOL.anthropic.baseUrlPlaceholder,
+  openai: PROTOCOL.openai.baseUrlPlaceholder,
+};
 
 export function ConnectStep({
   state,
@@ -28,10 +33,19 @@ export function ConnectStep({
   dispatch: Dispatch<WizardAction>;
   onRetest: () => Promise<boolean>;
 }) {
+  // Style flip follows the URL to the new style's canonical endpoint when
+  // the URL is still untouched; customized URLs are never clobbered.
+  const changeStyle = (next: ApiStyle) => {
+    dispatch({
+      type: 'patch',
+      patch: styleFlipPatch(state.baseUrl, state.apiStyle, next, preset, PROTOCOL_DEFAULTS),
+    });
+  };
+
   return preset ? (
-    <PresetConnectStep state={state} preset={preset} test={test} dispatch={dispatch} />
+    <PresetConnectStep state={state} preset={preset} test={test} dispatch={dispatch} changeStyle={changeStyle} />
   ) : (
-    <CustomConnectStep state={state} test={test} dispatch={dispatch} />
+    <CustomConnectStep state={state} test={test} dispatch={dispatch} changeStyle={changeStyle} />
   );
 }
 
@@ -43,11 +57,13 @@ function PresetConnectStep({
   preset,
   test,
   dispatch,
+  changeStyle,
 }: {
   state: WizardState;
   preset: ProviderPreset;
   test: TestStatus;
   dispatch: Dispatch<WizardAction>;
+  changeStyle: (next: ApiStyle) => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const host = preset.baseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -113,10 +129,7 @@ function PresetConnectStep({
           <div className="space-y-3.5 pt-3">
             <div className="space-y-2">
               <SectionLabel icon={<Plug className="size-3" />}>API style</SectionLabel>
-              <ApiStylePicker
-                value={state.apiStyle}
-                onChange={(apiStyle) => dispatch({ type: 'patch', patch: { apiStyle } })}
-              />
+              <ApiStylePicker value={state.apiStyle} onChange={changeStyle} />
             </div>
             <FormField id="wizard-base-url" label="Base URL">
               <Input
@@ -138,10 +151,12 @@ function CustomConnectStep({
   state,
   test,
   dispatch,
+  changeStyle,
 }: {
   state: WizardState;
   test: TestStatus;
   dispatch: Dispatch<WizardAction>;
+  changeStyle: (next: ApiStyle) => void;
 }) {
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
@@ -182,10 +197,7 @@ function CustomConnectStep({
     <div className="space-y-5">
       <div className="space-y-2">
         <SectionLabel icon={<Plug className="size-3" />}>API style</SectionLabel>
-        <ApiStylePicker
-          value={state.apiStyle}
-          onChange={(apiStyle) => dispatch({ type: 'patch', patch: { apiStyle } })}
-        />
+        <ApiStylePicker value={state.apiStyle} onChange={changeStyle} />
       </div>
 
       <EndpointPreview apiStyle={state.apiStyle} baseUrl={state.baseUrl} />

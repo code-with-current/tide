@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROVIDER_PRESETS, getPreset, filterPresetModels } from '../provider-presets';
+import { PROVIDER_PRESETS, getPreset, filterPresetModels, styleFlipPatch } from '../provider-presets';
 
 const VALID_STYLES = ['openai', 'anthropic'];
 
@@ -74,5 +74,46 @@ describe('filterPresetModels (OpenCode Zen routing)', () => {
   it('presets without routing pass everything through', () => {
     const out = filterPresetModels([{ modelId: 'anything' }], getPreset('openrouter'), 'openai');
     expect(ids(out)).toEqual(['anything']);
+  });
+});
+
+describe('styleFlipPatch', () => {
+  const defaults = {
+    anthropic: 'https://api.anthropic.com',
+    openai: 'https://api.openai.com/v1',
+  } as const;
+
+  it('z.ai flip swaps to the alt URL when the URL is untouched', () => {
+    const zai = getPreset('zai')!;
+    const patch = styleFlipPatch(zai.baseUrl, 'anthropic', 'openai', zai, defaults);
+    expect(patch).toEqual({ apiStyle: 'openai', baseUrl: 'https://api.z.ai/api/paas/v4' });
+  });
+
+  it('flip back returns the preset canonical URL', () => {
+    const zai = getPreset('zai')!;
+    const patch = styleFlipPatch('https://api.z.ai/api/paas/v4', 'openai', 'anthropic', zai, defaults);
+    expect(patch).toEqual({ apiStyle: 'anthropic', baseUrl: 'https://api.z.ai/api/anthropic' });
+  });
+
+  it('same-URL presets (Zen) keep the URL — only the style changes', () => {
+    const zen = getPreset('opencode')!;
+    const patch = styleFlipPatch(zen.baseUrl, 'anthropic', 'openai', zen, defaults);
+    expect(patch).toEqual({ apiStyle: 'openai', baseUrl: 'https://opencode.ai/zen' });
+  });
+
+  it('never clobbers a user-customized URL', () => {
+    const zai = getPreset('zai')!;
+    const patch = styleFlipPatch('https://my-proxy.dev/zai', 'anthropic', 'openai', zai, defaults);
+    expect(patch).toEqual({ apiStyle: 'openai' });
+  });
+
+  it('custom path follows the protocol defaults', () => {
+    const patch = styleFlipPatch(defaults.openai, 'openai', 'anthropic', undefined, defaults);
+    expect(patch).toEqual({ apiStyle: 'anthropic', baseUrl: 'https://api.anthropic.com' });
+  });
+
+  it('empty URL follows to the new canonical', () => {
+    const patch = styleFlipPatch('  ', 'openai', 'anthropic', undefined, defaults);
+    expect(patch).toEqual({ apiStyle: 'anthropic', baseUrl: 'https://api.anthropic.com' });
   });
 });

@@ -18,6 +18,9 @@ export interface ProviderPreset {
    *  on that ApiStyle; everything else is hidden from the model picker.
    *  Absent = every fetched model is offered. */
   modelRouting?: Partial<Record<ApiStyle, string[]>>;
+  /** Canonical baseUrl per alternate API style, when the provider serves
+   *  both wire formats at DIFFERENT URLs (z.ai). Absent = same URL. */
+  altUrls?: Partial<Record<ApiStyle, string>>;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -56,6 +59,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.z.ai/api/anthropic', requiresKey: true,
     keyUrl: 'https://z.ai/manage-apikey/apikey.html', keyPlaceholder: '…',
     recommended: ['glm-5', 'glm-4.6'], accent: '#ffffff',
+    altUrls: { openai: 'https://api.z.ai/api/paas/v4' },
   },
   {
     id: 'deepseek', name: 'DeepSeek', group: 'aggregator', apiStyle: 'openai',
@@ -131,6 +135,36 @@ export function filterPresetModels<T extends { modelId: string }>(
   if (!matchers) return models;
   const rs = matchers.map((m) => m.toLowerCase());
   return models.filter((m) => rs.some((r) => m.modelId.toLowerCase().includes(r)));
+}
+
+/** Canonical baseUrl a style maps to: the preset's own URL for its default
+ *  style, its altUrls entry otherwise; falls back to the protocol default. */
+export function canonicalUrlForStyle(
+  preset: ProviderPreset | undefined,
+  style: ApiStyle,
+  protocolDefault: string,
+): string {
+  if (!preset) return protocolDefault;
+  return preset.apiStyle === style ? preset.baseUrl : preset.altUrls?.[style] ?? preset.baseUrl;
+}
+
+/** Patch for an API-style flip: follow the URL to the new style's canonical
+ *  endpoint — but only when the current URL is still the old style's
+ *  canonical one (untouched). A user-customized URL is never clobbered. */
+export function styleFlipPatch(
+  currentUrl: string,
+  fromStyle: ApiStyle,
+  toStyle: ApiStyle,
+  preset: ProviderPreset | undefined,
+  protocolDefaults: Record<ApiStyle, string>,
+): { apiStyle: ApiStyle; baseUrl?: string } {
+  const patch: { apiStyle: ApiStyle; baseUrl?: string } = { apiStyle: toStyle };
+  const cur = currentUrl.trim();
+  const fromCanonical = canonicalUrlForStyle(preset, fromStyle, protocolDefaults[fromStyle]);
+  if (!cur || cur === fromCanonical) {
+    patch.baseUrl = canonicalUrlForStyle(preset, toStyle, protocolDefaults[toStyle]);
+  }
+  return patch;
 }
 
 const hostOf = (url: string) =>
