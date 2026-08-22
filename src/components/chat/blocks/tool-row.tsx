@@ -679,7 +679,6 @@ export const ToolRow = memo(function ToolRow({
         <div className="mt-1.5 mb-1">
           <PermissionCard
             call={pendingEntry}
-            variant="split"
             timeoutAt={permSurface?.timeoutAt}
             onApprove={handleApprove}
             onReject={handleReject}
