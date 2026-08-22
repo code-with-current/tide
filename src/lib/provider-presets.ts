@@ -79,10 +79,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     recommended: ['claude-sonnet', 'claude-opus', 'claude-haiku', 'qwen'], accent: '#ffffff',
     altUrls: { openai: 'https://opencode.ai/zen/v1' },
     modelRouting: {
-      anthropic: ['claude', 'qwen', 'mimo'],
-      // x-preview verified live on /chat/completions (docs table says
-      // Responses-only; the endpoint serves it regardless).
-      openai: ['glm', 'kimi', 'deepseek', 'minimax', 'big-pickle', 'mimo', 'hy3', 'nemotron', 'laguna', 'x-preview'],
+      anthropic: ['claude', 'qwen'],
+      // Free-tier routing verified live (2026-08-22): x-preview/hy3/nemotron/
+      // laguna/muse-spark work on /chat/completions only; mimo unverified
+      // (rate-limited) but same upstream family; big-pickle unverified.
+      // deepseek-v4-flash-free's upstream is dead — listed but unusable.
+      openai: ['glm', 'kimi', 'deepseek', 'minimax', 'big-pickle', 'mimo', 'hy3', 'nemotron', 'laguna', 'x-preview', 'muse-spark'],
     },
   },
   {

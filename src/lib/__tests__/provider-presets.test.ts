@@ -47,6 +47,7 @@ describe('filterPresetModels (OpenCode Zen routing)', () => {
         { modelId: 'glm-5.2' },
         { modelId: 'x-preview-f-free' },
         { modelId: 'gpt-5.5' },
+        { modelId: 'mimo-v2.5-free' },
       ],
       zen,
       'anthropic',
@@ -69,6 +70,21 @@ describe('filterPresetModels (OpenCode Zen routing)', () => {
       'openai',
     );
     expect(ids(out)).toEqual(['glm-5.2', 'kimi-k2.7-code', 'deepseek-v4-flash', 'x-preview-f-free']);
+  });
+
+  it('free tier routes to openai style only (verified live)', () => {
+    const out = filterPresetModels(
+      [
+        { modelId: 'hy3-free' },
+        { modelId: 'nemotron-3.5-lightning-free' },
+        { modelId: 'laguna-s-2.1-free' },
+        { modelId: 'muse-spark-1.2-contributor-free' },
+        { modelId: 'mimo-v2.5-free' },
+      ],
+      zen,
+      'openai',
+    );
+    expect(ids(out)).toEqual(['hy3-free', 'nemotron-3.5-lightning-free', 'laguna-s-2.1-free', 'muse-spark-1.2-contributor-free', 'mimo-v2.5-free']);
   });
 
   it('presets without routing pass everything through', () => {
