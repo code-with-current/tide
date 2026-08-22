@@ -4,6 +4,7 @@ import type { AutonomyMode, ThinkingLevel, SessionStream, ToolCall, DiffHunk } f
 import { updateSessionSettings } from '@/lib/api/client';
 import { setPlatformDefaults } from '@/lib/shortcuts';
 import { createLogger } from '@/lib/logger';
+import { useTabs } from './tabs';
 
 const log = createLogger('ui');
 
@@ -1102,9 +1103,19 @@ export const useUi = create<UiState>()(
             ? list[list.length - 1].id
             : undefined
           : currentActive;
+      // Closing the LAST terminal empties the panel — close it when the
+      // terminal tab is what's on screen (leaves other tabs like Files
+          // untouched). Keyed off the viewer's scope (activeSessionId), not
+      // the terminal bucket (which may be a draft).
+      const viewerKey = s.activeSessionId ?? 'default';
+      const panelShowingTerminal =
+        list.length === 0 &&
+        s.rightPanelOpen &&
+        useTabs.getState().active[viewerKey] === 'terminal';
       return {
         terminals: { ...s.terminals, [sessionId]: list },
         activeTerminal: { ...s.activeTerminal, [sessionId]: newActive },
+        ...(panelShowingTerminal ? { rightPanelOpen: false } : {}),
         // Drop any ports detected for the closed terminal — the dev
         // server behind them is gone.
         ...(s.terminalPorts[id]
