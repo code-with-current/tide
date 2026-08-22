@@ -9,6 +9,7 @@ import { spawn, execFile } from 'child_process';
 import * as net from 'node:net';
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
+import { sanitizePtyEnv } from './terminal-env.js';
 import { createLogger } from '../logger.js';
 import type { WebContents } from 'electron';
 
@@ -281,7 +282,7 @@ export function startTerminal(
 
   const cwd = resolveCwd(sessionId);
   const { cmd, args } = getShell();
-  const env = { ...process.env };
+  const env = sanitizePtyEnv(process.env);
 
   const detectedPorts = new Map<number, TrackedPort>();
 
