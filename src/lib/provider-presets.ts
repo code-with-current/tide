@@ -59,6 +59,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     recommended: ['deepseek-chat', 'deepseek-reasoner'], accent: '#4d6bfe',
   },
   {
+    // Zen's per-model API shapes differ: Claude/Qwen on Anthropic /messages
+    // (this preset), GLM/Kimi/DeepSeek on OpenAI /chat/completions — flip
+    // apiStyle + URL in the wizard's Advanced for those.
+    id: 'opencode', name: 'OpenCode Zen', group: 'aggregator', apiStyle: 'anthropic',
+    baseUrl: 'https://opencode.ai/zen', requiresKey: true,
+    keyUrl: 'https://opencode.ai/auth', keyPlaceholder: '…',
+    recommended: ['claude-sonnet', 'claude-opus', 'claude-haiku', 'qwen'], accent: '#ffffff',
+  },
+  {
     id: 'groq', name: 'Groq', group: 'aggregator', apiStyle: 'openai',
     baseUrl: 'https://api.groq.com/openai/v1', requiresKey: true,
     keyUrl: 'https://console.groq.com/keys', keyPlaceholder: 'gsk_…',
