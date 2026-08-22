@@ -17,7 +17,7 @@ describe('measureTerminalCells', () => {
     const ctx = makeCtx(metrics(10, 12, 3)); // cell = 10 x 17
     const size = measureTerminalCells({
       context: ctx as unknown as CanvasRenderingContext2D,
-      width: 315, // (315 - 15 scrollbar) / 10 = 30
+      width: 300, // 300 / 10 = 30
       height: 170, // 170 / 17 = 10
       fontSize: 15,
       fontFamily: 'MesloLGS NF',
@@ -29,7 +29,7 @@ describe('measureTerminalCells', () => {
     const ctx = makeCtx(metrics(12, 12, 14)); // cell = 12 x 28
     const size = measureTerminalCells({
       context: ctx as unknown as CanvasRenderingContext2D,
-      width: 30, // (30 - 15) / 12 = 1.25 → 1 → clamp 2
+      width: 30, // 30 / 12 = 2.5 → 2
       height: 26, // 26 / 28 = 0.9 → clamp 1
       fontSize: 15,
       fontFamily: 'monospace',
@@ -37,7 +37,7 @@ describe('measureTerminalCells', () => {
     expect(size).toEqual({ cols: 2, rows: 1 });
   });
 
-  it('subtracts container padding and reserves the scrollbar', () => {
+  it('subtracts container padding', () => {
     const ctx = makeCtx(metrics(5, 8, 2)); // cell = 5 x 12
     const size = measureTerminalCells({
       context: ctx as unknown as CanvasRenderingContext2D,
@@ -50,8 +50,8 @@ describe('measureTerminalCells', () => {
       fontSize: 10,
       fontFamily: 'monospace',
     });
-    // (200 - 20 - 15) / 5 = 33 ; (124 - 8) / 12 = 9.67 → 9
-    expect(size).toEqual({ cols: 33, rows: 9 });
+    // (200 - 20) / 5 = 36 ; (124 - 8) / 12 = 9.67 → 9
+    expect(size).toEqual({ cols: 36, rows: 9 });
   });
 
   it('returns null for degenerate metrics or tiny containers', () => {

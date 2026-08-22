@@ -1,6 +1,6 @@
 import { useRef, useEffect, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
-import type { Terminal as GhosttyTerminal, FitAddon as FitAddonHandle, ILink } from 'ghostty-web';
+import type { Terminal as GhosttyTerminal, ILink } from 'ghostty-web';
 import { useUi, terminalScopeKey } from '@/lib/stores/ui';
 import { getTerminalTheme } from '@/components/screens/settings/appearance';
 import { measureTerminalContainer } from '@/lib/terminal-size';
@@ -34,7 +34,6 @@ function loadGhostty(): Promise<GhosttyModule> {
 
 interface LiveTerminal {
   term: GhosttyTerminal;
-  fit: FitAddonHandle;
   /** The wrapper div we created and passed to term.open(). Stored explicitly
    *  because ghostty-web sets `term.element` TO this wrapper (unlike xterm,
    *  which nested its own element inside it) — so term.element.parentElement
@@ -79,6 +78,25 @@ function queueOutput(terminalId: string, data: string) {
     pendingFlushes.add(terminalId);
     requestAnimationFrame(() => flushTerminal(terminalId));
   }
+}
+
+// ── Fit ─────────────────────────────────────────────────────────
+// ghostty-web's FitAddon hardcodes a 15px scrollbar gutter in
+// proposeDimensions, but its scrollbar is an in-canvas overlay — the gutter
+// is dead space on the right edge. Fit from the canvas's own cell metrics
+// instead (cell = bitmap size / grid size; the canvas is 1:1 CSS px).
+function fitTerminal(term: GhosttyTerminal, wrapper: HTMLDivElement): { cols: number; rows: number } | null {
+  const canvas = wrapper.querySelector('canvas');
+  if (!canvas || term.cols === 0 || term.rows === 0) return null;
+  const cellW = canvas.width / term.cols;
+  const cellH = canvas.height / term.rows;
+  if (!Number.isFinite(cellW) || cellW <= 0 || !Number.isFinite(cellH) || cellH <= 0) return null;
+  const cols = Math.max(2, Math.floor(wrapper.clientWidth / cellW));
+  const rows = Math.max(1, Math.floor(wrapper.clientHeight / cellH));
+  if (cols !== term.cols || rows !== term.rows) {
+    try { term.resize(cols, rows); } catch { /* disposed mid-fit */ }
+  }
+  return { cols, rows };
 }
 
 // ── IPC listeners (registered at module scope) ──────────────────
@@ -326,9 +344,6 @@ export const TerminalPanel = memo(function TerminalPanel() {
         ...(provisional ?? {}),
       });
 
-      const fit = new ghosttyModule.FitAddon();
-      term.loadAddon(fit);
-
       // Create a wrapper div INSIDE the mount. ghostty-web renders a canvas
       // into this. We manage this div imperatively — React never touches it.
       const wrapper = document.createElement('div');
@@ -341,7 +356,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       wrapper.dataset.terminalId = tid;
       mount.appendChild(wrapper);
       term.open(wrapper);
-      fit.fit();
+      fitTerminal(term, wrapper);
 
       // Link providers — ghostty-web has no WebLinksAddon equivalent, so we
       // register two providers: URLs (open in OS browser on modifier+click,
@@ -419,11 +434,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
         // during an unmount window) — fitting there clears the canvas
         // bitmap for nothing; the re-attach/forceRedraw path repaints.
         if (wrapper.clientWidth === 0 || wrapper.clientHeight === 0) return;
-        try { fit.fit(); ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
+        try { fitTerminal(term, wrapper); ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
       });
       resizeObserver.observe(wrapper);
 
-      registry.set(tid, { term, fit, wrapper, inputDisposable, resizeObserver });
+      registry.set(tid, { term, wrapper, inputDisposable, resizeObserver });
       if (tid === active) createdActive = true;
     }
 
@@ -507,7 +522,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       // Re-asserting the current size forces ghostty-web's renderer to do a
       // FULL re-render (it clears the dirty rows + redraws). A real fit() is
       // attempted first so layout-driven resizes still propagate.
-      live.fit.fit();
+      fitTerminal(live.term, live.wrapper);
       const t = live.term;
       t.resize(t.cols, t.rows);
       t.focus();

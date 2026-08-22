@@ -1,16 +1,15 @@
 /** Provisional terminal sizing before ghostty mounts (OpenChamber technique):
  *  measure the cell box with canvas text metrics and derive cols/rows from the
  *  container, so the PTY spawns at the right dimensions while the WASM emulator
- *  is still loading — no 80x24 flash with re-wrapped shell output. Reserves
- *  FitAddon's 15px scrollbar gutter. Returns null when measurement is
- *  impossible (no canvas context, tiny container) — callers fall back. */
+ *  is still loading — no 80x24 flash with re-wrapped shell output. Returns
+ *  null when measurement is impossible (no canvas context, tiny container) —
+ *  callers fall back. */
 
 export interface TerminalCellSize {
   cols: number;
   rows: number;
 }
 
-const SCROLLBAR_RESERVE_PX = 15;
 const MIN_COLS = 2;
 const MIN_ROWS = 1;
 
@@ -39,7 +38,7 @@ export function measureTerminalCells(input: {
   ) + 2;
   if (cellWidth < 1 || cellHeight < 1) return null;
   return {
-    cols: Math.max(MIN_COLS, Math.floor((width - paddingLeft - paddingRight - SCROLLBAR_RESERVE_PX) / cellWidth)),
+    cols: Math.max(MIN_COLS, Math.floor((width - paddingLeft - paddingRight) / cellWidth)),
     rows: Math.max(MIN_ROWS, Math.floor((height - paddingTop - paddingBottom) / cellHeight)),
   };
 }
