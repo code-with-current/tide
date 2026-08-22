@@ -17,6 +17,7 @@ import { RightPanel } from "@/components/right-panel/right-panel";
 import { useRightPanelOverlay } from '@/lib/right-panel-layout';
 import { InspectorColumn } from "@/components/chat/inspector/inspector-column";
 import { useInspectorColumnVisible } from "@/lib/inspector-visibility";
+import { panelTransition } from "@/lib/panel-transitions";
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/right-panel/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -301,20 +302,20 @@ export function MainScreen() {
 
   // Auto-collapse the sessions + right panels when there's no session to
   // show in them (no active session, or workspace has zero sessions).
-  // Auto-expand when a session becomes available. Edge-triggered via a ref
-  // so the user's manual toggles aren't overridden on every render.
+  // Re-expanding covers only the sessions sidebar — the right panel never
+  // auto-opens (fresh sessions and restarts leave it closed; opening it is
+  // the user's call). Edge-triggered via a ref so manual toggles stick.
   const prevHadSessionRef = useRef<boolean>(false);
   useEffect(() => {
-    const hasSessions = (sessions?.length ?? 0) > 0;
-    const hasActive = !!activeSessionId;
-    const shouldShowPanels = hasSessions && hasActive;
-
-    // Only act on the false→true and true→false transitions.
-    if (shouldShowPanels && !prevHadSessionRef.current) {
+    const t = panelTransition({
+      hasSessions: (sessions?.length ?? 0) > 0,
+      hasActive: !!activeSessionId,
+      prevHadSession: prevHadSessionRef.current,
+    });
+    if (t.sessionsPanel === 'expand') {
       if (!sessionsPanelOpen) setSessionsPanelOpen();
-      if (!rightPanelOpen) setRightPanelOpen();
       prevHadSessionRef.current = true;
-    } else if (!shouldShowPanels && prevHadSessionRef.current) {
+    } else if (t.sessionsPanel === 'collapse') {
       if (sessionsPanelOpen) setSessionsPanelOpen();
       if (rightPanelOpen) setRightPanelOpen();
       prevHadSessionRef.current = false;
