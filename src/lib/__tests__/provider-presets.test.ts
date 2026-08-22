@@ -92,10 +92,13 @@ describe('styleFlipPatch', () => {
     expect(patch).toEqual({ apiStyle: 'anthropic', baseUrl: 'https://api.z.ai/api/anthropic' });
   });
 
-  it('same-URL presets (Zen) keep the URL — only the style changes', () => {
+  it('Zen flip swaps to the anthropic URL and back (default style is openai)', () => {
     const zen = getPreset('opencode')!;
-    const patch = styleFlipPatch(zen.baseUrl, 'anthropic', 'openai', zen, defaults);
-    expect(patch).toEqual({ apiStyle: 'openai', baseUrl: 'https://opencode.ai/zen/v1' });
+    expect(zen.apiStyle).toBe('openai');
+    const toAnthropic = styleFlipPatch(zen.baseUrl, 'openai', 'anthropic', zen, defaults);
+    expect(toAnthropic).toEqual({ apiStyle: 'anthropic', baseUrl: 'https://opencode.ai/zen' });
+    const back = styleFlipPatch('https://opencode.ai/zen', 'anthropic', 'openai', zen, defaults);
+    expect(back).toEqual({ apiStyle: 'openai', baseUrl: 'https://opencode.ai/zen/v1' });
   });
 
   it('never clobbers a user-customized URL', () => {

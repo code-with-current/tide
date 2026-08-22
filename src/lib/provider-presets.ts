@@ -68,22 +68,16 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     recommended: ['deepseek-chat', 'deepseek-reasoner'], accent: '#4d6bfe',
   },
   {
-    // Zen routes models per wire endpoint: Claude + Qwen on Anthropic
-    // /messages (this preset's default), GLM/Kimi/DeepSeek/MiniMax + the
-    // free tier on OpenAI /chat/completions (flip API style in Advanced).
-    // GPT/Grok/Muse/Ox models live ONLY on the OpenAI Responses endpoint —
-    // a wire format Tide doesn't speak — so modelRouting hides them.
-    id: 'opencode', name: 'OpenCode Zen', group: 'aggregator', apiStyle: 'anthropic',
-    baseUrl: 'https://opencode.ai/zen', requiresKey: true,
+    id: 'opencode', name: 'OpenCode Zen', group: 'aggregator', apiStyle: 'openai',
+    baseUrl: 'https://opencode.ai/zen/v1', requiresKey: true,
     keyUrl: 'https://opencode.ai/auth', keyPlaceholder: '…',
     recommended: ['claude-sonnet', 'claude-opus', 'claude-haiku', 'qwen'], accent: '#ffffff',
-    altUrls: { openai: 'https://opencode.ai/zen/v1' },
+    altUrls: { anthropic: 'https://opencode.ai/zen' },
     modelRouting: {
+      // OpenAI style (the default) is UNFILTERED by design: the live 64-model
+      // sweep (2026-08-22) showed Zen routes everything through
+      // /chat/completions. Anthropic /messages serves only Claude + Qwen.
       anthropic: ['claude', 'qwen'],
-      // OpenAI style is UNFILTERED by design: the live 64-model sweep
-      // (2026-08-22) showed Zen routes everything through /chat/completions —
-      // free models completed or hit the rate limiter, paid ones hit the
-      // billing gate pre-routing (which can't prove unroutable).
     },
   },
   {
