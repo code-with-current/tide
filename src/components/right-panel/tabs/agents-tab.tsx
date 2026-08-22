@@ -226,7 +226,6 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                 text={report}
                 streaming={running}
                 hasProcessContent={root.any || !!d?.reasoning}
-                elapsedMs={resolved.dispatch.durationMs}
               />
             )}
             {running && !root.any && !d?.reasoning && (

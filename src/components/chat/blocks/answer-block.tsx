@@ -1,8 +1,7 @@
 import { memo, useState } from 'react';
-import { Copy, Check, GitFork, Clock } from 'lucide-react';
+import { Copy, Check, GitFork } from 'lucide-react';
 import { MemoizedMarkdown } from '../memoized-markdown';
 import { initiateFork } from '@/lib/queries';
-import { formatMs } from '@/lib/stream/block-state';
 import { cn } from '@/lib/utils';
 
 export const AnswerBlock = memo(function AnswerBlock({
@@ -10,7 +9,6 @@ export const AnswerBlock = memo(function AnswerBlock({
   streaming,
   stopped,
   hasProcessContent,
-  elapsedMs,
   sessionId,
   sessionTitle: _sessionTitle,
   sessionModelId: _sessionModelId,
@@ -20,9 +18,6 @@ export const AnswerBlock = memo(function AnswerBlock({
   streaming: boolean;
   stopped?: boolean;
   hasProcessContent: boolean;
-  /** Wall-clock duration from send → result for live turns (undefined on
-   *  reloaded messages). Shown at the end of the answer when present. */
-  elapsedMs?: number;
   sessionId?: string | null;
   sessionTitle?: string;
   sessionModelId?: string;
@@ -67,12 +62,7 @@ export const AnswerBlock = memo(function AnswerBlock({
 
         {showActions && (
           <div className="flex items-center gap-0.5 px-2 pb-1.5">
-            {elapsedMs ? (
-              <span className="flex items-center gap-1 mr-auto text-[0.7857rem] font-mono text-muted-foreground/50">
-                <Clock className="size-3" />
-                {formatMs(elapsedMs)}
-              </span>
-            ) : <span className="mr-auto" />}
+            <span className="mr-auto" />
 
             <div className="flex items-center gap-0.5 opacity-60 transition-opacity group-hover/answer:opacity-100">
               <button

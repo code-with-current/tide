@@ -3,6 +3,7 @@ import { Check, X, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { isFailedStatus } from '@/lib/stream/block-state';
+import { stepsCount } from '@/components/blocks/process-state';
 import { PixelLoader } from '@/components/ui/pixel-loader';
 
 /** Format ms as whole seconds: "14s", "1m30s". No sub-second/ms precision. */
@@ -79,6 +80,7 @@ export function TurnHeader({
   }
   const toolDuration = formatDuration(toolMs);
   const wallClock = formatDuration(wallClockMs ?? turn?.totalMs);
+  const steps = stepsCount(blocks);
 
   if (streaming) return null;
 
@@ -102,6 +104,7 @@ export function TurnHeader({
       <span className={tone}>
         {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
       </span>
+      {steps > 0 && <span className="text-muted-foreground/50">· {steps} steps</span>}
       {wallClock && (
         <span className="flex items-center gap-0.5 text-muted-foreground/50">
           <Clock className="size-2.5" />

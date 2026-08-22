@@ -2,7 +2,7 @@
  * Thinking + ToolChips sections in an answer-gated collapsible. Open-state is
  * derived (process-state.ts) — the user's click pins, the pin resets when a
  * new turn starts streaming. Same header-row + grid-collapse anatomy as
- * ThinkingBlock/ToolChips. */
+ * ThinkingBlock/ToolChips. Steps/duration live in TurnHeader, not here. */
 
 import { memo, useEffect, useState } from 'react';
 import { Zap, ChevronDown, Loader2 } from 'lucide-react';
@@ -10,22 +10,12 @@ import { cn } from '@/lib/utils';
 import type { Block } from '@/types';
 import { deriveProcessOpen, stepsCount } from './process-state';
 
-// No self-ticking interval: Elapsed only mounts on finished turns (the
-// spinner replaces it while streaming), and block-list re-anchors startedAt
-// to `now - totalMs` on every render — so this always reads exactly the
-// persisted turn duration. A ticking interval would drift past totalMs.
-function Elapsed({ startedAt }: { startedAt: number }) {
-  const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  return <span className="font-mono text-[0.7857rem] tabular-nums text-muted-foreground/70">{s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`}</span>;
-}
-
 export const ProcessContainer = memo(function ProcessContainer({
-  streaming, blocks, answerActive, startedAt, phaseHint, children,
+  streaming, blocks, answerActive, phaseHint, children,
 }: {
   streaming: boolean;
   blocks: Block[] | undefined;
   answerActive: boolean;
-  startedAt: number;
   phaseHint?: string | null;
   children: React.ReactNode;
 }) {
@@ -38,7 +28,6 @@ export const ProcessContainer = memo(function ProcessContainer({
   useEffect(() => { if (streaming) setPinned(null); }, [streaming]);
 
   const open = deriveProcessOpen({ streaming, hasProcess, answerActive, userPinned: pinned });
-  const steps = stepsCount(blocks);
 
   return (
     <div className="mt-[5px] w-full">
@@ -55,11 +44,10 @@ export const ProcessContainer = memo(function ProcessContainer({
           <ChevronDown className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/agent:opacity-100" style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
         </span>
         <span className="shrink-0 text-[0.85rem] font-medium text-foreground/80">Agent</span>
-        {steps > 0 && <span className="shrink-0 text-[0.8214rem] text-muted-foreground">· {steps} steps</span>}
         {streaming && open && phaseHint ? (
           <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.8214rem] text-muted-foreground">{phaseHint}…</span>
         ) : null}
-        {streaming ? <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" /> : <Elapsed startedAt={startedAt} />}
+        {streaming ? <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" /> : null}
       </button>
       <div
         className="grid transition-[grid-template-rows,opacity] duration-300"

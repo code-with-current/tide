@@ -873,7 +873,7 @@ function ChipRow({
           e.preventDefault();
           onOpenDispatch();
         }}
-        title="Open this agent's stream in the Agents tab"
+        title="Stream in the Agents Panel"
         className="group/row flex h-7 w-full min-w-0 max-w-full items-center gap-2 rounded-md text-left transition-colors cursor-pointer hover:bg-secondary/60 hover:rounded-lg"
       >
         <span className="relative flex h-7 shrink-0 items-center justify-center">
@@ -1110,7 +1110,7 @@ function ToolChipsImpl({
 
   if (variant === 'stream') {
     return (
-      <div className="w-full mt-[5px]">
+      <div className="w-full">
         <div ref={rowsRef} className={cn('mt-[5px] flex flex-col gap-[5px]', streaming && 'max-h-[420px] overflow-y-auto')}>
           {rowEls}
         </div>

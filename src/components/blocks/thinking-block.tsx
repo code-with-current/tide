@@ -194,11 +194,11 @@ function ThinkingBlockImpl({
   );
 
   if (variant === 'stream') {
-    return <div className="mt-[5px] w-full">{content}</div>;
+    return <div className="w-full">{content}</div>;
   }
 
   return (
-    <div className="mt-[5px] w-full">
+    <div className="w-full">
       <button
         type="button"
         aria-expanded={open}
