@@ -43,12 +43,42 @@ export interface TitleModelSource {
   modelId: string;
 }
 
+/** Clamp so the title model never sees a huge paste — it only needs the gist. */
+const MAX_SUBJECT_CHARS = 6_000;
+const MAX_EXCERPT_CHARS = 800;
+
+export interface TitleAttachment {
+  path: string;
+  kind: string;
+  content?: string;
+}
+
+/** Subject for title generation: the message text, or — when the user only
+ *  attached files / pasted long text (which the composer stores as a virtual
+ *  attachment with empty display text) — the attachment names plus a short
+ *  excerpt of the first inline one. Long text is clamped. */
+export function buildTitleSubject(firstMessage: string, attachments: TitleAttachment[]): string {
+  const text = firstMessage.trim();
+  const names = attachments
+    .map((a) => a.path.split('/').pop() || a.path)
+    .filter(Boolean)
+    .join(', ');
+  if (!text) {
+    if (!names) return '';
+    const excerpt = attachments.find((a) => a.content?.trim())?.content?.trim().slice(0, MAX_EXCERPT_CHARS);
+    return excerpt ? `Attached files: ${names}\n\n${excerpt}` : `Attached files: ${names}`;
+  }
+  if (text.length <= MAX_SUBJECT_CHARS) return text;
+  return text.slice(0, MAX_SUBJECT_CHARS) + '…';
+}
+
 /** @returns cleaned title or null */
 export async function generateSessionTitle(
   firstMessage: string,
   source: TitleModelSource,
+  attachments: TitleAttachment[] = [],
 ): Promise<string | null> {
-  const { stripped, prompt } = extractSubject(firstMessage);
+  const { stripped, prompt } = extractSubject(buildTitleSubject(firstMessage, attachments));
   if (!stripped && !prompt) return null;
 
   if (!source.provider.apiKey) {

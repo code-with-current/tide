@@ -899,7 +899,12 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       const session = sessions.getSession(sessionId);
       if (!session) return null;
       const firstUser = session.messages.find((m: any) => m.role === 'user');
-      if (!firstUser || !firstUser.content) return null;
+      if (!firstUser) return null;
+      // Attachment-only sends (files, long pastes → virtual attachments)
+      // persist empty content — the title comes from the attachment names.
+      const firstText = String(firstUser.content ?? '');
+      const attachments = (firstUser.attachments ?? []) as Array<{ path: string; kind: string; content?: string }>;
+      if (!firstText.trim() && attachments.length === 0) return null;
       // Resolve the session's chat provider — same path as the orchestrator.
       const providers = store.listProviders();
       // Settings override: a pinned title model wins for title generation.
@@ -919,10 +924,10 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
         }
       }
       if (!provider) return null;
-      const title = await generateSessionTitle(String(firstUser.content), {
+      const title = await generateSessionTitle(firstText, {
         provider,
         modelId,
-      });
+      }, attachments);
       if (title) sessions.renameSession(sessionId, title);
       return title;
     } catch (e: any) {
