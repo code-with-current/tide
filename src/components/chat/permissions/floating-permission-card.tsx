@@ -4,7 +4,7 @@ import { useUi } from '@/lib/stores/ui';
 import { PermissionCard } from './permission-card';
 import type { AutonomyMode } from '@/types';
 
-/** IPC approve — mirrors InspectorTab's ipcApprove. */
+/** IPC approve — mirrors useChatStream's approveToolCalls. */
 function ipcApprove(
   sessionId: string,
   ids: string[],
@@ -13,7 +13,12 @@ function ipcApprove(
 ) {
   if (!sessionId || !window.tideIpc) return;
   window.tideIpc.approveToolCalls(sessionId, ids, newMode, remember);
-  useUi.getState().removePermissionCards(sessionId, ids);
+  // Mode escalation auto-approves every other pending ask main-side —
+  // dismiss their cards too.
+  const dismissIds = newMode
+    ? (useUi.getState().streams[sessionId]?.permissionRequest?.toolCalls ?? []).map((tc) => tc.id)
+    : ids;
+  useUi.getState().removePermissionCards(sessionId, dismissIds);
   if (newMode) useUi.getState().setAutonomyMode(newMode);
 }
 
@@ -33,7 +38,9 @@ export function FloatingPermissionCard({ sessionId }: { sessionId: string | null
 
   return (
     <div className="absolute top-0 left-0 right-0 z-50 pointer-events-none">
-      <div className="pointer-events-auto">
+      {/* Fixed-width column centered over the chat — cards don't stretch with
+          the window, so the command preview and action rows stay readable. */}
+      <div className="pointer-events-auto mx-auto w-[26rem] max-w-[calc(100%-1.5rem)]">
         {/* Header badge */}
         <div className="flex items-center justify-center gap-1.5 text-[0.7857rem] text-warning font-medium bg-background p-4">
           <ShieldAlert className="size-3.5" />

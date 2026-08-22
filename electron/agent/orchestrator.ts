@@ -24,7 +24,7 @@ import { shouldCompact, compactConversation, isContextOverflow } from './context
 import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts, clampOutputForContext } from './model-capabilities.js';
 import { mediaMimeFor } from './tools/read-media-file.js';
 import type { ToolResult } from './tools/types.js';
-import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
+import { resolvePermission, abortPermission, clearSession, getPendingAsk, pendingAskIds } from './permission-resolver.js';
 import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
 import { resolveFollowup, abortFollowup, clearFollowupSession } from './followup-resolver.js';
 import { resolveProtocolOptions, resolveReasoning } from './protocols/index.js';
@@ -195,7 +195,16 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain, opts?: { sin
         const ask = getPendingAsk(sessionId, toolCallIds[0]);
         if (ask) addPermissionRule(sessionId, ask.workspaceRoot, ask.toolName, ask.args);
       }
-      if (newMode) { try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch {} }
+      if (newMode) {
+        try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch {}
+        // Escalation un-gates every other pending ask in the session — their
+        // checks pass under the new mode, so resolve them as approved rather
+        // than leaving cards for tools that no longer need permission.
+        const siblings = pendingAskIds(sessionId).filter((id) => !toolCallIds.includes(id));
+        if (siblings.length > 0) {
+          resolvePermission(sessionId, siblings, { approved: true, newMode });
+        }
+      }
       resolvePermission(sessionId, toolCallIds, newMode ? { approved: true, newMode } : { approved: true });
     },
   );

@@ -97,6 +97,11 @@ export function getPendingAsk(
   return pendingAsk.get(sessionId)?.get(toolCallId);
 }
 
+/** Ids of every still-awaits-a-verdict ask in the session. */
+export function pendingAskIds(sessionId: string): string[] {
+  return [...pending.get(sessionId)?.keys() ?? []];
+}
+
 /** Drop all state for a session — call when the turn ends. */
 export function clearSession(sessionId: string): void {
   pending.delete(sessionId);

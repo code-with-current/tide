@@ -85,11 +85,16 @@ export function useChatStream(): {
     ) => {
       if (!ipc) return;
       ipc.approveToolCalls(sessionId, toolCallIds, newMode, remember);
-      removePendingPermissionCards(sessionId, toolCallIds);
+      // Mode escalation auto-approves every other pending ask main-side —
+      // dismiss their cards in the same pass so no dead cards linger.
+      const dismissIds = newMode
+        ? (useUi.getState().streams[sessionId]?.permissionRequest?.toolCalls ?? []).map((tc) => tc.id)
+        : toolCallIds;
+      removePendingPermissionCards(sessionId, dismissIds);
       // The main process mutates ctx.autonomyMode for the rest of the turn
       // when newMode is set — mirror that in the UI store so the chat
       // selector reflects the effective mode. (remember:* only adds a
-      // permission rule, not a mode change, so it does not move the selector.)
+      // permission rule, not a mode change, so it doesn't move the selector.)
       if (newMode) useUi.getState().setAutonomyMode(newMode);
     },
     [ipc],
