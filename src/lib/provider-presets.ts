@@ -74,8 +74,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: 'https://opencode.ai/auth', keyPlaceholder: '…',
     recommended: ['claude-sonnet', 'claude-opus', 'claude-haiku', 'qwen'], accent: '#ffffff',
     modelRouting: {
-      anthropic: ['claude', 'qwen'],
-      openai: ['glm', 'kimi', 'deepseek', 'minimax', 'big-pickle', 'mimo', 'hy3', 'nemotron', 'laguna'],
+      anthropic: ['claude', 'qwen', 'mimo'],
+      // x-preview verified live on /chat/completions (docs table says
+      // Responses-only; the endpoint serves it regardless).
+      openai: ['glm', 'kimi', 'deepseek', 'minimax', 'big-pickle', 'mimo', 'hy3', 'nemotron', 'laguna', 'x-preview'],
     },
   },
   {

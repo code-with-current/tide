@@ -68,7 +68,7 @@ describe('filterPresetModels (OpenCode Zen routing)', () => {
       zen,
       'openai',
     );
-    expect(ids(out)).toEqual(['glm-5.2', 'kimi-k2.7-code', 'deepseek-v4-flash']);
+    expect(ids(out)).toEqual(['glm-5.2', 'kimi-k2.7-code', 'deepseek-v4-flash', 'x-preview-f-free']);
   });
 
   it('presets without routing pass everything through', () => {
