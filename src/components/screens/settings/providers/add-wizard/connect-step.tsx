@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ApiStyle } from '@/types';
 import { styleFlipPatch, type ProviderPreset } from '@/lib/provider-presets';
-import { ApiStylePicker, EndpointPreview, FormField, PROTOCOL, SectionLabel } from '../providers';
+import { ApiStylePicker, EndpointPreview, FormField, PROTOCOL, SectionLabel } from '../provider-fields';
 import type { TestStatus, WizardAction, WizardState } from './wizard-reducer';
 
 const PROTOCOL_DEFAULTS: Record<ApiStyle, string> = {

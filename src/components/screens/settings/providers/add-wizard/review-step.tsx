@@ -4,7 +4,7 @@ import { ProviderLogo } from '@/components/primitives/provider-logo';
 import type { FetchedModel } from '@/lib/fetch-models';
 import type { ProviderPreset } from '@/lib/provider-presets';
 import { cn, formatContext } from '@/lib/utils';
-import { EndpointPreview, SectionLabel } from '../providers';
+import { EndpointPreview, SectionLabel } from '../provider-fields';
 import type { WizardState } from './wizard-reducer';
 
 export function ReviewStep({

@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { SectionLabel } from '../providers/providers';
+import { SectionLabel } from '../providers/provider-fields';
 import { ScopeCard } from './server-dialog';
 
 interface DetectedServer {

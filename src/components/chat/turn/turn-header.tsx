@@ -89,8 +89,8 @@ export function TurnHeader({
         : 'text-success';
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
-      <Icon className={cn('size-3', tone)} />
+    <div className="flex items-center gap-1.5 text-[0.85rem] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
+      <Icon className={cn('size-4', tone)} />
       <span className={tone}>
         {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
       </span>

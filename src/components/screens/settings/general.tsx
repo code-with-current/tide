@@ -63,7 +63,6 @@ export function GeneralSection() {
         description="Startup, notifications, git attribution, and background tasks."
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
           <SettingsGroup title="Startup">
             <Card>
               <SettingsRow
@@ -80,69 +79,72 @@ export function GeneralSection() {
                 </div>
               </SettingsRow>
             </Card>
-          </SettingsGroup>
+        </SettingsGroup>
 
-          <SettingsGroup title="Notifications">
-            <Card>
-              <SettingsRow
-                title="Enable notifications"
-                description="OS notifications for turn completion and errors."
-              >
-                <div className="flex items-center gap-2">
-                  {savingKey === 'notifications' && <SavedDot />}
-                  <Switch
-                    checked={settings.notifications}
-                    onCheckedChange={(v) => update('notifications', v)}
-                  />
-                </div>
-              </SettingsRow>
-              <SettingsRow
-                title="Notification sounds"
-                description="Play a sound when a turn finishes or needs your input."
-                last
-              >
-                <div className="flex items-center gap-2">
-                  {savingKey === 'notificationSound' && <SavedDot />}
-                  <Switch
-                    checked={settings.notificationSound}
-                    onCheckedChange={(v) => update('notificationSound', v)}
-                  />
-                </div>
-              </SettingsRow>
-            </Card>
-          </SettingsGroup>
+        <SettingsGroup title="Notifications">
+          <Card>
+            <SettingsRow
+              title="Enable notifications"
+              description="OS notifications for turn completion and errors."
+            >
+              <div className="flex items-center gap-2">
+                {savingKey === 'notifications' && <SavedDot />}
+                <Switch
+                  checked={settings.notifications}
+                  onCheckedChange={(v) => update('notifications', v)}
+                />
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title="Notification sounds"
+              description="Play a sound when a turn finishes or needs your input."
+              last
+            >
+              <div className="flex items-center gap-2">
+                {savingKey === 'notificationSound' && <SavedDot />}
+                <Switch
+                  checked={settings.notificationSound}
+                  onCheckedChange={(v) => update('notificationSound', v)}
+                />
+              </div>
+            </SettingsRow>
+          </Card>
+        </SettingsGroup>
+        <SettingsGroup title="Background tasks" hint="">
+          <Card>
+            <SettingsRow
+              title="Session Title"
+              description="Generate the session title from the first message."
+            >
+              <div className="flex items-center gap-2">
+                {savingKey === 'titleModel' && <SavedDot />}
+                <ModelPickerPopover
+                  value={settings.titleModel}
+                  onChange={(v) => update('titleModel', v)}
+                  defaultLabel="Default"
+                />
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title="Commit Message"
+              description="Generate the commit message from the changes."
+              last
+            >
+              <div className="flex items-center gap-2">
+                {savingKey === 'commitMessageModel' && <SavedDot />}
+                <ModelPickerPopover
+                  value={settings.commitMessageModel}
+                  onChange={(v) => update('commitMessageModel', v)}
+                  defaultLabel="Default"
+                />
+              </div>
+            </SettingsRow>
+          </Card>
+        </SettingsGroup>
 
-          <SettingsGroup title="Background tasks" hint="Defaults follow the session's model">
-            <Card>
-              <SettingsRow
-                title="Session title model"
-                description="Model that names new sessions from the first message."
-              >
-                <div className="flex items-center gap-2">
-                  {savingKey === 'titleModel' && <SavedDot />}
-                  <ModelPickerPopover
-                    value={settings.titleModel}
-                    onChange={(v) => update('titleModel', v)}
-                    defaultLabel="Session model (default)"
-                  />
-                </div>
-              </SettingsRow>
-              <SettingsRow
-                title="Commit message model"
-                description="Model behind the Git panel's ✨ commit-message generator."
-                last
-              >
-                <div className="flex items-center gap-2">
-                  {savingKey === 'commitMessageModel' && <SavedDot />}
-                  <ModelPickerPopover
-                    value={settings.commitMessageModel}
-                    onChange={(v) => update('commitMessageModel', v)}
-                    defaultLabel="Session model (default)"
-                  />
-                </div>
-              </SettingsRow>
-            </Card>
-          </SettingsGroup>
+
+
+
 
           <SettingsGroup title="Git Attribution">
             <Card>
@@ -200,7 +202,6 @@ export function GeneralSection() {
               )}
             </Card>
           </SettingsGroup>
-      </div>
     </>
   );
 }
@@ -208,7 +209,7 @@ export function GeneralSection() {
 function SavedDot() {
   return (
     <span className="flex items-center gap-0.5 text-[9px] text-[var(--success)] animate-in fade-in duration-200">
-      <Check className="size-2.5" /> saved
+      <Check className="size-2.5" /> Saved
     </span>
   );
 }

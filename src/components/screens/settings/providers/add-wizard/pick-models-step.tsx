@@ -11,7 +11,7 @@ import * as api from '@/lib/api/client';
 import { fetchAndEnrichModels, toResolveFn, type FetchedModel } from '@/lib/fetch-models';
 import { filterPresetModels, type ProviderPreset } from '@/lib/provider-presets';
 import { formatContext } from '@/lib/utils';
-import { FetchRow, FetchSection, SectionLabel } from '../providers';
+import { FetchRow, FetchSection, SectionLabel } from '../provider-fields';
 import type { WizardAction, WizardState } from './wizard-reducer';
 
 export function PickModelsStep({

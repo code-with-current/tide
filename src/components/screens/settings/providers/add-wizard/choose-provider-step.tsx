@@ -5,7 +5,7 @@ import { ProviderLogo } from '@/components/primitives/provider-logo';
 import { PROVIDER_PRESETS, type PresetGroup, type ProviderPreset } from '@/lib/provider-presets';
 import type { ApiStyle } from '@/types';
 import { cn } from '@/lib/utils';
-import { SectionLabel } from '../providers';
+import { SectionLabel } from '../provider-fields';
 
 const GROUPS: { id: PresetGroup; label: string }[] = [
   { id: 'first-party', label: 'First-party' },

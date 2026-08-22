@@ -50,11 +50,11 @@ export const ProcessContainer = memo(function ProcessContainer({
       >
         <span className="relative flex size-4 shrink-0 items-center justify-center text-primary">
           <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/agent:opacity-0">
-            <Zap className={cn('size-3.5', streaming && open && 'animate-pulse')} />
+            <Zap className={cn('size-4', streaming && open && 'animate-pulse')} />
           </span>
           <ChevronDown className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/agent:opacity-100" style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
         </span>
-        <span className="shrink-0 text-[12.5px] font-medium text-foreground/80">Agent</span>
+        <span className="shrink-0 text-[0.85rem] font-medium text-foreground/80">Agent</span>
         {steps > 0 && <span className="shrink-0 text-[11.5px] text-muted-foreground">· {steps} steps</span>}
         {streaming && open && phaseHint ? (
           <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11.5px] text-muted-foreground">{phaseHint}…</span>
@@ -65,7 +65,7 @@ export const ProcessContainer = memo(function ProcessContainer({
         className="grid transition-[grid-template-rows,opacity] duration-300"
         style={{ gridTemplateRows: open ? '1fr' : '0fr', opacity: open ? 1 : 0, transitionTimingFunction: 'cubic-bezier(0.23,1,0.32,1)' }}
       >
-        <div className="min-h-0 overflow-hidden">{children}</div>
+        <div className="min-h-0 overflow-hidden pl-5">{children}</div>
       </div>
     </div>
   );

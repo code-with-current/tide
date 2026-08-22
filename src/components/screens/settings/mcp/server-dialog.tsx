@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { SectionLabel, FormField } from '../providers/providers';
+import { SectionLabel, FormField } from '../providers/provider-fields';
 
 /** Add/edit dialog for an MCP server. Two bidirectionally-synced modes: Form (structured fields) and JSON (raw config textarea, live-validated). Edit mode opens to JSON. */
 
