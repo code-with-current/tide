@@ -98,7 +98,7 @@ describe('styleFlipPatch', () => {
   it('same-URL presets (Zen) keep the URL — only the style changes', () => {
     const zen = getPreset('opencode')!;
     const patch = styleFlipPatch(zen.baseUrl, 'anthropic', 'openai', zen, defaults);
-    expect(patch).toEqual({ apiStyle: 'openai', baseUrl: 'https://opencode.ai/zen' });
+    expect(patch).toEqual({ apiStyle: 'openai', baseUrl: 'https://opencode.ai/zen/v1' });
   });
 
   it('never clobbers a user-customized URL', () => {

@@ -77,6 +77,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://opencode.ai/zen', requiresKey: true,
     keyUrl: 'https://opencode.ai/auth', keyPlaceholder: '…',
     recommended: ['claude-sonnet', 'claude-opus', 'claude-haiku', 'qwen'], accent: '#ffffff',
+    altUrls: { openai: 'https://opencode.ai/zen/v1' },
     modelRouting: {
       anthropic: ['claude', 'qwen', 'mimo'],
       // x-preview verified live on /chat/completions (docs table says

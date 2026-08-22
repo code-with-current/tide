@@ -1072,11 +1072,22 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       } else {
         headers['authorization'] = `Bearer ${apiKey}`;
       }
-      const res = await fetch(url, {
+      let res = await fetch(url, {
         method: 'GET',
         headers,
         signal: AbortSignal.timeout(15_000),
       });
+      // OpenAI-style gateways that serve both protocols (OpenCode Zen) may
+      // only expose the models list under /v1 — retry there when the bare
+      // /models probe missed and the base has no version segment.
+      if (!res.ok && apiStyle === 'openai' && !/\/v\d+$/.test(cleanBase)) {
+        const v1 = await fetch(`${cleanBase}/v1/models`, {
+          method: 'GET',
+          headers,
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (v1.ok) res = v1;
+      }
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         return { ok: false, error: `HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}` };
