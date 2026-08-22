@@ -125,11 +125,16 @@ export const StreamBlocks = memo(function StreamBlocks({
             if ((b.parentToolCallId ?? null) !== rootId) return null;
             if (!b.text.trim()) return null;
             if (b.isAnswer) {
-              // Render the consolidated answer ONCE (at the first answer
+              // The consolidated answer renders ONCE (at the first answer
               // block's position); skip subsequent answer blocks — their
               // text is already included in answerInfo.text. Prevents
               // duplicate result blocks when the answer phase spans
               // multiple text blocks (e.g. split by reasoning).
+              // Root scope only: the Agents panel (rootId = a dispatch)
+              // appends its own AnswerBlock from the dispatch's report
+              // metadata — rendering the child's flagged answer here too
+              // would duplicate it.
+              if (rootId !== null) return null;
               if (!answerInfo || idx !== answerInfo.firstIdx) return null;
               return (
                 <div key={b.id}>
