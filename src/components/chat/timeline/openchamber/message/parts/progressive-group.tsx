@@ -1009,7 +1009,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                 +{previewHiddenCount} more...
               </button>
             ) : null}
-            <div className="space-y-1.5">{renderedRows}</div>
+            <div className="space-y-0.5">{renderedRows}</div>
           </div>
         ) : null}
       </div>
@@ -1019,4 +1019,3 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
 
 export default React.memo(ProgressiveGroup);
 export { ProgressiveGroup };
-

@@ -765,7 +765,7 @@ const AgentToolNesting: React.FC<{
 
   if (childToolParts.length === 0 && !hasReport) {
     return (
-      <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
+      <div className="relative pr-2 pb-1.5 pt-0.5 space-y-1 pl-[1.4375rem]">
         <div className="typography-meta text-muted-foreground/70">
           {isActive ? 'Waiting for subagent activity...' : 'No subagent activity recorded.'}
         </div>
@@ -776,7 +776,7 @@ const AgentToolNesting: React.FC<{
   return (
     <div
       className={cn(
-        'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]',
+        'relative pr-2 pb-1.5 pt-0.5 space-y-1 pl-[1.4375rem]',
         'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
         'before:top-[-0.25rem] before:bottom-0'
       )}
@@ -1591,6 +1591,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             >
               {displayName}
             </MinDurationShineText>
+            {isAgentTool && typeof input?.name === 'string' && input.name.trim().length > 0 && (
+              <span
+                className="flex-shrink-0 rounded-md border border-border/60 bg-muted/60 px-1.5 typography-micro leading-4 text-muted-foreground text-[0.75rem]"
+                title={`Sub-agent: ${input.name}`}
+              >
+                {input.name}
+              </span>
+            )}
           </div>
           {tool === 'bash' && typeof effectiveTimeStart === 'number' ? (
             <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
