@@ -314,6 +314,7 @@ function ProviderDetail({
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   // Key field starts EMPTY on edit — the decrypted key is never pre-filled into the DOM. Save omits apiKey from the patch when the field is blank, so an untouched form preserves whatever's in the keychain. Type a new value to replace; there's no explicit "clear key" affordance (delete the provider to clear the key).
   const [apiKey, setApiKey] = useState("");
+  const [limits, setLimits] = useState(provider.limits);
   const hasStoredKey = !!provider.apiKey;
   const { rows, setRows, updateRow, addRow, removeRow } = useModelRows(
     provider.models.map((m) => ({
@@ -353,6 +354,7 @@ function ProviderDetail({
         name: name.trim() || "Untitled",
         apiStyle,
         baseUrl: baseUrlToSave,
+        limits,
         models: rowsToModels(rows, provider.id),
       };
       const newKey = apiKey.trim();
@@ -370,7 +372,7 @@ function ProviderDetail({
     }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, baseUrl, apiKey, rows]);
+  }, [name, baseUrl, apiKey, limits, rows]);
 
   useCatalogEnrichment(rows, updateRow);
 
@@ -417,6 +419,39 @@ function ProviderDetail({
             <SectionLabel icon={<Server className="size-3" />}>
               Connection
             </SectionLabel>
+            <FormField id="usage-limits" label="Usage limits (informational)">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    value={limits?.fiveHourTokens ?? ""}
+                    onChange={(e) =>
+                      setLimits((l) => ({ ...l, fiveHourTokens: Number(e.target.value) || undefined }))
+                    }
+                    placeholder="—"
+                    className="w-full h-8 pr-9 text-[12px] font-mono bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">5h</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    value={limits?.weeklyTokens ?? ""}
+                    onChange={(e) =>
+                      setLimits((l) => ({ ...l, weeklyTokens: Number(e.target.value) || undefined }))
+                    }
+                    placeholder="—"
+                    className="w-full h-8 pr-9 text-[12px] font-mono bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">7d</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground/50 mt-1">
+                Token budgets for the top-bar meter. Never blocks — informational only.
+              </p>
+            </FormField>
             <FormField id="name" label="Provider name">
               <Input
                 className="h-8 text-[0.8929rem]"

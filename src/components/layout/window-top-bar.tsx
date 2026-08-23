@@ -27,6 +27,7 @@ import * as api from "@/lib/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn, isMac } from "@/lib/utils";
 import { OpenInAppMenu } from "./open-in-app-menu";
+import { UsageRing } from "./usage-ring";
 import { Badge } from "../ui/badge";
 import { BranchMenu, BranchBadges } from "@/components/git/branch-menu";
 
@@ -441,6 +442,8 @@ export function WindowTopBar() {
             </Button>
           </Tip>
         </ButtonGroup>
+
+        <UsageRing />
 
         <Tip label="Right Panel">
           <Button

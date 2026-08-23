@@ -23,6 +23,7 @@ export const qk = {
   session: (id: string) => ['sessions', 'detail', id] as const,
   archivedSessions: (workspaceId: string) => ['archivedSessions', workspaceId] as const,
   providers: ['providers'] as const,
+  providerUsage: (providerId: string) => ['providerUsage', providerId] as const,
   fileTree: (workspaceId: string) => ['fileTree', workspaceId] as const,
   terminal: (sessionId: string) => ['terminal', sessionId] as const,
   gitStatus: (workspaceId: string) => ['gitStatus', workspaceId] as const,
@@ -121,6 +122,56 @@ export function useDispatches(sessionId: string | null) {
 
 export function useProviders() {
   return useQuery({ queryKey: qk.providers, queryFn: api.listProviders });
+}
+
+export interface ProviderWindowUsage {
+  tokens: number;
+  oldestAt: number;
+  newestAt: number;
+}
+
+/** Rolling usage windows for a provider (informational metering). Polls
+ *  while any session streams (usage lands at turn end) and otherwise on a
+ *  slow cadence; null provider (no selection) skips the fetch. */
+export function useProviderUsage(providerId: string | null | undefined) {
+  const anyStreaming = useUi((s) => Object.values(s.streams).some((x) => x.isStreaming));
+  return useQuery({
+    queryKey: qk.providerUsage(providerId ?? ''),
+    queryFn: () => {
+      if (!providerId || !window.tideIpc?.providerUsageWindows) {
+        return { fiveHour: { tokens: 0, oldestAt: 0, newestAt: 0 }, weekly: { tokens: 0, oldestAt: 0, newestAt: 0 } };
+      }
+      return window.tideIpc.providerUsageWindows(providerId);
+    },
+    enabled: !!providerId,
+    refetchInterval: anyStreaming ? 15_000 : 5 * 60_000,
+    staleTime: 10_000,
+  });
+}
+
+export interface ProviderUsageReport {
+  source: string;
+  planName?: string;
+  windows: Array<{
+    label: string;
+    percent: number;
+    used?: number;
+    limit?: number;
+    unit: 'tokens' | 'USD' | 'credits';
+    resetsAt?: number;
+  }>;
+}
+
+/** Live usage report from the provider's own quota API (z.ai, OpenRouter).
+ *  60s cadence — provider-side windows move on their own schedule. */
+export function useProviderUsageReport(providerId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['providerUsageReport', providerId ?? ''] as const,
+    queryFn: () => window.tideIpc?.providerUsageReport(providerId!) ?? null,
+    enabled: !!providerId,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
 }
 
 /** A flattened model derived from the providers query. */

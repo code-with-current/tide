@@ -29,6 +29,8 @@ import { syncCoAuthorHook, syncAllWorkspaceHooks } from '../git-coauthor.js';
 import type { EventSink } from '../agent/event-sink.js';
 import type { SessionStoreV2 } from './session-store-v2.js';
 import { newV2MessageId, newV2PartId, orchestratorEventToSink } from '../agent/orchestrator-events.js';
+import { providerWindowUsage, FIVE_HOUR_MS, WEEK_MS } from '../agent/usage-windows.js';
+import { providerUsageReport } from '../agent/provider-usage.js';
 
 const log = createLogger('ipc');
 
@@ -1218,6 +1220,23 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
 
   // ── Test provider connection ─────────────────────────────────────
   // Sends a minimal chat completion to verify baseUrl+apiKey+modelId end-to-end (used by onboarding). Returns {ok:true} or {ok:false, error} — never throws.
+  // ── Provider usage windows (informational metering) ────────────────
+  handle('tide:providerUsageWindows', async (_e, providerId: string) => {
+    return {
+      fiveHour: providerWindowUsage(providerId, FIVE_HOUR_MS),
+      weekly: providerWindowUsage(providerId, WEEK_MS),
+    };
+  });
+
+  // Provider-API usage report (z.ai quota / OpenRouter credits) — the real
+  // limits straight from the provider. Null when the provider has no API.
+  handle('tide:providerUsageReport', async (_e, providerId: string) => {
+    const providers = store.listProviders();
+    const provider = providers.find((p) => p.id === providerId);
+    if (!provider) return null;
+    return providerUsageReport(provider);
+  });
+
   handle('tide:provider:testConnection', async (
     _e,
     input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string; modelId: string },

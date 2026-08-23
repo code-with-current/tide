@@ -36,6 +36,7 @@ import type { AutonomyMode, Provider, ToolCall, ToolDisplay, ToolName, Usage } f
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
 import { categorizeTool, answerBlockIds } from '../../src/lib/stream/block-state.js';
 import { repairJsonToolInput } from './tool-input-repair.js';
+import { recordProviderUsage } from './usage-windows.js';
 import { recordEditTurn } from '../rag/edit-journal.js';
 import { incrementBadge } from '../badge.js';
 import type { ToolContext } from './tools/tool-context.js';
@@ -91,6 +92,8 @@ interface Turn {
   sessionId: string;
   /** Workspace the session is bound to — used by the turn-end edit journal. */
   workspaceId: string;
+  /** Provider the turn bills to — keyed into the usage-window tracker. */
+  providerId: string;
   messageId: string;
   controller: AbortController;
   autonomyMode: AutonomyMode;
@@ -291,7 +294,7 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const effectivePermissionTimeout = (agentSettings.permissionTimeoutMin || 10) * 60 * 1000;
 
   const turn: Turn = {
-    sessionId, workspaceId, messageId, controller, autonomyMode,
+    sessionId, workspaceId, providerId: provider.id, messageId, controller, autonomyMode,
     blocks: [], currentTextBlockId: null, reasoningBlockId: null,
     toolBlockIndex: {}, finalText: '', finalReasoning: '', toolStartAt: {},
     toolCalls: [], timeline: [],
@@ -750,6 +753,7 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
     usage: turn.usage, lastStepUsage: turn.lastStepUsage ?? undefined,
   });
   persistFinalAssistantMessage(turn, blocks, stopReason);
+  recordProviderUsage(turn.providerId, turn.usage);
   journalEditTurn(turn);
   fireTurnEndNotification(wc, turn.sessionId, stopReason);
 }

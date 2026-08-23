@@ -318,7 +318,7 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
 
   function updateProvider(
     id: string,
-    patch: Partial<Pick<Provider, 'name' | 'apiStyle' | 'baseUrl' | 'enabled' | 'models' | 'apiKey'>>,
+    patch: Partial<Pick<Provider, 'name' | 'apiStyle' | 'baseUrl' | 'enabled' | 'models' | 'apiKey' | 'limits'>>,
   ): Provider | null {
     const cfg = read();
     const idx = cfg.providers.findIndex((p) => p.id === id);
@@ -332,6 +332,7 @@ export function createConfigStore(rootDir: string, crypto: CryptoOps) {
     if (patch.apiStyle !== undefined) stored.apiStyle = patch.apiStyle;
     if (patch.baseUrl !== undefined) stored.baseUrl = patch.baseUrl;
     if (patch.enabled !== undefined) stored.enabled = patch.enabled;
+    if (patch.limits !== undefined) stored.limits = patch.limits;
     if (patch.models !== undefined) {
       stored.models = patch.models.map((m) => ({ ...m, providerId: id }));
     }

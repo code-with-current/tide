@@ -296,6 +296,10 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // ── Real terminal (bottom panel) ──
   terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => ipcRenderer.invoke('terminal:start', terminalId, sessionId, size),
   terminalSnapshot: (terminalId: string) => ipcRenderer.invoke('terminal:snapshot', terminalId),
+  providerUsageWindows: (providerId: string) =>
+    ipcRenderer.invoke('tide:providerUsageWindows', providerId),
+  providerUsageReport: (providerId: string) =>
+    ipcRenderer.invoke('tide:providerUsageReport', providerId),
   terminalInput: (terminalId: string, input: string) => ipcRenderer.invoke('terminal:input', terminalId, input),
   terminalKill: (terminalId: string) => ipcRenderer.invoke('terminal:kill', terminalId),
   terminalStop: (terminalId: string) => ipcRenderer.invoke('terminal:stop', terminalId),

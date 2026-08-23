@@ -38,6 +38,14 @@ export interface Provider {
   apiKey?: string;
   enabled: boolean;
   models: Model[];
+  /** Rolling usage windows metered against per-provider token limits
+   *  (Claude-style). Absent/0 = unlimited. */
+  limits?: {
+    /** Max tokens in any rolling 5-hour window. */
+    fiveHourTokens?: number;
+    /** Max tokens in any rolling 7-day window. */
+    weeklyTokens?: number;
+  };
 }
 
 /** User-defined model entry: alias + provider model ID + context window. */

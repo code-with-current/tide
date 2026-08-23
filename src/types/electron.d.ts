@@ -368,6 +368,25 @@ declare global {
       terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
       /** Snapshot re-attach: scrollback + seq for a live PTY (alive:false → spawn fresh). */
       terminalSnapshot: (terminalId: string) => Promise<{ alive: true; data: string; seq: number } | { alive: false }>;
+      /** Rolling usage windows (5h / weekly) for a provider — informational metering. */
+      providerUsageWindows(providerId: string): Promise<{
+        fiveHour: { tokens: number; oldestAt: number; newestAt: number };
+        weekly: { tokens: number; oldestAt: number; newestAt: number };
+      }>;
+      /** Live usage report from the provider's own quota API (z.ai, OpenRouter).
+       *  Null when the provider has no usage API or the call fails. */
+      providerUsageReport(providerId: string): Promise<{
+        source: string;
+        planName?: string;
+        windows: Array<{
+          label: string;
+          percent: number;
+          used?: number;
+          limit?: number;
+          unit: 'tokens' | 'USD' | 'credits';
+          resetsAt?: number;
+        }>;
+      } | null>;
       terminalInput: (terminalId: string, input: string) => Promise<void>;
       terminalKill: (terminalId: string) => Promise<void>;
       terminalStop: (terminalId: string) => Promise<void>;
