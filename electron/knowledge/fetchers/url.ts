@@ -10,9 +10,15 @@ const MAX_CHARS = 2 * 1024 * 1024;
 const USER_AGENT = 'Tide/0.2 knowledge-indexer';
 
 export async function fetchUrl(url: string): Promise<SourceDocument[]> {
+  const { contentType, body } = await fetchRaw(url);
+  return toDocuments(body, url, contentType);
+}
+
+/** Raw download shared with the crawl fetcher so each crawled page is
+ *  downloaded exactly once (fetchUrl alone consumes the body). */
+export async function fetchRaw(url: string): Promise<{ contentType: string; body: string }> {
   if (!/^https?:\/\//i.test(url)) throw new Error(`unsupported url: ${url}`);
   let res: Response;
-  let body: string;
   try {
     res = await fetch(url, {
       headers: { 'user-agent': USER_AGENT },
@@ -20,15 +26,17 @@ export async function fetchUrl(url: string): Promise<SourceDocument[]> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`fetch failed: ${res.status} ${url}`);
-    body = await readBody(res);
+    return { contentType: (res.headers.get('content-type') ?? '').toLowerCase(), body: await readBody(res) };
   } catch (e) {
     if (e instanceof Error && e.name === 'TimeoutError') {
       throw new Error(`fetch timed out after ${FETCH_TIMEOUT_MS / 1000}s: ${url}`);
     }
     throw e;
   }
+}
+
+export function toDocuments(body: string, url: string, contentType: string): SourceDocument[] {
   const origin = originOf(url);
-  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
   if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
     const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(body)?.[1]?.trim() || url;
     const text = convert(body, { wordWrap: false });

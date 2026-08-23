@@ -20,6 +20,7 @@ import {
 } from '../knowledge/manager.js';
 import { fetchUrl } from '../knowledge/fetchers/url.js';
 import { fetchDocs } from '../knowledge/fetchers/docs.js';
+import { fetchCrawl } from '../knowledge/fetchers/crawl.js';
 import type { SourceKind, SourceProgressEvent } from '../knowledge/types.js';
 
 const log = createLogger('sources');
@@ -60,6 +61,7 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
   const fetchers: Partial<Record<SourceKind, SourceFetcher>> = {
     url: fetchUrl,
     docs: (location) => fetchDocs(location, { allowedRoots: [appDataDir()] }),
+    crawl: (location) => fetchCrawl(location),
     ...opts.fetchers,
   };
 
