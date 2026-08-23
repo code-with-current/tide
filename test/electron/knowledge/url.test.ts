@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { fetchUrl, originOf } from '../../../electron/knowledge/fetchers/url.js';
 
-function htmlResponse(body: string): Response {
+function htmlResponse(body: string, contentType = 'text/html; charset=utf-8'): Response {
   return new Response(body, {
     status: 200,
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+    headers: { 'content-type': contentType },
   });
 }
 
@@ -39,6 +39,54 @@ describe('fetchUrl', () => {
     expect(docs[0].origin).toBe('docs.example.com/guide');
     expect(docs[0].content).toContain('The quick install steps are here.');
     expect(docs[0].content).not.toContain('secretToken');
+  });
+
+  it('matches content-type case-insensitively and still converts HTML', async () => {
+    vi.stubGlobal(
+      'fetch',
+      () => htmlResponse('<html><body><script>var x = 1;</script><p>Cased header page</p></body></html>', 'Text/HTML; Charset=UTF-8'),
+    );
+
+    const [doc] = await fetchUrl('https://example.com/cased');
+
+    expect(doc.content).toContain('Cased header page');
+    expect(doc.content).not.toContain('var x');
+  });
+
+  it('treats application/xhtml+xml as HTML and strips script bodies', async () => {
+    vi.stubGlobal(
+      'fetch',
+      () =>
+        htmlResponse(
+          '<html><head><title>Xhtml Doc</title></head><body><script>var hidden = true;</script><p>Xhtml body text</p></body></html>',
+          'application/xhtml+xml',
+        ),
+    );
+
+    const docs = await fetchUrl('https://example.com/xhtml');
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0].title).toBe('Xhtml Doc');
+    expect(docs[0].content).toContain('Xhtml body text');
+    expect(docs[0].content).not.toContain('hidden');
+  });
+
+  it('returns [] for empty or whitespace-only non-HTML bodies', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Response('   \n\t ', { status: 200, headers: { 'content-type': 'text/plain' } })),
+    );
+
+    await expect(fetchUrl('https://example.com/blank')).resolves.toEqual([]);
+  });
+
+  it("returns [] when html conversion yields no visible text", async () => {
+    vi.stubGlobal(
+      'fetch',
+      () => htmlResponse('<html><head><style>p { color: red }</style></head><body></body></html>'),
+    );
+
+    await expect(fetchUrl('https://example.com/invisible')).resolves.toEqual([]);
   });
 
   it('falls back to the url as title when no <title> is present', async () => {
