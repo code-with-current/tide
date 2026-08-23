@@ -965,7 +965,7 @@ function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
     const args = (e.args ?? {}) as Record<string, unknown>;
     const meta = safeMeta(toolName);
     const toolCallId = (typeof e.toolCallId === 'string' && e.toolCallId) || `perm_${toolName}_${nextSeq(sessionId)}`;
-    const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask' };
+    const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask', allowRule: (e.ruleSpec as string | undefined) ?? undefined };
     send(wc, sessionId, { type: 'permission_required', sessionId, seq: nextSeq(sessionId), toolCalls: [tc], timeoutAt: Date.now() + turn.permissionTimeoutMs });
     return;
   }

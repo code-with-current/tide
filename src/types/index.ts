@@ -445,6 +445,9 @@ export interface ToolCall {
    *  approval. Absent on non-gated / legacy tool calls (renders as the plain
    *  ask card). */
   gateDecision?: 'ask' | 'blocked';
+  /** Rule spec an "Allow (…)" session approval would add, e.g. `bash(cat)`,
+   *  `edit_file(src/lib/*)`. Derived at ask time and displayed on the card. */
+  allowRule?: string;
   /** Short, model-facing summary. */
   output?: string;
   /** Live sub-agent report for dispatch_agent — streams into the block

@@ -62,6 +62,13 @@ export function PermissionCard({
     ? (call.display?.kind === 'command' ? call.display.command : call.argPreview) || '(no command)'
     : call.argPreview;
 
+  // `bash(cat)` → "cat *", `bash(npx cowsay:*)` → "npx cowsay:*",
+  // `edit_file(src/lib/*)` → "src/lib/*", bare `git` → "git *".
+  const allowDisplay = call.allowRule
+    ? call.allowRule.replace(/^[a-z_]+\((.*)\)$/i, '$1').trim() +
+      (/[*:]/.test(call.allowRule) ? '' : ' *')
+    : `${call.toolName} *`;
+
   const handleReject = () => {
     if (explaining && reason.trim()) onReject?.(reason.trim());
     else onReject?.();
@@ -172,29 +179,25 @@ export function PermissionCard({
               ]}
             />
             <SplitButton
-              label="Accept"
+              label="Allow"
               onPrimary={() => onApprove?.()}
               variant="default"
               menuAlign="end"
-              toggleAriaLabel="More accept options"
+              toggleAriaLabel="More allow options"
               items={[
+                ...(allowDisplay
+                  ? [{
+                      label: `Allow (${allowDisplay})`,
+                      hint: 'Auto-allow matching calls this session',
+                      icon: <FileClock />,
+                      onSelect: () => onApprove?.(undefined, 'session'),
+                    }]
+                  : []),
                 {
-                  label: 'Accept this session',
-                  hint: 'Auto-allow this tool until Tide closes',
-                  icon: <FileClock />,
-                  onSelect: () => onApprove?.(undefined, 'session'),
-                },
-                {
-                  label: 'Accept · full mode',
+                  label: 'Switch to Full Mode',
                   hint: 'All tools auto-run for the rest of this turn',
                   icon: <Zap />,
                   onSelect: () => onApprove?.('full'),
-                },
-                {
-                  label: 'Always allow',
-                  hint: 'Save a rule to .agents/settings.json',
-                  icon: <FileClock />,
-                  onSelect: () => onApprove?.(undefined, true),
                 },
               ]}
             />
