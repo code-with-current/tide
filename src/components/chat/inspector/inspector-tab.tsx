@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import {
   Cpu,
+  Server,
   Shield,
   Repeat,
   GitBranch,
@@ -14,7 +15,8 @@ import {
   DollarSign,
 } from 'lucide-react';
 import type { Session } from '@/types';
-import { Avatar } from '@/components/primitives';
+import { ProviderLogo } from '@/components/primitives/provider-logo';
+import { matchPresetByBaseUrl } from '@/lib/provider-presets';
 import { RagIndexProgress } from '@/components/rag/rag-index-progress';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -27,6 +29,7 @@ import { formatContext, formatNumber, formatRelative, cn } from '@/lib/utils';
 import {
   useModelOption,
   useModels,
+  useProviders,
   useWorkspaces,
   useGitStatus,
   useGitBranchInfo,
@@ -46,6 +49,11 @@ export function InspectorTab({ session }: { session: Session }) {
   const usage = session.usage;
   const { isLoading: modelsLoading } = useModels();
   const model = useModelOption(null, session.modelId);
+  const { data: providers } = useProviders();
+  // Provider record behind the resolved model — its baseUrl re-identifies the
+  // brand preset so the Provider row can show the real logo tile.
+  const provider = model ? providers?.find((p) => p.id === model.providerId) : undefined;
+  const providerPreset = provider ? matchPresetByBaseUrl(provider.baseUrl) : undefined;
   const { data: agentSettings } = useAgentSettings();
   const maxSteps = agentSettings?.maxSteps ?? 100;
 
@@ -108,26 +116,35 @@ export function InspectorTab({ session }: { session: Session }) {
           ) : (
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <Cpu className="size-3 text-muted-foreground" />
-              <span className="text-muted-foreground flex-1 text-[12px]">Model</span>
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <Avatar className="size-3.5 text-[8px] bg-gradient-to-br from-accent to-[#b8553f] text-white">
-                  {(model?.alias ?? session.modelId).charAt(0).toUpperCase()}
-                </Avatar>
-                <span title={session.modelId}>
-                  {model ? `${model.alias} · ${model.providerName}` : session.modelId}
+              <Server className="size-3 text-muted-foreground" />
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Provider</span>
+              <div className="flex items-center gap-1.5 text-[0.7857rem] min-w-0">
+                <ProviderLogoTile
+                  apiStyle={provider?.apiStyle ?? model?.apiStyle ?? 'openai'}
+                  presetId={providerPreset?.id}
+                  accent={providerPreset?.accent}
+                />
+                <span className="truncate max-w-[60%] text-right" title={model?.providerName}>
+                  {model?.providerName ?? '—'}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Cpu className="size-3 text-muted-foreground" />
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Model</span>
+              <span title={session.modelId} className="text-[0.7857rem] truncate max-w-[60%] text-right">
+                {model?.alias ?? session.modelId}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
               <Shield className="size-3 text-muted-foreground" />
-              <span className="text-muted-foreground flex-1 text-[12px]">Permissions</span>
-              <Badge variant="secondary" className="text-[10px] rounded-md">{autonomyLabel(effectiveMode)}</Badge>
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Permissions</span>
+              <Badge variant="secondary" className="text-[0.7143rem] rounded-md">{autonomyLabel(effectiveMode)}</Badge>
             </div>
             <div className="flex items-center gap-2">
               <Repeat className="size-3 text-muted-foreground" />
-              <span className="text-muted-foreground flex-1 text-[12px]">Iteration</span>
-              <span className="font-mono text-[11px]">{usage?.calls ?? 0} / {maxSteps}</span>
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Iteration</span>
+              <span className="font-mono text-[0.7857rem]">{usage?.calls ?? 0} / {maxSteps}</span>
             </div>
           </div>
           )}
@@ -140,7 +157,7 @@ export function InspectorTab({ session }: { session: Session }) {
         <PanelSection
           title="Git"
           defaultOpen={pending.length === 0}
-          badge={session.worktree ? <Badge variant="secondary" className="ml-1.5 text-[9px]">worktree</Badge> : undefined}
+          badge={session.worktree ? <Badge variant="secondary" className="ml-1.5 text-[0.6429rem]">worktree</Badge> : undefined}
           action={<OpenChangesButton sessionId={session.id} changed={gitLoading ? 0 : gitStats.changed} />}
         >
           {gitLoading ? (
@@ -159,7 +176,7 @@ export function InspectorTab({ session }: { session: Session }) {
                 <>
                   <div className="flex justify-between gap-2">
                     <span className="text-muted-foreground">base</span>
-                    <span className="font-mono text-[10px] truncate max-w-[60%] text-right">
+                    <span className="font-mono text-[0.7143rem] truncate max-w-[60%] text-right">
                       {session.worktree.baseBranch} @ {session.worktree.baseCommit}
                     </span>
                   </div>
@@ -171,13 +188,13 @@ export function InspectorTab({ session }: { session: Session }) {
               )}
               {!session.worktree && (
                 <div className="flex justify-between gap-2">
-                  <span className="text-muted-foreground text-[12px]">Head</span>
-                  <span className="font-mono text-[10px] truncate max-w-[60%] text-right">{workspace?.headCommit}</span>
+                  <span className="text-muted-foreground text-[0.8571rem]">Head</span>
+                  <span className="font-mono text-[0.7143rem] truncate max-w-[60%] text-right">{workspace?.headCommit}</span>
                 </div>
               )}
               <div className="flex justify-between">
-                <span className="text-muted-foreground text-[12px]">Changed</span>
-                <span className="font-mono text-[10px]">
+                <span className="text-muted-foreground text-[0.8571rem]">Changed</span>
+                <span className="font-mono text-[0.7143rem]">
                   {gitStats.changed}
                   {gitStats.staged > 0 && <span className="text-muted-foreground"> · {gitStats.staged} staged</span>}
                 </span>
@@ -186,8 +203,8 @@ export function InspectorTab({ session }: { session: Session }) {
                 <DiffStat additions={gitStats.additions} deletions={gitStats.deletions} />
               )}
               <div className="flex justify-between gap-2">
-                <span className="text-muted-foreground flex-shrink-0 text-[12px]">{session.worktree ? 'Worktree' : 'Repo'}</span>
-                <span className="font-mono text-[10px] truncate text-right max-w-[60%]">
+                <span className="text-muted-foreground flex-shrink-0 text-[0.8571rem]">{session.worktree ? 'Worktree' : 'Repo'}</span>
+                <span className="font-mono text-[0.7143rem] truncate text-right max-w-[60%]">
                   {session.worktree?.path ?? workspace?.path}
                 </span>
               </div>
@@ -260,14 +277,39 @@ function autonomyLabel(mode: Session['autonomyMode']) {
 // addTab is idempotent: creates the tab if absent, then activates it.
 // =============================================================
 
+/** Brand tile for the session's provider — same treatment as the model
+ *  picker's rail tiles (preset accent bg when branded, neutral otherwise). */
+function ProviderLogoTile({
+  apiStyle,
+  presetId,
+  accent,
+}: {
+  apiStyle: 'openai' | 'anthropic';
+  presetId?: string;
+  accent?: string;
+}) {
+  const branded = !!accent && accent !== '#ffffff';
+  return (
+    <span
+      className={cn(
+        'size-3.5 rounded flex items-center justify-center shrink-0',
+        branded ? 'text-white' : 'bg-secondary text-foreground',
+      )}
+      style={branded ? { background: accent } : undefined}
+    >
+      <ProviderLogo apiStyle={apiStyle} presetId={presetId} className="size-2" />
+    </span>
+  );
+}
+
 /** Additions/deletions bar — a proportional green/red strip mirroring the
  *  mockup's .diffstat. Replaces the old plain `+128 −54` text row so the
  *  change composition is visible at a glance. */
 function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
   const total = additions + deletions || 1; // guard divide-by-zero
   return (
-    <div className="flex items-center gap-2 py-1 font-mono text-[10.5px]">
-      <span className="flex-1 font-sans text-[11.5px] text-muted-foreground">Changes</span>
+    <div className="flex items-center gap-2 py-1 font-mono text-[0.75rem]">
+      <span className="flex-1 font-sans text-[0.8214rem] text-muted-foreground">Changes</span>
       <span className="text-emerald-400">+{additions}</span>
       <div className="flex h-1 w-20 overflow-hidden rounded-full bg-muted">
         <div className="h-full bg-emerald-400" style={{ width: `${(additions / total) * 100}%` }} />
@@ -287,7 +329,7 @@ function OpenChangesButton({ sessionId, changed }: { sessionId: string; changed:
       title="Open Git Panel tab"
       // Mirrors the mockup's .head-action: a compact bordered pill that reads
       // as a distinct action, not part of the header. Ghost Button blended in.
-      className="inline-flex items-center gap-1 h-5 px-2 rounded border border-border bg-transparent text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-accent hover:bg-secondary transition-colors cursor-pointer"
+      className="inline-flex items-center gap-1 h-5 px-2 rounded border border-border bg-transparent text-[0.7143rem] font-semibold text-muted-foreground hover:text-foreground hover:border-accent hover:bg-secondary transition-colors cursor-pointer"
     >
       <GitPullRequestArrow className="size-3" />
       Changes{changed > 0 && <span className="text-muted-foreground/70"> · {changed}</span>}
@@ -400,7 +442,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
           <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
             <Cpu className="size-3" />Iteration
           </div>
-          <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">
+          <div className="font-mono text-[0.9286rem] font-semibold mt-0.5 tabular-nums tracking-tight">
             {streamFields?.iteration ?? u.calls}<span className="text-[0.75rem] text-muted-foreground font-normal"> / {maxSteps}</span>
           </div>
         </div>
@@ -408,7 +450,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
           <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
             <Wrench className="size-3" />Tools
           </div>
-          <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">
+          <div className="font-mono text-[0.9286rem] font-semibold mt-0.5 tabular-nums tracking-tight">
             {formatNumber(cu.calls)}<span className="text-[0.75rem] text-muted-foreground font-normal"> calls</span>
           </div>
         </div>
@@ -416,7 +458,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
           <div className="flex items-center gap-1 text-[0.70rem] font-semibold uppercase tracking-wider text-muted-foreground">
             <DollarSign className="size-2.5" />Cost
           </div>
-          <div className="font-mono text-[13px] font-semibold mt-0.5 tabular-nums tracking-tight">
+          <div className="font-mono text-[0.9286rem] font-semibold mt-0.5 tabular-nums tracking-tight">
             {session.costUsd.toFixed(3)}<span className="text-[0.75rem] text-muted-foreground font-normal"> USD</span>
           </div>
         </div>
@@ -461,7 +503,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
       </div>
 
       {/* Per-class cumulative breakdown */}
-      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[0.7143rem]">
         {detailSegments.map((s) => (
           <div key={s.label} className="flex items-center justify-between">
             <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -510,22 +552,22 @@ function MemoryRagSection({ session }: { session: Session }) {
           {statusLoading ? (
             <>
               <Loader2 className="size-2.5 animate-spin text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground">Checking</span>
+              <span className="text-[0.7143rem] text-muted-foreground">Checking</span>
             </>
           ) : indexing ? (
             <>
               <Loader2 className="size-2.5 animate-spin text-emerald-400" />
-              <span className="text-[10px] text-emerald-400">Indexing</span>
+              <span className="text-[0.7143rem] text-emerald-400">Indexing</span>
             </>
           ) : toolAvailable ? (
             <>
               <CheckCircle2 className="size-2.5 text-emerald-400" />
-              <span className="text-[10px]">Active</span>
+              <span className="text-[0.7143rem]">Active</span>
             </>
           ) : (
             <>
               <XCircle className="size-2.5 text-warning/70" />
-              <span className="text-[10px] text-warning/70">Inactive</span>
+              <span className="text-[0.7143rem] text-warning/70">Inactive</span>
             </>
           )}
         </Badge>
@@ -545,16 +587,16 @@ function MemoryRagSection({ session }: { session: Session }) {
           {/* faint disabled preview of the stats underneath the overlay */}
           <div className="space-y-1 select-none pointer-events-none opacity-40" aria-hidden>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground flex-1  text-[12px]">Memory</span>
-              <span className="text-[11px] text-muted-foreground/60">workspace off</span>
+              <span className="text-muted-foreground flex-1  text-[0.8571rem]">Memory</span>
+              <span className="text-[0.7857rem] text-muted-foreground/60">workspace off</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground flex-1 text-[12px]">Indexed</span>
-              <span className="font-mono text-[11px]">—</span>
+              <span className="text-muted-foreground flex-1 text-[0.8571rem]">Indexed</span>
+              <span className="font-mono text-[0.7857rem]">—</span>
             </div>
             <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground text-[12px]">Embedder</span>
-              <span className="font-mono text-[10px] text-muted-foreground/70 truncate max-w-[60%] text-right">
+              <span className="text-muted-foreground text-[0.8571rem]">Embedder</span>
+              <span className="font-mono text-[0.7143rem] text-muted-foreground/70 truncate max-w-[60%] text-right">
                 {status?.embedderId ?? '—'}
               </span>
             </div>
@@ -564,7 +606,7 @@ function MemoryRagSection({ session }: { session: Session }) {
           {/* overlay */}
           <div className="absolute inset-0 -m-3 flex flex-col items-center justify-center gap-2 bg-background/80 backdrop-blur-[2px] text-center py-10">
             <Brain className="size-4 text-muted-foreground/70" />
-            <p className="text-[11px] leading-snug text-muted-foreground">
+            <p className="text-[0.7857rem] leading-snug text-muted-foreground">
               RAG is disabled for this workspace.
               <br />
               Enable it in Settings to index your files.
@@ -582,26 +624,26 @@ function MemoryRagSection({ session }: { session: Session }) {
       ) : (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground flex-1  text-[12px]">Memory</span>
-            <span className={`text-[11px] ${toolAvailable ? 'text-foreground' : 'text-muted-foreground/60'}`}>
+            <span className="text-muted-foreground flex-1  text-[0.8571rem]">Memory</span>
+            <span className={`text-[0.7857rem] ${toolAvailable ? 'text-foreground' : 'text-muted-foreground/60'}`}>
               {toolAvailable ? 'Available' : modelReady ? 'Workspace Off' : 'No Model'}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground flex-1 text-[12px]">Indexed</span>
-            <span className="font-mono text-[11px]">
+            <span className="text-muted-foreground flex-1 text-[0.8571rem]">Indexed</span>
+            <span className="font-mono text-[0.7857rem]">
               {chunkCount > 0 ? `${formatNumber(chunkCount)}` : '—'}
             </span>
           </div>
           {lastIndexed && (
             <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground text-[12px]">Last Indexed</span>
-              <span className="text-[11px] text-muted-foreground/70">{lastIndexed}</span>
+              <span className="text-muted-foreground text-[0.8571rem]">Last Indexed</span>
+              <span className="text-[0.7857rem] text-muted-foreground/70">{lastIndexed}</span>
             </div>
           )}
           <div className="flex justify-between gap-2">
-            <span className="text-muted-foreground text-[12px]">Embedder</span>
-            <span className="font-mono text-[10px] text-muted-foreground/70 truncate max-w-[60%] text-right">
+            <span className="text-muted-foreground text-[0.8571rem]">Embedder</span>
+            <span className="font-mono text-[0.7143rem] text-muted-foreground/70 truncate max-w-[60%] text-right">
               {status?.embedderId ?? '—'}
             </span>
             </div>

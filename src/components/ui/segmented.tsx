@@ -39,7 +39,7 @@ export function Segmented<T extends string>({
             onClick={() => onChange(opt.value)}
             className={cn(
               'inline-flex items-center gap-1 rounded font-medium transition-colors',
-              size === 'sm' ? 'px-2 py-1 text-[12px]' : 'px-2.5 py-1 text-[12px]',
+              size === 'sm' ? 'px-2 py-1 text-[0.8571rem]' : 'px-2.5 py-1 text-[0.8571rem]',
               active
                 ? cn(
                     'bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04)]',

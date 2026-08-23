@@ -79,8 +79,19 @@ export function CommitBar({
   // Suggestion is live (streaming or just finished) until the user types.
   const [suggesting, setSuggesting] = useState(false);
   const dismissedRef = useRef(false);
-  const { run, state: agentState } = useGitAgentAction();
+  // workspaceId lets the hook re-adopt a commit-writer dispatch that survived
+  // a screen/tab switch — the generation keeps running on its hidden session.
+  const { run, state: agentState } = useGitAgentAction(workspaceId);
   const generating = agentState.status === 'running';
+
+  // An adopted dispatch resumed mid-generation — stream it into the fields
+  // again, unless the user left typed text behind (their draft wins).
+  useEffect(() => {
+    if (generating && !suggesting && !summary) {
+      dismissedRef.current = false;
+      setSuggesting(true);
+    }
+  }, [generating, suggesting, summary]);
 
   // Amend ON → prefill from HEAD's full message (subject + body).
   useEffect(() => {
@@ -232,7 +243,7 @@ export function CommitBar({
           aria-pressed={amend}
           title="Amend the last commit instead of creating a new one"
           className={cn(
-            'flex-shrink-0 h-6 px-1.5 rounded-md text-[11px] transition-colors',
+            'flex-shrink-0 h-6 px-1.5 rounded-md text-[0.7857rem] transition-colors',
             amend
               ? 'bg-destructive/15 text-destructive font-medium'
               : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
@@ -240,7 +251,7 @@ export function CommitBar({
         >
           ⌥ Amend
         </button>
-        <span className="flex-shrink-0 text-[11px] font-mono tabular-nums text-muted-foreground whitespace-nowrap">
+        <span className="flex-shrink-0 text-[0.7857rem] font-mono tabular-nums text-muted-foreground whitespace-nowrap">
           {staged.length} staged · <span className="text-success">+{stagedAdd}</span> <span className="text-destructive">−{stagedDel}</span>
         </span>
         <div className="flex-1" />
@@ -266,7 +277,7 @@ export function CommitBar({
       </div>
 
       {hasConflicts && (
-        <p className="text-[11px] text-destructive/90">
+        <p className="text-[0.7857rem] text-destructive/90">
           Resolve merge conflicts before committing.
         </p>
       )}

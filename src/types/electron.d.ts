@@ -221,7 +221,7 @@ declare global {
       finalizeAssistantMessage(
         sessionId: string,
         messageId: string,
-        message: { content: string; reasoning?: string; reasoningTokens?: number; toolCalls?: any[]; timeline?: any[]; turn?: any },
+        message: { content: string; blocks?: any[]; reasoning?: string; reasoningTokens?: number; reasoningMs?: number; totalMs?: number; toolCalls?: any[]; timeline?: any[]; turn?: any; compactionInfo?: { tokensBefore: number; tokensAfter: number }; stopReason?: string | null },
       ): Promise<void>;
       addSessionUsage(
         sessionId: string,
@@ -232,9 +232,11 @@ declare global {
       clearAllSessions: () => Promise<{ ok: boolean }>;
       renameSession(sessionId: string, title: string): Promise<void>;
       generateSessionTitle(sessionId: string): Promise<string | null>;
+      /** Ask the system model to rewrite a broken mermaid diagram. */
+      mermaidRepair(input: { source: string; error: string }): Promise<{ ok: true; code: string } | { ok: false; error: string }>;
       getAgentSettings(): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
       updateAgentSettings(patch: Record<string, unknown>): Promise<{ defaultAutonomy: string; maxSteps: number; permissionTimeoutMin: number; planModeDryRun: boolean; auditShellCommands: boolean; experimentalBackgroundDispatch: boolean }>;
-      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
+      getGeneralSettings(): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean; titleModel?: { providerId: string; modelId: string } | null; commitMessageModel?: { providerId: string; modelId: string } | null }>;
       updateGeneralSettings(patch: Record<string, unknown>): Promise<{ startAtLogin: boolean; notifications: boolean; notificationSound: boolean; gitCoAuthored: boolean; gitCoAuthorName: string; gitCoAuthorEmail: string; autoUpdateCheck: boolean }>;
       archiveSession(sessionId: string): Promise<void>;
       unarchiveSession(sessionId: string): Promise<void>;
@@ -363,7 +365,28 @@ declare global {
       // Terminal seed
       getTerminalLines(sessionId: string): Promise<any[]>;
       // ── Real terminal (bottom panel) ──
-      terminalStart: (terminalId: string, sessionId: string) => Promise<void>;
+      terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
+      /** Snapshot re-attach: scrollback + seq for a live PTY (alive:false → spawn fresh). */
+      terminalSnapshot: (terminalId: string) => Promise<{ alive: true; data: string; seq: number } | { alive: false }>;
+      /** Rolling usage windows (5h / weekly) for a provider — informational metering. */
+      providerUsageWindows(providerId: string): Promise<{
+        fiveHour: { tokens: number; oldestAt: number; newestAt: number };
+        weekly: { tokens: number; oldestAt: number; newestAt: number };
+      }>;
+      /** Live usage report from the provider's own quota API (z.ai, OpenRouter).
+       *  Null when the provider has no usage API or the call fails. */
+      providerUsageReport(providerId: string): Promise<{
+        source: string;
+        planName?: string;
+        windows: Array<{
+          label: string;
+          percent: number;
+          used?: number;
+          limit?: number;
+          unit: 'tokens' | 'USD' | 'credits';
+          resetsAt?: number;
+        }>;
+      } | null>;
       terminalInput: (terminalId: string, input: string) => Promise<void>;
       terminalKill: (terminalId: string) => Promise<void>;
       terminalStop: (terminalId: string) => Promise<void>;
@@ -372,7 +395,7 @@ declare global {
       terminalGetPid: (terminalId: string) => Promise<number | null>;
       /** Is a process (by pid) still alive? Used for port-liveness + Run/Stop. */
       processIsAlive: (pid: number) => Promise<boolean>;
-      onTerminalOutput(callback: (data: { terminalId: string; data: string }) => void): void;
+      onTerminalOutput(callback: (data: { terminalId: string; data: string; seq?: number }) => void): void;
       onTerminalExit(callback: (data: { terminalId: string; code: number | null }) => void): void;
       onTerminalPorts(callback: (data: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => void): void;
       removeAllTerminalListeners(): void;

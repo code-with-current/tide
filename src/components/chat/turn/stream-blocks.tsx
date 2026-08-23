@@ -125,22 +125,26 @@ export const StreamBlocks = memo(function StreamBlocks({
             if ((b.parentToolCallId ?? null) !== rootId) return null;
             if (!b.text.trim()) return null;
             if (b.isAnswer) {
-              // Render the consolidated answer ONCE (at the first answer
+              // The consolidated answer renders ONCE (at the first answer
               // block's position); skip subsequent answer blocks — their
               // text is already included in answerInfo.text. Prevents
               // duplicate result blocks when the answer phase spans
               // multiple text blocks (e.g. split by reasoning).
+              // Root scope only: the Agents panel (rootId = a dispatch)
+              // appends its own AnswerBlock from the dispatch's report
+              // metadata — rendering the child's flagged answer here too
+              // would duplicate it.
+              if (rootId !== null) return null;
               if (!answerInfo || idx !== answerInfo.firstIdx) return null;
               return (
                 <div key={b.id}>
-                  <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} />
+                  <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} totalMs={totalMs} />
                   <AnswerBlock
                     text={answerInfo.text}
                     streaming={streaming}
                     stopped={stopped}
                     hasProcessContent={hasProcessContent}
-                    elapsedMs={totalMs}
-                    sessionId={sessionId}
+                              sessionId={sessionId}
                     sessionTitle={sessionTitle}
                     sessionModelId={sessionModelId}
                     sessionProviderId={sessionProviderId}
@@ -151,7 +155,7 @@ export const StreamBlocks = memo(function StreamBlocks({
             return (
               <div
                 key={b.id}
-                className="text-[0.85rem] text-card-foreground/80 leading-relaxed mt-[5px] [&_p]:my-0.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-0.5 [&_ul:first-child]:mt-0 [&_ul:last-child]:mb-0 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]"
+                className="text-[0.85rem] text-card-foreground/80 leading-relaxed mt-[5px] [&_p]:my-0.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-0.5 [&_ul:first-child]:mt-0 [&_ul:last-child]:mb-0 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem]"
               >
                 <Streamdown mode="static" remarkPlugins={[remarkGfm]} controls={false} animated={false}>
                   {b.text.trim()}

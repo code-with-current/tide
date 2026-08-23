@@ -1,9 +1,9 @@
 import { useRef, useEffect, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
-import { init, Terminal, FitAddon } from 'ghostty-web';
-import type { ILink } from 'ghostty-web';
+import type { Terminal as GhosttyTerminal, ILink } from 'ghostty-web';
 import { useUi, terminalScopeKey } from '@/lib/stores/ui';
 import { getTerminalTheme } from '@/components/screens/settings/appearance';
+import { measureTerminalContainer } from '@/lib/terminal-size';
 import { Button } from '@/components/ui/button';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
 import { Tip } from '@/components/ui/quick-tooltip';
@@ -12,12 +12,28 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } 
 
 const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
+// ── Lazy ghostty-web ────────────────────────────────────────────
+// 638 KB of JS + the WASM VT would sit in the startup bundle for a panel the
+// user may never open. Dynamic import keeps it in a lazy chunk; init() (WASM
+// bootstrap) runs once, then the resolved module is cached module-level so
+// terminal creation stays synchronous.
+type GhosttyModule = typeof import('ghostty-web');
+let ghosttyModule: GhosttyModule | null = null;
+let ghosttyLoad: Promise<GhosttyModule> | null = null;
+function loadGhostty(): Promise<GhosttyModule> {
+  ghosttyLoad ??= import('ghostty-web').then(async (m) => {
+    await m.init();
+    ghosttyModule = m;
+    return m;
+  });
+  return ghosttyLoad;
+}
+
 // ── Module-level terminal registry ──────────────────────────────
 // xterm instances live OUTSIDE React's reconciliation. React provides a mount div; we imperatively create/destroy terminal canvases inside it. This guarantees terminals survive session switches — the DOM elements are never touched by React's diffing.
 
 interface LiveTerminal {
-  term: Terminal;
-  fit: FitAddon;
+  term: GhosttyTerminal;
   /** The wrapper div we created and passed to term.open(). Stored explicitly
    *  because ghostty-web sets `term.element` TO this wrapper (unlike xterm,
    *  which nested its own element inside it) — so term.element.parentElement
@@ -33,6 +49,16 @@ const registry = new Map<string, LiveTerminal>();
 // PTY output arrives as many small IPC events (one per node-pty onData chunk). Writing each synchronously to xterm saturates the main thread on high-throughput output (cargo build, npm install, log floods) → UI freeze. Instead, buffer per-terminal and flush once per animation frame. Worst-case added latency: ~16ms (imperceptible); throughput is unchanged because the chunks concatenate into a single write.
 const outputBuffers = new Map<string, string>();
 const pendingFlushes = new Set<string>();
+
+// ── Snapshot re-attach ──────────────────────────────────────────
+// While a snapshot fetch is in flight, live output is PARKED (not queued);
+// when the snapshot lands it is written first, then parked chunks with a
+// newer seq replay. `lastSeq` dedupes anything the snapshot already
+// contains — this is what makes a renderer reload non-destructive: the
+// PTY lives in main, the terminal view is a disposable projection.
+const snapshotPending = new Set<string>();
+const parkedOutput = new Map<string, { seq: number; data: string }[]>();
+const lastSeq = new Map<string, number>();
 
 function flushTerminal(terminalId: string) {
   pendingFlushes.delete(terminalId);
@@ -54,6 +80,25 @@ function queueOutput(terminalId: string, data: string) {
   }
 }
 
+// ── Fit ─────────────────────────────────────────────────────────
+// ghostty-web's FitAddon hardcodes a 15px scrollbar gutter in
+// proposeDimensions, but its scrollbar is an in-canvas overlay — the gutter
+// is dead space on the right edge. Fit from the canvas's own cell metrics
+// instead (cell = bitmap size / grid size; the canvas is 1:1 CSS px).
+function fitTerminal(term: GhosttyTerminal, wrapper: HTMLDivElement): { cols: number; rows: number } | null {
+  const canvas = wrapper.querySelector('canvas');
+  if (!canvas || term.cols === 0 || term.rows === 0) return null;
+  const cellW = canvas.width / term.cols;
+  const cellH = canvas.height / term.rows;
+  if (!Number.isFinite(cellW) || cellW <= 0 || !Number.isFinite(cellH) || cellH <= 0) return null;
+  const cols = Math.max(2, Math.floor(wrapper.clientWidth / cellW));
+  const rows = Math.max(1, Math.floor(wrapper.clientHeight / cellH));
+  if (cols !== term.cols || rows !== term.rows) {
+    try { term.resize(cols, rows); } catch { /* disposed mid-fit */ }
+  }
+  return { cols, rows };
+}
+
 // ── IPC listeners (registered at module scope) ──────────────────
 // Each terminal's output/exit/ports events are routed by terminalId — the
 // handlers look up the xterm instance in the module-level `registry` at
@@ -65,7 +110,22 @@ function queueOutput(terminalId: string, data: string) {
 // scrollback lives in ghostty-web's WASM buffer, repainted on re-attach).
 if (ipc) {
   ipc.removeAllTerminalListeners();
-  ipc.onTerminalOutput(({ terminalId, data }: { terminalId: string; data: string }) => {
+  ipc.onTerminalOutput(({ terminalId, data, seq }: { terminalId: string; data: string; seq?: number }) => {
+    // Snapshot in flight — park; the attach path replays newer chunks after
+    // the snapshot lands.
+    if (snapshotPending.has(terminalId)) {
+      const list = parkedOutput.get(terminalId) ?? [];
+      if (seq !== undefined) list.push({ seq, data });
+      else list.push({ seq: Number.MAX_SAFE_INTEGER, data });
+      parkedOutput.set(terminalId, list);
+      return;
+    }
+    // Seq dedupe: chunks at or below the applied seq are already in the
+    // snapshot — drop them.
+    if (seq !== undefined) {
+      if (seq <= (lastSeq.get(terminalId) ?? 0)) return;
+      lastSeq.set(terminalId, seq);
+    }
     // Batched flush (rAF) — see queueOutput. Keeps the UI responsive under
     // high-throughput PTY output instead of writing per-IPC-event.
     queueOutput(terminalId, data);
@@ -85,8 +145,8 @@ if (ipc) {
 const PATH_PATTERN = /(?:\/[\w./@-]+|[A-Za-z]:\\[\w\\./-]+)(?::(\d+))?(?::(\d+))?/g;
 
 class FilePathLinkProvider {
-  private term: Terminal;
-  constructor(term: Terminal) {
+  private term: GhosttyTerminal;
+  constructor(term: GhosttyTerminal) {
     this.term = term;
   }
 
@@ -130,8 +190,8 @@ class FilePathLinkProvider {
 const URL_PATTERN = /(https?:\/\/[^\s<>"']+|www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"']*)/gi;
 
 class UrlLinkProvider {
-  private term: Terminal;
-  constructor(term: Terminal) {
+  private term: GhosttyTerminal;
+  constructor(term: GhosttyTerminal) {
     this.term = term;
   }
   provideLinks(bufferLineNumber: number, callback: (links: ILink[] | undefined) => void): void {
@@ -198,11 +258,15 @@ export const TerminalPanel = memo(function TerminalPanel() {
 
   const active = activeId && terminals.some((t) => t.id === activeId) ? activeId : terminals[0]?.id;
 
-  // ghostty-web loads its WASM (embedded base64 fallback) once before any
-  // Terminal can be constructed. Gate terminal creation on this so the first
-  // open doesn't race the WASM init.
-  const [wasmReady, setWasmReady] = useState(false);
-  useEffect(() => { let alive = true; init().then(() => { if (alive) setWasmReady(true); }).catch(() => {}); return () => { alive = false; }; }, []);
+  // ghostty-web (and its WASM) loads lazily on first panel mount — see
+  // loadGhostty. Terminal creation is gated on the resolved module so the
+  // first open doesn't race the WASM init.
+  const [ghosttyReady, setGhosttyReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    loadGhostty().then(() => { if (alive) setGhosttyReady(true); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // The ACTIVE session's terminals — only these get xterm instances created
   // and shown. Switching sessions must NOT destroy the previous session's
@@ -245,7 +309,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   // updates existing terminals in place via term.options — see below.)
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || !ipc || !wasmReady) return;
+    if (!mount || !ipc || !ghosttyReady || !ghosttyModule) return;
 
     let createdActive = false;
 
@@ -267,16 +331,18 @@ export const TerminalPanel = memo(function TerminalPanel() {
       }
 
       const themeColors = getTerminalTheme(terminalTheme);
+      const fontFamily = "'MesloLGS NF', 'MesloLGS Nerd Font', 'JetBrains Mono', Menlo, monospace";
+      // Provisional size from font metrics — the PTY spawns at the right
+      // dimensions while the emulator still initializes (no 80x24 flash).
+      const provisional = measureTerminalContainer(mount, terminalFontSize, fontFamily);
 
-      const term = new Terminal({
+      const term = new ghosttyModule.Terminal({
         cursorBlink: true,
         fontSize: terminalFontSize,
-        fontFamily: "'MesloLGS NF', 'MesloLGS Nerd Font', 'JetBrains Mono', Menlo, monospace",
+        fontFamily,
         theme: themeColors as any,
+        ...(provisional ?? {}),
       });
-
-      const fit = new FitAddon();
-      term.loadAddon(fit);
 
       // Create a wrapper div INSIDE the mount. ghostty-web renders a canvas
       // into this. We manage this div imperatively — React never touches it.
@@ -290,7 +356,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       wrapper.dataset.terminalId = tid;
       mount.appendChild(wrapper);
       term.open(wrapper);
-      fit.fit();
+      fitTerminal(term, wrapper);
 
       // Link providers — ghostty-web has no WebLinksAddon equivalent, so we
       // register two providers: URLs (open in OS browser on modifier+click,
@@ -300,12 +366,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
       term.registerLinkProvider(new UrlLinkProvider(term));
       term.registerLinkProvider(new FilePathLinkProvider(term));
 
-      // Start PTY. Await so any pendingCommand is flushed to a real PTY
-      // rather than a not-yet-existing id — without this, the Run button
-      // races ahead of the terminal spawn and the bytes get dropped.
-      ipc.terminalStart(tid, sid).then(() => {
-        // Read the pending command from the live store (not the closure,
-        // which would be stale across renders).
+      // Attach to the PTY. Snapshot FIRST: after a renderer reload the PTY
+      // (and its scrollback) is still alive in main — replay it instead of
+      // killing and respawning the shell. Only spawn when nothing is there.
+      // pendingCommand is flushed on both paths once the PTY exists.
+      const flushPending = () => {
         const state = useUi.getState();
         const inst = state.terminals[sid]?.find((t) => t.id === tid);
         const cmd = inst?.pendingCommand;
@@ -322,7 +387,36 @@ export const TerminalPanel = memo(function TerminalPanel() {
             },
           }));
         }
-      });
+      };
+      const attach = async () => {
+        snapshotPending.add(tid);
+        let snap: Awaited<ReturnType<typeof ipc.terminalSnapshot>> | undefined;
+        try {
+          snap = await ipc.terminalSnapshot(tid);
+        } catch { /* fall through to spawn */ }
+        if (snap && snap.alive) {
+          try { term.write(snap.data); } catch { /* disposed mid-attach */ }
+          lastSeq.set(tid, snap.seq);
+          const parked = parkedOutput.get(tid) ?? [];
+          parkedOutput.delete(tid);
+          snapshotPending.delete(tid);
+          for (const p of parked) {
+            if (p.seq <= snap.seq) continue;
+            lastSeq.set(tid, p.seq);
+            queueOutput(tid, p.data);
+          }
+          // The reloaded view may size differently than the pre-reload
+          // renderer — bring the PTY to the current dimensions.
+          try { ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
+          flushPending();
+          return;
+        }
+        snapshotPending.delete(tid);
+        parkedOutput.delete(tid);
+        await ipc.terminalStart(tid, sid, provisional ?? undefined);
+        flushPending();
+      };
+      void attach();
 
       // PTY → terminal: IPC listeners are registered ONCE (see useEffect below)
       // — they look up the terminal by id at event time. Previously each
@@ -340,11 +434,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
         // during an unmount window) — fitting there clears the canvas
         // bitmap for nothing; the re-attach/forceRedraw path repaints.
         if (wrapper.clientWidth === 0 || wrapper.clientHeight === 0) return;
-        try { fit.fit(); ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
+        try { fitTerminal(term, wrapper); ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
       });
       resizeObserver.observe(wrapper);
 
-      registry.set(tid, { term, fit, wrapper, inputDisposable, resizeObserver });
+      registry.set(tid, { term, wrapper, inputDisposable, resizeObserver });
       if (tid === active) createdActive = true;
     }
 
@@ -359,6 +453,9 @@ export const TerminalPanel = memo(function TerminalPanel() {
       live.inputDisposable.dispose();
       live.resizeObserver.disconnect();
       ipc.terminalKill(tid);
+      snapshotPending.delete(tid);
+      parkedOutput.delete(tid);
+      lastSeq.delete(tid);
       // ghostty-web's dispose() clears `term.element` (=== wrapper) to void 0,
       // so capture the wrapper div BEFORE dispose to remove it from the mount.
       const wrapper = live.wrapper;
@@ -395,7 +492,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       }
     }
     prevActiveRef.current = active;
-  }, [allEntries, activeSessionIds, survivingIds, active, wasmReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allEntries, activeSessionIds, survivingIds, active, ghosttyReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Theme / font-size updates: apply to EXISTING terminals in place via
   // term.options rather than recreating them. Keeps scrollback + PTY state.
@@ -425,7 +522,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       // Re-asserting the current size forces ghostty-web's renderer to do a
       // FULL re-render (it clears the dirty rows + redraws). A real fit() is
       // attempted first so layout-driven resizes still propagate.
-      live.fit.fit();
+      fitTerminal(live.term, live.wrapper);
       const t = live.term;
       t.resize(t.cols, t.rows);
       t.focus();

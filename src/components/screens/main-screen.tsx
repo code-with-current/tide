@@ -17,6 +17,7 @@ import { RightPanel } from "@/components/right-panel/right-panel";
 import { useRightPanelOverlay } from '@/lib/right-panel-layout';
 import { InspectorColumn } from "@/components/chat/inspector/inspector-column";
 import { useInspectorColumnVisible } from "@/lib/inspector-visibility";
+import { panelTransition } from "@/lib/panel-transitions";
 import { FileViewerPanel } from "@/components/right-panel/file-viewer-panel";
 import { CommitDetailsPanel } from "@/components/right-panel/git/commit-details-panel";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -301,20 +302,20 @@ export function MainScreen() {
 
   // Auto-collapse the sessions + right panels when there's no session to
   // show in them (no active session, or workspace has zero sessions).
-  // Auto-expand when a session becomes available. Edge-triggered via a ref
-  // so the user's manual toggles aren't overridden on every render.
+  // Re-expanding covers only the sessions sidebar — the right panel never
+  // auto-opens (fresh sessions and restarts leave it closed; opening it is
+  // the user's call). Edge-triggered via a ref so manual toggles stick.
   const prevHadSessionRef = useRef<boolean>(false);
   useEffect(() => {
-    const hasSessions = (sessions?.length ?? 0) > 0;
-    const hasActive = !!activeSessionId;
-    const shouldShowPanels = hasSessions && hasActive;
-
-    // Only act on the false→true and true→false transitions.
-    if (shouldShowPanels && !prevHadSessionRef.current) {
+    const t = panelTransition({
+      hasSessions: (sessions?.length ?? 0) > 0,
+      hasActive: !!activeSessionId,
+      prevHadSession: prevHadSessionRef.current,
+    });
+    if (t.sessionsPanel === 'expand') {
       if (!sessionsPanelOpen) setSessionsPanelOpen();
-      if (!rightPanelOpen) setRightPanelOpen();
       prevHadSessionRef.current = true;
-    } else if (!shouldShowPanels && prevHadSessionRef.current) {
+    } else if (t.sessionsPanel === 'collapse') {
       if (sessionsPanelOpen) setSessionsPanelOpen();
       if (rightPanelOpen) setRightPanelOpen();
       prevHadSessionRef.current = false;
@@ -1023,10 +1024,10 @@ export function MainScreen() {
                             <div className="flex items-start gap-2.5">
                               <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
                               <div className="flex-1 min-w-0">
-                                <div className="text-[12px] font-medium text-destructive">
+                                <div className="text-[0.8571rem] font-medium text-destructive">
                                   Turn Failed
                                 </div>
-                                <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
+                                <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
                                   {error}
                                 </div>
                               </div>
@@ -1107,6 +1108,10 @@ export function MainScreen() {
                           its width via the relative parent. No backdrop; floats
                           over the chat scroll without blocking interaction. */}
                         <OptionsPopup onSubmit={handleOptionsSubmit} />
+                        {/* Permission prompts share the same anchor — a paused
+                          turn surfaces its cards right where the user is
+                          looking, never behind panel state. */}
+                        <FloatingPermissionCard sessionId={activeSessionId} />
                         <ChatComposer
                           key={activeSessionId}
                           compact
@@ -1157,7 +1162,6 @@ export function MainScreen() {
               className="h-full relative min-w-0"
             >
               <RightPanel />
-              <FloatingPermissionCard sessionId={activeSessionId} />
             </ResizablePanel>
           )}
         </ResizablePanelGroup>
@@ -1177,7 +1181,6 @@ export function MainScreen() {
             style={{ top: '40px', height: 'auto' }}
           >
             <RightPanel />
-            <FloatingPermissionCard sessionId={activeSessionId} />
           </SheetContent>
         </Sheet>
 

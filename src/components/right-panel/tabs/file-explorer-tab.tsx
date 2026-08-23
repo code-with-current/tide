@@ -104,9 +104,9 @@ export function FileExplorerTab() {
     <div className="flex flex-col h-full min-w-0 overflow-hidden">
       {/* Search / filter bar — matches the VSCode section header style */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border flex-shrink-0">
-        {/*<span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
+        {/*<span className="text-[0.7857rem] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
         {fileCount > 0 && (
-          <span className="text-[10px] text-muted-foreground font-mono">{fileCount}</span>
+          <span className="text-[0.7143rem] text-muted-foreground font-mono">{fileCount}</span>
         )}
         */}
         <div className="flex-1">

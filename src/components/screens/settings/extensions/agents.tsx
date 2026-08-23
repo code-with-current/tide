@@ -94,7 +94,7 @@ export function AgentsSection() {
           />
         </div>
         <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
-          <SelectTrigger className="w-[8.5rem] h-8 text-[12px] capitalize">
+          <SelectTrigger className="w-[8.5rem] h-8 text-[0.8571rem] capitalize">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

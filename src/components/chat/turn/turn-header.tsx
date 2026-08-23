@@ -3,6 +3,7 @@ import { Check, X, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { isFailedStatus } from '@/lib/stream/block-state';
+import { stepsCount } from '@/components/blocks/process-state';
 import { PixelLoader } from '@/components/ui/pixel-loader';
 
 /** Format ms as whole seconds: "14s", "1m30s". No sub-second/ms precision. */
@@ -45,62 +46,81 @@ export function TurnHeader({
   streaming,
   stopReason,
   blocks,
+  totalMs: wallClockMs,
 }: {
   turn?: Turn;
   streaming: boolean;
   stopReason?: string | null;
   blocks?: Block[];
+  /** Wall-clock turn duration (send → result) — preferred over turn.totalMs
+   *  so callers that already hold it (block-list / stream-blocks) don't have
+   *  to materialize a Turn. */
+  totalMs?: number;
 }) {
-  let totalMs: number | undefined;
+  let toolMs: number | undefined;
   let anyFailed: boolean | undefined;
   if (blocks) {
     let sum = 0;
     let failed = false;
+    let hasTool = false;
     for (const b of blocks) {
-      if (b.kind === 'tool') {
-        if (b.durationMs != null) sum += b.durationMs;
-        if (isFailedStatus(b.status)) failed = true;
-      }
+      if (b.kind !== 'tool') continue;
+      // Sub-agent children run INSIDE their dispatch_agent's wall time —
+      // counting both double-counts the sub-agent's work.
+      if (b.parentToolCallId) continue;
+      hasTool = true;
+      if (b.durationMs != null) sum += b.durationMs;
+      if (isFailedStatus(b.status)) failed = true;
     }
-    totalMs = sum > 0 ? sum : undefined;
+    toolMs = hasTool ? sum : undefined;
     anyFailed = failed || undefined;
   } else {
-    totalMs = turn?.totalMs;
+    toolMs = turn?.totalMs;
     anyFailed = turn?.anyFailed;
   }
-  const toolDuration = formatDuration(totalMs);
-  // Wall-clock turn time — from Turn.totalMs (includes LLM time + tool time).
-  const wallClock = formatDuration(turn?.totalMs);
+  const toolDuration = formatDuration(toolMs);
+  const wallClock = formatDuration(wallClockMs ?? turn?.totalMs);
+  const steps = stepsCount(blocks);
 
   if (streaming) return null;
 
+  // Interrupted partial: a non-streaming message whose blocks still hold a
+  // running/pending tool. Finalized turns (and legacy messages) only carry
+  // terminal tool statuses — this shape means the app died mid-turn before
+  // any finalize (renderer reload + missed turn_end, killed process).
+  const interrupted = !!blocks?.some(
+    (b) => b.kind === 'tool' && (b.status === 'running' || b.status === 'pending'),
+  );
   const stopped = stopReason === 'aborted';
   const hasContent = blocks
     ? blocks.some((b) => b.kind === 'text' || b.kind === 'tool' || b.kind === 'reasoning')
     : !!(turn?.answer || turn?.commands?.length || turn?.edits?.length || turn?.exploration?.length);
   const failed = stopReason === 'refusal' || (!hasContent && !stopReason && !stopped);
-  const Icon = stopped ? X : failed ? AlertCircle : anyFailed ? AlertTriangle : Check;
-  const tone = stopped
-    ? 'text-destructive'
-    : failed
+  const Icon = interrupted ? AlertCircle : stopped ? X : failed ? AlertCircle : anyFailed ? AlertTriangle : Check;
+  const tone = interrupted
+    ? 'text-warning'
+    : stopped
       ? 'text-destructive'
-      : anyFailed
-        ? 'text-warning'
-        : 'text-success';
+      : failed
+        ? 'text-destructive'
+        : anyFailed
+          ? 'text-warning'
+          : 'text-success';
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5">
-      <Icon className={cn('size-3', tone)} />
+    <div className="flex items-center gap-1.5 text-[0.85rem] text-muted-foreground/60 hover:text-accent/60 font-mono py-0.5 mt-2">
+      <Icon className={cn('size-4', tone)} />
       <span className={tone}>
-        {stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
+        {interrupted ? 'Interrupted' : stopped ? 'Stopped' : failed ? 'Failed' : anyFailed ? 'Done · Issues' : 'Done'}
       </span>
-      {wallClock && (
+      {!interrupted && steps > 0 && <span className="text-muted-foreground/50">· {steps} steps</span>}
+      {!interrupted && wallClock && (
         <span className="flex items-center gap-0.5 text-muted-foreground/50">
           <Clock className="size-2.5" />
           {wallClock}
         </span>
       )}
-      {toolDuration && toolDuration !== wallClock && (
+      {!interrupted && toolDuration && toolDuration !== wallClock && (
         <span className="text-muted-foreground/30">· {toolDuration} tools</span>
       )}
     </div>

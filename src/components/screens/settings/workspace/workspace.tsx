@@ -104,18 +104,18 @@ export function WorkspaceSettingsSection() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search workspaces…"
-              className="w-full h-7 pl-7 pr-2 text-[11.5px] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
+              className="w-full h-7 pl-7 pr-2 text-[0.8214rem] bg-secondary/40 border border-border rounded-md outline-none focus:border-primary/50 transition-colors"
             />
           </div>
           <Button size="sm" onClick={() => openDialog("addWorkspace")}>
             <Plus className="size-3.5" /> Add Workspace
           </Button>
           <div className="flex items-center justify-between px-1 pt-1">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/55 font-semibold">
+            <span className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/55 font-semibold">
               Workspaces
             </span>
             {active.length > 0 && (
-              <Badge variant="secondary" className="font-mono text-[9px]">
+              <Badge variant="secondary" className="font-mono text-[0.6429rem]">
                 {active.length}
               </Badge>
             )}
@@ -152,10 +152,10 @@ export function WorkspaceSettingsSection() {
             {archived.length > 0 && (
               <>
                 <div className="flex items-center justify-between gap-1.5 px-1 pt-3 pb-1">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/45 font-semibold">
+                  <span className="text-[0.7143rem] uppercase tracking-wider text-muted-foreground/45 font-semibold">
                     Archived
                   </span>
-                  <Badge variant="secondary" className="font-mono text-[9px]">
+                  <Badge variant="secondary" className="font-mono text-[0.6429rem]">
                     {archived.length}
                   </Badge>
                 </div>
@@ -173,7 +173,7 @@ export function WorkspaceSettingsSection() {
 
             {/* Empty filter result — only when not loading + a query is set */}
             {!isLoading && q && active.length === 0 && archived.length === 0 && (
-              <div className="px-2 py-3 text-[11px] text-muted-foreground/50">
+              <div className="px-2 py-3 text-[0.7857rem] text-muted-foreground/50">
                 No workspaces match "{query}".
               </div>
             )}
@@ -191,7 +191,7 @@ export function WorkspaceSettingsSection() {
             )}
           >
             {!selected ? (
-              <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground/40">
+              <div className="h-full flex items-center justify-center text-[0.9286rem] text-muted-foreground/40">
                 {isLoading ? "Loading…" : "Select a workspace"}
               </div>
             ) : (

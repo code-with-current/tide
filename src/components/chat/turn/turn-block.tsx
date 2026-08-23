@@ -123,7 +123,9 @@ export const TurnBlock = memo(function TurnBlock({
           compacting={compacting}
         />
         {streaming && !compacting && (
-          <TurnWorkingFooter startedAt={message.createdAt} />
+          <div className='mt-2'>
+            <TurnWorkingFooter startedAt={message.createdAt} />
+          </div>
         )}
       </div>
     </PermissionSurfaceContext.Provider>

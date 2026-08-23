@@ -21,10 +21,10 @@ import { createConfigStore } from '../configStore.js';
 import { createTurnController, type TurnController } from './turn-controller.js';
 import { loadHookConfig, type HookConfig } from './hooks/hook-config.js';
 import { shouldCompact, compactConversation, isContextOverflow } from './context/auto-compact.js';
-import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts } from './model-capabilities.js';
+import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTokens, resolveMaxInputTokens, resolveReasoningContracts, clampOutputForContext } from './model-capabilities.js';
 import { mediaMimeFor } from './tools/read-media-file.js';
 import type { ToolResult } from './tools/types.js';
-import { resolvePermission, abortPermission, clearSession, getPendingAsk } from './permission-resolver.js';
+import { resolvePermission, abortPermission, clearSession, getPendingAsk, pendingAskIds } from './permission-resolver.js';
 import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
 import { resolveFollowup, abortFollowup, clearFollowupSession } from './followup-resolver.js';
 import { resolveProtocolOptions, resolveReasoning } from './protocols/index.js';
@@ -34,8 +34,11 @@ import { AGENT_EVENT_CHANNEL, AGENT_COMMANDS } from '../../src/lib/agent/events.
 import type { AgentEvent, RunTurnPayload, TurnMessage } from '../../src/lib/agent/events.js';
 import type { AutonomyMode, Provider, ToolCall, ToolDisplay, ToolName, Usage } from '../../src/types/index.js';
 import type { Block, ReasoningBlock, TextBlock, ToolBlock } from '../../src/types/block.js';
-import { categorizeTool, isBookkeepingTool } from '../../src/lib/stream/block-state.js';
+import { categorizeTool, answerBlockIds } from '../../src/lib/stream/block-state.js';
+import { repairJsonToolInput } from './tool-input-repair.js';
+import { recordProviderUsage } from './usage-windows.js';
 import { recordEditTurn } from '../rag/edit-journal.js';
+import { incrementBadge } from '../badge.js';
 import type { ToolContext } from './tools/tool-context.js';
 import { appDataDir } from '../appPaths.js';
 import type { EventSink, SinkEvent } from './event-sink.js';
@@ -89,6 +92,8 @@ interface Turn {
   sessionId: string;
   /** Workspace the session is bound to — used by the turn-end edit journal. */
   workspaceId: string;
+  /** Provider the turn bills to — keyed into the usage-window tracker. */
+  providerId: string;
   messageId: string;
   controller: AbortController;
   autonomyMode: AutonomyMode;
@@ -118,6 +123,10 @@ interface Turn {
   /** Wall-clock timestamp (Date.now()) when the turn started — diffed against
    *  the turn_end time to compute the persisted `totalMs` (send → result). */
   startedAt: number;
+  /** Wall-clock start per tool call — recorded at tool-input-start so failed
+   *  / errored calls (which carry no durationMs from the executor) can still
+   *  report how long they ran. */
+  toolStartAt: Record<string, number>;
   /** v2 event sequencing for this turn — null until the turn's try opens
    *  (initV2Turn) or when v2 is unavailable; additive, never required. */
   v2: V2TurnTracker | null;
@@ -189,7 +198,16 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain, opts?: { sin
         const ask = getPendingAsk(sessionId, toolCallIds[0]);
         if (ask) addPermissionRule(sessionId, ask.workspaceRoot, ask.toolName, ask.args);
       }
-      if (newMode) { try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch {} }
+      if (newMode) {
+        try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch {}
+        // Escalation un-gates every other pending ask in the session — their
+        // checks pass under the new mode, so resolve them as approved rather
+        // than leaving cards for tools that no longer need permission.
+        const siblings = pendingAskIds(sessionId).filter((id) => !toolCallIds.includes(id));
+        if (siblings.length > 0) {
+          resolvePermission(sessionId, siblings, { approved: true, newMode });
+        }
+      }
       resolvePermission(sessionId, toolCallIds, newMode ? { approved: true, newMode } : { approved: true });
     },
   );
@@ -276,9 +294,9 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const effectivePermissionTimeout = (agentSettings.permissionTimeoutMin || 10) * 60 * 1000;
 
   const turn: Turn = {
-    sessionId, workspaceId, messageId, controller, autonomyMode,
+    sessionId, workspaceId, providerId: provider.id, messageId, controller, autonomyMode,
     blocks: [], currentTextBlockId: null, reasoningBlockId: null,
-    toolBlockIndex: {}, finalText: '', finalReasoning: '',
+    toolBlockIndex: {}, finalText: '', finalReasoning: '', toolStartAt: {},
     toolCalls: [], timeline: [],
     usage: emptyUsage(), lastStepUsage: null,
     stepsCompleted: 0, maxSteps: effectiveMaxSteps,
@@ -294,7 +312,10 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
   const turnController = createTurnController(effectiveMaxSteps);
   const knownCtxWindow = contextWindowSize(modelId, modelEntry);
   const knownMaxInput = resolveMaxInputTokens(modelId, modelEntry) ?? knownCtxWindow;
-  const knownMaxOutput = resolveMaxOutputTokens(modelId, modelEntry);
+  const knownMaxOutput = clampOutputForContext(
+    resolveMaxOutputTokens(modelId, modelEntry),
+    knownCtxWindow,
+  );
   const compactionEnabled = agentSettings.compactionEnabled ?? true;
   const compactionThreshold = Math.min(0.95, Math.max(0.5, agentSettings.compactionThreshold ?? 0.75));
   const compactionKeepTurns = Math.max(1, Math.floor(agentSettings.compactionKeepTurns ?? 3));
@@ -418,12 +439,8 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
           repairToolCall: async ({ toolCall }) => {
             const input = toolCall.input;
             if (typeof input !== 'string') return toolCall;
-            const cleaned = input.replace(/<\/?tool_call>/g, '').replace(/<\/?tool_use>/g, '').replace(/<\/?function_call>/g, '').trim();
-            try { JSON.parse(cleaned); return { ...toolCall, input: cleaned }; } catch {
-              const match = cleaned.match(/\{[\s\S]*\}/);
-              if (match) { try { JSON.parse(match[0]); return { ...toolCall, input: match[0] }; } catch {} }
-            }
-            return null;
+            const repaired = repairJsonToolInput(input);
+            return repaired ? { ...toolCall, input: repaired } : null;
           },
 
           onError: ({ error }) => {
@@ -601,6 +618,7 @@ function translatePart(
       const toolCallId: string = p.id;
       const toolName = resolveToolName(p.toolName) as ToolName;
       emitSink(turn.v2?.toolStart(toolCallId) ?? []);
+      turn.toolStartAt[toolCallId] = Date.now();
       turn.currentTextBlockId = null;
       // Close the current thinking segment so the next reasoning delta (next
       // model step) opens a NEW reasoning block. This lets the block stream
@@ -644,6 +662,12 @@ function translatePart(
       const tr: ToolResult = part.type === 'tool-result' && p.output && typeof p.output === 'object'
         ? ({ ...(p.output as object) } as ToolResult)
         : { status: 'failed', output: part.type === 'tool-error' ? errMessage(p.error) || 'Tool error' : '(no output)' };
+      // Errored calls never ran the executor — derive duration from the
+      // input-start timestamp so failures still count toward tool time.
+      if (tr.durationMs == null && turn.toolStartAt[toolCallId] != null) {
+        tr.durationMs = Date.now() - turn.toolStartAt[toolCallId];
+      }
+      delete turn.toolStartAt[toolCallId];
       const status = normalizeStatus(tr.status);
       const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: input, argPreview, status, riskTier: meta?.riskTier ?? 'read_only', output: tr.output, display: tr.display, durationMs: tr.durationMs, meta: tr.meta };
       turn.toolCalls.push(tc);
@@ -728,8 +752,49 @@ function emitTurnEnd(wc: WebContents, turn: Turn, stopReason: StopReason) {
     toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
     usage: turn.usage, lastStepUsage: turn.lastStepUsage ?? undefined,
   });
+  persistFinalAssistantMessage(turn, blocks, stopReason);
+  recordProviderUsage(turn.providerId, turn.usage);
   journalEditTurn(turn);
   fireTurnEndNotification(wc, turn.sessionId, stopReason);
+}
+
+/** Main-side authoritative finalize — mirrors the renderer freeze effect's
+ *  payload. The renderer owns the live chatHistory append, but persistence
+ *  must not depend on it: a renderer reload/HMR mid-turn wipes the stream
+ *  store, the turn_end event is missed, and the session would keep the last
+ *  flushPartial snapshot forever (no stopReason/totalMs/answer). Idempotent
+ *  update-in-place by messageId, so the renderer's later finalize is a
+ *  harmless duplicate. Lazy require avoids the orchestrator↔sessions cycle
+ *  (same pattern as abortAllTurns). */
+function persistFinalAssistantMessage(turn: Turn, blocks: Block[], stopReason: StopReason): void {
+  const isEmpty =
+    !turn.finalText.trim() &&
+    turn.toolCalls.length === 0 &&
+    blocks.length === 0;
+  const isErrorStop =
+    stopReason === 'refusal' || stopReason === 'max_tokens' ||
+    stopReason === 'iteration_limit' || stopReason === 'content_filter';
+  if (isEmpty && !isErrorStop) return;
+  try {
+    const { finalizeAssistantMessage, addUsage } =
+      require('../ipc/sessions.js') as typeof import('../ipc/sessions.js');
+    finalizeAssistantMessage(turn.sessionId, turn.messageId, {
+      content: turn.finalText,
+      blocks,
+      reasoning: turn.finalReasoning || undefined,
+      reasoningTokens: turn.usage.reasoningTokens || undefined,
+      totalMs: Date.now() - turn.startedAt,
+      toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
+      timeline: turn.timeline.filter((e) => e.type === 'tool' || e.text.trim()),
+      turn: { stopReason },
+      stopReason,
+    });
+    if (turn.usage.inputTokens > 0 || turn.usage.outputTokens > 0) {
+      addUsage(turn.sessionId, turn.usage, turn.lastStepUsage ?? turn.usage);
+    }
+  } catch (e) {
+    log.warn('main-side finalize failed', { sessionId: turn.sessionId, err: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 /** Message row for the v2 stream lands at turn start (the sink only writes
@@ -785,12 +850,13 @@ function finalizeBlocks(turn: Turn, stopReason: StopReason): Block[] {
     stopped && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')
       ? { ...b, status: 'aborted' as const } : b
   );
-  let lastToolIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].kind === 'tool' && !isBookkeepingTool((blocks[i] as ToolBlock).toolName)) { lastToolIdx = i; break; }
-  }
-  for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    if (blocks[i].kind === 'text') (blocks[i] as TextBlock).isAnswer = true;
+  // Answer flagging is SCOPE-LOCAL (root + each dispatch_agent scope) so a
+  // sub-agent's trailing report persists as its own answer even when the
+  // parent continues calling tools. Mirrors the renderer's applyTurnEnd and
+  // blockMigration.redetermineAnswerFlag via the shared helper.
+  const answers = answerBlockIds(blocks);
+  for (const b of blocks) {
+    if (b.kind === 'text') (b as TextBlock).isAnswer = answers.has(b.id);
   }
   return blocks;
 }
@@ -842,6 +908,31 @@ function flushPartial(wc: WebContents, turn: Turn) {
  *  the turn freezes to the persisted message. */
 function mirrorSubagentToolEvent(turn: Turn, e: { type?: string; [k: string]: unknown }): void {
   if (typeof e.parentToolCallId !== 'string' || !e.parentToolCallId) return;
+  // Sub-agent narration/thinking — same merge rule as the renderer's
+  // applyDelta/applyReasoning (last block with same id+parentage), so the
+  // persisted message keeps one block per segment even with concurrent
+  // dispatches interleaving. Without this the reload path loses all child
+  // text (the panel rendered it live from the store only).
+  if (e.type === 'delta' || e.type === 'reasoning') {
+    const id = e.blockId as string | undefined;
+    const text = (e.type === 'delta' ? e.text : e.delta) as string | undefined;
+    if (!id || !text) return;
+    const kind = e.type === 'delta' ? 'text' : 'reasoning';
+    for (let i = turn.blocks.length - 1; i >= 0; i--) {
+      const b = turn.blocks[i];
+      if (b.kind !== kind || b.id !== id) continue;
+      if ((b.parentToolCallId ?? undefined) !== e.parentToolCallId) continue;
+      if (kind === 'text') (b as TextBlock).text += text;
+      else (b as ReasoningBlock).text += text;
+      return;
+    }
+    if (kind === 'text') {
+      turn.blocks.push({ id, kind: 'text', text, createdAtSeq: 0, modifiedAtSeq: 0, isAnswer: false, parentToolCallId: e.parentToolCallId });
+    } else {
+      turn.blocks.push({ id, kind: 'reasoning', text, createdAtSeq: 0, modifiedAtSeq: 0, parentToolCallId: e.parentToolCallId });
+    }
+    return;
+  }
   const toolCallId = e.toolCallId as string;
   if (!toolCallId) return;
   const toolName = resolveToolName((e.toolName as string) ?? 'unknown') as ToolName;
@@ -871,7 +962,7 @@ function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
     const args = (e.args ?? {}) as Record<string, unknown>;
     const meta = safeMeta(toolName);
     const toolCallId = (typeof e.toolCallId === 'string' && e.toolCallId) || `perm_${toolName}_${nextSeq(sessionId)}`;
-    const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask' };
+    const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask', allowRule: (e.ruleSpec as string | undefined) ?? undefined };
     send(wc, sessionId, { type: 'permission_required', sessionId, seq: nextSeq(sessionId), toolCalls: [tc], timeoutAt: Date.now() + turn.permissionTimeoutMs });
     return;
   }
@@ -897,6 +988,7 @@ function fireTurnEndNotification(wc: WebContents, sessionId: string, stopReason:
   if (stopReason === 'aborted' || win?.isFocused() || !Notification.isSupported()) return;
   try {
     if (!createConfigStore(appDataDir()).getGeneralSettings().notifications) return;
+    incrementBadge();
     const title = stopReason === 'refusal' ? 'Tide — turn failed' : stopReason === 'max_tokens' ? 'Tide — context limit reached' : stopReason === 'iteration_limit' ? 'Tide — step limit reached' : 'Tide — done';
     const body = stopReason === 'refusal' ? 'The turn ended with an error.' : stopReason === 'max_tokens' ? 'The model hit the token limit.' : stopReason === 'iteration_limit' ? 'The agent reached the step cap.' : 'Your request has completed.';
     const notif = new Notification({ title, body, silent: false });

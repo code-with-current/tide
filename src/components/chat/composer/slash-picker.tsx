@@ -43,7 +43,7 @@ export function SlashPicker({
     >
       <div className="max-h-[260px] overflow-y-auto overflow-x-hidden scroll py-1">
         {items.length === 0 && (
-          <div className="px-3 py-6 text-center text-[11px] text-muted-foreground/60">
+          <div className="px-3 py-6 text-center text-[0.7857rem] text-muted-foreground/60">
             No matches. Press Esc to keep typing.
           </div>
         )}
@@ -70,7 +70,7 @@ export function SlashPicker({
                   {(m.source === 'project' || m.source === 'user') && (
                     <span
                       className={cn(
-                        'text-[9px] uppercase tracking-wider bg-secondary border border-input px-1 py-px rounded',
+                        'text-[0.6429rem] uppercase tracking-wider bg-secondary border border-input px-1 py-px rounded',
                         m.source === 'project' ? 'text-secondary-foreground/60/70' : 'text-primary/70',
                       )}
                     >
@@ -78,18 +78,18 @@ export function SlashPicker({
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-muted-foreground/60 truncate">{m.description}</div>
+                <div className="text-[0.7857rem] text-muted-foreground/60 truncate">{m.description}</div>
               </div>
             </span>
           );
         })}
       </div>
-      <div className="px-3 py-1.5 border-t border-input text-[10px] text-muted-foreground/80 flex items-center gap-2">
-        <kbd className="font-mono text-[10px] px-1 py-0 bg-primary text-primary-foreground border border-border rounded">↑↓</kbd>
+      <div className="px-3 py-1.5 border-t border-input text-[0.7143rem] text-muted-foreground/80 flex items-center gap-2">
+        <kbd className="font-mono text-[0.7143rem] px-1 py-0 bg-primary text-primary-foreground border border-border rounded">↑↓</kbd>
         Navigate
-        <kbd className="font-mono text-[10px] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">↵</kbd>
+        <kbd className="font-mono text-[0.7143rem] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">↵</kbd>
         Select
-        <kbd className="font-mono text-[10px] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">esc</kbd>
+        <kbd className="font-mono text-[0.7143rem] px-1 py-0 bg-primary text-primary-foreground border border-border rounded ml-1">esc</kbd>
         Dismiss
       </div>
     </div>

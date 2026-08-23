@@ -39,7 +39,7 @@ export function PanelSection({
         <div className="flex items-center gap-1 px-3 py-1.5">
           <button
             onClick={() => setOpen((o) => !o)}
-            className="flex flex-1 items-center gap-1 min-w-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+            className="flex flex-1 items-center gap-1 min-w-0 text-[0.7857rem] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
           >
             {inner}
           </button>
@@ -49,7 +49,7 @@ export function PanelSection({
         // plain: the whole header is the toggle button (original behavior).
         <button
           onClick={() => setOpen((o) => !o)}
-          className="w-full flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          className="w-full flex items-center gap-1 px-3 py-1.5 text-[0.7857rem] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
         >
           {inner}
         </button>

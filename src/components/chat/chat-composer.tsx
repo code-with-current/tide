@@ -16,6 +16,7 @@ import { QueuedMessages } from './composer/queued-messages';
 import { initiateFork } from '@/lib/queries';
 import type { MessageAttachment } from '@/types';
 import * as api from '@/lib/api/client';
+import { UsageRing } from './composer/usage-ring';
 
 /** Module-level stable empty array — never re-create the fallback, or Zustand's
  *  selector sees a "new" snapshot every render and triggers an infinite loop. */
@@ -86,7 +87,7 @@ function mentionBlock(m: Mention): string {
 
 /** Chip class lookup — kind drives the tint, source drives the border style. */
 function chipClasses(_m: Mention): string {
-  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[11px] font-mono align-middle select-none rounded-md bg-foreground/10 text-foreground/70';
+  const base = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 border text-[0.7857rem] font-mono align-middle select-none rounded-md bg-foreground/10 text-foreground/70';
 
   return `${base}`;
 }
@@ -898,7 +899,9 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-xs focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground">
+      <div className="min-w-0 border border-input bg-input rounded-xl flex overflow-hidden focus-within:border-ring focus-within:shadow-lg
+        focus-within:ring-[1px] focus-within:ring-ring/50 hover:border-ring hover:ring-[1px] hover:ring-ring/50 z-10 transition-[color,box-shadow]
+        outline-none selection:bg-primary selection:text-primary-foreground shadow-lg">
         {/* ====================================================
             LEFT — vertical toolbar (attach, @).
            ==================================================== */}
@@ -938,7 +941,7 @@ export function ChatComposer({
               {attachments.map((a) => (
                 <span
                   key={a.path}
-                  className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[11px] font-mono rounded-md border-border bg-foreground/15 text-foreground/70"
+                  className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 border text-[0.7857rem] font-mono rounded-md border-border bg-foreground/15 text-foreground/70"
                   title={a.kind === 'paste' ? a.content : a.path}
                 >
                   {a.kind === 'paste' && <ClipboardPaste className="size-3 shrink-0" />}
@@ -981,7 +984,7 @@ export function ChatComposer({
               className={cn(
                 'chat-composer-editor',
                 'w-full bg-transparent border-0 resize-none outline-none text-sm focus:outline-none',
-                compact ? 'min-h-[4.25rem] py-2 px-3' : 'min-h-[5.25rem] py-3 px-3',
+                compact ? 'min-h-[6rem] py-2 px-3' : 'min-h-[6rem] py-3 px-3',
               )}
           />
 
@@ -1000,7 +1003,7 @@ export function ChatComposer({
               <Chip className="ml-1">{chipCount} mentioned</Chip>
             )}
             {!compact && (
-              <span className="ml-2 text-[11px] text-muted-foreground/60 font-mono">
+              <span className="ml-2 text-[0.7857rem] text-muted-foreground/60 font-mono">
                 {editorText.length} chars
               </span>
             )}
@@ -1013,6 +1016,9 @@ export function ChatComposer({
                 onStop={() => onStop?.()}
               />
             )}*/}
+            <span className="flex-1"></span>
+            <div className="flex items-center gap-2">
+            <UsageRing/>
             <SendStopButton
               className="ml-auto"
               mode={!editorEmpty || attachments.length > 0 ? 'send' : inProgress ? 'stop' : 'send'}
@@ -1020,7 +1026,8 @@ export function ChatComposer({
               disabled={pendingReads > 0 || (!inProgress && editorEmpty && attachments.length === 0)}
               onSend={() => send()}
               onStop={() => onStop?.()}
-            />
+              />
+            </div>
           </div>
         </div>
       </div>

@@ -59,13 +59,13 @@ export function RagColumn({
           </SettingsRow>
           {status.lastIngestedAt && (
             <SettingsRow title="Last indexed">
-              <span className="text-[11px] text-muted-foreground/70">
+              <span className="text-[0.7857rem] text-muted-foreground/70">
                 {new Date(status.lastIngestedAt).toLocaleString()}
               </span>
             </SettingsRow>
           )}
           <SettingsRow title="Embedder" last>
-            <span className="text-[10px] font-mono text-muted-foreground/70">
+            <span className="text-[0.7143rem] font-mono text-muted-foreground/70">
               {status.embedderId ?? "—"}
             </span>
           </SettingsRow>
@@ -112,7 +112,7 @@ export function RagColumn({
                 updateRag.mutate({ chunkTokens: Number(v) })
               }
             >
-              <SelectTrigger className="w-[8rem] h-7 text-[11px]">
+              <SelectTrigger className="w-[8rem] h-7 text-[0.7857rem]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -129,7 +129,7 @@ export function RagColumn({
             description="28 grammars bundled."
             last
           >
-            <span className="text-[9px] font-mono text-muted-foreground/50">
+            <span className="text-[0.6429rem] font-mono text-muted-foreground/50">
               TS JS PY GO RS JAVA…
             </span>
           </SettingsRow>
@@ -143,18 +143,18 @@ export function RagColumn({
             title="Working"
             description="Session state — in-context."
           >
-            <span className="text-[9px] text-muted-foreground/50">session</span>
+            <span className="text-[0.6429rem] text-muted-foreground/50">session</span>
           </SettingsRow>
           <SettingsRow
             title="Semantic"
             description="Codebase knowledge via RAG."
           >
-            <span className="text-[9px] text-muted-foreground/50">
+            <span className="text-[0.6429rem] text-muted-foreground/50">
               {status.chunkCount > 0 ? `${status.chunkCount} chunks` : "empty"}
             </span>
           </SettingsRow>
           <SettingsRow title="Episodic" description="Past sessions JSONL." last>
-            <span className="text-[9px] text-muted-foreground/50">planned</span>
+            <span className="text-[0.6429rem] text-muted-foreground/50">planned</span>
           </SettingsRow>
         </Card>
       </SettingsGroup>
@@ -170,7 +170,7 @@ export function RagColumn({
             <Button
               variant="secondary"
               size="sm"
-              className="h-7 text-[11px] gap-1.5"
+              className="h-7 text-[0.7857rem] gap-1.5"
               disabled={initWs.isPending || initRunning}
               onClick={() => initWs.mutate(workspaceId)}
             >

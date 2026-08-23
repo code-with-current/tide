@@ -1,17 +1,40 @@
 import React, { useRef, useState } from 'react';
-import { ChevronDown, Check, Brain, Eye, Star, Search, Lock } from 'lucide-react';
+import { ChevronDown, Check, Brain, Eye, Star, Search, Lock, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SkeletonBar } from '@/components/ui/loading-rows';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ProviderLogo } from '@/components/primitives/provider-logo';
 import { cn, formatContext } from '@/lib/utils';
-import { useModels } from '@/lib/queries';
+import { useModels, useProviders } from '@/lib/queries';
+import { matchPresetByBaseUrl } from '@/lib/provider-presets';
 import { useUi } from '@/lib/stores/ui';
 import type { ModelOption } from '@/lib/queries';
 import { Kbd } from '@/components/ui/kbd';
 
 /** Pseudo-rail id for the pinned Starred section. */
 const STARRED_RAIL = '__starred__';
+
+function ProviderTile({
+  preset,
+  apiStyle,
+}: {
+  preset?: ReturnType<typeof matchPresetByBaseUrl>;
+  apiStyle: 'openai' | 'anthropic';
+}) {
+  const accent = preset?.accent;
+  const branded = !!accent && accent !== '#ffffff';
+  return (
+    <span
+      className={cn(
+        'size-5 rounded flex items-center justify-center shrink-0',
+        branded ? 'text-white' : 'bg-secondary text-foreground',
+      )}
+      style={branded ? { background: accent } : undefined}
+    >
+      <ProviderLogo apiStyle={apiStyle} presetId={preset?.id} className="size-2.5" />
+    </span>
+  );
+}
 
 /** One rail entry: a provider with its (filtered) models. */
 interface RailEntry {
@@ -33,6 +56,10 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
   const starred = useUi((s) => s.starredModels);
   const toggleStar = useUi((s) => s.toggleStarredModel);
   const { models, isLoading } = useModels();
+  const { data: providers } = useProviders();
+  const presetByProvider = new Map(
+    (providers ?? []).map((p) => [p.id, matchPresetByBaseUrl(p.baseUrl)]),
+  );
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -43,6 +70,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
   const selected =
     models.find((m) => m.providerId === selectedProviderId && m.modelId === selectedId) ??
     models.find((m) => m.modelId === selectedId);
+  const selectedPreset = selected ? presetByProvider.get(selected.providerId) : undefined;
 
   const isStarredModel = (m: ModelOption) => starred.includes(`${m.providerId}:${m.modelId}`);
 
@@ -56,6 +84,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
         onClick={onLockedClick}
         title="Model is locked for this session. Click to fork into a new session."
       >
+        {selected && <ProviderTile preset={selectedPreset} apiStyle={selected.apiStyle} />}
         {!compact && (
           <span className="truncate max-w-[160px]">{selected?.alias ?? selectedId ?? 'Unknown'}</span>
         )}
@@ -135,21 +164,24 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
         <Button
           variant="ghost"
           size="sm"
-          className={cn('h-8 gap-1.5 text-[0.85rem] px-2 text-input-foreground hover:text-foreground', compact && 'px-1.5')}
+          className={cn('h-8 gap-1 text-[0.85rem] px-2 text-input-foreground hover:text-foreground', compact && 'px-1.5')}
           disabled={isLoading || models.length === 0}
         >
           {!compact &&
             (isLoading ? (
               <SkeletonBar className="h-3 w-16" aria-hidden />
             ) : (
-              <span>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+              <>
+                {selected && <ProviderTile preset={selectedPreset} apiStyle={selected.apiStyle} />}
+                <span className='truncate max-w-[100px]'>{selected?.alias ?? (models.length === 0 ? 'No models' : 'Select model')}</span>
+              </>
             ))}
-          <ChevronDown className="size-4 text-muted-foreground/60" />
+          <ChevronDown className="size-4 text-input-foreground/60" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" side="top" sideOffset={6} className="w-[350px] max-w-[calc(100vw-2rem)] h-[250px] p-0 overflow-hidden flex flex-col">
         {/* ── Search — spans both panes ── */}
-        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60">
+        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-border/60 bg-input">
           <Search className="size-3.5 text-muted-foreground/50 shrink-0" />
           <input
             autoFocus
@@ -185,7 +217,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
             className="w-full bg-transparent border-0 outline-none text-[0.75rem] text-foreground placeholder:text-muted-foreground/50"
           />
           {searching && (
-            <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
+            <span className="text-[0.7143rem] font-mono text-muted-foreground/50 shrink-0">
               {filtered.length} match{filtered.length === 1 ? '' : 'es'}
             </span>
           )}
@@ -195,7 +227,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
               onClick={() => setQuery('')}
               className="text-muted-foreground/50 hover:text-foreground text-md shrink-0"
             >
-              ✕
+              <XIcon className="size-3.5" />
             </button>
           )}
         </div>
@@ -230,18 +262,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
                   setRail(e.id);
                   setActiveIdx(0);
                 }}
-                tile={
-                  <span
-                    className="size-4 rounded flex items-center justify-center text-white shrink-0"
-                    style={
-                      e.apiStyle === 'anthropic'
-                        ? { background: 'linear-gradient(135deg,#d97757,#b8553f)' }
-                        : { background: '#10a37f' }
-                    }
-                  >
-                    <ProviderLogo apiStyle={e.apiStyle} className="size-2.5" />
-                  </span>
-                }
+                tile={<ProviderTile preset={presetByProvider.get(e.id)} apiStyle={e.apiStyle} />}
                 name={e.name}
               />
             ))}
@@ -268,7 +289,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
 
             {/* ── Empty states ── */}
             {visible.length === 0 && q && !isLoading && (
-              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center">
+              <div className="px-2 py-6 text-[0.7857rem] text-muted-foreground/60 text-center">
                 No models match &quot;{query}&quot;.
               </div>
             )}
@@ -286,7 +307,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
               </div>
             )}
             {!isLoading && models.length === 0 && (
-              <div className="px-2 py-6 text-[11px] text-muted-foreground/60 text-center">
+              <div className="px-2 py-6 text-[0.7857rem] text-muted-foreground/60 text-center">
                 No models configured.
                 <br />
                 Add a provider in Onboarding or Settings.
@@ -295,7 +316,7 @@ export function ModelSelector({ compact = false, locked = false, onLockedClick }
           </div>
         </div>
 
-        <div className="shrink-0 px-2 py-1 border-t border-border/60 text-[10px] text-muted-foreground/60 flex items-center gap-3">
+        <div className="shrink-0 px-2 py-1 border-t border-border/60 text-[0.7143rem] text-muted-foreground/60 flex items-center gap-3">
           <span><Kbd className='py-0.5'>←→</Kbd> Provider</span>
           <span><Kbd>↑↓</Kbd> Navigate</span>
           <span><Kbd>↵</Kbd> Select</span>
@@ -328,13 +349,13 @@ function RailItem({
       title={name}
       className={cn(
         'w-full flex items-center gap-1.5 px-2 py-1 text-left transition-colors',
-        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-primary/10',
         dim && 'opacity-40',
       )}
     >
       {tile}
-      <span className="flex-1 min-w-0 truncate text-[10.5px] font-medium">{name}</span>
-      <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">{count}</span>
+      <span className="flex-1 min-w-0 truncate text-[0.80rem] font-medium">{name}</span>
+      <span className="text-[0.6429rem] font-mono text-muted-foreground/50 shrink-0">{count}</span>
     </button>
   );
 }
@@ -371,7 +392,7 @@ function ModelRow({
       onMouseEnter={onHover}
       className={cn(
         'flex items-center gap-1.5 px-2 py-1 cursor-pointer overflow-hidden transition-colors',
-        active ? 'bg-accent/60' : 'hover:bg-accent/40',
+        active ? 'bg-primary/10' : 'hover:bg-primary/30',
       )}
     >
       <button

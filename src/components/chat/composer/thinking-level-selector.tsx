@@ -1,4 +1,4 @@
-import { Brain, Check, ChevronDown } from 'lucide-react';
+import { Brain, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -142,7 +142,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56 p-0 overflow-hidden">
-        <DropdownMenuLabel className="text-[11px] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2">
+        <DropdownMenuLabel className="text-[0.7857rem] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2 pt-3">
           <Brain className={cn('size-3', isOn ? 'text-reasoning' : 'text-muted-foreground/50')} /> Thinking
           <Switch
             size="sm"
@@ -153,7 +153,7 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
             title={mandatory ? 'Reasoning always on (model mandatory)' : isOn ? 'Turn thinking off' : 'Turn thinking on'}
           />
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="pt-0" />
 
         {options.length > 0 && (
           <div className={cn('px-2 py-1.5 flex flex-col gap-0.5', !isOn && 'pointer-events-none opacity-50')}>
@@ -164,13 +164,13 @@ export function ThinkingLevelSelector({ compact = false }: { compact?: boolean }
                 className={cn(
                   'justify-between rounded-md px-2.5 py-1.5 text-[0.85rem]',
                   isOn && o.value === current.value
-                    ? 'bg-accent text-foreground'
+                    ? 'bg-primary/10 text-foreground'
                     : 'text-muted-foreground',
                 )}
                 title={o.hint}
               >
                 {o.label}
-                {isOn && o.value === current.value && <Check className="size-3.5 text-reasoning" />}
+                {/*{isOn && o.value === current.value && <Check className="size-3.5 text-reasoning" />}*/}
               </DropdownMenuItem>
             ))}
           </div>

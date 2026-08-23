@@ -44,6 +44,7 @@ import { migrateOAuthFiles } from './agent/mcp/config.js';
 import { handleOAuthCallback } from './agent/mcp/oauth.js';
 import { setUserDataPath, appDataDir } from './appPaths.js';
 import { initUpdater, autoCheckForUpdates } from './updater.js';
+import { clearBadge } from './badge.js';
 
 // ESM doesn't provide __dirname — derive it from import.meta.url.
 const __filename = fileURLToPath(import.meta.url);
@@ -116,7 +117,10 @@ function createWindow() {
   // Open external links in the OS browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
-      shell.openExternal(url);
+      // Rejection here (no default browser handler, OS refusal) would otherwise
+      // surface as an unhandledRejection — log it instead.
+      shell.openExternal(url).catch((e) =>
+        log.warn('openExternal failed', { url, error: String(e) }));
     }
     return { action: 'deny' };
   });
@@ -125,6 +129,13 @@ function createWindow() {
     mainWindow?.webContents.send('tide:window:fullscreen', true));
   mainWindow.on('leave-full-screen', () =>
     mainWindow?.webContents.send('tide:window:fullscreen', false));
+
+  // Returning to the app reads every completed-turn notification — drop the
+  // dock badge count.
+  mainWindow.on('focus', () => clearBadge());
+  mainWindow.on('show', () => {
+    if (mainWindow?.isFocused()) clearBadge();
+  });
 
   // Block navigation away from the app — except OAuth callbacks.
   mainWindow.webContents.on('will-navigate', (e, url) => {

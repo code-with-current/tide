@@ -101,7 +101,7 @@ export function SkillsSection() {
           />
         </div>
         <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
-          <SelectTrigger className="w-[8.5rem] h-8 text-[12px] capitalize">
+          <SelectTrigger className="w-[8.5rem] h-8 text-[0.8571rem] capitalize">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -123,7 +123,7 @@ export function SkillsSection() {
             shadowedUserNames.has(item.name) ? (
               <span
                 title="A project-level skill with this name shadows this one."
-                className="text-[9px] text-warn uppercase tracking-wide"
+                className="text-[0.6429rem] text-warn uppercase tracking-wide"
               >
                 shadowed
               </span>

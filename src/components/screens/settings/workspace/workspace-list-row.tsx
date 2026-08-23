@@ -74,7 +74,7 @@ export function WorkspaceListRow({
             }
           }}
           className={cn(
-            "w-full flex flex-col gap-1 rounded-md px-2.5 py-[7px] text-left text-[12px] transition-colors cursor-default outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "w-full flex flex-col gap-1 rounded-md px-2.5 py-[7px] text-left text-[0.8571rem] transition-colors cursor-default outline-none focus-visible:ring-1 focus-visible:ring-ring",
             active
               ? "bg-secondary text-foreground"
               : "text-foreground hover:bg-secondary/50 hover:text-foreground/90",

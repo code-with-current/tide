@@ -22,6 +22,10 @@ Wrap the diagram in a fenced code block with language `mermaid`. Keep diagrams r
 - Do NOT mix diagram types — a `classDiagram` cannot contain `erDiagram` relationships
 - Use `<br/>` for line breaks inside quoted labels, never a literal newline
 - Avoid HTML entities (`&amp;`, `&lt;`, `&gt;`) inside labels — use the raw character (`&`, `<`, `>`)
+- **NEVER use `end` as a node id or node name.** `end` is the block terminator keyword: `end[Finish]` or `A --> end` breaks the whole parse. Use `Finish[Finish]` or `Terminal`.
+- **Subgraph titles with spaces must be quoted:** `subgraph "Main Flow"`. Bare `subgraph Main Flow` fails.
+- **No inline `%%` comments after code** (`A --> B %% note`). `%%` comments must be full lines; trailing ones derail the lexer.
+- **Do NOT emit `style`, `classDef`, `class`, `linkStyle`, or `click` lines.** A style rule referencing a node id that doesn't exist (typo, renamed, hallucinated) fails the entire render. Plain nodes and edges only.
 - **NEVER put braces `{ }` in sequenceDiagram message text.** Mermaid treats `{` as a block opener and the parser fails. Instead of `API-->>A: { data: currentUser }`, write `API-->>A: data: currentUser` or `API-->>A: returns currentUser data`. This applies to ALL message lines (`->>`, `-->>`, `--)`, `-x`).
 - In `sequenceDiagram`: keep messages as plain text. Avoid `()`, `?`, `...`, and `{}` in message content unless absolutely necessary — describe the action in words instead.
 

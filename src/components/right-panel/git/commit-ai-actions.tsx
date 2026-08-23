@@ -291,13 +291,13 @@ export function CommitAiActions({
                 <ul className="space-y-1.5">
                   {parseFindings(reviewSlot.text, files ?? []).map(({ text, file }, i) => (
                     <li key={i}>
-                      <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-muted-foreground">{text}</p>
+                      <p className="whitespace-pre-wrap text-[0.8571rem] leading-relaxed text-muted-foreground">{text}</p>
                       {file && (
                         <button
                           type="button"
                           onClick={() => onOpenFile(file)}
                           title={`Open ${file.path} diff at this commit`}
-                          className="mt-0.5 inline-flex items-center gap-1 max-w-full font-mono text-[11px] text-primary/80 hover:text-primary transition-colors"
+                          className="mt-0.5 inline-flex items-center gap-1 max-w-full font-mono text-[0.7857rem] text-primary/80 hover:text-primary transition-colors"
                         >
                           <span aria-hidden>→</span>
                           <span className="truncate">{file.path}</span>
@@ -329,7 +329,7 @@ function AiButton({ label, title, busy, disabled, onClick }: {
       disabled={disabled || busy}
       title={title}
       aria-label={title}
-      className="flex items-center gap-1 h-6 px-1.5 rounded-md text-[11px] text-muted-foreground/80 hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+      className="flex items-center gap-1 h-6 px-1.5 rounded-md text-[0.7857rem] text-muted-foreground/80 hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50 disabled:pointer-events-none"
     >
       {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
       {label}
@@ -353,7 +353,7 @@ function ResultCard({ title, busy, queued, text, onDismiss, children }: {
         ) : (
           <Sparkles className="size-3 text-primary/70" />
         )}
-        <span className="text-[11px] font-medium text-muted-foreground">{title}</span>
+        <span className="text-[0.7857rem] font-medium text-muted-foreground">{title}</span>
         <div className="flex-1" />
         <button
           type="button"
@@ -366,11 +366,11 @@ function ResultCard({ title, busy, queued, text, onDismiss, children }: {
         </button>
       </div>
       {busy ? (
-        <p className="text-[12px] leading-relaxed text-muted-foreground/70">
+        <p className="text-[0.8571rem] leading-relaxed text-muted-foreground/70">
           {queued ? 'Waiting for the current turn to finish…' : text || 'Thinking…'}
         </p>
       ) : children ?? (
-        <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-muted-foreground">{text}</p>
+        <p className="whitespace-pre-wrap text-[0.8571rem] leading-relaxed text-muted-foreground">{text}</p>
       )}
     </div>
   );

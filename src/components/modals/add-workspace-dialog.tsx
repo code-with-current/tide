@@ -524,7 +524,7 @@ export function AddWorkspaceDialog() {
             )}
           </div>
           <div className="flex-1">
-            <DialogTitle className="text-[15px] font-semibold text-left tracking-tight">
+            <DialogTitle className="text-[1.0714rem] font-semibold text-left tracking-tight">
               {phase === 'creating' ? 'Creating workspace…'
                 : phase === 'indexing' ? 'Indexing codebase…'
                 : phase === 'done' ? 'Workspace ready'
@@ -533,7 +533,7 @@ export function AddWorkspaceDialog() {
                 : phase === 'template' ? 'From Template'
                 : 'New Workspace'}
             </DialogTitle>
-            <p className="text-[11px] text-muted-foreground/60 mt-0.5">
+            <p className="text-[0.7857rem] text-muted-foreground/60 mt-0.5">
               {phase === 'creating' ? 'Setting up the workspace.'
                 : phase === 'indexing' ? 'Embedding code chunks — this may take a minute.'
                 : phase === 'done' ? 'Opening session view…'
@@ -563,7 +563,7 @@ export function AddWorkspaceDialog() {
               ) : (
                 <Loader2 className="size-4 animate-spin text-muted-foreground/60" />
               )}
-              <div className="text-[13px] font-medium min-w-0 truncate">
+              <div className="text-[0.9286rem] font-medium min-w-0 truncate">
                 {phase === 'creating' && (activeCreationLabel ? STEP_LABELS[activeCreationLabel] + '…' : 'Setting up workspace…')}
                 {phase === 'indexing' && (ragProgress && ragProgress.phase !== 'done' && ragProgress.phase !== 'failed'
                   ? phaseLabel(ragProgress.phase) + '…'
@@ -571,7 +571,7 @@ export function AddWorkspaceDialog() {
                 {phase === 'done' && 'Workspace ready'}
               </div>
               {ragDeterminate && (
-                <span className="ml-auto text-[11px] font-mono text-muted-foreground tabular-nums">{ragPct}%</span>
+                <span className="ml-auto text-[0.7857rem] font-mono text-muted-foreground tabular-nums">{ragPct}%</span>
               )}
             </div>
 
@@ -608,8 +608,8 @@ export function AddWorkspaceDialog() {
             <div className="rounded-md px-4 py-3 border border-destructive/20 bg-destructive/5 flex items-start gap-2.5">
               <AlertCircle className="size-4 text-destructive mt-0.5 shrink-0" />
               <div className="flex-1">
-                <div className="text-[12px] font-medium text-destructive">Failed to create workspace</div>
-                <div className="text-[11px] text-muted-foreground/60 mt-1">{phaseError}</div>
+                <div className="text-[0.8571rem] font-medium text-destructive">Failed to create workspace</div>
+                <div className="text-[0.7857rem] text-muted-foreground/60 mt-1">{phaseError}</div>
               </div>
             </div>
             <Button
@@ -652,19 +652,19 @@ export function AddWorkspaceDialog() {
         {phase === 'newProject' && (
           <>
             <div className="px-5 py-4">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Project name</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Project name</label>
               <Input
-                className="font-mono text-[12px] h-[34px] mb-4"
+                className="font-mono text-[0.8571rem] h-[34px] mb-4"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="my-new-project"
                 autoFocus
               />
 
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Parent folder</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Parent folder</label>
               <div className="flex gap-2 mb-2.5">
                 <Input
-                  className="font-mono text-[12px] flex-1 h-[34px]"
+                  className="font-mono text-[0.8571rem] flex-1 h-[34px]"
                   value={newParent}
                   onChange={(e) => setNewParent(e.target.value)}
                   placeholder="/path/to/parent"
@@ -676,10 +676,10 @@ export function AddWorkspaceDialog() {
 
               {/* Live preview of the synthesized path */}
               {newParent && newName.trim() && (
-                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[11px] text-muted-foreground/60 border border-border bg-secondary mb-4">
+                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[0.7857rem] text-muted-foreground/60 border border-border bg-secondary mb-4">
                   <FilePlus2 className="size-3.5" />
                   <span>Will create</span>
-                  <code className="font-mono text-[10px] text-foreground/80">
+                  <code className="font-mono text-[0.7143rem] text-foreground/80">
                     {newParent.replace(/\/+$/, '')}/{newName.trim()}
                   </code>
                 </div>
@@ -706,19 +706,19 @@ export function AddWorkspaceDialog() {
         {phase === 'template' && (
           <>
             <div className="px-5 py-4">
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Project name</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Project name</label>
               <Input
-                className="font-mono text-[12px] h-[34px] mb-4"
+                className="font-mono text-[0.8571rem] h-[34px] mb-4"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="my-new-project"
                 autoFocus
               />
 
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Parent folder</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Parent folder</label>
               <div className="flex gap-2 mb-4">
                 <Input
-                  className="font-mono text-[12px] flex-1 h-[34px]"
+                  className="font-mono text-[0.8571rem] flex-1 h-[34px]"
                   value={newParent}
                   onChange={(e) => setNewParent(e.target.value)}
                   placeholder="/path/to/parent"
@@ -728,7 +728,7 @@ export function AddWorkspaceDialog() {
                 </Button>
               </div>
 
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Template</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Template</label>
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {TEMPLATES.map((t) => {
                   const logo = TEMPLATE_LOGOS[t.id];
@@ -751,10 +751,10 @@ export function AddWorkspaceDialog() {
                         ) : (
                           <Folder className={cn('size-4', selected ? 'text-primary' : 'text-muted-foreground')} />
                         )}
-                        <span className="text-[12px] font-semibold tracking-tight">{t.label}</span>
+                        <span className="text-[0.8571rem] font-semibold tracking-tight">{t.label}</span>
                         {selected && <Check className="size-3 text-primary ml-auto" />}
                       </div>
-                      <p className="text-[10.5px] text-muted-foreground/70 leading-snug">{t.description}</p>
+                      <p className="text-[0.75rem] text-muted-foreground/70 leading-snug">{t.description}</p>
                     </button>
                   );
                 })}
@@ -762,10 +762,10 @@ export function AddWorkspaceDialog() {
 
               {/* Live path preview */}
               {newParent && newName.trim() && (
-                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[11px] text-muted-foreground/60 border border-border bg-secondary mb-4">
+                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[0.7857rem] text-muted-foreground/60 border border-border bg-secondary mb-4">
                   <FilePlus2 className="size-3.5" />
                   <span>Will create</span>
-                  <code className="font-mono text-[10px] text-foreground/80">
+                  <code className="font-mono text-[0.7143rem] text-foreground/80">
                     {newParent.replace(/\/+$/, '')}/{newName.trim()}
                   </code>
                 </div>
@@ -776,12 +776,12 @@ export function AddWorkspaceDialog() {
                   the card is hidden just like the New Project flow. */}
               {templateId !== 'empty' && (
                 <div className="rounded-[10px] p-3.5 border border-emerald-500/15 bg-emerald-500/[0.04] flex items-start gap-3">
-                  <div className="size-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-[15px]">
+                  <div className="size-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-[1.0714rem]">
                     ◈
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-semibold">Enable RAG for this workspace</div>
-                    <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                    <div className="text-[0.8571rem] font-semibold">Enable RAG for this workspace</div>
+                    <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed">
                       Indexes your codebase locally so the agent can search it semantically.
                     </div>
                     <ModelDownloadSection
@@ -817,7 +817,7 @@ export function AddWorkspaceDialog() {
         {phase === 'form' && (
         <div className="px-5 py-4">
           {/* Source tabs */}
-          <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Source</label>
+          <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Source</label>
           <div className="flex gap-1 mb-4 bg-secondary rounded-md p-[3px]">
             <SourceTab
               active={source === 'local'}
@@ -836,10 +836,10 @@ export function AddWorkspaceDialog() {
           {/* LOCAL flow */}
           {source === 'local' && (
             <>
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Repository path</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Repository path</label>
               <div className="flex gap-2 mb-3">
                 <Input
-                  className="font-mono text-[12px] flex-1 h-[34px]"
+                  className="font-mono text-[0.8571rem] flex-1 h-[34px]"
                   value={localPath}
                   onChange={(e) => setLocalPath(e.target.value)}
                   placeholder="/path/to/your/repo"
@@ -851,26 +851,26 @@ export function AddWorkspaceDialog() {
 
               {/* Git detection */}
               {!localPath && (
-                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[11px] text-muted-foreground/50 border border-border bg-secondary">
+                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[0.7857rem] text-muted-foreground/50 border border-border bg-secondary">
                   <Folder className="size-3.5" /> Browse for a folder containing a .git directory.
                 </div>
               )}
               {localPath && gitChecking && (
-                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[11px] text-muted-foreground/60 border border-border bg-secondary">
+                <div className="rounded-md px-3 py-2 flex items-center gap-2 text-[0.7857rem] text-muted-foreground/60 border border-border bg-secondary">
                   <Loader2 className="size-3.5 animate-spin" /> Checking for git repository…
                 </div>
               )}
               {localPath && !gitChecking && gitInfo && (
                 <div
-                  className="rounded-md px-3 py-2 flex items-center gap-2 text-[11px] border flex-wrap"
+                  className="rounded-md px-3 py-2 flex items-center gap-2 text-[0.7857rem] border flex-wrap"
                   style={{ background: 'rgba(52,211,153,0.06)', borderColor: 'rgba(52,211,153,0.2)', color: 'var(--success)' }}
                 >
                   <CheckCircle2 className="size-3.5" />
                   <span>Git repository detected</span>
                   <span className="text-muted-foreground/50">·</span>
-                  <code className="font-mono text-[10px] opacity-80">{gitInfo.branch} @ {gitInfo.headCommit}</code>
+                  <code className="font-mono text-[0.7143rem] opacity-80">{gitInfo.branch} @ {gitInfo.headCommit}</code>
                   <span className="text-muted-foreground/50">·</span>
-                  <code className="font-mono text-[10px] opacity-80">{gitInfo.fileCount.toLocaleString()} files</code>
+                  <code className="font-mono text-[0.7143rem] opacity-80">{gitInfo.fileCount.toLocaleString()} files</code>
                 </div>
               )}
                 {localPath && !gitChecking && gitError && (
@@ -879,8 +879,8 @@ export function AddWorkspaceDialog() {
                       <TriangleAlert className="size-4" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12px] font-semibold">{gitError}</div>
-                      <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+                      <div className="text-[0.8571rem] font-semibold">{gitError}</div>
+                      <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed">
                         Initialize git repo on this folder.
                       </div>
 
@@ -894,20 +894,20 @@ export function AddWorkspaceDialog() {
           {/* REMOTE flow */}
           {source === 'remote' && (
             <>
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Git URL</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Git URL</label>
               <div className="flex gap-2 mb-3">
                 <Input
-                  className="font-mono text-[12px] flex-1 h-[34px]"
+                  className="font-mono text-[0.8571rem] flex-1 h-[34px]"
                   value={remoteUrl}
                   onChange={(e) => setRemoteUrl(e.target.value)}
                   placeholder="https://github.com/owner/repo.git"
                 />
               </div>
 
-              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Clone destination</label>
+              <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-2">Clone destination</label>
               <div className="flex gap-2 mb-2">
                 <Input
-                  className="font-mono text-[12px] flex-1 h-[34px]"
+                  className="font-mono text-[0.8571rem] flex-1 h-[34px]"
                   value={cloneDir}
                   onChange={(e) => setCloneDir(e.target.value)}
                   placeholder="/parent/directory"
@@ -917,7 +917,7 @@ export function AddWorkspaceDialog() {
                 </Button>
               </div>
               {cloneDir && (
-                <div className="text-[10px] text-muted-foreground/50 font-mono mt-1.5">
+                <div className="text-[0.7143rem] text-muted-foreground/50 font-mono mt-1.5">
                   Repo will be cloned to{' '}
                   <code className="bg-secondary px-1.5 py-0.5 rounded border border-border">
                     {cloneDir}/&lt;repo-name&gt;
@@ -939,25 +939,25 @@ export function AddWorkspaceDialog() {
               <Terminal className="size-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-semibold">Add Script</div>
-              <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+              <div className="text-[0.8571rem] font-semibold">Add Script</div>
+              <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed">
                 Bind Install & Run commands to this workspace.
               </div>
               {addScript && (
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Install</label>
+                    <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Install</label>
                     <Input
-                      className="font-mono text-[12px] h-[34px]"
+                      className="font-mono text-[0.8571rem] h-[34px]"
                       value={installCmd}
                       onChange={(e) => setInstallCmd(e.target.value)}
                       placeholder="npm install"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Running</label>
+                    <label className="text-[0.7143rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground/50 block mb-1.5">Running</label>
                     <Input
-                      className="font-mono text-[12px] h-[34px]"
+                      className="font-mono text-[0.8571rem] h-[34px]"
                       value={runCmd}
                       onChange={(e) => setRunCmd(e.target.value)}
                       placeholder="npm run dev"
@@ -974,15 +974,15 @@ export function AddWorkspaceDialog() {
 
           {/* RAG enable card */}
           <div className="rounded-[10px] p-3.5 border border-emerald-500/15 bg-emerald-500/[0.04] flex items-start gap-3 mb-3">
-            <div className="size-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-[15px]">
+            <div className="size-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 text-emerald-400 text-[1.0714rem]">
               ◈
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-semibold">Enable RAG for this workspace</div>
-              <div className="text-[11px] text-muted-foreground/60 mt-0.5 leading-relaxed">
+              <div className="text-[0.8571rem] font-semibold">Enable RAG for this workspace</div>
+              <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed">
                 Indexes your codebase locally so the agent can search it semantically.
               </div>
-              <div className="text-[10px] text-muted-foreground/40 mt-1 font-mono">
+              <div className="text-[0.7143rem] text-muted-foreground/40 mt-1 font-mono">
                 all-MiniLM-L6-v2-code-search-512 · 384-dim · bundled
               </div>
               <ModelDownloadSection
@@ -1032,11 +1032,11 @@ function StepRow({ label, status, detail }: { label: string; status: StepStatus;
         {status === 'done' && <Check className="size-3.5 text-emerald-400" />}
         {status === 'active' && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         {status === 'pending' && <span className="size-2 rounded-full border border-muted-foreground/30" />}
-        {status === 'skipped' && <span className="text-[11px] text-muted-foreground/40">–</span>}
+        {status === 'skipped' && <span className="text-[0.7857rem] text-muted-foreground/40">–</span>}
       </span>
       <span
         className={cn(
-          'text-[12px]',
+          'text-[0.8571rem]',
           status === 'done' && 'text-foreground',
           status === 'active' && 'text-foreground',
           status === 'pending' && 'text-muted-foreground',
@@ -1046,7 +1046,7 @@ function StepRow({ label, status, detail }: { label: string; status: StepStatus;
         {label}
       </span>
       {detail && status === 'active' && (
-        <span className="text-[10.5px] text-muted-foreground/60 font-mono tabular-nums truncate">{detail}</span>
+        <span className="text-[0.75rem] text-muted-foreground/60 font-mono tabular-nums truncate">{detail}</span>
       )}
     </div>
   );
@@ -1067,7 +1067,7 @@ function ModelDownloadSection({
   return (
     <div className="mt-2.5">
       {dlState === 'idle' && (
-        <Button variant="secondary" size="sm" className="h-[28px] text-[11px] gap-1.5" onClick={onDownload}>
+        <Button variant="secondary" size="sm" className="h-[28px] text-[0.7857rem] gap-1.5" onClick={onDownload}>
           <Download className="size-3" /> Download model (22 MB)
         </Button>
       )}
@@ -1083,7 +1083,7 @@ function ModelDownloadSection({
               }}
             />
           </div>
-          <div className="text-[10px] text-muted-foreground/50 font-mono flex items-center gap-1.5">
+          <div className="text-[0.7143rem] text-muted-foreground/50 font-mono flex items-center gap-1.5">
             <Loader2 className="size-2.5 animate-spin" />
             {progress && progress.total > 0
               ? `${(progress.received / 1048576).toFixed(1)} / ${(progress.total / 1048576).toFixed(1)} MB`
@@ -1092,7 +1092,7 @@ function ModelDownloadSection({
         </div>
       )}
       {dlState === 'done' && (
-        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/80">
+        <div className="flex items-center gap-1.5 text-[0.7857rem] text-emerald-400/80">
           <CheckCircle2 className="size-3.5" />
           Model ready
           <span className="text-muted-foreground/30 font-mono ml-1">all-MiniLM-L6-v2 · 384-dim</span>
@@ -1100,11 +1100,11 @@ function ModelDownloadSection({
       )}
       {dlState === 'error' && (
         <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-[11px] text-destructive/70">
+          <div className="flex items-center gap-1.5 text-[0.7857rem] text-destructive/70">
             <AlertCircle className="size-3.5" />
             {dlError ?? 'Download failed'}
           </div>
-          <Button variant="secondary" size="sm" className="h-[24px] text-[10px] gap-1.5" onClick={onDownload}>
+          <Button variant="secondary" size="sm" className="h-[24px] text-[0.7143rem] gap-1.5" onClick={onDownload}>
             <Download className="size-2.5" /> Retry
           </Button>
         </div>
@@ -1122,7 +1122,7 @@ function SourceTab({
     <button
       onClick={onClick}
       className={cn(
-        'flex-1 py-1.5 px-3 rounded-[5px] text-[12px] font-medium text-center transition-all flex items-center justify-center gap-1.5 border-none',
+        'flex-1 py-1.5 px-3 rounded-[5px] text-[0.8571rem] font-medium text-center transition-all flex items-center justify-center gap-1.5 border-none',
         active
           ? 'bg-card text-foreground shadow-sm'
           : 'bg-transparent text-muted-foreground hover:text-foreground/80',
@@ -1163,8 +1163,8 @@ function ChoiceCard({
         <span className="[&>svg]:size-5">{icon}</span>
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-semibold tracking-tight">{title}</div>
-        <div className="text-[11px] text-muted-foreground/70 mt-0.5 leading-relaxed">{description}</div>
+        <div className="text-[0.9286rem] font-semibold tracking-tight">{title}</div>
+        <div className="text-[0.7857rem] text-muted-foreground/70 mt-0.5 leading-relaxed">{description}</div>
       </div>
     </button>
   );

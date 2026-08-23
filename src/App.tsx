@@ -20,9 +20,11 @@ function App() {
   const fontScale = useUi((s) => s.fontScale);
   const reduceMotion = useUi((s) => s.reduceMotion);
   const appTheme = useUi((s) => s.appTheme);
+  const toolColorMode = useUi((s) => s.toolColorMode);
   useEffect(() => {
     document.documentElement.style.fontSize = `${fontScale}px`;
     document.documentElement.setAttribute('data-theme', appTheme);
+    document.documentElement.setAttribute('data-tool-colors', toolColorMode === 'monochrome' ? 'off' : 'on');
     document.documentElement.classList.toggle('reduce-motion', reduceMotion);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

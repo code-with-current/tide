@@ -124,7 +124,7 @@ export const McpServerRow = memo(function McpServerRow({
                 <button
                   type="button"
                   onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-md border border-border/60 bg-secondary/60 text-[10px] text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-secondary transition-colors cursor-pointer shrink-0"
+                  className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded-md border border-border/60 bg-secondary/60 text-[0.7143rem] text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-secondary transition-colors cursor-pointer shrink-0"
                   title="View available tools"
                 >
                   <Wrench className="size-2.5" />
@@ -140,20 +140,20 @@ export const McpServerRow = memo(function McpServerRow({
               >
                 <div className="px-3 py-2 border-b border-border flex items-center gap-1.5 shrink-0">
                   <Wrench className="size-3 text-muted-foreground" />
-                  <span className="text-[11px] font-medium">{toolCount} {toolCount === 1 ? 'tool' : 'tools'}</span>
-                  <span className="text-[10px] text-muted-foreground/50 truncate">· {name}</span>
+                  <span className="text-[0.7857rem] font-medium">{toolCount} {toolCount === 1 ? 'tool' : 'tools'}</span>
+                  <span className="text-[0.7143rem] text-muted-foreground/50 truncate">· {name}</span>
                 </div>
                 <div className="overflow-y-auto scroll py-1">
                   {(toolNames ?? []).map((t) => (
                     <div
                       key={t}
-                      className="px-3 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                      className="px-3 py-1 text-[0.7857rem] font-mono text-muted-foreground hover:text-foreground hover:bg-secondary/60"
                     >
                       {t}
                     </div>
                   ))}
                   {(!toolNames || toolNames.length === 0) && (
-                    <div className="px-3 py-2 text-[11px] text-muted-foreground/50">
+                    <div className="px-3 py-2 text-[0.7857rem] text-muted-foreground/50">
                       {toolCount} tools available.
                     </div>
                   )}
@@ -334,7 +334,7 @@ function TransportBadge({ transport }: { transport: 'stdio' | 'sse' | 'http' }) 
   };
   return (
     <span
-      className={`text-[9px] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[transport]}`}
+      className={`text-[0.6429rem] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[transport]}`}
     >
       {transport}
     </span>
@@ -354,7 +354,7 @@ function ScopeBadge({ scope }: { scope: 'user' | 'project' | 'builtin' }) {
   };
   return (
     <span
-      className={`text-[9px] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[scope]}`}
+      className={`text-[0.6429rem] uppercase tracking-wide px-1 py-0.5 rounded border font-mono ${styles[scope]}`}
     >
       {labels[scope]}
     </span>

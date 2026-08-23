@@ -3,7 +3,7 @@
 import { checkPermission } from './permission.js';
 import { getToolMeta } from './tools/tool-meta.js';
 import { waitForPermissionResolve, storePendingAsk } from './permission-resolver.js';
-import { evaluateRules, getSessionRules, loadPermissionRules, type RuleSet } from './permissions/rules.js';
+import { evaluateRules, getSessionRules, loadPermissionRules, deriveRuleSpec, type RuleSet } from './permissions/rules.js';
 import { currentToolCallId } from './tools/tool-call-context.js';
 import { createLogger } from '../logger.js';
 import type { ToolContext } from './tools/tool-context.js';
@@ -59,7 +59,7 @@ export async function withPermission<T>(
   // when the user picks "Always allow — session/project" on the card.
   storePendingAsk(ctx.sessionId, toolCallId, toolName, argsObj, ctx.workspaceRoot);
   log.info('asking user', { tool: toolName, mode: ctx.autonomyMode, tier: meta.riskTier, toolCallId });
-  ctx.emit({ type: 'permission', toolCallId, toolName, args, decision });
+  ctx.emit({ type: 'permission', toolCallId, toolName, args, decision, ruleSpec: deriveRuleSpec(toolName, argsObj) });
   const verdict = await waitForPermissionResolve(ctx.sessionId, toolCallId);
 
   // Escalation sticks for the rest of the turn.

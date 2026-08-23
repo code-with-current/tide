@@ -1,12 +1,10 @@
-import { Shield, ChevronDown, Check, Map, Pencil, Zap } from 'lucide-react';
+import { Shield, ChevronDown, Map, Pencil, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuItem,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
@@ -45,26 +43,23 @@ export function PermissionModeSelector({ compact = false }: { compact?: boolean 
           <ChevronDown className="size-4 text-input-foreground/60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="w-[300px] max-w-[calc(100vw-2rem)] p-0 overflow-hidden">
-        <DropdownMenuLabel className="text-[0.9rem] text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 px-3 py-2 pt-3">
-          <Shield className="size-4.5" /> Permissions
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+      <DropdownMenuContent align="start" side="top" className="w-[250px] max-w-[calc(100vw-2rem)] p-0 overflow-hidden px-2 py-2">
 
+   <div className={cn('flex flex-col gap-0.5')}>
         {MODES.map((m) => (
           <DropdownMenuItem
             key={m.value}
             onClick={() => setMode(m.value)}
-            className="gap-2 py-2 cursor-pointer items-start"
+            className={cn("gap-2 py-2 px-4 cursor-pointer items-start", m.value === mode && "bg-primary/10")}
           >
             <span className="mt-0.5">{m.icon}</span>
             <div className="flex-1 min-w-0">
-              <div className="text-[0.9rem] font-medium">{m.label}</div>
-              <div className="text-[0.75rem] text-muted-foreground/60">{m.hint}</div>
+              <div className="text-[0.85rem] font-medium">{m.label}</div>
+              <div className="text-[0.70rem] text-muted-foreground/60">{m.hint}</div>
             </div>
-            {m.value === mode && <Check className="size-3.5 text-primary mt-0.5" />}
           </DropdownMenuItem>
         ))}
+      </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -38,6 +38,14 @@ export interface Provider {
   apiKey?: string;
   enabled: boolean;
   models: Model[];
+  /** Rolling usage windows metered against per-provider token limits
+   *  (Claude-style). Absent/0 = unlimited. */
+  limits?: {
+    /** Max tokens in any rolling 5-hour window. */
+    fiveHourTokens?: number;
+    /** Max tokens in any rolling 7-day window. */
+    weeklyTokens?: number;
+  };
 }
 
 /** User-defined model entry: alias + provider model ID + context window. */
@@ -445,6 +453,9 @@ export interface ToolCall {
    *  approval. Absent on non-gated / legacy tool calls (renders as the plain
    *  ask card). */
   gateDecision?: 'ask' | 'blocked';
+  /** Rule spec an "Allow (…)" session approval would add, e.g. `bash(cat)`,
+   *  `edit_file(src/lib/*)`. Derived at ask time and displayed on the card. */
+  allowRule?: string;
   /** Short, model-facing summary. */
   output?: string;
   /** Live sub-agent report for dispatch_agent — streams into the block
@@ -573,7 +584,7 @@ export interface Usage {
 // Right-panel tabs
 // ============================================================
 
-export type RightTabKind = 'git' | 'files' | 'agents' | 'terminal' | 'browser';
+export type RightTabKind = 'home' | 'git' | 'files' | 'agents' | 'terminal' | 'browser';
 
 export interface RightTab {
   kind: RightTabKind;

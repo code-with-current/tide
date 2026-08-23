@@ -57,7 +57,7 @@ export function NoWorkspaceState() {
 
         </div>
 
-        <div className="text-[11px] text-muted-foreground/60 max-w-md text-center">
+        <div className="text-[0.7857rem] text-muted-foreground/60 max-w-md text-center">
           You can work on multiple worktrees simultaneously.
           Each session can have an isolated worktree under <Tag>.agent/worktrees/&lt;session&gt;</Tag>.
         </div>

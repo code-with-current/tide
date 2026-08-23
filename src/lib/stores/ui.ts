@@ -4,6 +4,7 @@ import type { AutonomyMode, ThinkingLevel, SessionStream, ToolCall, DiffHunk } f
 import { updateSessionSettings } from '@/lib/api/client';
 import { setPlatformDefaults } from '@/lib/shortcuts';
 import { createLogger } from '@/lib/logger';
+import { useTabs } from './tabs';
 
 const log = createLogger('ui');
 
@@ -147,6 +148,13 @@ export interface PendingFork {
   sourceTitle: string;
   sourceModelId: string;
   origin: 'menu' | 'result' | 'model';
+}
+
+/** Worktree intent for the new-session screen — set by the branch popover's
+ *  "Worktrees +" action. EmptyChatState consumes it to pre-enable isolation
+ *  (and preselect the base branch) so the session starts isolated. */
+export interface PendingWorktree {
+  baseBranch?: string;
 }
 
 export interface DraftSession {
@@ -371,6 +379,10 @@ interface UiState {
    *  on send, dismissal, or any navigation that leaves the fork draft. */
   pendingFork: PendingFork | null;
 
+  /** Worktree intent — see PendingWorktree. Transient; consumed by the
+   *  new-session screen on arrival. */
+  pendingWorktree: PendingWorktree | null;
+
   /** Session ids whose title is currently being LLM-generated. Drives a
    *  shimmer animation on the sidebar title while the fire-and-forget
    *  generateSessionTitle call is in flight. */
@@ -401,6 +413,8 @@ interface UiState {
   deleteDraft: (id: string) => void;
   /** Set/clear the fork intent shown on the new-session screen. */
   setPendingFork: (fork: PendingFork | null) => void;
+  /** Set/clear the worktree intent consumed by the new-session screen. */
+  setPendingWorktree: (wt: PendingWorktree | null) => void;
   /** Title-generation flag actions (shimmer on the sidebar title). */
   addTitleGenerating: (sessionId: string) => void;
   removeTitleGenerating: (sessionId: string) => void;
@@ -499,7 +513,10 @@ interface UiState {
   terminalTheme: string;
   terminalFontSize: number;
   appTheme: string;
-  setAppearance: (patch: Partial<Pick<UiState, 'fontScale' | 'reduceMotion' | 'terminalTheme' | 'terminalFontSize' | 'appTheme'>>) => void;
+  /** Tool icon/text tinting in the chat stream: 'colorful' (per-category
+   *  palette) or 'monochrome' (muted foreground everywhere). */
+  toolColorMode: 'colorful' | 'monochrome';
+  setAppearance: (patch: Partial<Pick<UiState, 'fontScale' | 'reduceMotion' | 'terminalTheme' | 'terminalFontSize' | 'appTheme' | 'toolColorMode'>>) => void;
 
   // ─── Chat stream ────────────────────────────────────────────
   /** How the reasoning/thinking block renders in the chat stream.
@@ -589,6 +606,7 @@ export const useUi = create<UiState>()(
   draftSessions: {},
   dismissedTodoSignatures: {},
   pendingFork: null,
+  pendingWorktree: null,
   activeDraftId: null,
   titleGeneratingSessionIds: new Set<string>(),
   runningScripts: {},
@@ -603,7 +621,11 @@ export const useUi = create<UiState>()(
       if (keys.length > 50) delete next[keys[0]];
       return { dismissedTodoSignatures: next };
     }),
-  setMainView: (mainView) => set({ mainView }),
+  setMainView: (mainView) =>
+    set((s) => ({
+      mainView,
+      rightPanelOpen: mainView === 'chat' && s.mainView === 'new' ? false : s.rightPanelOpen,
+    })),
   addComposerAttachment: (key, f) =>
     set((state) => {
       const list = state.composerAttachments[key] ?? [];
@@ -645,6 +667,7 @@ export const useUi = create<UiState>()(
       activeDraftId: workspaceId ? crypto.randomUUID() : null,
       activeSessionId: null,
       mainView: 'new',
+      pendingWorktree: null,
     });
     get().setPendingFork(null);
   },
@@ -727,6 +750,7 @@ export const useUi = create<UiState>()(
       }
       return patch;
     }),
+  setPendingWorktree: (pendingWorktree) => set({ pendingWorktree }),
   // Set-based add/remove so the sidebar title re-renders (and starts/stops
   // shimmering) the instant the flag flips. New Set identity each update so
   // Zustand's shallow-equality subscribers detect the change.
@@ -779,6 +803,7 @@ export const useUi = create<UiState>()(
       activeDraftId: null,
       mainView: 'chat',
       sessionLastActive,
+      rightPanelOpen: state.mainView === 'new' ? false : state.rightPanelOpen,
     });
     if (activeSessionId) get().setPendingFork(null);
 
@@ -1094,9 +1119,19 @@ export const useUi = create<UiState>()(
             ? list[list.length - 1].id
             : undefined
           : currentActive;
+      // Closing the LAST terminal empties the panel — close it when the
+      // terminal tab is what's on screen (leaves other tabs like Files
+          // untouched). Keyed off the viewer's scope (activeSessionId), not
+      // the terminal bucket (which may be a draft).
+      const viewerKey = s.activeSessionId ?? 'default';
+      const panelShowingTerminal =
+        list.length === 0 &&
+        s.rightPanelOpen &&
+        useTabs.getState().active[viewerKey] === 'terminal';
       return {
         terminals: { ...s.terminals, [sessionId]: list },
         activeTerminal: { ...s.activeTerminal, [sessionId]: newActive },
+        ...(panelShowingTerminal ? { rightPanelOpen: false } : {}),
         // Drop any ports detected for the closed terminal — the dev
         // server behind them is gone.
         ...(s.terminalPorts[id]
@@ -1217,6 +1252,7 @@ export const useUi = create<UiState>()(
   terminalTheme: 'tide-dark',
   terminalFontSize: 11,
   appTheme: 'tide',
+  toolColorMode: 'colorful',
 
   // ─── Chat stream ──────────────────────────────────────────────
   reasoningView: 'phased',
@@ -1229,6 +1265,9 @@ export const useUi = create<UiState>()(
     }
     if (patch.appTheme !== undefined) {
       document.documentElement.setAttribute('data-theme', state.appTheme);
+    }
+    if (patch.toolColorMode !== undefined) {
+      document.documentElement.setAttribute('data-tool-colors', state.toolColorMode === 'monochrome' ? 'off' : 'on');
     }
     if (patch.reduceMotion !== undefined) {
       document.documentElement.classList.toggle('reduce-motion', patch.reduceMotion);
@@ -1295,7 +1334,6 @@ export const useUi = create<UiState>()(
         sessionsPanelOpen: s.sessionsPanelOpen,
         sidebarMode: s.sidebarMode,
         sidebarWidth: s.sidebarWidth,
-        rightPanelOpen: s.rightPanelOpen,
         fileViewerOpen: s.fileViewerOpen,
         sheetWidth: s.sheetWidth,
         terminals: s.terminals,
@@ -1304,6 +1342,7 @@ export const useUi = create<UiState>()(
         terminalTheme: s.terminalTheme,
         terminalFontSize: s.terminalFontSize,
         appTheme: s.appTheme,
+        toolColorMode: s.toolColorMode,
         chatView: s.chatView,
         diffMode: s.diffMode,
         activeTerminal: s.activeTerminal,
@@ -1328,6 +1367,10 @@ export const useUi = create<UiState>()(
         // died with the app. Force the running set empty so a stale persisted
         // blob can't restore running indicators for dead turns.
         runningSessionIds: [],
+        // The right panel always starts closed after a restart — it shows
+        // session-scoped data (terminal, files, inspector) that belongs to
+        // the previous app run, not a fresh start.
+        rightPanelOpen: false,
         // Strip 'default'-bucket terminals left by the pre-draft-keying bug:
         // they were draft-phase strays that leaked into every new-session
         // screen. Real buckets are session ids or 'draft:<id>' — never bare.

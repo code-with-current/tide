@@ -124,10 +124,10 @@ function ExtensionCard({
     <div className="rounded-lg bg-card border border-border overflow-hidden">
       {/* Header row */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border/60">
-        <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium">
+        <h3 className="text-[0.7857rem] uppercase tracking-wide text-muted-foreground/60 font-medium">
           {label}
         </h3>
-        <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+        <span className="text-[0.7143rem] text-muted-foreground/50 font-mono tabular-nums">
           {items.length}
         </span>
       </div>
@@ -151,7 +151,7 @@ function ExtensionCard({
       {/* Pagination footer */}
       {showPagination && (
         <div className="flex items-center justify-between px-4 py-2 border-t border-border/60 bg-muted/20">
-          <span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums">
+          <span className="text-[0.7143rem] text-muted-foreground/60 font-mono tabular-nums">
             Showing {rangeStart}–{rangeEnd} of {items.length}
           </span>
           <div className="flex items-center gap-1">
@@ -164,7 +164,7 @@ function ExtensionCard({
             >
               <ChevronLeft className="size-3.5" />
             </button>
-            <span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums min-w-[3rem] text-center">
+            <span className="text-[0.7143rem] text-muted-foreground/60 font-mono tabular-nums min-w-[3rem] text-center">
               {page} / {totalPages}
             </span>
             <button

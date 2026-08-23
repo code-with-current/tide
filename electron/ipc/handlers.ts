@@ -15,8 +15,9 @@ import { getSessionTodos, todoEvents } from '../agent/tools/todo-write';
 import { scanProjectEntries } from '../agent/project-context';
 import { getGitStatus, getGitLog, getCommitFiles, getCommitFileDiff, gitStage, gitCommit, gitDiff, branchInfo, gitHeadSha, gitRestoreFile, gitStageAll, gitUnstageAll, gitRestoreAll, gitStash, gitStashPop, gitStashList, gitCheckout, gitCreateBranch, recentBranches, gitAmend, gitRevertCommit, gitFetch, gitPush, gitPull, gitAheadBehind, gitListBranchesDetailed, gitDeleteBranch, gitMergeBranch, gitConflictFiles, gitResolveFile, gitStagedDiff, gitCommitMessage, gitDiscardFile } from './git.js';
 import { startGitWatcher } from './git-watcher.js';
-import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive } from './terminal.js';
+import { startTerminal, sendInput, killTerminal, stopTerminal, resizeTerminal, getTerminalPid, isProcessAlive, snapshotTerminal } from './terminal.js';
 import { generateSessionTitle } from '../agent/title.js';
+import { repairMermaidDiagram } from '../agent/mermaid-repair.js';
 import { getPermissionStatus, requestPermission, shouldShowConsent } from '../permissions.js';
 import { registerRagHandlers } from './rag.js';
 
@@ -28,6 +29,8 @@ import { syncCoAuthorHook, syncAllWorkspaceHooks } from '../git-coauthor.js';
 import type { EventSink } from '../agent/event-sink.js';
 import type { SessionStoreV2 } from './session-store-v2.js';
 import { newV2MessageId, newV2PartId, orchestratorEventToSink } from '../agent/orchestrator-events.js';
+import { providerWindowUsage, FIVE_HOUR_MS, WEEK_MS } from '../agent/usage-windows.js';
+import { providerUsageReport } from '../agent/provider-usage.js';
 
 const log = createLogger('ipc');
 
@@ -857,6 +860,7 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     messageId: string,
     message: {
       content: string;
+      blocks?: any[];
       reasoning?: string;
       reasoningTokens?: number;
       reasoningMs?: number;
@@ -864,6 +868,8 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       toolCalls?: any[];
       timeline?: any[];
       turn?: any;
+      compactionInfo?: { tokensBefore: number; tokensAfter: number };
+      stopReason?: string | null;
     },
   ) => {
     sessions.finalizeAssistantMessage(sessionId, messageId, message);
@@ -899,20 +905,35 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       const session = sessions.getSession(sessionId);
       if (!session) return null;
       const firstUser = session.messages.find((m: any) => m.role === 'user');
-      if (!firstUser || !firstUser.content) return null;
+      if (!firstUser) return null;
+      // Attachment-only sends (files, long pastes → virtual attachments)
+      // persist empty content — the title comes from the attachment names.
+      const firstText = String(firstUser.content ?? '');
+      const attachments = (firstUser.attachments ?? []) as Array<{ path: string; kind: string; content?: string }>;
+      if (!firstText.trim() && attachments.length === 0) return null;
       // Resolve the session's chat provider — same path as the orchestrator.
       const providers = store.listProviders();
-      let provider = providers.find((p) => p.id === session.providerId);
-      if (!provider && session.modelId) {
-        provider = providers.find(
-          (p) => p.enabled && p.models.some((m) => m.modelId === session.modelId),
-        );
+      // Settings override: a pinned title model wins for title generation.
+      const utility = store.getGeneralSettings().titleModel;
+      let modelId = session.modelId;
+      let provider = utility
+        ? providers.find((p) => p.id === utility.providerId && p.enabled)
+        : undefined;
+      if (utility && provider) {
+        modelId = utility.modelId;
+      } else {
+        provider = providers.find((p) => p.id === session.providerId);
+        if (!provider && session.modelId) {
+          provider = providers.find(
+            (p) => p.enabled && p.models.some((m) => m.modelId === session.modelId),
+          );
+        }
       }
       if (!provider) return null;
-      const title = await generateSessionTitle(String(firstUser.content), {
+      const title = await generateSessionTitle(firstText, {
         provider,
-        modelId: session.modelId,
-      });
+        modelId,
+      }, attachments);
       if (title) sessions.renameSession(sessionId, title);
       return title;
     } catch (e: any) {
@@ -1072,11 +1093,22 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
       } else {
         headers['authorization'] = `Bearer ${apiKey}`;
       }
-      const res = await fetch(url, {
+      let res = await fetch(url, {
         method: 'GET',
         headers,
         signal: AbortSignal.timeout(15_000),
       });
+      // OpenAI-style gateways that serve both protocols (OpenCode Zen) may
+      // only expose the models list under /v1 — retry there when the bare
+      // /models probe missed and the base has no version segment.
+      if (!res.ok && apiStyle === 'openai' && !/\/v\d+$/.test(cleanBase)) {
+        const v1 = await fetch(`${cleanBase}/v1/models`, {
+          method: 'GET',
+          headers,
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (v1.ok) res = v1;
+      }
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         return { ok: false, error: `HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}` };
@@ -1179,8 +1211,32 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
     forwardLog(input.level, input.tag, input.msg, input.args);
   });
 
+  // ── Mermaid auto-repair ───────────────────────────────────────────
+  // Last resort after the renderer's local sanitize chain exhausts all
+  // candidates: ask the system model to rewrite the diagram.
+  handle('tide:mermaidRepair', async (_e, input: { source: string; error: string }) => {
+    return repairMermaidDiagram(input.source, input.error);
+  });
+
   // ── Test provider connection ─────────────────────────────────────
   // Sends a minimal chat completion to verify baseUrl+apiKey+modelId end-to-end (used by onboarding). Returns {ok:true} or {ok:false, error} — never throws.
+  // ── Provider usage windows (informational metering) ────────────────
+  handle('tide:providerUsageWindows', async (_e, providerId: string) => {
+    return {
+      fiveHour: providerWindowUsage(providerId, FIVE_HOUR_MS),
+      weekly: providerWindowUsage(providerId, WEEK_MS),
+    };
+  });
+
+  // Provider-API usage report (z.ai quota / OpenRouter credits) — the real
+  // limits straight from the provider. Null when the provider has no API.
+  handle('tide:providerUsageReport', async (_e, providerId: string) => {
+    const providers = store.listProviders();
+    const provider = providers.find((p) => p.id === providerId);
+    if (!provider) return null;
+    return providerUsageReport(provider);
+  });
+
   handle('tide:provider:testConnection', async (
     _e,
     input: { apiStyle: 'openai' | 'anthropic'; baseUrl: string; apiKey: string; modelId: string },
@@ -1233,12 +1289,19 @@ export function registerIpcHandlers(opts?: { sink?: EventSink; storeV2?: Session
   });
 
   // ── Real terminal (bottom panel) ────────────────────────────
-  handle('terminal:start', (e, terminalId: string, sessionId: string) => {
-    startTerminal(terminalId, sessionId, e.sender);
+  handle('terminal:start', (e, terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => {
+    startTerminal(terminalId, sessionId, e.sender, size);
   });
 
   ipcMain.handle('terminal:input', async (_e, terminalId: string, input: string) => {
     sendInput(terminalId, input);
+  });
+
+  // Snapshot re-attach: bounded scrollback + seq for a LIVE PTY. The renderer
+  // calls this before spawning — if the PTY survived a renderer reload, it
+  // replays the snapshot instead of killing and respawning the shell.
+  handle('terminal:snapshot', (e, terminalId: string) => {
+    return snapshotTerminal(terminalId, e.sender);
   });
 
   handle('terminal:kill', async (_e, terminalId: string) => {

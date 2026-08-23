@@ -66,13 +66,13 @@ export function MissingWorkspaceScreen({
         <FolderX className="size-15 text-warning" />
       </div>
 
-      <h2 className="text-[17px] font-semibold tracking-tight">Workspace folder is Missing</h2>
-      <p className="text-[12px] text-muted-foreground/70 mt-1.5 max-w-[380px] leading-relaxed">
+      <h2 className="text-[1.2143rem] font-semibold tracking-tight">Workspace folder is Missing</h2>
+      <p className="text-[0.8571rem] text-muted-foreground/70 mt-1.5 max-w-[380px] leading-relaxed">
         The folder for <span className="font-medium text-foreground">{workspace.name}</span> can't
         be found. It may have been moved, renamed, or deleted.
       </p>
 
-      <code className="mt-3 text-[11px] font-mono text-muted-foreground/55 bg-secondary/60 border border-border rounded-md px-2.5 py-1.5 max-w-[440px] truncate block">
+      <code className="mt-3 text-[0.7857rem] font-mono text-muted-foreground/55 bg-secondary/60 border border-border rounded-md px-2.5 py-1.5 max-w-[440px] truncate block">
         {workspace.path}
       </code>
 
@@ -101,7 +101,7 @@ export function MissingWorkspaceScreen({
       {/* Helper copy explaining the manual-restore flow. */}
       <div className="mt-7 flex items-start gap-2 text-left rounded-lg border border-border/60 bg-secondary/30 px-3.5 py-3 max-w-[440px]">
         <CheckCircle2 className="size-3.5 text-muted-foreground/50 mt-px shrink-0" />
-        <p className="text-[11px] leading-relaxed text-muted-foreground/65">
+        <p className="text-[0.7857rem] leading-relaxed text-muted-foreground/65">
           Recreate or copy the project folder to the path above, then click{' '}
           <span className="font-medium text-foreground">“I’ve restored it”</span> to re-check and
           continue. The workspace record (sessions, scripts, settings) is preserved.

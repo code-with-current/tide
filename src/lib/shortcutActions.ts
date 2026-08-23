@@ -67,7 +67,14 @@ const toggleSessions: Action = () => {
 
 const toggleRightPanel: Action = () => {
   if (!requireMain()) return false;
-  useUi.getState().toggleRightPanel();
+  const s = useUi.getState();
+  if (s.rightPanelOpen) {
+    s.setRightPanel(false);
+    return true;
+  }
+  // Opening always lands on the landing view.
+  useTabs.getState().setActive(s.activeSessionId ?? 'default', 'home');
+  s.setRightPanel(true);
   return true;
 };
 

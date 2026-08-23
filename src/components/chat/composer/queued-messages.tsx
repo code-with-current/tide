@@ -70,7 +70,7 @@ export function QueuedMessages({
           <Clock className="size-2.5" />
           {queue.length}
         </Badge>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-[0.7857rem] text-muted-foreground">
           {inProgress ? 'Queued — Sends when the current turn finishes' : 'Queued — Sends on next turn'}
         </span>
         <div className="flex-1" />
@@ -163,7 +163,7 @@ function SortableItem({
       )}
 
       {/* Position number (↻ for synthetic background-dispatch results) */}
-      <span className="text-[10px] font-mono text-muted-foreground/40 tabular-nums w-3 text-center flex-shrink-0">
+      <span className="text-[0.7143rem] font-mono text-muted-foreground/40 tabular-nums w-3 text-center flex-shrink-0">
         {item.synthetic ? '↻' : index + 1}
       </span>
 

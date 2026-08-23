@@ -165,20 +165,12 @@ export const BlockList = memo(function BlockList({
     );
   }
 
-  // Virtual start timestamp: reconstructs "now - duration" so the container's
-  // finished-turn Elapsed reads ≈ totalMs. Only rendered when !streaming (the
-  // spinner replaces it live), so the Date.now() call per render is inert for
-  // history rows until they re-render; turns without persisted totalMs
-  // (pre-field legacy) degrade to ~0s.
-  const startedAtMs = Date.now() - (totalMs ?? 0);
-
   return (
     <>
       <ProcessContainer
         streaming={streaming}
         blocks={blocks}
         answerActive={answerIsGrowing(blocks, streaming)}
-        startedAt={startedAtMs}
         phaseHint={lastPhaseLabel(layout.thinking?.text)}
       >
         <div ref={thinkingRef}>{layout.thinking && (
@@ -208,7 +200,7 @@ export const BlockList = memo(function BlockList({
         <CompactingIndicator />
       )}
 
-      <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} />
+      <TurnHeader blocks={blocks} streaming={streaming} stopReason={stopReason} totalMs={totalMs} />
 
       <div ref={answerRef} data-answer-root>
         <AnswerBlock
@@ -216,7 +208,6 @@ export const BlockList = memo(function BlockList({
           streaming={streaming}
           stopped={stopped}
           hasProcessContent={hasProcessContent}
-          elapsedMs={totalMs}
           sessionId={sessionId}
           sessionTitle={sessionTitle}
           sessionModelId={sessionModelId}

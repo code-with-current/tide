@@ -82,11 +82,11 @@ export function ShortcutsSection() {
                           {item.label}
                           {!item.implemented && (
                             <Tip label="Listed but no key listener is wired to this action yet. Your binding still saves for when it is.">
-                              <span className="text-[10px] text-muted-foreground/60 italic">(soon)</span>
+                              <span className="text-[0.7143rem] text-muted-foreground/60 italic">(soon)</span>
                             </Tip>
                           )}
                           {isCustom && (
-                            <span className="text-[9px] uppercase tracking-wider text-accent-foreground/60 bg-secondary px-1 rounded">
+                            <span className="text-[0.6429rem] uppercase tracking-wider text-accent-foreground/60 bg-secondary px-1 rounded">
                               custom
                             </span>
                           )}
@@ -116,7 +116,7 @@ export function ShortcutsSection() {
       </div>
 
       <SettingsGroup>
-        <p className="text-[11px] text-muted-foreground/70 px-1">
+        <p className="text-[0.7857rem] text-muted-foreground/70 px-1">
           {hasOverrides
             ? `${Object.keys(overrides).length} custom binding${Object.keys(overrides).length === 1 ? '' : 's'}. Reset all restores defaults.`
             : 'Using defaults. Click any binding above to customize.'}

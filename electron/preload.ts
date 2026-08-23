@@ -123,7 +123,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
   openExternal: (url: string) => {
     if (/^https?:\/\//i.test(url)) {
       const { shell } = require('electron');
-      shell.openExternal(url);
+      shell.openExternal(url).catch((e) =>
+        console.warn('[tide] openExternal failed', url, e));
     }
   },
   detectGitRepo: (dirPath: string) => ipcRenderer.invoke('tide:detectGitRepo', dirPath),
@@ -191,6 +192,8 @@ contextBridge.exposeInMainWorld('tideIpc', {
     ipcRenderer.invoke('tide:renameSession', sessionId, title),
   generateSessionTitle: (sessionId: string) =>
     ipcRenderer.invoke('tide:generateSessionTitle', sessionId),
+  mermaidRepair: (input: { source: string; error: string }) =>
+    ipcRenderer.invoke('tide:mermaidRepair', input),
   getAgentSettings: () =>
     ipcRenderer.invoke('tide:getAgentSettings'),
   updateAgentSettings: (patch: Record<string, unknown>) =>
@@ -291,7 +294,12 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // ── Terminal seed ──
   getTerminalLines: (sessionId: string) => ipcRenderer.invoke('tide:getTerminalLines', sessionId),
   // ── Real terminal (bottom panel) ──
-  terminalStart: (terminalId: string, sessionId: string) => ipcRenderer.invoke('terminal:start', terminalId, sessionId),
+  terminalStart: (terminalId: string, sessionId: string, size?: { cols: number; rows: number }) => ipcRenderer.invoke('terminal:start', terminalId, sessionId, size),
+  terminalSnapshot: (terminalId: string) => ipcRenderer.invoke('terminal:snapshot', terminalId),
+  providerUsageWindows: (providerId: string) =>
+    ipcRenderer.invoke('tide:providerUsageWindows', providerId),
+  providerUsageReport: (providerId: string) =>
+    ipcRenderer.invoke('tide:providerUsageReport', providerId),
   terminalInput: (terminalId: string, input: string) => ipcRenderer.invoke('terminal:input', terminalId, input),
   terminalKill: (terminalId: string) => ipcRenderer.invoke('terminal:kill', terminalId),
   terminalStop: (terminalId: string) => ipcRenderer.invoke('terminal:stop', terminalId),
@@ -299,7 +307,7 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // PID-based liveness for port badges + Run/Stop detection.
   terminalGetPid: (terminalId: string) => ipcRenderer.invoke('terminal:getPid', terminalId),
   processIsAlive: (pid: number) => ipcRenderer.invoke('process:isAlive', pid),
-  onTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void) =>
+  onTerminalOutput: (callback: (data: { terminalId: string; data: string; seq?: number }) => void) =>
     ipcRenderer.on('terminal:output', (_e, data) => callback(data)),
   onTerminalExit: (callback: (data: { terminalId: string; code: number | null }) => void) =>
     ipcRenderer.on('terminal:exit', (_e, data) => callback(data)),

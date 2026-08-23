@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { SectionLabel } from '../providers/providers';
+import { SectionLabel } from '../providers/provider-fields';
 import { ScopeCard } from './server-dialog';
 
 interface DetectedServer {
@@ -113,10 +113,10 @@ export function McpImportDialog({
             <Download className="size-4 text-primary" />
           </div>
           <div className="flex-1">
-            <DialogTitle className="text-[15px] font-semibold text-left tracking-tight">
+            <DialogTitle className="text-[1.0714rem] font-semibold text-left tracking-tight">
               Import MCP
             </DialogTitle>
-            <DialogDescription className="text-[11px] text-muted-foreground/60 mt-0.5 text-left">
+            <DialogDescription className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 text-left">
               Detected from Claude Code, Codex, OpenCode, and other configs.
             </DialogDescription>
           </div>
@@ -164,16 +164,16 @@ export function McpImportDialog({
                           onCheckedChange={() => toggleAllInGroup(sourceServers)}
                           className="size-3.5"
                         />
-                        <h3 className="text-[11px] uppercase tracking-wide text-muted-foreground/60 font-medium">
+                        <h3 className="text-[0.7857rem] uppercase tracking-wide text-muted-foreground/60 font-medium">
                           {source}
                         </h3>
                       </div>
                       {sourceServers[0]?.sourceFile && (
-                        <span className="text-[9px] text-muted-foreground/30 font-mono truncate max-w-[180px]" title={sourceServers[0].sourceFile}>
+                        <span className="text-[0.6429rem] text-muted-foreground/30 font-mono truncate max-w-[180px]" title={sourceServers[0].sourceFile}>
                           {sourceServers[0].sourceFile.replace(/^.*\//, '~/')}
                         </span>
                       )}
-                      <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
+                      <span className="text-[0.7143rem] text-muted-foreground/40 font-mono tabular-nums">
                         {sourceServers.length}
                       </span>
                     </div>
@@ -206,14 +206,14 @@ export function McpImportDialog({
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-medium">{s.name}</span>
                                 {isImported && (
-                                  <span className="text-[9px] text-muted-foreground/50">(already in Tide)</span>
+                                  <span className="text-[0.6429rem] text-muted-foreground/50">(already in Tide)</span>
                                 )}
-                                <span className="text-[8px] uppercase tracking-wide text-muted-foreground/40 font-mono shrink-0 px-1 py-0.5 rounded bg-muted/40">
+                                <span className="text-[0.5714rem] uppercase tracking-wide text-muted-foreground/40 font-mono shrink-0 px-1 py-0.5 rounded bg-muted/40">
                                   {s.config.type}
                                 </span>
                               </div>
                               {cmd && (
-                                <div className="text-[10px] text-muted-foreground/50 font-mono truncate mt-0.5" title={cmd + argSummary}>
+                                <div className="text-[0.7143rem] text-muted-foreground/50 font-mono truncate mt-0.5" title={cmd + argSummary}>
                                   {cmd}<span className="text-muted-foreground/30">{argSummary}</span>
                                 </div>
                               )}
@@ -256,7 +256,7 @@ export function McpImportDialog({
         )}
 
         <DialogFooter className="px-5 py-3.5 flex-row items-center justify-between border-t border-border bg-secondary/30">
-          <div className="text-[11px] text-muted-foreground/60">
+          <div className="text-[0.7857rem] text-muted-foreground/60">
             {checked.size > 0 ? (
               <Badge variant="secondary" className="font-mono">{checked.size} selected</Badge>
             ) : (

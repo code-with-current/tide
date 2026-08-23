@@ -9,6 +9,8 @@ import { spawn, execFile } from 'child_process';
 import * as net from 'node:net';
 import * as store from '../store.js';
 import * as sessions from './sessions.js';
+import { sanitizePtyEnv } from './terminal-env.js';
+import { ScrollbackBuffer } from './terminal-scrollback.js';
 import { createLogger } from '../logger.js';
 import type { WebContents } from 'electron';
 
@@ -71,6 +73,9 @@ interface TerminalEntry {
    *  event for a listening dev server's banner — and so the reaper can
    *  verify the owning process is still alive. */
   detectedPorts: Map<number, TrackedPort>;
+  /** Main-side scrollback + monotonic output seq. Lets the renderer
+   *  re-attach with a snapshot after a reload while the PTY keeps running. */
+  scrollback: ScrollbackBuffer;
 }
 
 interface TrackedPort {
@@ -269,6 +274,7 @@ export function startTerminal(
   terminalId: string,
   sessionId: string,
   wc: WebContents,
+  size?: { cols: number; rows: number },
 ): void {
   // Kill any existing terminal with this ID — but dispose its
   // listeners FIRST so the old process's exit event doesn't leak.
@@ -281,13 +287,21 @@ export function startTerminal(
 
   const cwd = resolveCwd(sessionId);
   const { cmd, args } = getShell();
-  const env = { ...process.env };
+  const env = sanitizePtyEnv(process.env);
+  // Provisional size from the renderer's font metrics (avoids the 80x24
+  // spawn flash); bounded like OpenChamber: 2–1000 cols, 1–500 rows.
+  const cols = Math.min(1000, Math.max(2, Math.floor(size?.cols ?? 80)));
+  const rows = Math.min(500, Math.max(1, Math.floor(size?.rows ?? 24)));
 
   const detectedPorts = new Map<number, TrackedPort>();
+  const scrollback = new ScrollbackBuffer(512 * 1024);
 
   const sendOutput = (data: string) => {
+    // Buffer FIRST and unconditionally — output arriving while the renderer
+    // is reloading (wc destroyed) must still accumulate for the snapshot.
+    const seq = scrollback.append(data);
     if (!wc.isDestroyed()) {
-      wc.send('terminal:output', { terminalId, data });
+      wc.send('terminal:output', { terminalId, data, seq });
     }
     // Scan for dev-server ports. Only re-emit when the SET changes so a
     // chatty server doesn't spam the renderer — once :5173 is reported,
@@ -317,8 +331,8 @@ export function startTerminal(
 
   const ptyProc = pty.spawn(cmd, args, {
     name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
+    cols,
+    rows,
     cwd,
     env,
   });
@@ -341,8 +355,24 @@ export function startTerminal(
     stopPortReaperIfIdle();
   }));
 
-  terminals.set(terminalId, { ptyProc, pid, sessionId, cwd, wc, disposables, detectedPorts });
+  terminals.set(terminalId, { ptyProc, pid, sessionId, cwd, wc, disposables, detectedPorts, scrollback });
   log.info('started PTY', { terminalId, pid, sessionId, cwd });
+}
+
+/** Snapshot re-attach: return the terminal's buffered scrollback + output
+ *  seq. Re-binds the entry's WebContents to the caller — after a renderer
+ *  reload the stored wc is destroyed, which would otherwise silently drop
+ *  live output forever. `alive: false` means no PTY — the caller should
+ *  spawn a fresh one. */
+export function snapshotTerminal(
+  terminalId: string,
+  wc: WebContents,
+): { alive: true; data: string; seq: number } | { alive: false } {
+  const entry = terminals.get(terminalId);
+  if (!entry) return { alive: false };
+  entry.wc = wc;
+  const snap = entry.scrollback.snapshot();
+  return { alive: true, data: snap.data, seq: snap.seq };
 }
 
 export function sendInput(terminalId: string, input: string): void {

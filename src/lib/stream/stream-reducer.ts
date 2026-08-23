@@ -3,7 +3,7 @@
 import type { SessionStream, ToolCallStatus } from '@/types';
 import type { Block, FollowupBlock, ReasoningBlock, TextBlock, ToolBlock } from '@/types';
 import type { AgentEvent } from '@/lib/agent/events';
-import { categorizeTool, deriveFollowupMode, isBookkeepingTool } from './block-state';
+import { categorizeTool, deriveFollowupMode, answerBlockIds } from './block-state';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('streamReducer');
@@ -41,19 +41,22 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
 
 function applyDelta(state: SessionStream, e: Extract<AgentEvent, { type: 'delta' }>): SessionStream {
   const blocks = state.blocks ?? [];
-  const last = blocks[blocks.length - 1];
-  // Merge requires same id AND same parentage — a parented child segment
-  // arriving between parent segments must open its own block, never graft
-  // onto the parent's (ids are provider/uuid-scoped, this is belt+braces).
-  if (last && last.kind === 'text' && last.id === e.blockId
-    && (last.parentToolCallId ?? undefined) === e.parentToolCallId) {
-    // Append to the active text block — same id means same segment.
+  // Merge into the LAST block with the same id AND parentage — not the
+  // array's last block. Concurrent sub-agents interleave parented deltas
+  // (plus tool events) between one agent's deltas, so a segment's block is
+  // almost never globally-last; last-block-only merging fragments every
+  // delta into a duplicate-id block and the panel renders them all.
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.kind !== 'text' || b.id !== e.blockId) continue;
+    if ((b.parentToolCallId ?? undefined) !== e.parentToolCallId) continue;
     const updated: TextBlock = {
-      ...last, text: last.text + e.text, modifiedAtSeq: e.seq,
+      ...b, text: b.text + e.text, modifiedAtSeq: e.seq,
     };
-    return { ...state, blocks: [...blocks.slice(0, -1), updated] };
+    const next = blocks.slice();
+    next[i] = updated;
+    return { ...state, blocks: next };
   }
-  // Different id (or last wasn't text) — push a new block.
   const block: TextBlock = {
     id: e.blockId, kind: 'text', text: e.text,
     createdAtSeq: e.seq, modifiedAtSeq: e.seq, isAnswer: false,
@@ -229,8 +232,8 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
   const stopped = e.stopReason === 'aborted';
   const prevBlocks = state.blocks ?? [];
 
-  // Shallow-clone blocks so we can mark isAnswer on the answer-phase text
-  // blocks without mutating the original (state.blocks is shared with prior states).
+  // Shallow-clone blocks so we can mark isAnswer per parent scope without
+  // mutating the original (state.blocks is shared with prior states).
   const blocks: Block[] = prevBlocks.map(b => {
     if (stopped && b.kind === 'tool' && (b.status === 'running' || b.status === 'pending')) {
       return { ...b, status: 'aborted' as ToolCallStatus, modifiedAtSeq: e.seq };
@@ -239,20 +242,14 @@ function applyTurnEnd(state: SessionStream, e: Extract<AgentEvent, { type: 'turn
     return b;
   });
 
-  // The answer phase begins after the last *work* tool call: text before =
-  // narration, after = deliverable. Bookkeeping tools (todo_write,
-  // ask_followup_question, exit_plan_mode, compact, slash_command, load_skill)
-  // are skipped so a trailing "mark plan done" doesn't demote the report to
-  // narration. Mirrors orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag.
-  let lastToolIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.kind === 'tool' && !isBookkeepingTool(b.toolName)) { lastToolIdx = i; break; }
-  }
-  for (let i = lastToolIdx + 1; i < blocks.length; i++) {
-    const b = blocks[i];
-    // Parented text is sub-agent narration — never the parent's deliverable.
-    if (b.kind === 'text' && !b.parentToolCallId) (b as TextBlock).isAnswer = true;
+  // The answer phase is SCOPE-LOCAL: per scope (root / each dispatch), text
+  // after that scope's last work tool is that scope's deliverable. Mirrors
+  // orchestrator.finalizeBlocks and blockMigration.redetermineAnswerFlag —
+  // a sub-agent's report must flag as its own answer even though the parent
+  // keeps calling tools afterwards.
+  const answers = answerBlockIds(blocks);
+  for (const b of blocks) {
+    if (b.kind === 'text') (b as TextBlock).isAnswer = answers.has(b.id);
   }
 
   return {

@@ -106,7 +106,7 @@ export function FileViewerPanel() {
             />
           ))}
           {(!files || files.length === 0) && (
-            <span className="text-[11px] text-muted-foreground/50 px-3 py-1.5 self-center">No file open</span>
+            <span className="text-[0.7857rem] text-muted-foreground/50 px-3 py-1.5 self-center">No file open</span>
           )}
         </ScrollTabsList>
 
@@ -317,7 +317,7 @@ function TextBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
         </div>
       ) : (
         <div className="flex-1 overflow-auto scroll">
-          <div className="flex font-mono text-[12px] leading-relaxed">
+          <div className="flex font-mono text-[0.8571rem] leading-relaxed">
             {/* Line numbers */}
             <div className="select-none text-right text-muted-foreground/30 py-3 pl-3 pr-2 flex-shrink-0 sticky left-0 bg-background">
               {lines.map((_, i) => <div key={i}>{i + 1}</div>)}
@@ -337,7 +337,7 @@ function TextBody({ file, workspaceId }: { file: OpenFile; workspaceId: string }
 
 function FileHeader({ path, badge, action }: { path: string; badge?: string; action?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border flex-shrink-0 text-[10px] text-muted-foreground/60">
+    <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border flex-shrink-0 text-[0.7143rem] text-muted-foreground/60">
       <code className="font-mono truncate flex-1" title={path}>{path}</code>
       {badge && <span className="uppercase flex-shrink-0">{badge}</span>}
       {action}
@@ -355,7 +355,7 @@ function CenteredSpinner() {
 
 function CenteredMessage({ message }: { message: string }) {
   return (
-    <div className="flex items-center justify-center h-full text-[12px] text-destructive/80 px-6 text-center">
+    <div className="flex items-center justify-center h-full text-[0.8571rem] text-destructive/80 px-6 text-center">
       {message}
     </div>
   );

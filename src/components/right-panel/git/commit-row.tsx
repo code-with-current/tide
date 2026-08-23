@@ -100,7 +100,7 @@ export function CommitRow({
         </span>
         <span className="flex w-28 flex-shrink-0 items-center justify-end gap-1 overflow-hidden">
           <span
-            className="flex size-3.5 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-semibold text-white"
+            className="flex size-3.5 flex-shrink-0 items-center justify-center rounded-full text-[0.5rem] font-semibold text-white"
             style={{ background: `hsl(${hue} 40% 42%)` }}
             title={commit.author}
           >
@@ -192,7 +192,7 @@ function RowActions({
       <PopoverContent align="end" className="w-60 p-2" onOpenAutoFocus={(e) => { if (stage === 'branch') e.preventDefault(); }}>
         {stage === 'menu' ? (
           <div className="flex flex-col gap-0.5">
-            <span className="truncate px-2 pb-1 pt-0.5 font-mono text-[10px] text-muted-foreground/60">
+            <span className="truncate px-2 pb-1 pt-0.5 font-mono text-[0.7143rem] text-muted-foreground/60">
               {commit.sha} · {commit.subject || '(no subject)'}
             </span>
             {onBranch && (
@@ -221,15 +221,15 @@ function RowActions({
         ) : stage === 'revert' ? (
           <div className="space-y-2.5 p-1">
             <div>
-              <p className="text-[13px] font-semibold">Revert this commit?</p>
-              <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground/60">
+              <p className="text-[0.9286rem] font-semibold">Revert this commit?</p>
+              <p className="mt-0.5 text-[0.7857rem] leading-relaxed text-muted-foreground/60">
                 Creates a new commit undoing <span className="font-mono">{commit.sha}</span>. If it conflicts, resolve from the Changes tab.
               </p>
             </div>
             <div className="flex items-center justify-end gap-2">
-              <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={pendingAction} onClick={close}>Cancel</Button>
+              <Button variant="ghost" size="sm" className="h-7 text-[0.7857rem]" disabled={pendingAction} onClick={close}>Cancel</Button>
               <Button
-                variant="destructive" size="sm" className="h-7 text-[11px]" disabled={pendingAction}
+                variant="destructive" size="sm" className="h-7 text-[0.7857rem]" disabled={pendingAction}
                 onClick={() => { onRevert?.(commit.sha); close(); }}
               >
                 <RotateCcw className="size-3" /> Revert
@@ -238,7 +238,7 @@ function RowActions({
           </div>
         ) : (
           <div className="space-y-2 p-1">
-            <p className="text-[13px] font-semibold">Branch from <span className="font-mono text-xs">{commit.sha}</span></p>
+            <p className="text-[0.9286rem] font-semibold">Branch from <span className="font-mono text-xs">{commit.sha}</span></p>
             <Input
               autoFocus
               value={branchName}
@@ -248,8 +248,8 @@ function RowActions({
               className="h-7 text-xs"
             />
             <div className="flex items-center justify-end gap-2">
-              <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={pendingAction} onClick={close}>Cancel</Button>
-              <Button size="sm" className="h-7 text-[11px]" disabled={pendingAction || !branchName.trim()} onClick={submitBranch}>
+              <Button variant="ghost" size="sm" className="h-7 text-[0.7857rem]" disabled={pendingAction} onClick={close}>Cancel</Button>
+              <Button size="sm" className="h-7 text-[0.7857rem]" disabled={pendingAction || !branchName.trim()} onClick={submitBranch}>
                 <CornerUpRight className="size-3" /> Create & switch
               </Button>
             </div>

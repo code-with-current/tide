@@ -26,6 +26,15 @@ const PHASE_COLOR: Record<PhaseLabel, string> = {
   Reasoning: 'text-purple-400',
 };
 
+
+const BG_COLOR: Record<PhaseLabel, string> = {
+  Planning: 'bg-green-400',
+  Search: 'bg-blue-400',
+  Coding: 'bg-emerald-400',
+  Verifying: 'bg-amber-400',
+  Reasoning: 'bg-purple-400',
+};
+
 const SIGNATURE_RE = /思考中|Signature|redacted/i;
 
 function formatMs(ms?: number): string {
@@ -60,24 +69,33 @@ function PhaseRow({
         type="button"
         aria-expanded={phaseOpen}
         onClick={onToggle}
-        className="flex h-7 min-w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-secondary/60"
+        className="group/row flex h-7 min-w-full items-center gap-2 rounded-md text-left transition-colors hover:bg-secondary/60"
       >
-        <span className="relative flex size-4 shrink-0 items-center justify-center">
-          <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/phase:opacity-0">
-            <Icon className={cn('size-3', PHASE_COLOR[phase.label], phaseStreaming && 'animate-pulse')} />
+        <span className="relative flex shrink-0 items-center justify-center">
+          <span className={cn(
+            'flex h-7 items-center rounded-l-md px-2 text-black tool-bg',
+            'transition-opacity duration-100 group-hover/row:opacity-0',
+            phaseOpen && 'opacity-0',
+            BG_COLOR[phase.label],
+          )}>
+            <Icon className={cn('size-3', phaseStreaming && 'animate-pulse')} />
           </span>
           <ChevronDown
-            className="absolute size-3 opacity-0 text-muted-foreground transition-[opacity,transform] duration-150 group-hover/phase:opacity-100"
+            className={cn(
+              'absolute size-3 text-muted-foreground transition-[opacity,transform] duration-150',
+              phaseOpen ? 'opacity-100' : 'opacity-0',
+              'group-hover/row:opacity-100',
+            )}
             style={{ transform: phaseOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className={cn('shrink-0 text-[12px] font-medium', PHASE_COLOR[phase.label])}>
+        <span className={cn('tool-tint shrink-0 text-[0.8571rem] font-medium', PHASE_COLOR[phase.label])}>
           {phase.label}
         </span>
-        <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11px] text-muted-foreground">
+        <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.7857rem] text-muted-foreground">
           {phaseStreaming ? '…' : phase.text.trim().split('\n')[0]?.slice(0, 80)}
         </span>
-        <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground/60">
+        <span className="shrink-0 font-mono text-[0.75rem] tabular-nums text-muted-foreground/60">
           ~{phase.estTokens.toLocaleString()} tok
         </span>
         {phaseStreaming ? (
@@ -90,7 +108,7 @@ function PhaseRow({
       >
         <div className="min-h-0 overflow-hidden">
           <div className="mt-[5px] ml-[13px] border-l border-border py-0.5 pl-3">
-            <pre ref={preRef} className="scroll max-h-[352px] overflow-y-auto whitespace-pre-wrap py-1 pl-1 pr-2 font-mono text-[11px] leading-[1.6] text-muted-foreground">
+            <pre ref={preRef} className="scroll max-h-[352px] overflow-y-auto whitespace-pre-wrap py-1 pl-1 pr-2 font-mono text-[0.7857rem] leading-[1.6] text-muted-foreground">
               {phase.text}
             </pre>
           </div>
@@ -167,7 +185,7 @@ function ThinkingBlockImpl({
     </div>
   ) : (
     <div className="mt-[5px] ml-[13px] border-l border-border py-0.5 pl-3">
-      <div ref={flatRef} className="scroll max-h-[368px] overflow-y-auto text-[11.5px] leading-[1.6] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px]">
+      <div ref={flatRef} className="scroll max-h-[368px] overflow-y-auto text-[0.8214rem] leading-[1.6] text-muted-foreground [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem]">
         {lines.map((line, i) => (
           <p key={i}>{line}</p>
         ))}
@@ -176,18 +194,18 @@ function ThinkingBlockImpl({
   );
 
   if (variant === 'stream') {
-    return <div className="mt-[5px] w-full">{content}</div>;
+    return <div className="w-full">{content}</div>;
   }
 
   return (
-    <div className="mt-[5px] w-full">
+    <div className="w-full">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className="group/row -mx-1.5 flex h-7 w-[calc(100%+12px)] min-w-0 items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-secondary/60"
       >
-        <span className="relative flex size-4 shrink-0 items-center justify-center text-purple-400">
+        <span className="tool-tint relative flex size-4 shrink-0 items-center justify-center text-purple-400">
           <span className="flex size-4 items-center justify-center transition-opacity duration-100 group-hover/row:opacity-0">
             <Brain className={cn('size-3.5', streaming && 'animate-pulse')} />
           </span>
@@ -196,16 +214,16 @@ function ThinkingBlockImpl({
             style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className="shrink-0 text-[12.5px] font-medium text-foreground/80">
+        <span className="shrink-0 text-[0.8929rem] font-medium text-foreground/80">
           Thinking
         </span>
         {headerSnippet || streaming ? (
-          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[11.5px] text-muted-foreground">
+          <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.8214rem] text-muted-foreground">
             {headerSnippet ?? '…'}
           </span>
         ) : null}
         {meta && (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 font-mono text-[0.7857rem] tabular-nums text-muted-foreground/70">
             {meta}
           </span>
         )}

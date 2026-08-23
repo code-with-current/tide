@@ -128,7 +128,7 @@ function ExpandSeparator({
   const next = nextExpandWidth(contextLines);
   const glyph = 'px-1.5 text-muted-foreground/60 hover:text-foreground hover:underline';
   return (
-    <div className="flex items-center justify-center gap-2 py-0.5 px-3 bg-info/[0.03] border-y border-info/10 text-[11px] text-muted-foreground/60 select-none">
+    <div className="flex items-center justify-center gap-2 py-0.5 px-3 bg-info/[0.03] border-y border-info/10 text-[0.7857rem] text-muted-foreground/60 select-none">
       {next > contextLines && (
         <>
           {dir === 'down' ? (
@@ -288,7 +288,7 @@ function UnifiedDiff({ hunks, language, highlight, contextLines, onExpandContext
       return <ExpandSeparator dir={row.dir} hiddenLines={row.hidden} contextLines={contextLines} onExpand={onExpandContext!} />;
     }
     if (row.kind === 'header') {
-      return <div className="px-3 py-1 bg-info/[0.06] text-info/70 text-[11px] border-y border-info/10 select-none">{row.text}</div>;
+      return <div className="px-3 py-1 bg-info/[0.06] text-info/70 text-[0.7857rem] border-y border-info/10 select-none">{row.text}</div>;
     }
     const line = row.line;
     const isAdd = line.type === 'add';
@@ -298,8 +298,8 @@ function UnifiedDiff({ hunks, language, highlight, contextLines, onExpandContext
     const code = highlight && language != null;
     return (
       <div className={cn('flex items-start px-0', isAdd && 'bg-success/[0.08]', isDel && 'bg-destructive/[0.08]')}>
-        <span className={cn('select-none w-[32px] flex-shrink-0 text-right pr-2 tabular-nums text-[10px] pt-[1px]', isDel ? 'text-destructive/50' : 'text-muted-foreground/40')}>{line.oldNo ?? ''}</span>
-        <span className={cn('select-none w-[32px] flex-shrink-0 text-right pr-2 tabular-nums text-[10px] pt-[1px]', isAdd ? 'text-success/50' : 'text-muted-foreground/40')}>{line.newNo ?? ''}</span>
+        <span className={cn('select-none w-[32px] flex-shrink-0 text-right pr-2 tabular-nums text-[0.7143rem] pt-[1px]', isDel ? 'text-destructive/50' : 'text-muted-foreground/40')}>{line.oldNo ?? ''}</span>
+        <span className={cn('select-none w-[32px] flex-shrink-0 text-right pr-2 tabular-nums text-[0.7143rem] pt-[1px]', isAdd ? 'text-success/50' : 'text-muted-foreground/40')}>{line.newNo ?? ''}</span>
         <span className={cn('select-none w-[16px] flex-shrink-0 text-center pt-[1px]', isAdd && 'text-success/60', isDel && 'text-destructive/60', isContext && 'text-transparent')}>{isAdd ? '+' : isDel ? '−' : ' '}</span>
         <span className={cn('flex-1 whitespace-pre-wrap break-all pr-3', !code && isAdd && 'text-success', !code && isDel && 'text-destructive', !code && isContext && 'text-muted-foreground')}>
           {code ? <CodeSpan text={text} language={language} /> : text}
@@ -309,7 +309,7 @@ function UnifiedDiff({ hunks, language, highlight, contextLines, onExpandContext
   };
 
   return (
-    <div className="font-mono text-[12px] leading-[1.7]">
+    <div className="font-mono text-[0.8571rem] leading-[1.7]">
       {model.bodyCount > VIRTUALIZE_ROW_THRESHOLD
         ? <VirtualRows rows={model.rows}>{renderRow}</VirtualRows>
         : model.rows.map((row, j) => <div key={j}>{renderRow(row)}</div>)}
@@ -331,7 +331,7 @@ function SplitDiff({ hunks, language, highlight, contextLines, onExpandContext }
       return <ExpandSeparator dir={row.dir} hiddenLines={row.hidden} contextLines={contextLines} onExpand={onExpandContext!} />;
     }
     if (row.kind === 'header') {
-      return <div className="px-3 py-1 bg-info/[0.06] text-info/70 text-[11px] border-y border-info/10 select-none">{row.text}</div>;
+      return <div className="px-3 py-1 bg-info/[0.06] text-info/70 text-[0.7857rem] border-y border-info/10 select-none">{row.text}</div>;
     }
     const { left, right } = row;
     const leftDel = left?.type === 'del';
@@ -347,7 +347,7 @@ function SplitDiff({ hunks, language, highlight, contextLines, onExpandContext }
       const tone = del ? 'text-destructive' : add ? 'text-success' : 'text-muted-foreground';
       return (
         <div className={cn('flex-1 flex items-start min-w-0', old && 'border-r border-border/50', del && 'bg-destructive/[0.08]', add && 'bg-success/[0.08]')}>
-          <span className={cn('select-none w-[36px] flex-shrink-0 text-right pr-2 tabular-nums text-[10px] pt-[1px]', del ? 'text-destructive/50' : add ? 'text-success/50' : 'text-muted-foreground/40')}>
+          <span className={cn('select-none w-[36px] flex-shrink-0 text-right pr-2 tabular-nums text-[0.7143rem] pt-[1px]', del ? 'text-destructive/50' : add ? 'text-success/50' : 'text-muted-foreground/40')}>
             {line ? (old ? line.oldNo ?? '' : line.newNo ?? '') : ''}
           </span>
           <span className={cn('flex-1 whitespace-pre-wrap break-all pr-3 pl-1', (segs || !code) && tone)}>
@@ -371,7 +371,7 @@ function SplitDiff({ hunks, language, highlight, contextLines, onExpandContext }
   };
 
   return (
-    <div className="font-mono text-[12px] leading-[1.7]">
+    <div className="font-mono text-[0.8571rem] leading-[1.7]">
       {model.bodyCount > VIRTUALIZE_ROW_THRESHOLD
         ? <VirtualRows rows={model.rows}>{renderRow}</VirtualRows>
         : model.rows.map((row, j) => <div key={j}>{renderRow(row)}</div>)}
@@ -389,7 +389,7 @@ export function DiffModeTabs({ mode, onChange }: { mode: 'unified' | 'split'; on
   ];
   return (
     <div className="flex justify-end px-2 py-1 border-b border-border/50">
-      <div className="flex items-center rounded-md border border-border/60 overflow-hidden text-[10px] leading-none select-none">
+      <div className="flex items-center rounded-md border border-border/60 overflow-hidden text-[0.7143rem] leading-none select-none">
         {tabs.map((t) => (
           <button
             key={t.id}

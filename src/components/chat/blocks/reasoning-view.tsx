@@ -137,7 +137,7 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
         {/* {chips.length > 0 && (
           <span className="flex items-center gap-1.5 ml-0.5">
             {chips.map((c) => (
-              <span key={c} className={cn('flex items-center gap-0.5', PHASE_COLOR[c])}>
+              <span key={c} className={cn('tool-tint flex items-center gap-0.5', PHASE_COLOR[c])}>
                 <span className="size-1 rounded-full bg-current" />
                 {c}
               </span>
@@ -161,12 +161,12 @@ function PhasedReasoning({ text, tokens, ms, streaming }: { text: string; tokens
                   className="flex items-center gap-1 font-mono text-[0.78rem] h-auto py-1 px-2 -ml-px"
                 >
                   <ChevronRight className={cn('size-2.5 transition-transform', open && 'rotate-90')} />
-                  <Icon className={cn('size-3', PHASE_COLOR[p.label])} />
-                  <span className={PHASE_COLOR[p.label]}>{p.label}</span>
+                  <Icon className={cn('tool-tint size-3', PHASE_COLOR[p.label])} />
+                  <span className={cn('tool-tint', PHASE_COLOR[p.label])}>{p.label}</span>
                   <span className="text-muted-foreground/50">· ~{p.estTokens.toLocaleString()} tok</span>
                 </span>
                 {open && (
-                  <pre className="text-[0.82rem] px-3 pb-2 pl-7 text-card-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[11px] [&_table]:text-[11px] [&_th]:text-[10px] [&_td]:text-[11px]">
+                  <pre className="text-[0.82rem] px-3 pb-2 pl-7 text-card-foreground/80 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scroll py-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_pre]:my-1 [&_code]:text-[0.7857rem] [&_table]:text-[0.7857rem] [&_th]:text-[0.7143rem] [&_td]:text-[0.7857rem]">
                     {p.text}
                   </pre>
                 )}

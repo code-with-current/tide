@@ -57,25 +57,48 @@ function dispatchReportOf(toolCalls: ToolCall[] | undefined, agent: string): str
 
 const utilitySessions = new Map<string, Promise<string>>();
 
-/** Find-or-create this workspace's hidden git-tools session. Model settings
- *  copy the active session (or the composer's selected model) so the turn
- *  bills to the provider the user actually uses. */
+/** In-flight dispatch per workspace — survives consumer unmounts so a
+ *  screen/tab switch mid-generation doesn't kill the turn. The utility
+ *  session serializes one action at a time, so one entry per workspace is
+ *  exact. Cleared when the watched stream finishes or errors. */
+interface ActiveDispatch {
+  workspaceId: string;
+  sid: string;
+  agent?: string;
+}
+const activeDispatch = new Map<string, ActiveDispatch>();
+
+/** Find-or-create this workspace's hidden git-tools session. The settings'
+ *  utility-model override (if set) pins the provider+model so commit-message
+ *  generation doesn't bill to / depend on the session's chat model; the
+ *  default copies the active session (or the composer's selected model). */
 async function ensureUtilitySession(workspaceId: string): Promise<string> {
   const cached = utilitySessions.get(workspaceId);
   if (cached) return cached;
   const created = (async () => {
     let modelId = '';
     let providerId: string | undefined;
-    const activeId = useUi.getState().activeSessionId;
-    if (activeId) {
-      const s = await api.getSession(activeId).catch(() => null);
-      modelId = s?.modelId ?? '';
-      providerId = s?.providerId ?? undefined;
-    }
+    try {
+      const s = await window.tideIpc?.getGeneralSettings();
+      const utility = (s as { commitMessageModel?: { providerId: string; modelId: string } | null } | undefined)
+        ?.commitMessageModel;
+      if (utility?.providerId && utility.modelId) {
+        modelId = utility.modelId;
+        providerId = utility.providerId;
+      }
+    } catch { /* fall through to session default */ }
     if (!modelId) {
-      const ui = useUi.getState();
-      modelId = ui.selectedModelId ?? '';
-      providerId = ui.selectedProviderId ?? undefined;
+      const activeId = useUi.getState().activeSessionId;
+      if (activeId) {
+        const s = await api.getSession(activeId).catch(() => null);
+        modelId = s?.modelId ?? '';
+        providerId = s?.providerId ?? undefined;
+      }
+      if (!modelId) {
+        const ui = useUi.getState();
+        modelId = ui.selectedModelId ?? '';
+        providerId = ui.selectedProviderId ?? undefined;
+      }
     }
     const s = await api.createSession(workspaceId, '✨ Git tools', modelId, {
       kind: 'subagent',
@@ -90,7 +113,7 @@ async function ensureUtilitySession(workspaceId: string): Promise<string> {
   return created;
 }
 
-export function useGitAgentAction(): {
+export function useGitAgentAction(homeWorkspaceId?: string): {
   run: (args: GitAgentDispatchArgs) => GitAgentRunResult;
   state: GitAgentActionState;
   reset: () => void;
@@ -107,12 +130,66 @@ export function useGitAgentAction(): {
     activeSidRef.current = null;
   }, []);
 
-  // Abort the turn WE started if the consumer unmounts mid-dispatch.
-  useEffect(() => () => {
-    const sid = activeSidRef.current;
-    cleanup();
-    if (sid && ipc && useUi.getState().streams[sid]?.isStreaming) ipc.abortTurn(sid);
-  }, [cleanup, ipc]);
+  // Unmount detaches the watch but NEVER aborts the turn — the dispatch runs
+  // on a hidden utility session and keeps streaming into the store; a
+  // remounted consumer re-adopts it via the activeDispatch registry.
+
+  /** Subscribe to the utility session's stream store entry, mirroring the
+   *  dispatch report into local state until the turn ends. */
+  const watch = useCallback((sid: string, agent: string | undefined) => {
+    const reportOf = (stream: SessionStream) => {
+      if (!agent) return stream.text;
+      // The model occasionally answers inline despite the imperative
+      // dispatch instruction — its text IS the requested output then.
+      return dispatchReportOf(stream.toolCalls, agent) || stream.text;
+    };
+    const finish = (next: GitAgentActionState) => {
+      for (const [wid, d] of activeDispatch) {
+        if (d.sid === sid) activeDispatch.delete(wid);
+      }
+      cleanup();
+      setState(next);
+    };
+    let prevStream = useUi.getState().streams[sid];
+    unsubscribeRef.current = useUi.subscribe((s) => {
+      const stream = s.streams[sid];
+      if (stream === prevStream || !stream) return;
+      prevStream = stream;
+      const report = reportOf(stream);
+      if (stream.finalMessage && !stream.isStreaming) {
+        const failed = !!stream.error || stream.stopReason === 'aborted';
+        finish(failed
+          ? { status: 'error', report, error: stream.error ?? `turn ${stream.stopReason ?? 'ended'}` }
+          : { status: 'done', report, error: null });
+        return;
+      }
+      if (stream.error) {
+        finish({ status: 'error', report, error: stream.error });
+        return;
+      }
+      setState((cur) => (cur.status === 'running' ? { ...cur, report } : cur));
+    });
+  }, [cleanup]);
+
+  // Adopt a dispatch that outlived a previous mount of this consumer (e.g.
+  // the commit-writer still running after a screen switch back).
+  useEffect(() => {
+    if (!homeWorkspaceId || !ipc) return;
+    const active = activeDispatch.get(homeWorkspaceId);
+    if (!active) return;
+    const stream = useUi.getState().streams[active.sid];
+    if (!stream?.isStreaming) {
+      activeDispatch.delete(homeWorkspaceId);
+      return;
+    }
+    activeSidRef.current = active.sid;
+    const report = !active.agent
+      ? stream.text
+      : dispatchReportOf(stream.toolCalls, active.agent) || stream.text;
+    setState({ status: 'running', report, error: null });
+    watch(active.sid, active.agent);
+    return () => cleanup();
+  }, [homeWorkspaceId, ipc, cleanup, watch]);
 
   const run = useCallback((args: GitAgentDispatchArgs): GitAgentRunResult => {
     if (!ipc) {
@@ -154,37 +231,8 @@ export function useGitAgentAction(): {
         useUi.getState().resetStream(sid);
         useUi.getState().patchStream(sid, { isStreaming: true });
         useUi.getState().setSessionRunning(sid, true);
-
-        // Watch the shared stream store for this dispatch's report + completion.
-        let prevStream = useUi.getState().streams[sid];
-        const finish = (next: GitAgentActionState) => {
-          cleanup();
-          setState(next);
-        };
-        const reportOf = (stream: SessionStream) => {
-          if (!args.agent) return stream.text;
-          // The model occasionally answers inline despite the imperative
-          // dispatch instruction — its text IS the requested output then.
-          return dispatchReportOf(stream.toolCalls, args.agent) || stream.text;
-        };
-        unsubscribeRef.current = useUi.subscribe((s) => {
-          const stream = s.streams[sid];
-          if (stream === prevStream || !stream) return;
-          prevStream = stream;
-          const report = reportOf(stream);
-          if (stream.finalMessage && !stream.isStreaming) {
-            const failed = !!stream.error || stream.stopReason === 'aborted';
-            finish(failed
-              ? { status: 'error', report, error: stream.error ?? `turn ${stream.stopReason ?? 'ended'}` }
-              : { status: 'done', report, error: null });
-            return;
-          }
-          if (stream.error) {
-            finish({ status: 'error', report, error: stream.error });
-            return;
-          }
-          setState((cur) => (cur.status === 'running' ? { ...cur, report } : cur));
-        });
+        activeDispatch.set(args.workspaceId, { workspaceId: args.workspaceId, sid, agent: args.agent });
+        watch(sid, args.agent);
 
         await ipc.runTurn({
           sessionId: sid,
@@ -205,13 +253,23 @@ export function useGitAgentAction(): {
           const stream = useUi.getState().streams[sid];
           if (stream?.isStreaming) {
             useUi.getState().patchStream(sid, { isStreaming: false });
-            finish({ status: 'done', report: reportOf(stream), error: null });
+            for (const [wid, d] of activeDispatch) {
+              if (d.sid === sid) activeDispatch.delete(wid);
+            }
+            const failed = !!stream.error;
+            setState(failed
+              ? { status: 'error', report: stream.text, error: stream.error ?? 'turn ended' }
+              : { status: 'done', report: !args.agent ? stream.text : dispatchReportOf(stream.toolCalls, args.agent) || stream.text, error: null });
+            cleanup();
           }
         }
       } catch (err: any) {
         if (activeSidRef.current) {
           useUi.getState().patchStream(activeSidRef.current, { isStreaming: false });
           useUi.getState().setSessionRunning(activeSidRef.current, false);
+          for (const [wid, d] of activeDispatch) {
+            if (d.sid === activeSidRef.current) activeDispatch.delete(wid);
+          }
         }
         cleanup();
         setState({ status: 'error', report: '', error: err?.message ?? String(err) });
@@ -219,7 +277,7 @@ export function useGitAgentAction(): {
     })();
 
     return { status: 'running' };
-  }, [cleanup, ipc]);
+  }, [cleanup, watch, ipc]);
 
   const reset = useCallback(() => {
     cleanup();
