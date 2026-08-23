@@ -180,3 +180,63 @@ describe('projectTurnRecords', () => {
     expect(finalActivity).toBe(undefined);
   });
 });
+
+describe('projectTurnRecords — sub-agent nesting (regression: activity leak)', () => {
+  type CreateEntryOptions = {
+    id: string;
+    role: 'user' | 'assistant';
+    parentID?: string;
+    createdAt: number;
+    parts?: OcPart[];
+    finish?: string;
+  };
+
+  const createEntryWithParts = ({ id, role, parentID, createdAt, parts = [], finish }: CreateEntryOptions): ChatMessageEntry => ({
+    info: {
+      id,
+      role,
+      ...(parentID ? { parentID } : {}),
+      time: { created: createdAt, ...(role === 'assistant' ? { completed: createdAt + 1000 } : {}) },
+      ...(finish ? { finish } : {}),
+    } as OcMessage,
+    parts,
+  });
+
+  test('sub-agent child parts are excluded from top-level turn activity; the dispatch_agent row stays', () => {
+    const agentTool: OcPart = {
+      type: 'tool',
+      id: 'agent-1',
+      tool: 'dispatch_agent',
+      state: { status: 'executed' },
+      metadata: {},
+    } as OcPart;
+    const childBash: OcPart = {
+      type: 'tool',
+      id: 'child-bash-1',
+      tool: 'bash',
+      state: { status: 'executed' },
+      metadata: { parentToolCallId: 'agent-1' },
+    } as OcPart;
+    const childReport: OcPart = {
+      type: 'text',
+      id: 'child-text-1',
+      text: 'sub-agent final report',
+      metadata: { parentToolCallId: 'agent-1' },
+    } as OcPart;
+
+    const user = createEntryWithParts({ id: 'u1', role: 'user', createdAt: 1 });
+    const assistant = createEntryWithParts({
+      id: 'a1',
+      role: 'assistant',
+      parentID: 'u1',
+      createdAt: 2,
+      finish: 'stop',
+      parts: [agentTool, childBash, childReport],
+    });
+
+    const projection = projectTurnRecords([user, assistant]);
+    const turn = projection.turns[0];
+
+    expect(turn?.activityParts.map((activity) => activity.id)).toEqual(['agent-1']);
+  });
+});

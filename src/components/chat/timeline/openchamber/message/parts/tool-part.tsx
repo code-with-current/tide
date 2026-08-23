@@ -1581,7 +1581,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            {isActive && !isError && <PixelLoader variant="sparkle" size="xs" />}
+            {isActive && !isError && <PixelLoader variant="orbit" size="xs" />}
             <MinDurationShineText
               active={Boolean(isActive && !isError)}
               minDurationMs={300}

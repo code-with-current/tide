@@ -37,7 +37,7 @@ function useWallClock(startedAt?: string): string {
 export function TurnWorkingFooter({ startedAt }: { startedAt?: string }) {
   const elapsed = useWallClock(startedAt);
   return (
-    <PixelLoader variant="sparkle" label="Working" elapsed={elapsed} className="py-2" />
+    <PixelLoader variant="orbit" label="Working" elapsed={elapsed} className="py-2" />
   );
 }
 

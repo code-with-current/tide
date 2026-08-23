@@ -8,6 +8,15 @@ import type {
   TurnPartRecord,
 } from './types';
 
+// Local twin of hasParentToolCall (lib/tide-adapter) — importing the adapter
+// here would cycle (adapter → project-turn-records → this module). Sub-agent
+// child parts render nested inside their dispatch_agent block, never as
+// top-level turn activity.
+const hasParentToolCall = (part: { metadata?: Record<string, unknown> }): boolean => {
+  const parentId = part.metadata?.parentToolCallId;
+  return typeof parentId === 'string' && parentId !== '';
+};
+
 const isStandaloneTool = (toolName: unknown): boolean => {
   return typeof toolName === 'string' && ACTIVITY_STANDALONE_TOOL_NAMES.has(toolName.toLowerCase());
 };
@@ -80,6 +89,12 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
 
   input.assistantMessages.forEach((message) => {
     message.parts.forEach((part) => {
+      // Sub-agent child parts render nested inside their dispatch_agent block
+      // (AgentNestingContext) — they are not top-level turn activity.
+      if (hasParentToolCall(part)) {
+        return;
+      }
+
       if (part.type === 'tool') {
         hasTools = true;
         return;
@@ -102,6 +117,10 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
     const messageIsCompactionSummary = isCompactionSummaryMessage(message);
 
     message.parts.forEach((part, partIndex) => {
+      if (hasParentToolCall(part)) {
+        return;
+      }
+
       const isTool = part.type === 'tool';
 
       const text = part.type === 'reasoning' || part.type === 'text'

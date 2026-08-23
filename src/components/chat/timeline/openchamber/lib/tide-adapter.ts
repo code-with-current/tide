@@ -101,6 +101,17 @@ function buildToolMetadata(b: ToolBlock): Record<string, unknown> {
   return metadata;
 }
 
+/** True for parts mirrored from a dispatched sub-agent (src/types/block.ts
+ *  invariant: children carry parentToolCallId). Top-level render paths —
+ *  message-body's flat loop and the turn-activity projection — must skip
+ *  these; they render nested inside their dispatch_agent ToolPart via
+ *  AgentNestingContext, and rendering them again at top level leaks the
+ *  sub-agent's activity outside the agent block. */
+export function hasParentToolCall(part: OcPart): boolean {
+  const parentId = part.metadata?.parentToolCallId;
+  return typeof parentId === 'string' && parentId !== '';
+}
+
 export function toChatMessageEntry(msg: Message): ChatMessageEntry {
   const created = toEpochMs(msg.createdAt);
   const isAssistant = msg.role === 'assistant';

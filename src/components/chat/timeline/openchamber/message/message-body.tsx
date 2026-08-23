@@ -59,6 +59,7 @@ import { StaticToolRow } from './parts/progressive-group';
 import { ToolPartMemoized as ToolPart } from './parts/tool-part';
 import { TurnActivityMemoized as TurnActivity } from '../components/turn-activity';
 import { isActiveToolStatus, isExpandableTool, isFinalizedToolStatus, isStandaloneTool } from './tool-render-utils';
+import { hasParentToolCall } from '../lib/tide-adapter';
 import { getAgentColor } from '../lib/agent-colors';
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -908,7 +909,11 @@ const AssistantMessageBody = React.memo(({
       .filter((part) => {
         const rawPart = part as Record<string, unknown>;
         return rawPart.type !== 'compaction';
-      });
+      })
+      // Sub-agent child parts (metadata.parentToolCallId) render nested inside
+      // their dispatch_agent ToolPart via AgentNestingContext — keeping them
+      // here leaks the sub-agent's activity outside the agent block.
+      .filter((part) => !hasParentToolCall(part));
   }, [parts]);
 
   const toolParts = React.useMemo(() => {
