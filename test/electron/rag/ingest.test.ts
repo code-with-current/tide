@@ -27,7 +27,7 @@ const { embedMock, LocalOnnxMock, localModelExistsMock } = vi.hoisted(() => {
     }),
   );
   const LocalOnnxMock = vi.fn(function () {
-    return { embed: embedMock };
+    return { id: 'local-code-512', dim: 384 as const, maxTokens: 512, embed: embedMock };
   });
   const localModelExistsMock = vi.fn((): boolean => true);
   return { embedMock, LocalOnnxMock, localModelExistsMock };
