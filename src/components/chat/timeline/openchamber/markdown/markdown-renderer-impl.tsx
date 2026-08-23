@@ -11,9 +11,9 @@
  *    equivalent store; wrap toggling works within a renderer instance.
  *  - Deleted subsystems with no Tide equivalent: file-reference annotation
  *    (`fileReferenceParser`/`fileReferenceStat`/fs stat probes/editor APIs),
- *    app-link confirmation interactions, loopback preview, FadeInOnReveal
- *    wrapper (arrives with Task 3's message components — `isAnimated` is
- *    accepted and currently renders without the fade), and stream perf probes.
+ *    app-link confirmation interactions, loopback preview, and stream perf
+ *    probes. (The FadeInOnReveal wrapper omission from Task 2 was reverted to
+ *    upstream in Task 3 — see `fadeKey` below.)
  *  - `part?: Part` from `@opencode-ai/sdk/v2` becomes `part?: OcPart` from
  *    Tide's ported structural types (../types/opencode-parts).
  *  - `ToolPopupContent` from ./message/types (out of port scope) becomes a
@@ -44,6 +44,7 @@ import {
   type MermaidRender,
 } from './decorate';
 import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './mermaid-viewer';
+import { FadeInOnReveal } from '../message/fade-in-on-reveal';
 
 // ---------------------------------------------------------------------------
 // Seams: theme + popup content
@@ -496,6 +497,8 @@ const markdownContentClassName = (variant: MarkdownVariant): string =>
 
 const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   content,
+  part,
+  messageId,
   isAnimated = true,
   skipFadeIn = false,
   className,
@@ -506,8 +509,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   enableFileReferences = true,
 }) => {
   void enableFileReferences; // Retained for API compat; Tide has no file-reference pipeline (see header).
-  void isAnimated;
-  void skipFadeIn;
   const currentTheme = useMarkdownChatTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
 
@@ -523,6 +524,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme.palette), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, DEFAULT_MERMAID_CONTROLS);
 
+  // Identity for the fade-in wrapper: a new part/message restarts the animation.
+  const fadeKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
+
   useMorphdomMarkdown({
     containerRef,
     text: content,
@@ -532,11 +536,21 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     ctx,
   });
 
-  return (
+  const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
       <div className={markdownContentClassName(variant)} data-markdown-content />
     </div>
   );
+
+  if (isAnimated) {
+    return (
+      <FadeInOnReveal key={fadeKey} skipAnimation={skipFadeIn}>
+        {markdownContent}
+      </FadeInOnReveal>
+    );
+  }
+
+  return markdownContent;
 };
 
 export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) => {
