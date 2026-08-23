@@ -1567,6 +1567,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 'absolute inset-0 flex items-center justify-center transition-opacity',
                 isExpanded && 'opacity-0',
                 !isExpanded && 'group-hover/tool:opacity-0',
+                tintClass && 'tool-tint',
                 tintClass
               )}
               style={tintClass ? undefined : iconStyle}
@@ -1588,7 +1589,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             <MinDurationShineText
               active={Boolean(isActive && !isError)}
               minDurationMs={300}
-              className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0', tintClass)}
+              className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0', tintClass && 'tool-tint', tintClass)}
               style={tintClass ? undefined : titleStyle}
               title={displayName}
             >

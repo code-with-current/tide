@@ -383,8 +383,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 'absolute inset-0 transition-opacity',
                 isExpanded && 'opacity-0',
                 !isExpanded && 'group-hover/tool:opacity-0',
+                'tool-tint text-reasoning',
               )}
-              style={{ color: 'var(--tools-icon)' }}
             >
               <Icon name="brain-ai-3" className="h-3.5 w-3.5" />
             </div>
@@ -393,8 +393,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 'absolute inset-0 transition-opacity flex items-center justify-center',
                 isExpanded && 'opacity-100',
                 !isExpanded && 'opacity-0 group-hover/tool:opacity-100',
+                'tool-tint text-reasoning',
               )}
-              style={{ color: 'var(--tools-icon)' }}
             >
               {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
             </div>
@@ -403,20 +403,17 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
           {isStreaming ? (
             <CyclingDotsLabel
               label={variantLabel}
-              className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)}
-              style={{ color: 'var(--tools-title)' }}
+              className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS, 'tool-tint text-reasoning')}
             />
           ) : isExpanded ? (
             <span
-              className={TOOL_ROW_TITLE_CLASS}
-              style={{ color: 'var(--tools-title)' }}
+              className={cn(TOOL_ROW_TITLE_CLASS, 'tool-tint text-reasoning')}
             >
               {variantLabel}
             </span>
           ) : (
             <span
-              className={TOOL_ROW_TITLE_CLASS}
-              style={{ color: 'var(--tools-title)' }}
+              className={cn(TOOL_ROW_TITLE_CLASS, 'tool-tint text-reasoning')}
             >
               {variantLabel}
             </span>

@@ -30,6 +30,7 @@ import { FileTypeIcon } from '../../icon';
 import { Icon } from '../../icon';
 import { FadeInOnReveal } from '../fade-in-on-reveal';
 import { getToolIcon } from '../tool-presentation';
+import { toolTextColor } from '@/lib/tool-colors';
 import { getToolMetadata } from '../../lib/tool-helpers';
 import { isExpandableTool, isStandaloneTool, isStaticTool } from '../tool-render-utils';
 import ReasoningPart from './reasoning-part';
@@ -582,6 +583,7 @@ const StaticToolRowInner: React.FC<{
   const showToolFileIcons = true;
   const displayName = getToolMetadata(toolName).displayName;
   const icon = getToolIcon(toolName);
+  const tintClass = toolTextColor(toolName);
   const isReadGroup = toolName.toLowerCase() === 'read';
   const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
 
@@ -652,14 +654,17 @@ const StaticToolRowInner: React.FC<{
         'oc-static-tool-row flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0',
       )}
     >
-      <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
+      <div
+        className={cn('inline-flex h-5 items-center flex-shrink-0', tintClass && 'tool-tint', tintClass)}
+        style={tintClass ? undefined : { color: 'var(--tools-icon)' }}
+      >
         {icon}
       </div>
       <MinDurationShineText
         active={hasRunningActivity}
         minDurationMs={1000}
-        className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0 opacity-85')}
-        style={{ color: 'var(--tools-title)' }}
+        className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0 opacity-85', tintClass && 'tool-tint', tintClass)}
+        style={tintClass ? undefined : { color: 'var(--tools-title)' }}
         title={displayName}
       >
         {displayName}
