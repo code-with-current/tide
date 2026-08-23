@@ -41,7 +41,7 @@ describe('parseZaiQuota', () => {
       TOKENS_5H,
       { type: 'TIME_LIMIT', unit: 1, number: 1, percentage: 10, usage: 1440, remaining: 1296, nextResetTime: 1_810_000_000_000 },
     ]));
-    const mcp = r!.windows.find((w) => w.label === 'MCP time');
+    const mcp = r!.windows.find((w) => w.label === 'MCP Limit');
     expect(mcp).toMatchObject({ unit: 'credits', limit: 1440 });
   });
 
