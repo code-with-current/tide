@@ -47,6 +47,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { toolTextColor } from '@/lib/tool-colors';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { PixelLoader } from '@/components/ui/pixel-loader';
@@ -1532,6 +1533,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     handleMainClick(event);
   };
 
+  const tintClass = !isError ? toolTextColor(tool) : undefined;
   const iconStyle = !isAgentTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
   const titleStyle = !isAgentTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
   const shouldRenderAgentNesting = useDeferredExpandedContent(isAgentTool && (isActive || isFinalized));
@@ -1564,9 +1566,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
               className={cn(
                 'absolute inset-0 flex items-center justify-center transition-opacity',
                 isExpanded && 'opacity-0',
-                !isExpanded && 'group-hover/tool:opacity-0'
+                !isExpanded && 'group-hover/tool:opacity-0',
+                tintClass
               )}
-              style={iconStyle}
+              style={tintClass ? undefined : iconStyle}
             >
               {getToolIcon(tool || part.tool)}
             </div>
@@ -1585,8 +1588,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             <MinDurationShineText
               active={Boolean(isActive && !isError)}
               minDurationMs={300}
-              className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
-              style={titleStyle}
+              className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0', tintClass)}
+              style={tintClass ? undefined : titleStyle}
               title={displayName}
             >
               {displayName}
