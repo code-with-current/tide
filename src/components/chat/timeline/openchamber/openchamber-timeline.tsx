@@ -32,7 +32,10 @@ import { ChatEmptyStateMemoized } from './chat-empty-state';
 import { TurnWorkingFooter } from '@/components/chat/turn/turn-header';
 import { CompactedDivider } from '../../blocks/compacted-divider';
 import { PanelActionsProvider } from './panel-actions-context';
-import type { Turn } from './lib/turns/types';
+import { useUi } from '@/lib/stores/ui';
+import { effectiveTurnExpanded } from './lib/turns/effective-turn-expansion';
+import { TurnSummaryRow } from './components/turn-summary-row';
+import type { Turn, TurnRecord } from './lib/turns/types';
 import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 import { cn } from '@/lib/utils';
 import './openchamber-chat.css';
@@ -84,6 +87,7 @@ function OpenChamberTimelineImpl({
   className,
   retryActive,
 }: OpenChamberTimelineProps) {
+  const chatView = useUi((s) => s.chatView);
   const isEmpty = messages.length === 0 && !streamingMessage && !sessionLoading;
   const listActive = !isEmpty && !(sessionLoading && messages.length === 0);
   const { scrollRef, state, showScrollButton, goToBottom, scrollToBottomOnSend } =
@@ -203,11 +207,16 @@ function OpenChamberTimelineImpl({
   // Static turn rows: group state from the controller; NO streaming-only
   // props (isStreamingRow/pendingToolCallIds/onApprove/onReject/
   // onAnswerFollowup are tail-row-only per the task-8 brief).
+  // Compact mode: a collapsed turn renders ONLY its summary row (the row
+  // shrinks; the virtualizer re-measures normally). Auto-collapse on finish
+  // is not explicit code — when the tail finishes, streamingTailEntry → null
+  // and this renderer takes over with no manual expansion yet, i.e. collapsed.
   const renderStaticTurnContent = useCallback(
-    (turn: Turn) => {
+    (turn: TurnRecord) => {
       const isGroupExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? false;
       const onToggleGroup = () => toggleTurnGroup(turn.turnId);
-      return (
+      const expanded = effectiveTurnExpanded(chatView, turnUiStates.get(turn.turnId));
+      const content = (
         <TurnItemMemoized
           turn={turn}
           renderMessage={(entry) => (
@@ -221,12 +230,27 @@ function OpenChamberTimelineImpl({
           )}
         />
       );
+      if (chatView === 'stream') return content;
+      return (
+        <>
+          <TurnSummaryRow
+            turn={turn}
+            diffStats={turn.diffStats}
+            changedFiles={turn.changedFiles}
+            expanded={expanded}
+            onToggle={onToggleGroup}
+          />
+          {expanded ? content : null}
+        </>
+      );
     },
-    [turnUiStates, toggleTurnGroup, directory],
+    [chatView, turnUiStates, toggleTurnGroup, directory],
   );
 
   // Streaming tail: same OpenChamberChatMessage-based renderMessage so live
-  // parts stream in-place, plus the streaming-only props.
+  // parts stream in-place, plus the streaming-only props. Always fully
+  // expanded regardless of chatView — compact collapse applies only once the
+  // turn becomes a static row above.
   const renderTailContent = useCallback(
     (tail: StreamingTailEntry) => {
       if (tail.kind === 'turn') {

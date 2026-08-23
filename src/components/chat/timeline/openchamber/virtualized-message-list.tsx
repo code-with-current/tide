@@ -33,7 +33,7 @@ import {
   type VirtualItem,
   type Virtualizer,
 } from '@tanstack/react-virtual';
-import type { Turn } from './lib/turns/types';
+import type { TurnRecord } from './lib/turns/types';
 import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 
 type HtmlVirtualizer = Virtualizer<HTMLDivElement, HTMLDivElement>;
@@ -54,7 +54,7 @@ export interface TimelineDividerPayload {
  */
 export type TimelineRow =
   | { key: string; kind: 'divider'; compaction: TimelineDividerPayload; userMessage?: undefined }
-  | { key: string; kind: 'turn'; turn: Turn; userMessage: boolean }
+  | { key: string; kind: 'turn'; turn: TurnRecord; userMessage: boolean }
   | { key: string; kind: 'tail'; entry: StreamingTailEntry; userMessage: boolean };
 
 const ESTIMATED_ROW_SIZE = 320;
