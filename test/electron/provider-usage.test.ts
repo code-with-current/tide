@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseZaiQuota, parseOpenRouterKey } from '../../electron/agent/provider-usage';
+import { parseZaiQuota, parseOpenRouterKey, parseDeepSeekBalance, parseFireworksSummary } from '../../electron/agent/provider-usage';
 
 const zaiPayload = (limits: unknown[], planName = 'GLM Coding Plan') => ({
   success: true,
@@ -72,5 +72,55 @@ describe('parseOpenRouterKey', () => {
   it('rejects malformed payloads', () => {
     expect(parseOpenRouterKey({})).toBeNull();
     expect(parseOpenRouterKey(null)).toBeNull();
+  });
+});
+
+describe('parseDeepSeekBalance', () => {
+  it('surfaces the USD entry as the balance window', () => {
+    const r = parseDeepSeekBalance({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0', topped_up_balance: '100.00' },
+        { currency: 'USD', total_balance: '5.25', granted_balance: '0.25', topped_up_balance: '5.00' },
+      ],
+    });
+    expect(r!.windows[0]).toMatchObject({ label: 'balance', used: 5.25, unit: 'USD' });
+    expect(r!.windows[0].percent).toBeUndefined();
+  });
+
+  it('falls back to the first currency when no USD', () => {
+    const r = parseDeepSeekBalance({
+      is_available: true,
+      balance_infos: [{ currency: 'CNY', total_balance: '88.00' }],
+    });
+    expect(r!.windows[0].label).toBe('balance (CNY)');
+  });
+
+  it('rejects malformed payloads', () => {
+    expect(parseDeepSeekBalance({})).toBeNull();
+    expect(parseDeepSeekBalance({ balance_infos: [] })).toBeNull();
+    expect(parseDeepSeekBalance({ balance_infos: [{ currency: 'USD', total_balance: 'x' }] })).toBeNull();
+  });
+});
+
+describe('parseFireworksSummary', () => {
+  it('sums rated line items (units + nanos/1e9) into 30-day spend', () => {
+    const r = parseFireworksSummary({
+      lineItems: [
+        { cost: { units: '0', nanos: '300000000', currencyCode: 'USD' } },
+        { cost: { units: '1', nanos: 250000000, currencyCode: 'USD' } },
+      ],
+    }, 'acct-1');
+    expect(r!.windows[0]).toMatchObject({ label: '30-day spend', used: 1.55, unit: 'USD' });
+    expect(r!.planName).toBe('acct-1');
+  });
+
+  it('empty line items are valid zero spend', () => {
+    const r = parseFireworksSummary({ lineItems: [] }, 'acct');
+    expect(r!.windows[0].used).toBe(0);
+  });
+
+  it('rejects payloads without lineItems', () => {
+    expect(parseFireworksSummary({}, 'acct')).toBeNull();
   });
 });

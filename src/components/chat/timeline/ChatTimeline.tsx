@@ -62,7 +62,7 @@ function ChatTimelineImpl({
   const lastRole = (streamingMessage ?? messages[messages.length - 1])?.role;
   // Turn frozen at a permission gate → freeze the follow too (see hook).
   const permissionPaused = (pendingToolCallIds?.length ?? 0) > 0;
-  const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole, sessionId, permissionPaused);
+  const { unread, pinned, entrySticking, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole, sessionId, permissionPaused);
 
   const virtualizer = useVirtualizer({
     count: listActive ? totalCount : 0,
@@ -86,10 +86,11 @@ function ChatTimelineImpl({
           // repositions rows (card mounts, measure corrections), which the
           // chase then re-glues DOWN — the visible up-down bob.
           'h-full overflow-y-auto overflow-x-hidden scroll [overflow-anchor:none] px-6 py-3',
-          // The pin-scroll spacer mounts a 100vh scroll range for the whole
-          // turn — a scrollbar over that phantom range is noise, so it's
-          // hidden until the spacer collapses and only real overflow remains.
-          (pinned || isStreaming) && 'chat-streaming',
+          // The pin-scroll spacers mount phantom scroll ranges (100vh while
+          // a turn is live, 10vh while a switched-to session is landing) —
+          // a scrollbar over phantom range is noise, so it's hidden until
+          // only real overflow remains.
+          (pinned || isStreaming || entrySticking) && 'chat-streaming',
           className,
         )}
       >
@@ -142,6 +143,13 @@ function ChatTimelineImpl({
                   })}
                 </div>
                 {errorBlock}
+                {/* Permanent breathing room below the last result block —
+                    placed ABOVE the sentinel so every resting position
+                    (tail follow, turn-end settle, entry glide, jump to
+                    bottom) bakes the gap in; without it the sentinel-based
+                    bottom leaves the final answer flush against the
+                    viewport's bottom edge. */}
+                <div style={{ height: '10vh' }} aria-hidden="true" />
                 {/* Marks the real content end for usePinnedTimelineScroll —
                     must stay below every message and above the spacer. Lives
                     outside the virtual box so it never unmounts. */}
@@ -150,6 +158,12 @@ function ChatTimelineImpl({
                     viewport top; mounted for the whole turn so a mid-stream
                     unpin doesn't collapse it under the user. */}
                   {(pinned || isStreaming) && <div style={{ height: '100vh' }} aria-hidden="true" />}
+                {/* Blank buffer while a switched-to session's history lands:
+                    post-switch growth (measure corrections, async blocks)
+                    happens in empty space below the last message instead of
+                    visibly pushing the viewport down frame by frame. The
+                    hook glides to the exact bottom before unmounting it. */}
+                  {entrySticking && <div style={{ height: '10vh' }} aria-hidden="true" />}
               </>
             )}
         </div>

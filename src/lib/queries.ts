@@ -154,7 +154,7 @@ export interface ProviderUsageReport {
   planName?: string;
   windows: Array<{
     label: string;
-    percent: number;
+    percent?: number;
     used?: number;
     limit?: number;
     unit: 'tokens' | 'USD' | 'credits';

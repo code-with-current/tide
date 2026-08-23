@@ -11,9 +11,10 @@ import type { Provider } from '../../src/types';
 export interface UsageWindow {
   label: string;
   /** Percent used, 0-100 — every provider reports this even when absolute
-   *  numbers are absent. */
-  percent: number;
-  /** Used amount in the window's unit. */
+   *  numbers are absent. Balance/spend-only reports omit it. */
+  percent?: number;
+  /** Used amount in the window's unit. For balance-only reports this is
+   *  the AVAILABLE balance. */
   used?: number;
   /** Total allowance in the window's unit (null/undefined = unlimited). */
   limit?: number;
@@ -23,7 +24,7 @@ export interface UsageWindow {
 }
 
 export interface ProviderUsageReport {
-  source: 'zai' | 'openrouter';
+  source: 'zai' | 'openrouter' | 'deepseek' | 'fireworks';
   planName?: string;
   windows: UsageWindow[];
 }
@@ -156,6 +157,93 @@ async function fetchOpenRouterReport(apiKey: string): Promise<ProviderUsageRepor
   return parseOpenRouterKey(await res.json().catch(() => null));
 }
 
+// ─── DeepSeek ────────────────────────────────────────────────────────────
+// GET https://api.deepseek.com/user/balance (Bearer) →
+// { is_available, balance_infos: [{ currency, total_balance, granted_balance,
+//   topped_up_balance }] } — prepaid balance only, no windows.
+
+export function parseDeepSeekBalance(json: unknown): ProviderUsageReport | null {
+  const root = json as {
+    is_available?: boolean;
+    balance_infos?: Array<{ currency?: string; total_balance?: string; granted_balance?: string; topped_up_balance?: string }>;
+  };
+  if (!root || !Array.isArray(root.balance_infos) || root.balance_infos.length === 0) return null;
+  // USD preferentially, else the first entry.
+  const entry = root.balance_infos.find((b) => b.currency === 'USD') ?? root.balance_infos[0];
+  const total = Number(entry.total_balance);
+  if (!Number.isFinite(total)) return null;
+  return {
+    source: 'deepseek',
+    windows: [{
+      label: entry.currency === 'USD' ? 'balance' : `balance (${entry.currency})`,
+      used: total,
+      unit: 'USD',
+      // Balance-only: no allowance, no percent — the ring stays muted.
+    }],
+  };
+}
+
+async function fetchDeepSeekReport(apiKey: string): Promise<ProviderUsageReport | null> {
+  const res = await fetch('https://api.deepseek.com/user/balance', {
+    headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) return null;
+  return parseDeepSeekBalance(await res.json().catch(() => null));
+}
+
+// ─── Fireworks ───────────────────────────────────────────────────────────
+// Two calls with the inference key: list accounts, then the 30-day rated
+// spend from the billing summary. No public balance endpoint — spend only.
+
+interface FireworksMoney { units?: string; nanos?: string | number; currencyCode?: string }
+
+function fireworksTotal(m: FireworksMoney): number {
+  const units = Number(m.units ?? 0);
+  const nanos = Number(m.nanos ?? 0);
+  return units + (Number.isFinite(nanos) ? nanos / 1e9 : 0);
+}
+
+export function parseFireworksSummary(
+  json: unknown,
+  accountSlug: string,
+): ProviderUsageReport | null {
+  const items = (json as { lineItems?: Array<{ cost?: FireworksMoney }> }).lineItems;
+  if (!Array.isArray(items)) return null;
+  let spend = 0;
+  for (const item of items) {
+    if (item?.cost) spend += fireworksTotal(item.cost);
+  }
+  return {
+    source: 'fireworks',
+    windows: [{
+      label: '30-day spend',
+      used: spend,
+      unit: 'USD',
+    }],
+    ...(accountSlug ? { planName: accountSlug } : {}),
+  };
+}
+
+async function fetchFireworksReport(apiKey: string): Promise<ProviderUsageReport | null> {
+  const accountsRes = await fetch('https://api.fireworks.ai/v1/accounts', {
+    headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!accountsRes.ok) return null;
+  const accounts = await accountsRes.json().catch(() => null) as { accounts?: Array<{ slug?: string }> } | null;
+  const slug = accounts?.accounts?.[0]?.slug;
+  if (!slug) return null;
+  const end = new Date();
+  const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const res = await fetch(
+    `https://api.fireworks.ai/v1/accounts/${encodeURIComponent(slug)}/billing/summary?startTime=${start.toISOString()}&endTime=${end.toISOString()}`,
+    { headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) },
+  );
+  if (!res.ok) return null;
+  return parseFireworksSummary(await res.json().catch(() => null), slug);
+}
+
 // ─── Dispatch ───────────────────────────────────────────────────────────
 
 /** Fetch the provider-API usage report for a configured provider, or null
@@ -168,6 +256,8 @@ export async function providerUsageReport(provider: Provider): Promise<ProviderU
     switch (preset?.id) {
       case 'zai': return await fetchZaiReport(provider.apiKey);
       case 'openrouter': return await fetchOpenRouterReport(provider.apiKey);
+      case 'deepseek': return await fetchDeepSeekReport(provider.apiKey);
+      case 'fireworks': return await fetchFireworksReport(provider.apiKey);
       default: return null;
     }
   } catch {

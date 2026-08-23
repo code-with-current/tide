@@ -16,6 +16,7 @@ import { QueuedMessages } from './composer/queued-messages';
 import { initiateFork } from '@/lib/queries';
 import type { MessageAttachment } from '@/types';
 import * as api from '@/lib/api/client';
+import { UsageRing } from './composer/usage-ring';
 
 /** Module-level stable empty array — never re-create the fallback, or Zustand's
  *  selector sees a "new" snapshot every render and triggers an infinite loop. */
@@ -1015,6 +1016,9 @@ export function ChatComposer({
                 onStop={() => onStop?.()}
               />
             )}*/}
+            <span className="flex-1"></span>
+            <div className="flex items-center gap-2">
+            <UsageRing/>
             <SendStopButton
               className="ml-auto"
               mode={!editorEmpty || attachments.length > 0 ? 'send' : inProgress ? 'stop' : 'send'}
@@ -1022,7 +1026,8 @@ export function ChatComposer({
               disabled={pendingReads > 0 || (!inProgress && editorEmpty && attachments.length === 0)}
               onSend={() => send()}
               onStop={() => onStop?.()}
-            />
+              />
+            </div>
           </div>
         </div>
       </div>

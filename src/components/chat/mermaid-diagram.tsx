@@ -394,14 +394,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({
           let lastParseError = '';
           for (const candidate of sanitizeMermaid(source)) {
             try {
-              const renderId = `mermaid-${++diagramId}`;
-              const { svg: rendered } = await mermaid.render(renderId, candidate);
-              // Clean up DOM artifacts mermaid leaves after a failed render.
-              document.querySelectorAll(
-                '[id^="dmermaid"], .mermaid-error, #mermaid-error',
-              ).forEach((el) => {
-                if (el.id !== renderId) el.remove();
-              });
+              const { svg: rendered } = await mermaid.render(`mermaid-${++diagramId}`, candidate);
               return { svg: rendered };
             } catch (e) {
               lastParseError = e instanceof Error ? e.message : String(e);

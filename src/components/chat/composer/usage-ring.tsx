@@ -83,7 +83,7 @@ function WindowRow({
         />
       </div>
       <div className="flex justify-between text-[0.7143rem] text-muted-foreground/50">
-        <span>{pct != null ? `${Math.round(pct)}% used` : 'usage unknown'}</span>
+        <span>{pct != null ? `${Math.round(pct)}% used` : label.includes('spend') ? 'rated spend' : 'available'}</span>
         {resetsAt ? (
           <span className="tabular-nums">resets in {formatCountdown(resetsAt - Date.now())}</span>
         ) : null}
@@ -111,7 +111,9 @@ export function UsageRing() {
   if (!provider) return null;
 
   // Primary: provider-API report. Fallback: local windows + manual limits.
-  const primary = report?.windows.find((w) => w.unit !== 'credits') ?? report?.windows[0];
+  // Prefer a window with a real percent for the ring; balance/spend-only
+  // reports (DeepSeek, Fireworks) leave the ring muted with no % text.
+  const primary = report?.windows.find((w) => w.percent != null) ?? report?.windows[0];
   const percent = primary?.percent;
   const hasApi = !!report;
 
@@ -124,7 +126,7 @@ export function UsageRing() {
           title={`${provider.name} — ${hasApi ? 'provider-reported usage' : 'local usage estimate'}`}
           aria-label="Provider usage"
         >
-          <RingSvg percent={percent ?? 0} muted={!hasApi && !provider.limits?.fiveHourTokens} />
+          <RingSvg percent={percent ?? 0} muted={percent == null && !provider.limits?.fiveHourTokens} />
           {percent != null ? (
             <span className="font-mono text-[0.7143rem] tabular-nums text-muted-foreground/80">
               {Math.round(percent)}%
