@@ -18,6 +18,7 @@ import { isRagCloudConfigured } from '../system-model.js';
 import { hydrateRagConfig } from '../../configStore.js';
 import * as workspaceStore from '../../store.js';
 import { knowledgeDbPath, openKnowledgeStore } from '../../knowledge/store.js';
+import type { Embedder } from '../../rag/embedder.js';
 import type { ToolResult, ToolRegistration } from './types';
 
 const DEFAULT_K = 5;
@@ -30,6 +31,16 @@ const RRF_K = 60;
 type KnowledgeHit = (VectorHit | FtsHit) & { sourceName: string };
 
 const NO_KNOWLEDGE: { hits: KnowledgeHit[]; total: number } = { hits: [], total: 0 };
+
+/** Tagged preparation failures: the workspace half surfaces these fatally;
+ *  the knowledge half treats any of them as "no knowledge results". */
+class RagUnusableError extends Error {}
+class QueryEmbedError extends Error {}
+
+interface PreparedQuery {
+  embedderId: string;
+  queryVec: number[];
+}
 
 /** Shared body — testable without the SDK wrapper. ctx-free; the
  *  workspaceId comes from the caller (the SDK factory pulls it from
@@ -69,57 +80,72 @@ export async function runMemory(
   try {
     const wsTotal = ragStore?.chunkCount() ?? 0;
 
-    // 3. Resolve the query-time embedder. resolveForQuery refuses to cross
-    //    embedders — a local-built index whose runtime died throws rather
-    //    than silently re-embedding via cloud (vectors would mismatch).
-    const ws = workspaceStore.listWorkspaces().find((w) => w.id === workspaceId);
-    const ragConfig = hydrateRagConfig(ws?.ragConfig);
-    let embedder;
-    let embedderId: string;
-    try {
-      ({ embedder, embedderId } = resolveForQuery({
-        config: ragConfig,
-        localAvailable: localModelExists(),
-        cloudConfigured: isRagCloudConfigured(),
-      }));
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return {
-        status: 'failed',
-        output: `RAG index unusable: ${msg}`,
-      };
-    }
-
-    // 4. Embed the query + run both stores' searches.
+    // 3. Query preparation (embedder resolution + query embedding) is lazy
+    //    and memoized: paid at most once, and never started when no half
+    //    ends up needing it. Failures are tagged so the workspace half can
+    //    surface them fatally while the knowledge half swallows them.
     const kClamped = Math.min(Math.max(k, 1), MAX_K);
-    let queryVec: number[];
-    try {
-      const vecs = await embedder.embed([query]);
-      queryVec = vecs[0];
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { status: 'failed', output: `Embedding query failed: ${msg}` };
+    let prepared: PreparedQuery | null = null;
+    const prepareQuery = async (): Promise<PreparedQuery> => {
+      if (!prepared) {
+        let embedder: Embedder;
+        let embedderId: string;
+        try {
+          const ws = workspaceStore.listWorkspaces().find((w) => w.id === workspaceId);
+          const ragConfig = hydrateRagConfig(ws?.ragConfig);
+          ({ embedder, embedderId } = resolveForQuery({
+            config: ragConfig,
+            localAvailable: localModelExists(),
+            cloudConfigured: isRagCloudConfigured(),
+          }));
+        } catch (e: unknown) {
+          throw new RagUnusableError(
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+        try {
+          const vecs = await embedder.embed([query]);
+          prepared = { embedderId, queryVec: vecs[0] };
+        } catch (e: unknown) {
+          throw new QueryEmbedError(
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
+      return prepared;
+    };
+
+    if (wsEnabled) {
+      try {
+        await prepareQuery();
+      } catch (e: unknown) {
+        if (e instanceof RagUnusableError) {
+          return { status: 'failed', output: `RAG index unusable: ${e.message}` };
+        }
+        return { status: 'failed', output: `Embedding query failed: ${(e as Error).message}` };
+      }
     }
 
-    const wsFused =
-      ragStore && wsTotal > 0
-        ? fuse(
-            ragStore.queryByVector(queryVec, kClamped),
-            ragStore.queryByFts(query, kClamped),
-            kClamped,
-          )
-        : [];
+    let wsFused: Array<VectorHit | FtsHit> = [];
+    if (ragStore && wsTotal > 0) {
+      const { queryVec } = await prepareQuery();
+      wsFused = fuse(
+        ragStore.queryByVector(queryVec, kClamped),
+        ragStore.queryByFts(query, kClamped),
+        kClamped,
+      );
+    }
 
-    const knowledge = searchKnowledgeSources({
-      embedderId,
+    const knowledge = await searchKnowledgeSources({
       workspaceId,
       query,
-      queryVec,
       k: kClamped,
+      prepareQuery,
     });
 
     // 5. Reciprocal rank fusion: within each store first, then across stores.
     const fused = fuse(wsFused, knowledge.hits, kClamped);
+    const grandTotal = wsTotal + knowledge.total;
 
     if (fused.length === 0) {
       if (!wsEnabled) {
@@ -141,7 +167,7 @@ export async function runMemory(
       }
       return {
         status: 'executed',
-        output: `No matches for "${query}" across ${total(wsTotal, knowledge)} indexed chunks.`,
+        output: `No matches for "${query}" across ${grandTotal} indexed chunks.`,
       };
     }
 
@@ -164,7 +190,7 @@ export async function runMemory(
 
     const text =
       `Found ${fused.length} relevant chunk${fused.length === 1 ? '' : 's'} ` +
-      `for "${query}" (out of ${total(wsTotal, knowledge)}):\n\n${lines.join('\n\n')}`;
+      `for "${query}" (out of ${grandTotal}):\n\n${lines.join('\n\n')}`;
 
     return {
       status: 'executed',
@@ -177,34 +203,35 @@ export async function runMemory(
   }
 }
 
-function total(wsTotal: number, knowledge: { total: number }): number {
-  return wsTotal + knowledge.total;
-}
-
 /** Search the global knowledge-sources index. Best-effort by design: any
  *  failure here (db missing/corrupt, registry error) degrades to "no
  *  knowledge results" so a broken global DB never fails the tool. */
-function searchKnowledgeSources(opts: {
-  embedderId: string;
+async function searchKnowledgeSources(opts: {
   workspaceId: string;
   query: string;
-  queryVec: number[];
   k: number;
-}): { hits: KnowledgeHit[]; total: number } {
+  prepareQuery: () => Promise<PreparedQuery>;
+}): Promise<{ hits: KnowledgeHit[]; total: number }> {
   try {
     const dbPath = knowledgeDbPath();
     // existsSync guard: openRagStoreAt would otherwise create an empty db as a side effect of every query.
     if (!fs.existsSync(dbPath)) return NO_KNOWLEDGE;
     const ks = openKnowledgeStore(dbPath);
     try {
+      const { embedderId, queryVec } = await opts.prepareQuery();
       // First-embedder-wins pinning (meta.embedderId): silently skip on
       // mismatch — unlike the workspace path, which surfaces an error.
       const pinned = ks.rag.getMeta('embedderId');
-      if (pinned && pinned !== opts.embedderId) return NO_KNOWLEDGE;
+      if (pinned && pinned !== embedderId) return NO_KNOWLEDGE;
 
       const enabledIds = new Set(ks.enabledSourceIdsFor(opts.workspaceId));
-      const totalChunks = ks.rag.chunkCount();
-      if (enabledIds.size === 0 || totalChunks === 0) return NO_KNOWLEDGE;
+      const sources = ks.listSources();
+      // Total counts only what this workspace can see — chunks behind
+      // disabled sources must not leak into the reported coverage.
+      const visibleChunks = sources
+        .filter((s) => enabledIds.has(s.id))
+        .reduce((n, s) => n + s.chunkCount, 0);
+      if (enabledIds.size === 0 || visibleChunks === 0) return NO_KNOWLEDGE;
 
       const names = new Map(ks.listSources().map((s) => [s.id, s.name] as const));
       // Over-fetch then filter by sourceId: cheap post-filtering beats
@@ -214,17 +241,26 @@ function searchKnowledgeSources(opts: {
         h: VectorHit | FtsHit,
       ): h is (VectorHit | FtsHit) & { sourceId: string } =>
         h.sourceId != null && enabledIds.has(h.sourceId);
-      const kVec = ks.rag.queryByVector(opts.queryVec, overFetch).filter(isEnabled);
+      const kVec = ks.rag.queryByVector(queryVec, overFetch).filter(isEnabled);
       const kFts = ks.rag.queryByFts(opts.query, overFetch).filter(isEnabled);
       const hits: KnowledgeHit[] = fuse(kVec, kFts, opts.k).map((h) => ({
         ...h,
         sourceName: names.get(h.sourceId) ?? h.sourceId,
       }));
-      return { hits, total: totalChunks };
+      return { hits, total: visibleChunks };
     } finally {
-      ks.close();
+      // A close() failure here must not discard already-computed hits.
+      try {
+        ks.close();
+      } catch {
+        /* nothing actionable */
+      }
     }
-  } catch {
+  } catch (e) {
+    console.warn(
+      '[memory] knowledge search skipped:',
+      e instanceof Error ? e.message : String(e),
+    );
     return NO_KNOWLEDGE;
   }
 }

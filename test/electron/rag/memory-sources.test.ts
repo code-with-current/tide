@@ -30,16 +30,17 @@ vi.mock('../../../electron/agent/system-model.js', () => ({
   isRagCloudConfigured: isRagCloudConfiguredMock,
 }));
 
-const { embedMock } = vi.hoisted(() => ({
+const { embedMock, localExistsMock } = vi.hoisted(() => ({
   embedMock: vi.fn(async (texts: string[]) =>
     texts.map(() => new Array(384).fill(0)),
   ),
+  localExistsMock: vi.fn((): boolean => true),
 }));
 vi.mock('../../../electron/rag/local-onnx-embedder.js', () => ({
   LocalOnnxEmbedder: vi.fn(function () {
     return { id: 'local-code-512', dim: 384, maxTokens: 512, embed: embedMock, isAvailable: () => true };
   }),
-  localModelExists: vi.fn(() => true),
+  localModelExists: localExistsMock,
 }));
 
 import { runMemory } from '../../../electron/agent/tools/memory.js';
@@ -75,6 +76,7 @@ function seedKnowledge(input: {
   name: string;
   enabledWorkspaceIds?: string[];
   embedderId?: string;
+  chunkCount?: number;
   chunks: Array<{ id: string; content: string; origin: string; vector: number[] }>;
 }): void {
   const ks = openKnowledgeStore();
@@ -101,6 +103,8 @@ function seedKnowledge(input: {
   ks.rag.upsertVectors(
     rowids.map((r, i) => ({ rowid: r.rowid, chunkId: r.id, embedding: input.chunks[i].vector })),
   );
+  // The manager stamps registry chunkCount after a real ingest pass; mirror that here.
+  ks.setChunkCount(src.id, input.chunkCount ?? input.chunks.length);
   ks.rag.setMeta('embedderId', input.embedderId ?? 'local-code-512');
   ks.close();
 }
@@ -112,6 +116,7 @@ describe('runMemory — knowledge sources fusion', () => {
     listRagEnabledWorkspacesMock.mockReturnValue([WS]);
     isRagCloudConfiguredMock.mockReturnValue(false);
     embedMock.mockClear();
+    localExistsMock.mockReturnValue(true);
     embedMock.mockImplementation(async (texts: string[]) =>
       texts.map(() => new Array(384).fill(0)),
     );
@@ -289,6 +294,66 @@ describe('runMemory — knowledge sources fusion', () => {
 
     expect(result.status).toBe('executed');
     expect(result.output).toContain('[Handbook] wiki.example/expenses');
+  });
+
+  it('returns the RAG-disabled hint instead of an embedder failure when the embedder is unresolvable', async () => {
+    listRagEnabledWorkspacesMock.mockReturnValue([]);
+    // No local model + no cloud + cloud fallback disallowed → resolveForQuery throws.
+    localExistsMock.mockReturnValue(false);
+    seedKnowledge({
+      name: 'Handbook',
+      enabledWorkspaceIds: ['*'],
+      chunks: [{
+        id: 'k-hb2',
+        content: 'expense reports are submitted through the finance portal',
+        origin: 'wiki.example/expenses',
+        vector: oneHot(9),
+      }],
+    });
+
+    const result = await runMemory('expense report submission finance portal', 5, WS);
+
+    expect(result.status).toBe('executed');
+    expect(result.output).toMatch(/RAG is not enabled/i);
+  });
+
+  it('reports a header total that excludes chunks from sources disabled for this workspace', async () => {
+    seedWorkspace(
+      [mkChunk({ id: 'w-auth', content: 'auth token refresh logic lives here' })],
+      [oneHot(3)],
+    );
+    seedKnowledge({
+      name: 'Shared Docs',
+      enabledWorkspaceIds: ['*'],
+      chunkCount: 2,
+      chunks: [{
+        id: 'k-on',
+        content: 'alpha quantum flux capacitor manual',
+        origin: 'docs.example/quantum',
+        vector: oneHot(4),
+      }],
+    });
+    seedKnowledge({
+      name: 'Private Docs',
+      enabledWorkspaceIds: ['other-ws'],
+      chunkCount: 7,
+      chunks: [{
+        id: 'k-off',
+        content: 'omega hyperdrive coil assembly guide',
+        origin: 'docs.example/hyperdrive',
+        vector: oneHot(6),
+      }],
+    });
+
+    embedMock.mockResolvedValueOnce([oneHot(3)]);
+    const result = await runMemory('auth token refresh alpha quantum flux', 5, WS);
+
+    expect(result.status).toBe('executed');
+    // 1 workspace chunk + 2 visible knowledge chunks; the disabled source's 7 stay hidden.
+    expect(result.output).toContain('out of 3');
+    expect(result.output).not.toContain('out of 10');
+    expect(result.output).toContain('[Shared Docs] docs.example/quantum');
+    expect(result.output).not.toContain('[Private Docs]');
   });
 });
 
