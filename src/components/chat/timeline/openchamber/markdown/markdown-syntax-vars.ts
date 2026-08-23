@@ -4,7 +4,9 @@
  *  next-themes with static CSS tokens — so the seam is a local structural
  *  `MarkdownSyntaxPalette` type plus two exported palettes (light/dark) that
  *  mirror the `--md-syntax-*` values in openchamber-chat.css. The renderer
- *  picks the palette from the resolved next-themes theme. Keep this module free
+ *  picks the palette from the resolved next-themes theme. Tide pins code
+ *  blocks to the dark palette in both themes (product decision), so the light
+ *  export aliases the dark palette. Keep this module free
  *  of `@pierre/diffs` imports — eager consumers must not pull that stack into
  *  the startup graph (upstream constraint, preserved).
  */
@@ -31,27 +33,6 @@ export interface MarkdownSyntaxPalette {
   };
 }
 
-export const MARKDOWN_SYNTAX_PALETTE_LIGHT: MarkdownSyntaxPalette = {
-  base: {
-    foreground: 'hsl(226 44% 12%)',
-    comment: 'hsl(220 9% 46%)',
-    string: 'hsl(134 55% 30%)',
-    number: 'hsl(271 45% 38%)',
-    keyword: 'hsl(304 40% 34%)',
-    operator: 'hsl(210 12% 32%)',
-    function: 'hsl(208 78% 34%)',
-    type: 'hsl(187 55% 30%)',
-    variable: 'hsl(218 24% 20%)',
-  },
-  tokens: {
-    variableProperty: 'hsl(186 48% 34%)',
-  },
-  status: {
-    success: 'hsl(142 71% 40%)',
-    error: 'hsl(0 72% 45%)',
-  },
-};
-
 export const MARKDOWN_SYNTAX_PALETTE_DARK: MarkdownSyntaxPalette = {
   base: {
     foreground: 'hsl(226 30% 86%)',
@@ -72,6 +53,9 @@ export const MARKDOWN_SYNTAX_PALETTE_DARK: MarkdownSyntaxPalette = {
     error: 'hsl(0 68% 62%)',
   },
 };
+
+// Code blocks always render with the dark palette, even in light theme.
+export const MARKDOWN_SYNTAX_PALETTE_LIGHT = MARKDOWN_SYNTAX_PALETTE_DARK;
 
 /**
  * Build the `--md-syntax-*` CSS custom properties for the given palette.

@@ -57,32 +57,11 @@
   --markdown-inline-code: var(--foreground);
   --markdown-inline-code-bg: var(--surface-muted);
 
-  /* ── Syntax palette (mirrors markdown-syntax-vars.ts light palette) ──
+  /* ── Syntax palette (mirrors markdown-syntax-vars.ts, pinned to dark) ──
      The renderer applies the same vars as inline styles from
      getMarkdownSyntaxVars(); these CSS values are the static fallback so
-     code still colors when the inline pass has not run. */
-  --md-syntax-foreground: hsl(226 44% 12%);
-  --md-syntax-comment: hsl(220 9% 46%);
-  --md-syntax-string: hsl(134 55% 30%);
-  --md-syntax-number: hsl(271 45% 38%);
-  --md-syntax-keyword: hsl(304 40% 34%);
-  --md-syntax-operator: hsl(210 12% 32%);
-  --md-syntax-function: hsl(208 78% 34%);
-  --md-syntax-type: hsl(187 55% 30%);
-  --md-syntax-variable: hsl(218 24% 20%);
-  --md-syntax-property: hsl(186 48% 34%);
-  --md-syntax-inserted: hsl(142 71% 40%);
-  --md-syntax-deleted: var(--destructive);
-
-  color-scheme: light;
-}
-
-.dark .oc-chat {
-  --status-success: hsl(142 60% 52%);
-  --status-warning: hsl(42 88% 60%);
-  --status-info: hsl(213 90% 66%);
-
-  /* Syntax palette (mirrors markdown-syntax-vars.ts dark palette) */
+     code still colors when the inline pass has not run. Code blocks use the
+     dark palette in both themes. */
   --md-syntax-foreground: hsl(226 30% 86%);
   --md-syntax-comment: hsl(222 14% 62%);
   --md-syntax-string: hsl(138 44% 66%);
@@ -95,6 +74,16 @@
   --md-syntax-property: hsl(184 46% 68%);
   --md-syntax-inserted: hsl(142 60% 52%);
   --md-syntax-deleted: var(--destructive);
+
+  color-scheme: light;
+}
+
+.dark .oc-chat {
+  --status-success: hsl(142 60% 52%);
+  --status-warning: hsl(42 88% 60%);
+  --status-info: hsl(213 90% 66%);
+
+  /* Syntax palette is pinned to the dark values in the base scope. */
 
   color-scheme: dark;
 }
