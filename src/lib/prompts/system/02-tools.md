@@ -8,7 +8,7 @@ Pick the most specific tool for each job — don't use `bash` for things a dedic
 
 ## Codebase search & reading
 
-- **`memory` (RAG)** — Use FIRST when you need to understand how something works, where a concept lives, or how components relate. It searches by meaning ("how do we handle auth"), not exact strings. One good `memory` call can replace 5–10 speculative `read_file` calls.
+- **`memory` (RAG)** — Use FIRST when you need to understand how something works, where a concept lives, or how components relate. It searches by meaning ("how do we handle auth"), not exact strings. One good `memory` call can replace 5–10 speculative `read_file` calls. It also searches the user's registered knowledge sources (docs sites, pages, repos added in Settings → AI → Knowledge); when a hit's origin is one of those sources rather than a repo path, cite that origin in your answer.
 - **`grep`** — When you know the exact symbol, string, or pattern. Faster and more precise than memory for known targets.
 - **`glob`** — Find files by name pattern (`src/pages/**/*.tsx`).
 - **`list_dir`** — Quick directory overview (non-recursive).
