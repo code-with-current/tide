@@ -46,15 +46,19 @@ export const safeStorage = {
   decryptString: vi.fn((b: Buffer) => b.toString()),
 };
 
-export const BrowserWindow = vi.fn(() => ({
-  webContents: { send: vi.fn(), id: 0 },
-  loadURL: vi.fn(),
-  on: vi.fn(),
-  close: vi.fn(),
-  destroy: vi.fn(),
-  show: vi.fn(),
-  hide: vi.fn(),
-}));
+export const BrowserWindow = Object.assign(
+  vi.fn(() => ({
+    webContents: { send: vi.fn(), id: 0 },
+    loadURL: vi.fn(),
+    on: vi.fn(),
+    close: vi.fn(),
+    destroy: vi.fn(),
+    show: vi.fn(),
+    hide: vi.fn(),
+  })),
+  // Static used by IPC broadcast loops (tide:sources:progress etc.) and main.ts.
+  { getAllWindows: vi.fn((): Array<{ webContents: { send: ReturnType<typeof vi.fn> } }> => []) },
+);
 
 export const ipcMain = {
   handle: vi.fn(),

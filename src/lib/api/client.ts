@@ -12,12 +12,15 @@ import type {
   ApiStyle,
   ArchivedHeader,
   DiffHunk,
+  KnowledgeSource,
   Provider,
   ProviderModelMeta,
   RagDownloadProgressEvent,
   RagInitProgressEvent,
   RagInitResult,
   RagStatus,
+  SourceKind,
+  SourceProgressEvent,
   WorkspaceProgressEvent,
   RagWorkspaceOpResult,
   Workspace,
@@ -822,6 +825,64 @@ export function subscribeRagDownloadProgress(cb: (e: RagDownloadProgressEvent) =
 }
 export function subscribeWorkspaceProgress(cb: (e: WorkspaceProgressEvent) => void): () => void {
   if (ipc && ipc.onWorkspaceProgress) return ipc.onWorkspaceProgress(cb as (e: unknown) => void);
+  return () => {};
+}
+
+// ============================================================
+// Knowledge sources (settings → Knowledge)
+// ============================================================
+
+export interface SourcesListResult {
+  sources: KnowledgeSource[];
+  /** Ids enabled for the requested workspace ('*' sources resolved). Empty when no workspaceId is given. */
+  enabledSourceIds: string[];
+}
+
+export async function listSources(workspaceId?: string): Promise<SourcesListResult> {
+  if (ipc && ipc.sourcesList) return ipc.sourcesList(workspaceId);
+  return { sources: [], enabledSourceIds: [] };
+}
+
+export interface AddSourceInput {
+  name: string;
+  kind: SourceKind;
+  location: string;
+  /** ['*'] = available in all workspaces (default). */
+  enabledWorkspaceIds?: string[];
+}
+
+/** Add a source. The row is persisted immediately; the first index pass runs
+ *  in the background and reports via subscribeSourcesProgress. */
+export async function addSource(input: AddSourceInput): Promise<{ ok: boolean; id?: string; error?: string }> {
+  if (ipc && ipc.sourcesAdd) return ipc.sourcesAdd(input.name, input.kind, input.location, input.enabledWorkspaceIds);
+  return { ok: false, error: 'IPC unavailable (browser dev mode)' };
+}
+
+export async function updateSource(
+  id: string,
+  patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] },
+): Promise<{ ok: boolean; error?: string }> {
+  if (ipc && ipc.sourcesUpdate) return ipc.sourcesUpdate(id, patch);
+  return { ok: false, error: 'IPC unavailable (browser dev mode)' };
+}
+
+export async function removeSource(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc && ipc.sourcesRemove) return ipc.sourcesRemove(id);
+  return { ok: false, error: 'IPC unavailable (browser dev mode)' };
+}
+
+export async function setSourceEnabled(id: string, workspaceId: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+  if (ipc && ipc.sourcesSetEnabled) return ipc.sourcesSetEnabled(id, workspaceId, enabled);
+  return { ok: false, error: 'IPC unavailable (browser dev mode)' };
+}
+
+export async function reindexSource(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (ipc && ipc.sourcesReindex) return ipc.sourcesReindex(id);
+  return { ok: false, error: 'IPC unavailable (browser dev mode)' };
+}
+
+export function subscribeSourcesProgress(cb: (e: SourceProgressEvent) => void): () => void {
+  if (ipc && ipc.onSourcesProgress) return ipc.onSourcesProgress(cb);
   return () => {};
 }
 
