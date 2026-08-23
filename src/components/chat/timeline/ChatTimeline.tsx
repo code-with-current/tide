@@ -80,10 +80,15 @@ function ChatTimelineImpl({
       <div
         ref={scrollRef}
         className={cn(
-          'h-full overflow-y-auto overflow-x-hidden scroll px-6 py-3',
+          // overflow-anchor:none — the pin/follow hook owns every scrollTop
+          // write on this container; Chromium's native scroll anchoring
+          // fights it with compensating UP writes when the virtualizer
+          // repositions rows (card mounts, measure corrections), which the
+          // chase then re-glues DOWN — the visible up-down bob.
+          'h-full overflow-y-auto overflow-x-hidden scroll [overflow-anchor:none] px-6 py-3',
           // The pin-scroll spacer mounts a 100vh scroll range for the whole
           // turn — a scrollbar over that phantom range is noise, so it's
-          // hidden until the spacer collapses and only real overflow stays.
+          // hidden until the spacer collapses and only real overflow remains.
           (pinned || isStreaming) && 'chat-streaming',
           className,
         )}
