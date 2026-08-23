@@ -73,6 +73,9 @@ import { DiffViewToggle, type DiffViewMode } from '../diff-view-toggle';
 import { MinDurationShineText } from './min-duration-shine-text';
 import { ToolRevealOnMount } from './tool-reveal-on-mount';
 import { getToolIcon } from '../tool-presentation';
+import { usePanelActions } from '../../panel-actions-context';
+import { parseUnifiedDiff } from '@/lib/stream/parse-diff';
+import { Bot, FileDiff, FileText } from 'lucide-react';
 import { areRenderRelevantPartsEqual } from '../render-compare';
 import {
   getDiffPatchEntries,
@@ -1462,6 +1465,29 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
       ? parseDiffStats(metadata)
       : null;
   }, [metadata, tool]);
+
+  // Tide-native panel navigation (user request): file / diff / agent affordances
+  // ride on the header row. Upstream routed these through RuntimeAPIContext,
+  // which the port dropped; see panel-actions-context.tsx.
+  const panelActions = usePanelActions();
+  const panelFilePath = React.useMemo(() => {
+    const candidate = input?.filePath || input?.file_path || input?.path
+      || metadata?.filePath || metadata?.file_path || metadata?.path;
+    return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate : undefined;
+  }, [input, metadata]);
+  const panelPatch = React.useMemo(() => {
+    if (tool !== 'edit' && tool !== 'multiedit' && tool !== 'write') return undefined;
+    return getPatchText(metadata?.patch) ?? getPatchText(metadata?.diff);
+  }, [metadata, tool]);
+  const showPanelFileButton = Boolean(panelActions && tool === 'read' && panelFilePath);
+  const showPanelDiffButton = Boolean(panelActions && panelPatch && panelFilePath);
+  const showPanelAgentButton = Boolean(panelActions && isAgentTool && part.toolCallId);
+  const handlePanelFile = () => panelFilePath && panelActions?.viewFile(panelFilePath);
+  const handlePanelDiff = () => {
+    if (!panelFilePath || !panelPatch) return;
+    panelActions?.viewDiff({ path: panelFilePath, hunks: parseUnifiedDiff(panelPatch) });
+  };
+  const handlePanelAgent = () => part.toolCallId && panelActions?.openDispatch(part.toolCallId);
   const writeLineCount = React.useMemo(() => {
     return tool === 'write' ? parseWriteLineCount(input) : null;
   }, [input, tool]);
@@ -1615,6 +1641,41 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             )}
           </div>
         </div>
+
+        {(showPanelFileButton || showPanelDiffButton || showPanelAgentButton) && (
+          <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover/tool:opacity-100 focus-within:opacity-100 transition-opacity">
+            {showPanelFileButton && (
+              <button
+                type="button"
+                title={`Open in file viewer: ${panelFilePath}`}
+                onClick={(event) => { event.stopPropagation(); handlePanelFile(); }}
+                className="flex items-center justify-center size-5 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <FileText className="size-3" />
+              </button>
+            )}
+            {showPanelDiffButton && (
+              <button
+                type="button"
+                title={`Review diff: ${panelFilePath}`}
+                onClick={(event) => { event.stopPropagation(); handlePanelDiff(); }}
+                className="flex items-center justify-center size-5 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <FileDiff className="size-3" />
+              </button>
+            )}
+            {showPanelAgentButton && (
+              <button
+                type="button"
+                title="Open in agents panel"
+                onClick={(event) => { event.stopPropagation(); handlePanelAgent(); }}
+                className="flex items-center justify-center size-5 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <Bot className="size-3" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {shouldRenderAgentNesting ? (

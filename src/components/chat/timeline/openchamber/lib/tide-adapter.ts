@@ -114,7 +114,7 @@ export function toChatMessageEntry(msg: Message): ChatMessageEntry {
       // streaming entry (see projectTideTurns) stays uncompleted.
       ...(isAssistant ? { completed: created + (msg.totalMs ?? 0) } : {}),
     },
-    ...(isAssistant ? { finish: msg.stopReason ?? 'stop' } : {}),
+    ...(isAssistant ? { finish: normalizeFinish(msg.stopReason) } : {}),
     ...(msg.mentions ? { mentions: msg.mentions } : {}),
     ...(msg.attachments ? { attachments: msg.attachments } : {}),
   };
@@ -123,6 +123,28 @@ export function toChatMessageEntry(msg: Message): ChatMessageEntry {
     : [{ type: 'text', text: msg.content }];
   return { info, parts };
 }
+
+/**
+ * Tide's StopReason vocabulary ('end_turn' | 'max_tokens' | 'content_filter' |
+ * 'iteration_limit' | 'aborted' | 'refusal' — orchestrator.stopReasonFor)
+ * never contains 'stop', but upstream's turn footer gates on
+ * `finish === 'stop'` (message-body hasStopFinish) — without this mapping a
+ * completed turn renders without its timestamp/changed-files footer.
+ */
+const normalizeFinish = (stopReason: string | null | undefined): string => {
+  switch (stopReason) {
+    case 'max_tokens':
+    case 'iteration_limit':
+      return 'length';
+    case 'aborted':
+      return 'aborted';
+    case 'refusal':
+    case 'content_filter':
+      return 'error';
+    default:
+      return 'stop';
+  }
+};
 
 export interface ProjectTideTurnsOptions {
   showTextJustificationActivity?: boolean;
@@ -175,7 +197,7 @@ export function buildChatMessageEntries(
       entry.info.finish = undefined;
     }
     if (stopReason) {
-      entry.info.finish = stopReason;
+      entry.info.finish = normalizeFinish(stopReason);
     }
     entries.push(entry);
   }

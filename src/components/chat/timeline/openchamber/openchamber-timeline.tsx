@@ -31,6 +31,7 @@ import { OpenChamberChatMessage } from './chat-message';
 import { ChatEmptyStateMemoized } from './chat-empty-state';
 import { TurnWorkingFooter } from '@/components/chat/turn/turn-header';
 import { CompactedDivider } from '../../blocks/compacted-divider';
+import { PanelActionsProvider } from './panel-actions-context';
 import type { Turn } from './lib/turns/types';
 import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 import { cn } from '@/lib/utils';
@@ -294,6 +295,7 @@ function OpenChamberTimelineImpl({
   );
 
   return (
+    <PanelActionsProvider sessionId={sessionId}>
     <div className="relative flex-1 min-h-0">
       <div
         ref={scrollRef}
@@ -347,6 +349,7 @@ function OpenChamberTimelineImpl({
         </button>
       )}
     </div>
+    </PanelActionsProvider>
   );
 }
 

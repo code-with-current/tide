@@ -24,7 +24,7 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, rend
       data-scroll-spy-id={turn.turnId}
     >
       {stickyUserHeader ? (
-        <div className="sticky top-0 z-20 relative bg-[var(--surface-background)] [overflow-anchor:none]">
+        <div className="oc-sticky-user-header sticky top-0 z-20 relative bg-[var(--surface-background)] [overflow-anchor:none]">
           <div className="relative z-10">
             {renderMessage(turn.userMessage)}
           </div>

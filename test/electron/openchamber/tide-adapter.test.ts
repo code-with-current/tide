@@ -338,3 +338,32 @@ describe('projectTideTurns', () => {
     expect(projection.turns.map((turn) => turn.summaryText)).toEqual(['one', 'two']);
   });
 });
+
+describe('finish vocabulary normalization (turn footer gate)', () => {
+  test("Tide's 'end_turn' maps to upstream 'stop' so the turn footer renders", () => {
+    const entry = toChatMessageEntry(message('a1', 'assistant', { stopReason: 'end_turn' }));
+    expect(entry.info.finish).toBe('stop');
+  });
+
+  test('missing stopReason on a committed assistant message defaults to stop', () => {
+    const entry = toChatMessageEntry(message('a1', 'assistant', {}));
+    expect(entry.info.finish).toBe('stop');
+  });
+
+  test.each([
+    ['max_tokens', 'length'],
+    ['iteration_limit', 'length'],
+    ['aborted', 'aborted'],
+    ['refusal', 'error'],
+    ['content_filter', 'error'],
+  ] as const)('%s maps to %s', (stopReason, expected) => {
+    const entry = toChatMessageEntry(message('a1', 'assistant', { stopReason }));
+    expect(entry.info.finish).toBe(expected);
+  });
+
+  test('streaming entry normalizes the same way once the turn ends', () => {
+    const streaming = message('a1', 'assistant', { stopReason: 'end_turn' });
+    const entries = buildChatMessageEntries([], streaming, false, 'end_turn');
+    expect(entries[0]!.info.finish).toBe('stop');
+  });
+});
