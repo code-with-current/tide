@@ -27,7 +27,6 @@ import {
   Check,
   Copy,
   X,
-  Loader2,
   ExternalLink,
   Image as ImageIcon,
   Database,
@@ -39,6 +38,7 @@ import { toolLabel } from '@/lib/tool-labels';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 import { agentStatusOf, type AgentStatus } from './agent-status';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
@@ -141,7 +141,7 @@ export function AgentStatusChip({ status }: { status: AgentStatus }) {
     >
       {status === 'running' ? (
         <>
-          <Loader2 className="size-2.5 animate-spin" />
+          <PixelLoader variant="orbit" size="xs" />
           running…
         </>
       ) : status === 'done' ? (
@@ -813,7 +813,7 @@ function StatusGlyph({ call }: { call: ToolCall }) {
       return <MessageCircleQuestionMark className="size-3 text-primary animate-pulse" />;
     case 'pending':
     case 'running':
-      return <Loader2 className="size-3 text-muted-foreground animate-spin" />;
+      return <PixelLoader variant="orbit" size="xs" className="text-muted-foreground" />;
     default:
       return <X className="size-3 text-warning" />;
   }

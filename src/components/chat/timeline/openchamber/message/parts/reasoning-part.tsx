@@ -28,6 +28,7 @@ import { Icon } from '../../icon';
 import { MarkdownRenderer } from '../../markdown/markdown-renderer';
 import { useStreamingTextThrottle } from '../../hooks/use-streaming-text-throttle';
 import type { StreamPhase } from '../types';
+import { CyclingDotsLabel } from '@/components/ui/cycling-dots-label';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -340,34 +341,6 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
   const variantLabel = variant === 'justification' ? 'Justification' : 'Thinking';
 
-/** Tide-native (user request): while streaming, the header cycles
- *  "Thinking." → "Thinking.." → "Thinking..." every 500ms — replaces
- *  upstream's BusyDots (three dots pulsing in place). */
-const THINKING_DOT_INTERVAL_MS = 500;
-
-const CyclingDotsLabel: React.FC<{ label: string }> = ({ label }) => {
-  const [dotCount, setDotCount] = React.useState(1);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const id = window.setInterval(() => {
-      setDotCount((count) => (count % 3) + 1);
-    }, THINKING_DOT_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, []);
-
-  return (
-    <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-title)' }}>
-      <span>
-        {label}
-        {'.'.repeat(dotCount)}
-      </span>
-    </span>
-  );
-};
-
   const reasoningBody = (
     <>
       <div data-message-text-export-source="true">
@@ -428,7 +401,11 @@ const CyclingDotsLabel: React.FC<{ label: string }> = ({ label }) => {
           </div>
 
           {isStreaming ? (
-            <CyclingDotsLabel label={variantLabel} />
+            <CyclingDotsLabel
+              label={variantLabel}
+              className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)}
+              style={{ color: 'var(--tools-title)' }}
+            />
           ) : isExpanded ? (
             <span
               className={TOOL_ROW_TITLE_CLASS}

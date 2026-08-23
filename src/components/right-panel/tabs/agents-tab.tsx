@@ -14,13 +14,14 @@
  *  exactly, with the dispatch report as an AnswerBlock last. */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Loader2, X } from 'lucide-react';
+import { Bot, X } from 'lucide-react';
 import type { Block, Session, ToolBlock } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { useSession, useDispatches } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 import { ThinkingBlock } from '@/components/blocks/thinking-block';
 import { AgentStatusChip } from '@/components/blocks/tool-chips';
 import { agentStatusOf } from '@/components/blocks/agent-status';
@@ -230,7 +231,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
             )}
             {running && !root.any && !d?.reasoning && (
               <div className="flex items-center gap-1.5 px-1 text-[0.7857rem] text-muted-foreground/70">
-                <Loader2 className="size-3 animate-spin" />
+                <PixelLoader variant="orbit" size="xs" />
                 waiting for the agent's first output…
               </div>
             )}
