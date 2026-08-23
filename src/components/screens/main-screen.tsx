@@ -23,7 +23,7 @@ import { CommitDetailsPanel } from "@/components/right-panel/git/commit-details-
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SheetResizeHandle } from "@/components/ui/sheet-resize-handle";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
-import { useUi } from "@/lib/stores/ui";
+import { useUi, isRightPanelOpen } from "@/lib/stores/ui";
 import { useModelOption, useWorkspaces, useSessions, useSession } from "@/lib/queries";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import * as api from "@/lib/api/client";
@@ -65,7 +65,7 @@ export function MainScreen() {
   }, [setSidebarMode]);
   const sidebarWidth = useUi((s) => s.sidebarWidth);
   const setSidebarWidth = useUi((s) => s.setSidebarWidth);
-  const rightPanelOpen = useUi((s) => s.rightPanelOpen);
+  const rightPanelOpen = useUi(isRightPanelOpen);
   const fileViewerOpen = useUi((s) => s.fileViewerOpen);
   const commitDetail = useUi((s) => s.commitDetail);
   const setCommitDetail = useUi((s) => s.setCommitDetail);

@@ -19,7 +19,7 @@ import { Tip } from "@/components/ui/quick-tooltip";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
 } from "@/components/ui/dropdown-menu";
-import { useUi, terminalScopeKey } from "@/lib/stores/ui";
+import { useUi, isRightPanelOpen, terminalScopeKey } from "@/lib/stores/ui";
 import { useTabs } from "@/lib/stores/tabs";
 import { openTerminalTab, toggleTerminalTab } from "@/lib/terminal-tab";
 import { useWorkspaces, useSession, useGitBranchInfo } from "@/lib/queries";
@@ -60,7 +60,7 @@ export function WindowTopBar() {
   }, [mainView]);
 
   // ── Panel toggles ──
-  const rightPanelOpen = useUi((s) => s.rightPanelOpen);
+  const rightPanelOpen = useUi(isRightPanelOpen);
   const toggleSessionsPanel = useUi((s) => s.toggleSessionsPanel);
   const sidebarMode = useUi((s) => s.sidebarMode);
   const sessionsPanelOpen = useUi((s) => s.sessionsPanelOpen);
@@ -77,7 +77,7 @@ export function WindowTopBar() {
   const rpSetFeature = useTabs((s) => s.setActive);
   const switchTo = (kind: string) => {
     rpSetFeature(activeSessionId ?? 'default', kind as any);
-    if (!rightPanelOpen) useUi.setState({ rightPanelOpen: true });
+    if (!rightPanelOpen) useUi.getState().setRightPanel(true);
   };
 
   const { data: workspaces } = useWorkspaces();
@@ -451,11 +451,11 @@ export function WindowTopBar() {
               // Opening the panel always lands on the landing view; closing
               // is a plain toggle.
               if (rightPanelOpen) {
-                useUi.setState({ rightPanelOpen: false });
+                useUi.getState().setRightPanel(false);
                 return;
               }
               rpSetFeature(activeSessionId ?? 'default', 'home');
-              useUi.setState({ rightPanelOpen: true });
+              useUi.getState().setRightPanel(true);
             }}
           >
             <PanelRight className="size-3.5" />

@@ -342,7 +342,7 @@ export function AutonomyCapsSection() {
           <AlertTriangle className="size-3.5 text-[var(--error)] mt-px shrink-0" />
           <p className="text-[0.7857rem] leading-relaxed text-muted-foreground/80">
             Full Access is on without an audit log. Consider enabling the audit log above so every
-            shell command is recorded.
+            shell Command is recorded.
           </p>
         </div>
       )}

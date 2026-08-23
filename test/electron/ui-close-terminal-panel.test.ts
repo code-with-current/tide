@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useUi } from '@/lib/stores/ui';
+import { useUi, isRightPanelOpen } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 
 function reset() {
@@ -9,7 +9,7 @@ function reset() {
     terminals: {},
     activeTerminal: {},
     terminalPorts: {},
-    rightPanelOpen: true,
+    rightPanelOpen: { s1: true },
   });
   useTabs.setState({ active: {}, bySession: {} });
 }
@@ -25,7 +25,7 @@ describe('closeTerminal → right panel', () => {
     useTabs.setState({ active: { s1: 'terminal' } });
     useUi.getState().closeTerminal('s1', 't1');
     expect(useUi.getState().terminals.s1).toHaveLength(0);
-    expect(useUi.getState().rightPanelOpen).toBe(false);
+    expect(isRightPanelOpen(useUi.getState())).toBe(false);
   });
 
   it('keeps the panel open when other terminals remain', () => {
@@ -35,7 +35,7 @@ describe('closeTerminal → right panel', () => {
     });
     useTabs.setState({ active: { s1: 'terminal' } });
     useUi.getState().closeTerminal('s1', 't1');
-    expect(useUi.getState().rightPanelOpen).toBe(true);
+    expect(isRightPanelOpen(useUi.getState())).toBe(true);
     expect(useUi.getState().activeTerminal.s1).toBe('t2');
   });
 
@@ -46,7 +46,7 @@ describe('closeTerminal → right panel', () => {
     });
     useTabs.setState({ active: { s1: 'files' } });
     useUi.getState().closeTerminal('s1', 't1');
-    expect(useUi.getState().rightPanelOpen).toBe(true);
+    expect(isRightPanelOpen(useUi.getState())).toBe(true);
   });
 
   it('terminal close on a non-viewed session does not close the panel', () => {
@@ -56,6 +56,18 @@ describe('closeTerminal → right panel', () => {
     });
     useTabs.setState({ active: { s1: 'files' } });
     useUi.getState().closeTerminal('s2', 't2');
-    expect(useUi.getState().rightPanelOpen).toBe(true);
+    expect(isRightPanelOpen(useUi.getState())).toBe(true);
+  });
+
+  it('closing the last terminal of the viewed session leaves other sessions untouched', () => {
+    useUi.setState({
+      terminals: { s1: [{ id: 't1', name: 'bash' }] },
+      activeTerminal: { s1: 't1' },
+      rightPanelOpen: { s1: true, s2: true },
+    });
+    useTabs.setState({ active: { s1: 'terminal' } });
+    useUi.getState().closeTerminal('s1', 't1');
+    // Auto-close materializes s1: false (reads closed) and leaves s2 intact.
+    expect(useUi.getState().rightPanelOpen).toEqual({ s1: false, s2: true });
   });
 });
