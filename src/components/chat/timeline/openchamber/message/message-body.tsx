@@ -6,10 +6,10 @@
  *  turn footer (model/variant/agent/duration/timestamp).
  *
  *  Adaptations (each per brief ruling or the judgment rubric):
- *  - Placeholder seam (ruling 2/3): `TurnActivity` (Task 6) is a local no-render
- *    placeholder at the bottom of this file; `ToolPart` arrived in Task 4
- *    (`./parts/tool-part`, memoized export) and `TurnChangedFilesDropdown` in Task 5
- *    (`../turn-changed-files-dropdown`).
+ *  - Placeholder seams (rulings 2/3) all resolved: `ToolPart` arrived in Task 4
+ *    (`./parts/tool-part`, memoized export), `TurnChangedFilesDropdown` in Task 5
+ *    (`../turn-changed-files-dropdown`), and `TurnActivity` in Task 6
+ *    (`../components/turn-activity`, memoized export).
  *  - Permanently dropped branches (ruling 2): MessageFilesDisplay/FileAttachment,
  *    SaveProjectPlanDialog, ForkSessionDialog, useMessageTTS, useProviderLogo
  *    (footer always renders the Icon fallback), useChatSurfaceMode (surface is
@@ -57,6 +57,7 @@ import type { TimeFormatPreference } from '../lib/time-format';
 import { ToolRevealOnMount } from './parts/tool-reveal-on-mount';
 import { StaticToolRow } from './parts/progressive-group';
 import { ToolPartMemoized as ToolPart } from './parts/tool-part';
+import { TurnActivityMemoized as TurnActivity } from '../components/turn-activity';
 import { isExpandableTool, isStandaloneTool } from './tool-render-utils';
 import { getAgentColor } from '../lib/agent-colors';
 
@@ -1243,7 +1244,6 @@ const AssistantMessageBody = React.memo(({
       }
       return (
         <div key={`progressive-group-${segment.id}`} className="mb-3">
-          {/* Task 6 placeholder — see file header. */}
           <TurnActivity
             parts={visibleSegmentParts}
             isExpanded={turnGroupingContext?.isGroupExpanded === true}
@@ -1717,29 +1717,5 @@ export const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) =
 
   return <AssistantMessageBody {...props} />;
 });
-
-// ---------------------------------------------------------------------------
-// Placeholder seams for later-task modules (brief rulings 2 & 3). Each renders
-// nothing; the importing sites above keep upstream's prop contracts so the
-// swap-in is a single import change.
-// ---------------------------------------------------------------------------
-
-/** PLACEHOLDER — Task 6 replaces with the ported TurnActivity. Renders nothing. */
-const TurnActivity: React.FC<{
-  parts: TurnActivityRecord[];
-  isExpanded: boolean;
-  collapsedPreviewCount: number;
-  onToggle: () => void;
-  isMobile: boolean;
-  expandedTools: Set<string>;
-  onToggleTool: (toolId: string) => void;
-  onShowPopup: (content: ToolPopupContent) => void;
-  onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-  streamPhase: StreamPhase;
-  showHeader: boolean;
-  animateRows: boolean;
-  animatedToolIds: Set<string>;
-  diffStats?: import('../lib/turns/types').TurnDiffStats;
-}> = () => null;
 
 export default MessageBody;

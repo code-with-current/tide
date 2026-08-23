@@ -70,6 +70,8 @@ import {
   CircleDot,
   CircleCheckBig,
   ChevronsUp,
+  MessageCircle,
+  RotateCcw,
   type LucideProps,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -138,7 +140,10 @@ export type IconName =
   | 'close-circle'
   | 'record-circle'
   | 'checkbox-circle'
-  | 'arrow-up-double';
+  | 'arrow-up-double'
+  // ChatErrorBoundary (Task 6) additions:
+  | 'chat-3'
+  | 'restart';
 
 const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'file-copy': Copy,
@@ -206,6 +211,9 @@ const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'record-circle': CircleDot,
   'checkbox-circle': CircleCheckBig,
   'arrow-up-double': ChevronsUp,
+  // ChatErrorBoundary (Task 6) additions:
+  'chat-3': MessageCircle,
+  restart: RotateCcw,
 };
 
 export interface IconProps extends Omit<LucideProps, 'name'> {
