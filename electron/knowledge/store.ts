@@ -43,7 +43,8 @@ function rowToSource(r: SourceRow): KnowledgeSource {
 }
 
 export class KnowledgeStore {
-  constructor(private readonly rag: RagStore) {}
+  // Public: the manager feeds this RagStore into ingestDocuments().
+  constructor(readonly rag: RagStore) {}
 
   // Lazy so a reopened/replaced RagStore isn't orphaned by a construction-time snapshot.
   private get db(): DB {
@@ -107,6 +108,15 @@ export class KnowledgeStore {
     this.db
       .prepare('UPDATE sources SET status = ?, error = ? WHERE id = ?')
       .run(status, error ?? null, id);
+  }
+
+  /** Crash leftovers ('queued'/'indexing' with no live job) resolve to idle
+   *  without stamping lastIndexedAt — markStatus would stamp a fake time for
+   *  rows stuck in 'indexing'. */
+  resolveStaleStatuses(): void {
+    this.db
+      .prepare("UPDATE sources SET status = 'idle', error = NULL WHERE status IN ('queued', 'indexing')")
+      .run();
   }
 
   setChunkCount(id: string, n: number): void {
