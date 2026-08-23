@@ -997,7 +997,6 @@ export function MainScreen() {
                       panel can anchor to the top-right of the chat column. */}
                     <div className="flex-1 min-h-0 flex flex-col relative">
                       <TodoFloatingPanel sessionId={activeSessionId} />
-                      <FloatingPermissionCard sessionId={activeSessionId} />
                       <ChatTimeline
                         messages={chatHistory}
                         sessionId={historySessionId}
@@ -1109,6 +1108,10 @@ export function MainScreen() {
                           its width via the relative parent. No backdrop; floats
                           over the chat scroll without blocking interaction. */}
                         <OptionsPopup onSubmit={handleOptionsSubmit} />
+                        {/* Permission prompts share the same anchor — a paused
+                          turn surfaces its cards right where the user is
+                          looking, never behind panel state. */}
+                        <FloatingPermissionCard sessionId={activeSessionId} />
                         <ChatComposer
                           key={activeSessionId}
                           compact
