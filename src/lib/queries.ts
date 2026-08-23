@@ -29,7 +29,7 @@ export const qk = {
   gitStatus: (workspaceId: string) => ['gitStatus', workspaceId] as const,
   sessionMessagesV2: (sessionId: string) => ['session-messages-v2', sessionId] as const,
   ragStatus: (workspaceId: string) => ['ragStatus', workspaceId] as const,
-  sources: ['sources'] as const,
+  sources: (workspaceId?: string) => ['sources', workspaceId ?? 'global'] as const,
   agentSettings: ['agentSettings'] as const,
 };
 
@@ -896,7 +896,7 @@ export function useRagDownloadProgress(): RagDownloadProgressEvent | null {
 
 export function useSources(workspaceId?: string | null) {
   return useQuery({
-    queryKey: qk.sources,
+    queryKey: qk.sources(workspaceId ?? undefined),
     queryFn: () => api.listSources(workspaceId ?? undefined),
   });
 }
@@ -905,7 +905,7 @@ export function useAddSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: api.AddSourceInput) => api.addSource(input),
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.sources }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });
 }
 
@@ -914,7 +914,7 @@ export function useUpdateSource() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { name?: string; location?: string } }) =>
       api.updateSource(id, patch),
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.sources }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });
 }
 
@@ -922,7 +922,7 @@ export function useRemoveSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.removeSource(id),
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.sources }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });
 }
 
@@ -931,7 +931,7 @@ export function useSetSourceEnabled() {
   return useMutation({
     mutationFn: ({ id, workspaceId, enabled }: { id: string; workspaceId: string; enabled: boolean }) =>
       api.setSourceEnabled(id, workspaceId, enabled),
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.sources }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });
 }
 
@@ -939,19 +939,20 @@ export function useReindexSource() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.reindexSource(id),
-    onSettled: () => qc.invalidateQueries({ queryKey: qk.sources }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });
 }
 
 /** Live ingestion progress for the sources list. Every event also invalidates
- *  qk.sources so status/chunkCount re-fetch without waiting for staleTime. */
+ *  all sources queries so status/chunkCount re-fetch without waiting for
+ *  staleTime. */
 export function useSourcesProgress(): SourceProgressEvent | null {
   const qc = useQueryClient();
   const [event, setEvent] = useState<SourceProgressEvent | null>(null);
   useEffect(() => {
     const unsubscribe = api.subscribeSourcesProgress((e) => {
       setEvent(e);
-      void qc.invalidateQueries({ queryKey: qk.sources });
+      void qc.invalidateQueries({ queryKey: ['sources'] });
     });
     return unsubscribe;
   }, [qc]);

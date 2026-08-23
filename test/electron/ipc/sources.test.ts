@@ -117,9 +117,10 @@ describe('tide:sources ipc handlers', () => {
     const ks = openKnowledgeStore(dbPath);
     const srcId = ks.listSources()[0]?.id;
     expect(srcId).toBeTruthy();
-    // Let the queue start the job (fetch is blocked inside it).
-    await new Promise((r) => setTimeout(r, 10));
-    expect(ks.getSource(srcId!)?.status).toBe('indexing');
+    // Poll until the queue starts the job (fetch is blocked inside it).
+    await vi.waitFor(() => {
+      expect(ks.getSource(srcId!)?.status).toBe('indexing');
+    });
 
     releaseFetch();
     await pending;
@@ -199,6 +200,63 @@ describe('tide:sources ipc handlers', () => {
     ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
     expect(ks.listSources()).toHaveLength(0);
     expect(ks.rag.chunkCount()).toBe(0);
+    ks.close();
+  });
+
+  it('add rejects duplicate kind+location and points at the existing id', async () => {
+    registerWith();
+    const first = (await handlerFor('tide:sources:add')('A', 'url', 'https://dup')) as { ok: boolean; id: string };
+    expect(first.ok).toBe(true);
+
+    const second = (await handlerFor('tide:sources:add')('B', 'url', 'https://dup')) as { ok: boolean; error?: string; id?: string };
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain('already exists');
+    expect(second.id).toBe(first.id);
+
+    const ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    expect(ks.listSources()).toHaveLength(1);
+    ks.close();
+  });
+
+  it('setEnabled rejects invalid arguments before touching the store', async () => {
+    registerWith();
+    const added = (await handlerFor('tide:sources:add')('V', 'url', 'https://v')) as { ok: boolean; id: string };
+
+    const badEnabled = (await handlerFor('tide:sources:setEnabled')(added.id, 'ws-2', 'yes')) as { ok: boolean };
+    const emptyWs = (await handlerFor('tide:sources:setEnabled')(added.id, '   ', true)) as { ok: boolean };
+    const emptyId = (await handlerFor('tide:sources:setEnabled')('', 'ws-2', true)) as { ok: boolean };
+    expect(badEnabled.ok).toBe(false);
+    expect(emptyWs.ok).toBe(false);
+    expect(emptyId.ok).toBe(false);
+
+    const ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    expect(ks.getSource(added.id)?.enabledWorkspaceIds).toEqual(['*']);
+    ks.close();
+  });
+
+  it('update with a location edit triggers an automatic reindex; name-only does not', async () => {
+    let fetchCalls = 0;
+    registerWith({
+      fetchers: {
+        url: async (): Promise<SourceDocument[]> => {
+          fetchCalls += 1;
+          return [{ title: 'F', origin: 'fetched.example.com', content: 'Fresh content.' }];
+        },
+      },
+    });
+    const added = (await handlerFor('tide:sources:add')('E', 'url', 'https://e1')) as { ok: boolean; id: string };
+    expect(fetchCalls).toBe(1);
+
+    const renameOnly = (await handlerFor('tide:sources:update')(added.id, { name: 'Renamed' })) as { ok: boolean };
+    expect(renameOnly.ok).toBe(true);
+    expect(fetchCalls).toBe(1);
+
+    const relayout = (await handlerFor('tide:sources:update')(added.id, { location: 'https://e2' })) as { ok: boolean };
+    expect(relayout.ok).toBe(true);
+    expect(fetchCalls).toBe(2);
+
+    const ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    expect(ks.getSource(added.id)).toMatchObject({ name: 'Renamed', location: 'https://e2', status: 'idle' });
     ks.close();
   });
 

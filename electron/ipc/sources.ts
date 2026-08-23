@@ -113,6 +113,12 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
         return { ok: false, error: `unsupported source kind '${kind}'` };
       }
       if (!location?.trim()) return { ok: false, error: 'location is required' };
+      const duplicate = knowledge()
+        .listSources()
+        .find((s) => s.kind === kind && s.location === location.trim());
+      if (duplicate) {
+        return { ok: false, error: 'a source with this location already exists', id: duplicate.id };
+      }
       let id: string;
       try {
         id = knowledge().addSource({ name: name.trim(), kind, location: location.trim() }).id;
@@ -131,10 +137,20 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
 
   ipcMain.handle(
     'tide:sources:update',
-    (_e, id: string, patch: { name?: string; location?: string }): { ok: boolean; error?: string } => {
+    async (_e, id: string, patch: { name?: string; location?: string }): Promise<{ ok: boolean; error?: string }> => {
       try {
         if (!knowledge().updateSource(id, patch ?? {})) {
           return { ok: false, error: `unknown knowledge source ${id}` };
+        }
+        // A location edit invalidates the stored chunks — reindex automatically.
+        if (patch?.location?.trim()) {
+          knowledge().markStatus(id, 'queued');
+          try {
+            await manager.enqueue(id);
+          } catch (err) {
+            // Row edits are persisted; the failed reindex shows as status=error.
+            log.warn('post-update reindex failed', { err });
+          }
         }
         return { ok: true };
       } catch (err) {
@@ -160,6 +176,15 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
   ipcMain.handle(
     'tide:sources:setEnabled',
     (_e, id: string, workspaceId: string, enabled: boolean): { ok: boolean; error?: string } => {
+      if (typeof id !== 'string' || !id.trim()) {
+        return { ok: false, error: 'invalid source id' };
+      }
+      if (typeof workspaceId !== 'string' || !workspaceId.trim()) {
+        return { ok: false, error: 'invalid workspace id' };
+      }
+      if (typeof enabled !== 'boolean') {
+        return { ok: false, error: 'enabled must be a boolean' };
+      }
       try {
         const src = knowledge().getSource(id);
         if (!src) return { ok: false, error: `unknown knowledge source ${id}` };
@@ -169,9 +194,14 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
           next = cur.includes('*') || cur.includes(workspaceId) ? cur : [...cur, workspaceId];
         } else if (cur.includes('*')) {
           // '*' covers every workspace including this one — expand to the
-          // concrete id list minus it so the exclusion actually sticks.
+          // concrete id list minus it so the exclusion actually sticks. An
+          // empty result would disable the source everywhere INCLUDING future
+          // workspaces — refuse rather than persist that.
           const all = (opts.listWorkspaces ?? defaultListWorkspaceIds)();
           next = all.filter((wid) => wid !== workspaceId);
+          if (next.length === 0) {
+            return { ok: false, error: 'no workspaces registered' };
+          }
         } else {
           next = cur.filter((wid) => wid !== workspaceId);
         }
