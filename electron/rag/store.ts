@@ -78,7 +78,10 @@ export function openRagStoreAt(dbPath: string): RagStore {
 }
 
 /** Internal: idempotent schema migration. Reads `meta.schemaVersion`;
- *  runs each step whose version > stored, then writes the new version. */
+ *  runs each step whose version > stored, then writes the new version.
+ *  All steps for a given target version (including the version write)
+ *  run in one transaction, so a crash mid-migration rolls back cleanly
+ *  instead of leaving a half-applied schema that can't be retried. */
 function migrate(db: DB): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS meta (
@@ -89,10 +92,17 @@ function migrate(db: DB): void {
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('schemaVersion') as
     | { value?: string }
     | undefined;
-  const current = row?.value ? Number(row.value) : 0;
+  const parsed = row?.value ? Number(row.value) : 0;
+  // Corrupt/non-numeric meta values must not silently skip every migration.
+  const current = Number.isFinite(parsed) ? parsed : 0;
 
-  if (current < 1) {
-    db.exec(`
+  // Only bump up — an older binary must not downgrade a newer db
+  // (re-running future migrations against newer schemas would corrupt it).
+  if (current >= SCHEMA_VERSION) return;
+
+  db.transaction(() => {
+    if (current < 1) {
+      db.exec(`
       CREATE TABLE IF NOT EXISTS chunks (
         id           TEXT PRIMARY KEY,
         path         TEXT NOT NULL,
@@ -127,20 +137,28 @@ function migrate(db: DB): void {
         embedding float[${EMBED_DIM}],
         +chunkId  TEXT
       );
-    `);
-  }
+      `);
+    }
 
-  if (current < 2) {
-    db.exec('ALTER TABLE chunks ADD COLUMN sourceId TEXT');
-    db.exec('CREATE INDEX IF NOT EXISTS chunks_by_source ON chunks(sourceId)');
-  }
+    if (current < 2) {
+      // Guard the ALTER so a db left half-migrated by a pre-transactional
+      // crash (column present, version stale) reopens instead of throwing.
+      const hasSourceId = db
+        .prepare("SELECT 1 FROM pragma_table_info('chunks') WHERE name = 'sourceId'")
+        .get();
+      if (!hasSourceId) {
+        db.exec('ALTER TABLE chunks ADD COLUMN sourceId TEXT');
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS chunks_by_source ON chunks(sourceId)');
+    }
 
-  // Future migrations: append `if (current < 3) { ... }` blocks here.
-  // Never EDIT a past migration — only add new ones.
+    // Future migrations: append `if (current < 3) { ... }` blocks here.
+    // Never EDIT a past migration — only add new ones.
 
-  db.prepare(
-    'INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-  ).run('schemaVersion', String(SCHEMA_VERSION));
+    db.prepare(
+      'INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run('schemaVersion', String(SCHEMA_VERSION));
+  })();
 }
 
 /** Handle to an open RAG index. Methods are sync; close() releases the

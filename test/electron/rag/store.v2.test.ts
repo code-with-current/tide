@@ -77,4 +77,36 @@ describe('schema v2', () => {
     expect(c.chunkCount()).toBe(1);
     c.close();
   });
+
+  it('recovers from a crash-interrupted migration (v1 db with sourceId already added)', () => {
+    // Simulates a pre-transactional crash: version still '1' but ALTER TABLE
+    // already applied. migrate() must not re-run ADD COLUMN and must not throw.
+    const dbPath = path.join(tmp, 'index.db');
+    const crashed = new Database(dbPath);
+    crashed.exec(`
+      CREATE TABLE meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE chunks (
+        id           TEXT PRIMARY KEY,
+        path         TEXT NOT NULL,
+        symbol       TEXT NOT NULL,
+        content      TEXT NOT NULL,
+        contentHash  TEXT NOT NULL,
+        startLine    INTEGER NOT NULL,
+        endLine      INTEGER NOT NULL,
+        embedderId   TEXT NOT NULL,
+        createdAt    INTEGER NOT NULL,
+        sourceId     TEXT
+      );
+    `);
+    crashed.prepare('INSERT INTO meta(key, value) VALUES (?, ?)').run('schemaVersion', '1');
+    crashed.close();
+
+    const b = openRagStoreAt(dbPath);
+    expect(b.getMeta('schemaVersion')).toBe('2');
+    expect(() => openRagStoreAt(dbPath)).not.toThrow();
+    b.close();
+  });
 });
