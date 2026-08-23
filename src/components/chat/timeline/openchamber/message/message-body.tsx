@@ -40,7 +40,7 @@ import { AssistantTextPart } from './parts/assistant-text-part';
 import { ReasoningPart } from './parts/reasoning-part';
 import type { OcPart, OcToolPart } from '../types/opencode-parts';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo, ContentChangeReason } from './types';
-import type { TurnActivityGroup, TurnActivityRecord, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
+import type { TurnActivityGroup, TurnActivityRecord, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { WorkerHighlightedCode } from '../code/worker-highlighted-code';
 import { isEmptyTextPart, extractTextContent } from './part-utils';
@@ -50,10 +50,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../markdown/markdown-renderer';
 import { TextSelectionMenu } from './text-selection-menu';
-import { Icon, FileTypeIcon } from '../icon';
+import { Icon } from '../icon';
 import { GitFork } from 'lucide-react';
 import { initiateFork } from '@/lib/queries';
-import { TurnChangedFilesDropdown } from '../turn-changed-files-dropdown';
+import { extractFileChangeEntries } from '../changed-files';
+import { FileChanges } from '@/components/chat/blocks/file-changes';
+import { usePanelActions } from '../panel-actions-context';
 import { formatTimestampForDisplay } from './time-format';
 import type { TimeFormatPreference } from '../lib/time-format';
 import { ToolRevealOnMount } from './parts/tool-reveal-on-mount';
@@ -72,47 +74,14 @@ const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-s
  *  Upstream's AssistantTextPart prop defaults to 'live'. */
 type ChatRenderMode = 'sorted' | 'live';
 
-const getDisplayFileName = (file: string): string => {
-  const normalized = file.replace(/\\/g, '/');
-  const segments = normalized.split('/').filter(Boolean);
-  return segments.at(-1) ?? file;
+/** True when a part carries visible content — stops the thinking-row dots
+ *  once anything follows the reasoning block. */
+const partHasRenderableContent = (part: OcPart): boolean => {
+  if (part.type === 'tool') return true;
+  if (part.type !== 'text' && part.type !== 'reasoning') return false;
+  const text = (part as { text?: unknown }).text;
+  return typeof text === 'string' && text.trim().length > 0;
 };
-
-const TurnChangedFileChipContent = React.memo(({ file, interactive = false }: { file: TurnChangedFile; interactive?: boolean }) => (
-  <span
-    className={cn(
-      'inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/30 bg-muted/30 px-2 py-1 text-xs text-muted-foreground',
-      interactive && 'transition-colors hover:border-border/60 hover:bg-interactive-hover',
-    )}
-    style={{ lineHeight: 'round(1.35em, 1px)' }}
-  >
-    <FileTypeIcon filePath={file.file} className="h-3.5 w-3.5 flex-shrink-0" />
-    <span className="max-w-52 truncate text-foreground/80" title={file.file}>{getDisplayFileName(file.file)}</span>
-    <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
-      <span style={{ color: 'var(--status-success)' }}>+{file.additions}</span>
-      <span className="text-muted-foreground/70">/</span>
-      <span style={{ color: 'var(--status-error)' }}>-{file.deletions}</span>
-    </span>
-  </span>
-));
-
-const StaticTurnChangedFilePills = React.memo(({ files }: { files: TurnChangedFile[] }) => (
-  <>
-    {files.map((file) => (
-      <span key={file.file} className="inline-flex h-8 max-w-full items-center" title={file.file}>
-        <TurnChangedFileChipContent file={file} />
-      </span>
-    ))}
-  </>
-));
-
-/** Seam: upstream renders clickable pills that navigate to the diff viewer (UI-store actions); Tide renders static chips until Task 8 wires navigation. */
-const TurnChangedFilePills = React.memo(({ files }: { files?: TurnChangedFile[]; isInteractive: boolean }) => {
-  void files;
-  if (!files || files.length === 0) return null;
-
-  return <StaticTurnChangedFilePills files={files} />;
-});
 
 type SubtaskPartLike = {
   type: 'subtask';
@@ -308,8 +277,8 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
               onClick={() => {
                 void copyOutputToClipboard();
               }}
-              aria-label={copiedOutput ? 'Copied' : 'Copy output'}
-              title={copiedOutput ? 'Copied' : 'Copy output'}
+              aria-label={copiedOutput ? 'Copied' : 'Copy'}
+              title={copiedOutput ? 'Copied' : 'Copy'}
             >
               {copiedOutput ? <Icon name="check" className="h-3.5 w-3.5" /> : <Icon name="file-copy" className="h-3.5 w-3.5" />}
             </button>
@@ -591,7 +560,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 <Icon name="git-branch" className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent sideOffset={6}>Fork from here</TooltipContent>
+            <TooltipContent sideOffset={6}>Fork the Result</TooltipContent>
           </Tooltip>
         )}
         {onToggleContextPin && hasCopyableText && (
@@ -626,7 +595,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 size="icon"
                 data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
                 className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                aria-label="Copy message"
+                aria-label="Copy"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={handleCopyButtonClick}
                 onFocus={() => setCopyHintVisible(true)}
@@ -643,7 +612,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent sideOffset={6}>Copy message</TooltipContent>
+            <TooltipContent sideOffset={6}>Copy</TooltipContent>
           </Tooltip>
         )}
       </div>
@@ -823,7 +792,7 @@ const AssistantMessageActionButtons = React.memo(({
                 !hasCopyableText && 'opacity-50',
               )}
               disabled={!hasCopyableText}
-              aria-label="Copy message"
+              aria-label="Copy"
               aria-hidden={!hasCopyableText}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -858,7 +827,7 @@ const AssistantMessageActionButtons = React.memo(({
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-              aria-label="Fork from here"
+              aria-label="Fork the Result"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
@@ -868,7 +837,7 @@ const AssistantMessageActionButtons = React.memo(({
               <GitFork className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={6}>Fork from here</TooltipContent>
+          <TooltipContent sideOffset={6}>Fork the Result</TooltipContent>
         </Tooltip>
       )}
     </>
@@ -1216,6 +1185,12 @@ const AssistantMessageBody = React.memo(({
     />
   ), [hasCopyableText, isTouchContext, sessionId, onCopyMessage]);
 
+  const panelActions = usePanelActions();
+  const turnFileChangeEntries = React.useMemo(
+    () => extractFileChangeEntries((turnGroupingContext?.activityParts ?? []).map((activity) => activity.part)),
+    [turnGroupingContext?.activityParts],
+  );
+
   const lastRenderableTextPartIndex = React.useMemo(() => {
     if (!shouldShowStandaloneMessageActions) {
       return -1;
@@ -1390,6 +1365,7 @@ const AssistantMessageBody = React.memo(({
                 messageId={messageId}
                 streamPhase={effectiveStreamPhase}
                 onContentChange={onContentChange}
+                isLastContent={!visibleParts.some((laterPart, laterIndex) => laterIndex > i && partHasRenderableContent(laterPart))}
               />,
             );
           }
@@ -1648,15 +1624,6 @@ const AssistantMessageBody = React.memo(({
                   <TooltipContent>{footerTimestamp}</TooltipContent>
                 </Tooltip>
               ) : null}
-              {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
-              ) : null}
-              {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                <TurnChangedFilePills
-                  files={turnGroupingContext?.changedFiles}
-                  isInteractive={turnGroupingContext?.isLatestTurn === true}
-                />
-              ) : null}
             </div>
             <div
               className={cn(
@@ -1694,6 +1661,16 @@ const AssistantMessageBody = React.memo(({
             </div>
           </div>
         )}
+
+        {/* Legacy chat UI's collapsible "files changed" card — path click / Review
+            opens the diff viewer via panel actions. Sits below the turn footer. */}
+        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish && turnFileChangeEntries.length > 0 ? (
+          <FileChanges
+            changes={turnFileChangeEntries}
+            streaming={false}
+            onViewFile={(entry) => panelActions?.viewDiff({ path: entry.path, hunks: entry.hunks })}
+          />
+        ) : null}
 
       </div>
     </div>

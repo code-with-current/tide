@@ -489,6 +489,10 @@ type ReasoningPartProps = {
   onContentChange?: (reason?: ContentChangeReason) => void;
   messageId: string;
   streamPhase?: StreamPhase;
+  /** False once other content parts follow this one — stops the cycling-dots
+   *  animation even while the turn is still streaming (Tide: Tide blocks carry
+   *  no per-part end timestamps). */
+  isLastContent?: boolean;
   /** Store seam — upstream reads `chatRenderMode` from its UI store. */
   chatRenderMode?: 'sorted' | 'live';
 };
@@ -498,6 +502,7 @@ const ReasoningPart = React.memo(({
   onContentChange,
   messageId,
   streamPhase,
+  isLastContent = true,
   chatRenderMode = 'live',
 }: ReasoningPartProps) => {
   const partWithText = part as PartWithText;
@@ -505,7 +510,10 @@ const ReasoningPart = React.memo(({
   const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
   const time = partWithText.time;
   const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
-  const isStreaming = chatRenderMode === 'live' && canBeStreaming && typeof time?.end !== 'number';
+  const isStreaming = chatRenderMode === 'live'
+    && canBeStreaming
+    && isLastContent
+    && typeof time?.end !== 'number';
   const throttledText = useStreamingTextThrottle({
     text: textContent,
     isStreaming,

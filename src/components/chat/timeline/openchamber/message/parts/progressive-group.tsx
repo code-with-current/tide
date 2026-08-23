@@ -798,10 +798,12 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhase }: {
+const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhase, isLastContent = true }: {
   activity: TurnActivityPart;
   onContentChange?: (reason?: ContentChangeReason) => void;
   streamPhase: StreamPhase;
+  /** False once later rows follow — stops the cycling-dots animation. */
+  isLastContent?: boolean;
 }) => {
   return (
     <ReasoningPart
@@ -809,6 +811,7 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhas
       messageId={activity.messageId}
       streamPhase={streamPhase}
       onContentChange={onContentChange}
+      isLastContent={isLastContent}
     />
   );
 });
@@ -903,6 +906,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                 activity={row.activity}
                 streamPhase={streamPhase}
                 onContentChange={onContentChange}
+                isLastContent={index === visibleRows.length - 1}
               />
             </>,
           );

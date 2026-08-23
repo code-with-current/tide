@@ -14,7 +14,8 @@
  *    the global PendingChangesBar, which is excluded from the port) and `messageID`
  *    (OcPart carries no message coupling; the turn record owns that). */
 
-import type { DiffHunk, DiffLine } from '@/types';
+import type { DiffHunk, DiffLine, ToolName } from '@/types';
+import type { FileChangeEntry } from '@/lib/stream/block-state';
 import type { OcPart } from './types/opencode-parts';
 import { getRelativeFilePath, toAbsoluteFilePath } from './lib/path-utils';
 
@@ -149,4 +150,53 @@ export const getFileStats = (file: ChangedFile): { additions: number; deletions:
     return { additions: parsed.added, deletions: parsed.removed };
   }
   return { additions: 0, deletions: 0 };
+};
+
+/** Extract the changed files from Tide edit/write tool parts as FileChangeEntry[]
+ *  (the shape the legacy chat UI's FileChanges card consumes). Same filter as
+ *  extractChangedFiles: executed edit-tool parts only, diff display primary,
+ *  input.path fallback (write_file), first-seen order, deduped by path. */
+export const extractFileChangeEntries = (parts: OcPart[]): FileChangeEntry[] => {
+  const byPath = new Map<string, FileChangeEntry>();
+
+  for (const part of parts) {
+    if (part.type !== 'tool') continue;
+    if (!FILE_EDIT_TOOLS.has(part.tool)) continue;
+
+    const state = part.state as { metadata?: Record<string, unknown>; input?: Record<string, unknown>; status?: string };
+    if (state.status !== 'executed') continue;
+
+    const metadata = state.metadata;
+    const display = metadata?.display as
+      | { kind?: unknown; path?: unknown; hunks?: unknown; additions?: unknown; deletions?: unknown }
+      | undefined;
+    let path: string | undefined;
+    let hunks: DiffHunk[] | undefined;
+    let additions: number | undefined;
+    let deletions: number | undefined;
+
+    if (display && display.kind === 'diff' && typeof display.path === 'string' && display.path) {
+      path = display.path;
+      if (isDiffHunkArray(display.hunks)) hunks = display.hunks;
+      additions = parseCount(display.additions);
+      deletions = parseCount(display.deletions);
+    }
+
+    if (!path) {
+      const input = state.input ?? part.input;
+      path = typeof input?.path === 'string' && input.path ? input.path : undefined;
+    }
+    if (!path || byPath.has(path)) continue;
+
+    byPath.set(path, {
+      path,
+      status: part.tool === 'write_file' ? 'created' : 'edited',
+      toolName: part.tool as ToolName,
+      ...(additions !== undefined ? { additions } : {}),
+      ...(deletions !== undefined ? { deletions } : {}),
+      ...(hunks ? { hunks } : {}),
+    });
+  }
+
+  return [...byPath.values()];
 };
