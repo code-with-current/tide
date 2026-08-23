@@ -213,4 +213,46 @@ describe('knowledge manager', () => {
     expect(resolver).toHaveBeenCalledTimes(1);
     expect(ks.rag.getMeta('embedderId')).toBe('local-code-512');
   });
+
+  it('still marks the source errored when the failed-event broadcast throws', async () => {
+    mgr = createKnowledgeManager({
+      knowledge: () => ks,
+      embedder: hashEmbedder(),
+      fetchers: fakeFetchers({ url: async () => {
+        throw new Error('boom');
+      } }),
+      broadcast: (e) => {
+        if (e.phase === 'failed') throw new Error('listener gone');
+        events.push(e);
+      },
+    });
+    const src = ks.addSource({ name: 'Loud', kind: 'url', location: 'https://loud.example.com' });
+
+    await expect(mgr.enqueue(src.id)).resolves.toBeUndefined();
+    const row = ks.getSource(src.id);
+    expect(row?.status).toBe('error');
+    expect(row?.error).toBe('boom');
+  });
+
+  it('recoverStale skips sources with a live pending job', async () => {
+    let release: () => void = () => {};
+    mgr = makeManager({
+      url: async () => {
+        await new Promise<void>((r) => (release = r));
+        return [doc('live.example.com')];
+      },
+    });
+    const src = ks.addSource({ name: 'Live', kind: 'url', location: 'https://live.example.com' });
+
+    const p = mgr.enqueue(src.id);
+    await vi.waitFor(() => expect(ks.getSource(src.id)?.status).toBe('indexing'));
+
+    mgr.recoverStale();
+    expect(ks.getSource(src.id)?.status).toBe('indexing');
+
+    release();
+    await p;
+    expect(ks.getSource(src.id)?.status).toBe('idle');
+    expect(ks.getSource(src.id)?.lastIndexedAt).not.toBeNull();
+  });
 });

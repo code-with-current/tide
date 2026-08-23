@@ -113,10 +113,18 @@ export class KnowledgeStore {
   /** Crash leftovers ('queued'/'indexing' with no live job) resolve to idle
    *  without stamping lastIndexedAt — markStatus would stamp a fake time for
    *  rows stuck in 'indexing'. */
-  resolveStaleStatuses(): void {
-    this.db
-      .prepare("UPDATE sources SET status = 'idle', error = NULL WHERE status IN ('queued', 'indexing')")
-      .run();
+  resolveStaleStatuses(excludeIds: readonly string[] = []): void {
+    const exclude = new Set(excludeIds);
+    const stuck = this.db
+      .prepare<{ id: string }>("SELECT id FROM sources WHERE status IN ('queued', 'indexing')")
+      .all();
+    for (const { id } of stuck) {
+      if (!exclude.has(id)) {
+        this.db
+          .prepare("UPDATE sources SET status = 'idle', error = NULL WHERE id = ?")
+          .run(id);
+      }
+    }
   }
 
   setChunkCount(id: string, n: number): void {

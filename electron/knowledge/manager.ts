@@ -65,9 +65,14 @@ export function createKnowledgeManager(deps: {
         ks.markStatus(sourceId, 'idle');
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        deps.broadcast({ sourceId, phase: 'failed', error: message });
         // A removed source has no row left to carry the error.
-        if (ks.getSource(sourceId)) ks.markStatus(sourceId, 'error', message);
+        if (!ks.getSource(sourceId)) return;
+        ks.markStatus(sourceId, 'error', message);
+        try {
+          deps.broadcast({ sourceId, phase: 'failed', error: message });
+        } catch {
+          // Listener death (destroyed webContents at quit) must not fail the job.
+        }
       }
     })();
   }
@@ -89,7 +94,7 @@ export function createKnowledgeManager(deps: {
       const run = chain.then(() => runJob(sourceId));
       chain = run.then(() => {}, () => {});
       pending.set(sourceId, run);
-      void run.finally(() => pending.delete(sourceId));
+      run.finally(() => pending.delete(sourceId)).catch(() => {});
       return run;
     },
 
@@ -98,12 +103,15 @@ export function createKnowledgeManager(deps: {
       if (!ks.getSource(sourceId)) return;
       ks.deleteSource(sourceId);
       const inflight = pending.get(sourceId);
-      if (inflight) await inflight;
-      purgeOrphans(ks, sourceId);
+      try {
+        if (inflight) await inflight;
+      } finally {
+        purgeOrphans(ks, sourceId);
+      }
     },
 
     recoverStale(): void {
-      deps.knowledge().resolveStaleStatuses();
+      deps.knowledge().resolveStaleStatuses([...pending.keys()]);
     },
   };
 }
