@@ -18,12 +18,12 @@ const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function formatCountdown(ms: number): string {
-  if (ms <= 0) return 'resets now';
+  if (ms <= 0) return 'Resets now';
   const m = Math.ceil(ms / 60_000);
-  if (m < 60) return `resets in ${m}m`;
+  if (m < 60) return `Resets in ${m}m`;
   const h = Math.floor(m / 60);
-  if (h < 48) return `resets in ${h}h ${m % 60}m`;
-  return `resets in ${Math.floor(h / 24)}d ${h % 24}h`;
+  if (h < 48) return `Resets in ${h}h ${m % 60}m`;
+  return `Resets in ${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
 function tone(percent: number): string {
@@ -40,8 +40,8 @@ function formatAmount(v: number, unit: 'tokens' | 'USD' | 'credits'): string {
 
 function unitSuffix(unit: 'tokens' | 'USD' | 'credits'): string {
   if (unit === 'USD') return '';
-  if (unit === 'credits') return ' credits';
-  return ' tokens';
+  if (unit === 'credits') return ' Credits';
+  return ' Tokens';
 }
 
 function RingSvg({ percent, muted }: { percent: number; muted?: boolean }) {
@@ -161,7 +161,7 @@ function ProviderHeader({
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[0.85rem] font-semibold leading-tight truncate">{name}</div>
-        <div className="text-[0.6786rem] text-muted-foreground/60 truncate">{subtitle}</div>
+        <div className="text-[0.6786rem] text-muted-foreground/60 truncate uppercase">{subtitle}</div>
       </div>
     </div>
   );

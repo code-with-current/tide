@@ -93,7 +93,7 @@ export function parseZaiQuota(json: unknown): ProviderUsageReport | null {
     } else if (e.type === 'TIME_LIMIT') {
       // The MCP lane — minutes of tool-server time, not model tokens.
       windows.push({
-        label: 'MCP time',
+        label: 'MCP Limit',
         percent,
         limit: allowance ?? undefined,
         unit: 'credits',
