@@ -1,10 +1,8 @@
 /** Per-workspace RAG storage (SQLite + FTS5 + sqlite-vec) at `<userData>/rag/<workspaceId>/index.db`. Sync better-sqlite3 writes wrapped in transactions; bump SCHEMA_VERSION and append a step in `migrate()` to evolve the schema. */
-import Database from 'better-sqlite3';
+import Database, { type Database as DB } from 'better-sqlite3';
 import { getLoadablePath as getSqliteVecPath } from 'sqlite-vec';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { app } from 'electron';
-import type { Database as DB } from 'better-sqlite3';
 import { appDataDir } from '../appPaths.js';
 
 /** A single AST-symbol chunk waiting to be embedded + stored. */
@@ -166,6 +164,18 @@ function migrate(db: DB): void {
 export class RagStore {
   constructor(private readonly db: DB) {}
 
+  /** Raw SQL escape hatch so a sibling store (e.g. the knowledge sources
+   *  registry) can create its own tables on the same db file without
+   *  routing them through migrate(). */
+  runRaw(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  /** Underlying connection, for siblings building prepared statements on the same db file. */
+  get rawDb(): DB {
+    return this.db;
+  }
+
   /** Number of chunks in the index. */
   chunkCount(): number {
     const r = this.db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number };
@@ -262,6 +272,14 @@ export class RagStore {
       }
     });
     tx(items);
+  }
+
+  /** Chunk ids belonging to a knowledge source — feeds deleteChunks for cascading purge. */
+  chunksBySource(sourceId: string): string[] {
+    const rows = this.db.prepare('SELECT id FROM chunks WHERE sourceId = ?').all(sourceId) as {
+      id: string;
+    }[];
+    return rows.map((r) => r.id);
   }
 
   /** Delete chunk + FTS + vector rows by chunk id; vec0 has no FK cascade, so all three deletes are explicit and vec0 deletes by the +chunkId aux column. */
