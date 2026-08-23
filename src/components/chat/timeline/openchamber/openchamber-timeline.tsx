@@ -29,6 +29,7 @@ import { buildChatMessageEntries } from './lib/tide-adapter';
 import { TurnItemMemoized } from './components/turn-item';
 import { OpenChamberChatMessage } from './chat-message';
 import { ChatEmptyStateMemoized } from './chat-empty-state';
+import { TurnWorkingFooter } from '@/components/chat/turn/turn-header';
 import { CompactedDivider } from '../../blocks/compacted-divider';
 import type { Turn } from './lib/turns/types';
 import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
@@ -230,38 +231,47 @@ function OpenChamberTimelineImpl({
       if (tail.kind === 'turn') {
         const isGroupExpanded = turnUiStates.get(tail.turn.turnId)?.isExpanded ?? false;
         return (
-          <TurnItemMemoized
-            turn={tail.turn}
-            renderMessage={(entry) => (
-              <OpenChamberChatMessage
-                entry={entry}
-                turn={tail.turn}
-                isStreamingRow
-                pendingToolCallIds={pendingToolCallIds}
-                onApprove={onApproveToolCalls}
-                onReject={onRejectToolCalls}
-                onAnswerFollowup={onAnswerFollowup}
-                isGroupExpanded={isGroupExpanded}
-                onToggleGroup={() => toggleTurnGroup(tail.turn.turnId)}
-                directory={directory}
-              />
-            )}
-          />
+          <>
+            <TurnItemMemoized
+              turn={tail.turn}
+              renderMessage={(entry) => (
+                <OpenChamberChatMessage
+                  entry={entry}
+                  turn={tail.turn}
+                  isStreamingRow
+                  pendingToolCallIds={pendingToolCallIds}
+                  onApprove={onApproveToolCalls}
+                  onReject={onRejectToolCalls}
+                  onAnswerFollowup={onAnswerFollowup}
+                  isGroupExpanded={isGroupExpanded}
+                  onToggleGroup={() => toggleTurnGroup(tail.turn.turnId)}
+                  directory={directory}
+                />
+              )}
+            />
+            {/* Tide-native working indicator (user request): upstream mounts
+                StatusRow in ChatInput/ChatContainer — neither ported — so
+                without this a mid-dispatch turn looks finished. */}
+            {isStreaming && <TurnWorkingFooter startedAt={streamingMessage?.createdAt} />}
+          </>
         );
       }
       return (
-        <OpenChamberChatMessage
-          entry={tail.message}
-          isStreamingRow
-          pendingToolCallIds={pendingToolCallIds}
-          onApprove={onApproveToolCalls}
-          onReject={onRejectToolCalls}
-          onAnswerFollowup={onAnswerFollowup}
-          directory={directory}
-        />
+        <>
+          <OpenChamberChatMessage
+            entry={tail.message}
+            isStreamingRow
+            pendingToolCallIds={pendingToolCallIds}
+            onApprove={onApproveToolCalls}
+            onReject={onRejectToolCalls}
+            onAnswerFollowup={onAnswerFollowup}
+            directory={directory}
+          />
+          {isStreaming && <TurnWorkingFooter startedAt={streamingMessage?.createdAt} />}
+        </>
       );
     },
-    [turnUiStates, toggleTurnGroup, pendingToolCallIds, onApproveToolCalls, onRejectToolCalls, onAnswerFollowup, directory],
+    [turnUiStates, toggleTurnGroup, pendingToolCallIds, onApproveToolCalls, onRejectToolCalls, onAnswerFollowup, directory, isStreaming, streamingMessage?.createdAt],
   );
 
   const renderRowContent = useCallback(

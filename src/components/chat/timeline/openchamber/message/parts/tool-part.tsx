@@ -36,6 +36,9 @@
  *   in progressive-group.tsx); `JsonTreeViewer` ui-kit → local minimal
  *   disclosure tree below; `useDurationTickerNow` → local ticker hook below;
  *   `copyTextToClipboard` → inline `navigator.clipboard`; `toast` → `@/lib/toast`.
+ * - ADDED (Tide-native, user request): PixelLoader in the row header while a
+ *   tool runs — upstream's only running cue is the subtle title shimmer plus a
+ *   bash-only duration, which reads as "no progress indicator".
  * - Types: SDK `ToolPart`/`ToolState`/`FilePart` → vendored `OcToolPart`/
  *   `OcToolState` from ../../types/opencode-parts (OcToolState already carries
  *   metadata/input/output/error/title/time, so the upstream intersection type
@@ -46,6 +49,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 
 import { SimpleMarkdownRenderer } from '../../markdown/markdown-renderer';
 import { getToolMetadata } from '../../lib/tool-helpers';
@@ -1551,6 +1555,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isActive && !isError && <PixelLoader variant="sparkle" size="xs" />}
             <MinDurationShineText
               active={Boolean(isActive && !isError)}
               minDurationMs={300}

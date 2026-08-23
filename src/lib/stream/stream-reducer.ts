@@ -19,11 +19,10 @@ export function reduceStream(state: SessionStream, event: AgentEvent): SessionSt
     case 'tool_result':        return applyToolResult(state, event);
     case 'dispatch_result':    return applyDispatchResult(state, event);
     case 'usage':              return { ...state, usage: event.tokens, iteration: event.iteration };
-    // permission_required is owned by applyLegacyEvent (useChatStream) — it's a
-    // legacy field, not part of the block model. Handling it here too meant
-    // permissionRequest was double-managed (harmless via dedupe, but a binding
-    // smell). No-op here keeps the block reducer out of permission state.
-    case 'permission_required': return state;
+    // Blocks: flag gated tool rows as awaiting_input so the inline card mounts
+    // (the block reads `running` because tool_executing fires before the ask).
+    // permissionRequest accumulation stays owned by applyLegacyEvent.
+    case 'permission_required': return applyPermissionRequired(state, event);
     case 'retry':              return state; // retry state is managed by applyLegacyEvent
     case 'turn_end':           return applyTurnEnd(state, event);
     case 'error':
@@ -171,6 +170,23 @@ function applyToolStatus(state: SessionStream, e: Extract<AgentEvent, { type: 't
   const next = blocks.slice();
   next[idx] = { ...cur, status, modifiedAtSeq: e.seq };
   return { ...state, blocks: next };
+}
+
+// ─── Permission gate: flag gated tool rows so the pause is visible ──────
+
+function applyPermissionRequired(state: SessionStream, e: Extract<AgentEvent, { type: 'permission_required' }>): SessionStream {
+  const blocks = state.blocks ?? [];
+  const next = blocks.slice();
+  let changed = false;
+  for (const tc of e.toolCalls) {
+    const idx = state.toolBlockIndex?.[tc.id];
+    if (idx == null) continue;
+    const cur = blocks[idx];
+    if (!cur || cur.kind !== 'tool' || cur.status === 'awaiting_input') continue;
+    next[idx] = { ...cur, status: 'awaiting_input', modifiedAtSeq: e.seq };
+    changed = true;
+  }
+  return changed ? { ...state, blocks: next } : state;
 }
 
 // ─── Tool result: update in place with the result payload ───────────────

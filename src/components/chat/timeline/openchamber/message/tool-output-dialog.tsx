@@ -1075,7 +1075,10 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
     <Dialog open={popup.open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          'overflow-hidden flex flex-col min-h-0 pt-3 pb-4 px-4 gap-1',
+          // `oc-chat` re-scopes the ported token layer over the portal —
+          // Radix portals this to document.body, outside .oc-chat, and the
+          // dialog's colors are token-driven (unreadable without it).
+          'oc-chat overflow-hidden flex flex-col min-h-0 pt-3 pb-4 px-4 gap-1',
           '[&>button]:top-1.5',
           isMobile ? 'w-[95vw] max-w-[95vw]' : 'max-w-5xl',
           isMobile ? '[&>button]:right-1' : '[&>button]:top-2.5 [&>button]:right-4',
