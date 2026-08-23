@@ -1,7 +1,13 @@
 /** Virtualized history list for the OpenChamber-port chat timeline.
  *
  *  Ported from openchamber/openchamber `packages/ui/src/components/chat/MessageList.tsx`
- *  (MIT), reduced to Tide's flat Message[] model.
+ *  (MIT). Task-8 seam: the row model is rewritten from Tide's flat `Message[]`
+ *  to a generic `TimelineRow[]` (divider | turn | streaming tail) computed by
+ *  `openchamber-timeline.tsx` from the controller's turn projection. This is a
+ *  Tide-side adaptation of upstream MessageList — upstream inlines turn
+ *  rendering inside the list; we keep the split: this component owns ONLY
+ *  virtualization mechanics, the timeline owns row construction and content
+ *  (via `renderRowContent`).
  *
  *  What makes this scroll smoothly where the previous implementation didn't:
  *
@@ -15,7 +21,7 @@
  *  - Padding-based window offset (not per-row absolute positioning) keeps
  *    every row in normal flow — sticky elements and margin boxes behave like
  *    plain DOM.
- *  - Measurement snapshots per session (`takeSnapshot` + 
+ *  - Measurement snapshots per session (`takeSnapshot` +
  *    `initialMeasurementsCache`) restore real row heights instantly on
  *    session switch instead of re-estimating, killing estimate-flash jumps.
  */
@@ -27,12 +33,29 @@ import {
   type VirtualItem,
   type Virtualizer,
 } from '@tanstack/react-virtual';
-import type { Message } from '@/types';
-import { ChatMessage } from '../../chat-message';
-import { CompactedDivider } from '../../blocks/compacted-divider';
-import { timelineRowKey } from '../row-metrics';
+import type { Turn } from './lib/turns/types';
+import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 
 type HtmlVirtualizer = Virtualizer<HTMLDivElement, HTMLDivElement>;
+
+/** Compaction point payload for a divider row (Tide `Message.compactionInfo`). */
+export interface TimelineDividerPayload {
+  tokensBefore: number;
+  tokensAfter: number;
+}
+
+/**
+ * Generic virtualized row. `key` is the virtualizer measurement-cache key —
+ * turn-based (`turn:${turnId}` / `divider:${turnId}`) with the transient tail
+ * session-scoped (`${sessionKey}:tail:${...}`) because the measurement cache
+ * outlives session switches (see `timelineRowKey`'s rationale in
+ * `../row-metrics.ts`). `userMessage` marks rows whose leading rendered
+ * message is a user message (drives the `data-user-message` attribute).
+ */
+export type TimelineRow =
+  | { key: string; kind: 'divider'; compaction: TimelineDividerPayload; userMessage?: undefined }
+  | { key: string; kind: 'turn'; turn: Turn; userMessage: boolean }
+  | { key: string; kind: 'tail'; entry: StreamingTailEntry; userMessage: boolean };
 
 const ESTIMATED_ROW_SIZE = 320;
 const OVERSCAN = 8;
@@ -76,28 +99,20 @@ function writeSnapshot(
 
 export interface VirtualizedMessageListProps {
   sessionKey?: string | null;
-  messages: Message[];
-  streamingMessage: Message | null;
+  rows: readonly TimelineRow[];
   scrollRef: React.RefObject<HTMLDivElement | null>;
-  pendingToolCallIds?: string[];
-  stopReason?: string | null;
-  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
-  onRejectToolCalls?: (ids: string[], reason?: string) => void;
+  renderRowContent: (row: TimelineRow) => React.ReactNode;
 }
 
 export function VirtualizedMessageList({
   sessionKey,
-  messages,
-  streamingMessage,
+  rows,
   scrollRef,
-  pendingToolCallIds,
-  stopReason,
-  onApproveToolCalls,
-  onRejectToolCalls,
+  renderRowContent,
 }: VirtualizedMessageListProps) {
-  const totalCount = messages.length + (streamingMessage ? 1 : 0);
+  const totalCount = rows.length;
   const keysRef = useRef<readonly string[]>([]);
-  keysRef.current = Array.from({ length: totalCount }, (_, i) => timelineRowKey(messages, i, sessionKey));
+  keysRef.current = rows.map((row) => row.key);
 
   // Initial-only read: snapshot restore is a mount-time concern; afterwards
   // the live virtualizer owns measurements.
@@ -157,14 +172,13 @@ export function VirtualizedMessageList({
 
   const renderRow = useCallback(
     (row: VirtualItem) => {
-      const isStreamingRow = row.index >= messages.length;
-      const msg = isStreamingRow ? streamingMessage! : messages[row.index];
+      const model = rows[row.index];
       return (
         <div
           key={row.key}
           data-index={row.index}
           ref={virtualizer.measureElement}
-          data-user-message={msg.role === 'user' ? 'true' : undefined}
+          data-user-message={model?.userMessage === true ? 'true' : undefined}
           // flow-root makes the row a BFC so TurnBlock's mb-6 is contained in
           // the row box and thus captured by measureElement. In plain normal
           // flow the margin collapses through this div: measured sizes (and
@@ -173,25 +187,11 @@ export function VirtualizedMessageList({
           // paint over the error block and bottom spacer below it.
           className="min-w-0 w-full flow-root"
         >
-          {msg.compactionInfo && (
-            <CompactedDivider
-              tokensBefore={msg.compactionInfo.tokensBefore}
-              tokensAfter={msg.compactionInfo.tokensAfter}
-            />
-          )}
-          <ChatMessage
-            message={msg}
-            streaming={isStreamingRow}
-            pendingToolCallIds={isStreamingRow ? pendingToolCallIds : undefined}
-            stopReason={isStreamingRow ? stopReason : msg.stopReason}
-            sessionId={sessionKey}
-            onApproveToolCalls={isStreamingRow ? onApproveToolCalls : undefined}
-            onRejectToolCalls={isStreamingRow ? onRejectToolCalls : undefined}
-          />
+          {model ? renderRowContent(model) : null}
         </div>
       );
     },
-    [messages, streamingMessage, sessionKey, pendingToolCallIds, stopReason, onApproveToolCalls, onRejectToolCalls, virtualizer],
+    [rows, renderRowContent, virtualizer],
   );
 
   const virtualItems = virtualizer.getVirtualItems();

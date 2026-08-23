@@ -10,7 +10,7 @@ import { EmptyChatState } from "@/components/chat/empty-chat-state";
 import { TimelineSkeleton } from "@/components/chat/turn/turn-skeleton";
 import { NoWorkspaceState } from "@/components/chat/no-workspace-state";
 import { MissingWorkspaceScreen } from "./missing-workspace-screen";
-import { ChatTimeline } from "@/components/chat/timeline/ChatTimeline";
+import { OpenChamberTimeline as ChatTimeline } from "@/components/chat/timeline/openchamber/openchamber-timeline";
 import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
@@ -1017,6 +1017,13 @@ export function MainScreen() {
                                 rejectToolCalls(activeSessionId, ids, reason)
                             : undefined
                         }
+                        onAnswerFollowup={
+                          activeSessionId
+                            ? (toolCallId, answer) =>
+                                submitFollowup(activeSessionId, toolCallId, answer)
+                            : undefined
+                        }
+                        directory={activeWorkspace?.path}
                         loadingFallback={<TimelineSkeleton />}
                         retryActive={!!retry}
                         errorBlock={error && !isStreaming ? (

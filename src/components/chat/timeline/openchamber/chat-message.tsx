@@ -59,6 +59,7 @@ import { PermissionCard } from './permission-card';
 import { QuestionCard } from './question-card';
 import type { FollowupQuestionPayload } from './question-serializers';
 import { cn } from '@/lib/utils';
+import type { AutonomyMode } from '@/types';
 
 /** Upstream UI-store reads → module constants with upstream defaults (brief "Settings surface"). */
 const CHAT_DISPLAY_DEFAULTS = {
@@ -193,9 +194,20 @@ interface OpenChamberChatMessageProps {
   turn?: Turn;
   isStreamingRow?: boolean;
   pendingToolCallIds?: string[];
-  onApprove?: (ids: string[], newMode?: unknown, remember?: boolean) => void;
+  /** Tide wiring (task 8): typed to Tide's AutonomyMode (PermissionCard's
+   *  seam) so the timeline can pass its onApproveToolCalls straight through. */
+  onApprove?: (ids: string[], newMode?: AutonomyMode, remember?: boolean) => void;
   onReject?: (ids: string[], reason?: string) => void;
   onAnswerFollowup?: (toolCallId: string, answer: string, mode?: unknown) => void;
+  /** Tide wiring (task 8): controller-owned turn-group expand/collapse state
+   *  threaded into TurnGroupingContext (upstream reads it from a store). */
+  isGroupExpanded?: boolean;
+  /** Tide wiring (task 8): toggles the turn's activity group via the timeline
+   *  controller's toggleTurnGroup (upstream dispatches to a store). */
+  onToggleGroup?: () => void;
+  /** Tide wiring (task 8): active workspace root threaded to MessageBody's
+   *  `directory` store seam (path-relative rendering). */
+  directory?: string;
 }
 
 const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
@@ -206,6 +218,9 @@ const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
   onApprove,
   onReject,
   onAnswerFollowup,
+  isGroupExpanded,
+  onToggleGroup,
+  directory,
 }) => {
   const { showReasoningTraces, stickyUserHeader, chatRenderMode } = CHAT_DISPLAY_DEFAULTS;
   const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -345,8 +360,12 @@ const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
       changedFiles: record.changedFiles,
       userMessageCreatedAt: record.userMessage?.info?.time?.created,
       isWorking: isStreamingRow,
+      // Tide wiring (task 8): controller-owned group state (see props note) —
+      // upstream leaves these store-fed on the context; Tide threads props.
+      isGroupExpanded,
+      toggleGroup: onToggleGroup,
     };
-  }, [entry.info.id, isStreamingRow, toolParts.length, turn]);
+  }, [entry.info.id, isGroupExpanded, isStreamingRow, onToggleGroup, toolParts.length, turn]);
 
   const turnActivityToolParts = React.useMemo<OcToolPart[]>(() => {
     if (isUser) {
@@ -764,6 +783,7 @@ const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
                           errorVariant={assistantErrorVariant}
                           userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                           stickyUserHeaderEnabled={stickyUserHeader}
+                          directory={directory}
                         />
                       </div>
                     </div>
@@ -802,6 +822,7 @@ const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
                   footerProviderID={headerProviderID}
                   footerModelName={headerModelName}
                   footerAgentName={headerAgentName}
+                  directory={directory}
                 />
                 {pendingPermissionParts.map((part) => (
                   <PermissionCard
@@ -871,6 +892,12 @@ export const OpenChamberChatMessage = React.memo(OpenChamberChatMessageImpl, (pr
     && prev.onApprove === next.onApprove
     && prev.onReject === next.onReject
     && prev.onAnswerFollowup === next.onAnswerFollowup
+    // Tide wiring (task 8): group-state + directory props must participate or
+    // toggles/workspace switches would not re-render (deriveTurnGroupingContext
+    // above does not see them).
+    && prev.isGroupExpanded === next.isGroupExpanded
+    && prev.onToggleGroup === next.onToggleGroup
+    && prev.directory === next.directory
     && areRelevantTurnGroupingContextsEqual(
       deriveTurnGroupingContext(prev),
       deriveTurnGroupingContext(next),

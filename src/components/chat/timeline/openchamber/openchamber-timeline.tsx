@@ -2,6 +2,13 @@
  *  openchamber/openchamber (MIT): `MessageList.tsx` + `useChatAutoFollow.ts`,
  *  adapted to Tide's Message/ChatMessage model.
  *
+ *  Task 8: rows are now the OpenChamber turn model. Tide `Message[]` is
+ *  projected via `toChatMessageEntry` (lib/tide-adapter) into
+ *  `ChatMessageEntry[]`, folded into turns by `useChatTimelineController`
+ *  (T6), and rendered as `TimelineRow[]` (divider | turn | streaming tail)
+ *  inside `VirtualizedMessageList`. Row content is `TurnItemMemoized` +
+ *  `OpenChamberChatMessage` — the ported OpenChamber chat entry renderer.
+ *
  *  Differences from the previous ChatTimeline implementation:
  *  - Bottom anchoring lives in @tanstack/virtual-core (`anchorTo: 'end'`),
  *    so there is no pin spacer, no sentinel, no eased chase — one instant
@@ -12,24 +19,44 @@
  *    pin-user-message-to-top choreography.
  */
 
-import { memo, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { Message } from '@/types';
 import { useChatAutoFollow } from './use-chat-auto-follow';
-import { VirtualizedMessageList } from './virtualized-message-list';
+import { VirtualizedMessageList, type TimelineRow } from './virtualized-message-list';
+import { useChatTimelineController } from './hooks/use-chat-timeline-controller';
+import { toChatMessageEntry } from './lib/tide-adapter';
+import { TurnItemMemoized } from './components/turn-item';
+import { OpenChamberChatMessage } from './chat-message';
+import { ChatEmptyStateMemoized } from './chat-empty-state';
+import { CompactedDivider } from '../../blocks/compacted-divider';
+import type { ChatMessageEntry, Turn } from './lib/turns/types';
+import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 import { cn } from '@/lib/utils';
 import './openchamber-chat.css';
+// katex base stylesheet — `.oc-chat .katex` overrides in openchamber-chat.css
+// assume it is loaded (declared dependency; upstream imports it globally).
+import 'katex/dist/katex.min.css';
 
 export interface OpenChamberTimelineProps {
   messages: Message[];
   streamingMessage: Message | null;
   isStreaming: boolean;
   pendingToolCallIds?: string[];
+  /** Accepted for ChatTimeline prop parity but unconsumed by the turn model:
+   *  OpenChamberChatMessage derives finish state from parts. Still threaded
+   *  into the streaming entry conversion below (finish override once the turn
+   *  ends), so it is NOT dead — task-8 seam note. */
   stopReason?: string | null;
   sessionId?: string | null;
   sessionLoading?: boolean;
   onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
+  /** Tide wiring (task 8): live-pause followup answers (QuestionCard →
+   *  submitFollowup IPC). */
+  onAnswerFollowup?: (toolCallId: string, answer: string, mode?: unknown) => void;
+  /** Tide wiring (task 8): active workspace root for path-relative rendering. */
+  directory?: string;
   loadingFallback?: React.ReactNode;
   emptyState?: React.ReactNode;
   errorBlock?: React.ReactNode;
@@ -47,6 +74,8 @@ function OpenChamberTimelineImpl({
   sessionLoading,
   onApproveToolCalls,
   onRejectToolCalls,
+  onAnswerFollowup,
+  directory,
   loadingFallback,
   emptyState,
   errorBlock,
@@ -68,6 +97,212 @@ function OpenChamberTimelineImpl({
     if (grew && lastRole === 'user') scrollToBottomOnSend();
   }, [messages.length, lastRole, scrollToBottomOnSend]);
 
+  // ── Tide → OpenChamber projection (task 8) ─────────────────────────────
+  // Memoize on the `messages` reference — the array rebuilds on every store
+  // commit, so identity IS the change signal.
+  const staticEntries = useMemo(
+    () => messages.map((message) => toChatMessageEntry(message)),
+    [messages],
+  );
+
+  // Streaming-entry conversion mirrors `projectTideTurns` in lib/tide-adapter:
+  // the in-flight entry is appended to the controller input so the projection
+  // folds it into the last turn (or opens the new one), with its completion
+  // stamp + finish stripped while live and `stopReason` overriding finish once
+  // the turn ends. Without the append, buildLiveStreamingEntry would never
+  // find the live message inside the streaming turn.
+  const lastUserId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') return messages[index].id;
+    }
+    return undefined;
+  }, [messages]);
+
+  const streamingEntry = useMemo<ChatMessageEntry | undefined>(() => {
+    if (!streamingMessage) return undefined;
+    const entry = toChatMessageEntry(streamingMessage);
+    if (lastUserId) entry.info.parentID = lastUserId;
+    if (isStreaming) {
+      entry.info.time.completed = undefined;
+      entry.info.finish = undefined;
+    }
+    if (stopReason) entry.info.finish = stopReason;
+    return entry;
+  }, [streamingMessage, lastUserId, isStreaming, stopReason]);
+
+  const controllerMessages = useMemo(
+    () => (streamingEntry ? [...staticEntries, streamingEntry] : staticEntries),
+    [staticEntries, streamingEntry],
+  );
+
+  const {
+    turnRecords,
+    staticTurns,
+    streamingTailEntry,
+    // turnUiStates/toggleTurnGroup: controller-owned per-turn group state.
+    turnUiStates,
+    toggleTurnGroup,
+    // `turnWindowModel` is intentionally unconsumed: upstream uses it for
+    // pagination; Tide's list virtualizes on its own (task-8 seam note).
+  } = useChatTimelineController({
+    messages: controllerMessages,
+    streamingMessage: streamingEntry,
+    isStreaming,
+    sessionKey: sessionId ?? undefined,
+  });
+
+  // Tide `Message.compactionInfo` is not projected onto entries — look it up
+  // by message id. A turn whose first message (user message, else first
+  // assistant message) carries it gets a divider row immediately before it.
+  const compactionById = useMemo(() => {
+    const map = new Map<string, { tokensBefore: number; tokensAfter: number }>();
+    for (const message of messages) {
+      if (message.compactionInfo) map.set(message.id, message.compactionInfo);
+    }
+    if (streamingMessage?.compactionInfo) {
+      map.set(streamingMessage.id, streamingMessage.compactionInfo);
+    }
+    return map;
+  }, [messages, streamingMessage]);
+
+  const dividerRowForTurn = useCallback(
+    (turn: Turn): TimelineRow | undefined => {
+      const candidateIds = [turn.userMessage.info.id, turn.assistantMessages[0]?.info.id];
+      for (const id of candidateIds) {
+        if (!id) continue;
+        const compaction = compactionById.get(id);
+        if (compaction) {
+          return { key: `divider:${turn.turnId}`, kind: 'divider', compaction };
+        }
+      }
+      return undefined;
+    },
+    [compactionById],
+  );
+
+  // Row list: static turns + tail while streaming; while idle the tail is
+  // null and the LAST turn is excluded from `staticTurns`, so render the full
+  // projection (`turnRecords.turns`) instead — otherwise the last committed
+  // turn would vanish.
+  const rows = useMemo<TimelineRow[]>(() => {
+    const result: TimelineRow[] = [];
+    if (streamingTailEntry) {
+      for (const turn of staticTurns) {
+        const divider = dividerRowForTurn(turn);
+        if (divider) result.push(divider);
+        result.push({ key: `turn:${turn.turnId}`, kind: 'turn', turn, userMessage: true });
+      }
+      // Tail row key is session-scoped: the measurement cache outlives session
+      // switches (same rationale as timelineRowKey's `__streaming__` key).
+      const tailKey = `${sessionId ?? 's'}:tail:${streamingTailEntry.key}`;
+      if (streamingTailEntry.kind === 'turn') {
+        const divider = dividerRowForTurn(streamingTailEntry.turn);
+        if (divider) result.push(divider);
+        result.push({ key: tailKey, kind: 'tail', entry: streamingTailEntry, userMessage: true });
+      } else {
+        result.push({
+          key: tailKey,
+          kind: 'tail',
+          entry: streamingTailEntry,
+          userMessage: streamingTailEntry.message.info.role === 'user',
+        });
+      }
+      return result;
+    }
+    for (const turn of turnRecords.turns) {
+      const divider = dividerRowForTurn(turn);
+      if (divider) result.push(divider);
+      result.push({ key: `turn:${turn.turnId}`, kind: 'turn', turn, userMessage: true });
+    }
+    return result;
+  }, [staticTurns, streamingTailEntry, turnRecords.turns, dividerRowForTurn, sessionId]);
+
+  // ── Row content (task 8) ────────────────────────────────────────────────
+  // Static turn rows: group state from the controller; NO streaming-only
+  // props (isStreamingRow/pendingToolCallIds/onApprove/onReject/
+  // onAnswerFollowup are tail-row-only per the task-8 brief).
+  const renderStaticTurnContent = useCallback(
+    (turn: Turn) => {
+      const isGroupExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? false;
+      const onToggleGroup = () => toggleTurnGroup(turn.turnId);
+      return (
+        <TurnItemMemoized
+          turn={turn}
+          renderMessage={(entry) => (
+            <OpenChamberChatMessage
+              entry={entry}
+              turn={turn}
+              isGroupExpanded={isGroupExpanded}
+              onToggleGroup={onToggleGroup}
+              directory={directory}
+            />
+          )}
+        />
+      );
+    },
+    [turnUiStates, toggleTurnGroup, directory],
+  );
+
+  // Streaming tail: same OpenChamberChatMessage-based renderMessage so live
+  // parts stream in-place, plus the streaming-only props.
+  const renderTailContent = useCallback(
+    (tail: StreamingTailEntry) => {
+      if (tail.kind === 'turn') {
+        const isGroupExpanded = turnUiStates.get(tail.turn.turnId)?.isExpanded ?? false;
+        return (
+          <TurnItemMemoized
+            turn={tail.turn}
+            renderMessage={(entry) => (
+              <OpenChamberChatMessage
+                entry={entry}
+                turn={tail.turn}
+                isStreamingRow
+                pendingToolCallIds={pendingToolCallIds}
+                onApprove={onApproveToolCalls}
+                onReject={onRejectToolCalls}
+                onAnswerFollowup={onAnswerFollowup}
+                isGroupExpanded={isGroupExpanded}
+                onToggleGroup={() => toggleTurnGroup(tail.turn.turnId)}
+                directory={directory}
+              />
+            )}
+          />
+        );
+      }
+      return (
+        <OpenChamberChatMessage
+          entry={tail.message}
+          isStreamingRow
+          pendingToolCallIds={pendingToolCallIds}
+          onApprove={onApproveToolCalls}
+          onReject={onRejectToolCalls}
+          onAnswerFollowup={onAnswerFollowup}
+          directory={directory}
+        />
+      );
+    },
+    [turnUiStates, toggleTurnGroup, pendingToolCallIds, onApproveToolCalls, onRejectToolCalls, onAnswerFollowup, directory],
+  );
+
+  const renderRowContent = useCallback(
+    (row: TimelineRow) => {
+      switch (row.kind) {
+        case 'divider':
+          return (
+            <CompactedDivider
+              tokensBefore={row.compaction.tokensBefore}
+              tokensAfter={row.compaction.tokensAfter}
+            />
+          );
+        case 'turn':
+          return renderStaticTurnContent(row.turn);
+        case 'tail':
+          return renderTailContent(row.entry);
+      }
+    },
+    [renderStaticTurnContent, renderTailContent],
+  );
+
   return (
     <div className="relative flex-1 min-h-0">
       <div
@@ -83,21 +318,19 @@ function OpenChamberTimelineImpl({
           className,
         )}
       >
-        <div className="w-[80%] max-w-3xl mx-auto">
+        {/* `oc-chat` scopes the ported OpenChamber token layer (see
+            openchamber-chat.css) over every row in the timeline. */}
+        <div className="oc-chat w-[80%] max-w-3xl mx-auto">
           {sessionLoading && messages.length === 0 ? loadingFallback
-            : isEmpty ? emptyState
+            : isEmpty ? (emptyState ?? <ChatEmptyStateMemoized />)
             : (
               <>
                 {listActive && (
                   <VirtualizedMessageList
                     sessionKey={sessionId}
-                    messages={messages}
-                    streamingMessage={streamingMessage}
+                    rows={rows}
                     scrollRef={scrollRef}
-                    pendingToolCallIds={pendingToolCallIds}
-                    stopReason={stopReason}
-                    onApproveToolCalls={onApproveToolCalls}
-                    onRejectToolCalls={onRejectToolCalls}
+                    renderRowContent={renderRowContent}
                   />
                 )}
                 {errorBlock}
