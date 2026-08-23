@@ -1044,7 +1044,7 @@ body {
   background: color-mix(in srgb, var(--muted) 30%, transparent);
   color: var(--muted-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.02em;
 }
 .prose-chat [data-streamdown="code-block-header"] span { margin-left: 0; }

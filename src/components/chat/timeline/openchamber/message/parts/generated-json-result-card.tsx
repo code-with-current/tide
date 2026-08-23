@@ -48,7 +48,7 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
   return (
     <div data-component="generated-json-result" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
-        <span className="font-mono text-[13px] text-muted-foreground">
+        <span className="font-mono text-[0.8125rem] text-muted-foreground">
           {result.kind === 'commit'
             ? 'Generated commit message'
             : 'Generated pull request'}

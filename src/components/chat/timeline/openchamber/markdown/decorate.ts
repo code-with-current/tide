@@ -280,7 +280,7 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
     const header = document.createElement('div');
     header.className = 'flex items-center justify-between border-b border-border/70 px-3 py-1.5';
     const langLabel = document.createElement('span');
-    langLabel.className = 'font-mono text-[13px] text-muted-foreground';
+    langLabel.className = 'font-mono text-[0.8125rem] text-muted-foreground';
     langLabel.textContent = language;
     const copyBtn = makeIconButton('copy', ctx.labels.copy, 'copy-code');
     const wrapBtn = makeIconButton('textWrap', ctx.codeBlockLineWrap ? ctx.labels.disableCodeWrap : ctx.labels.enableCodeWrap, 'toggle-code-wrap');
