@@ -131,26 +131,27 @@ export interface ProjectTideTurnsOptions {
 }
 
 /**
- * Projects Tide messages into OpenChamber turn records.
+ * Builds OpenChamber entries from Tide messages — the timeline's production
+ * path (static and in-flight messages alike).
  *
  * `parentID` (which upstream gets from the OpenCode session shape) is assigned
  * sequentially: each user message starts a turn and every following non-user
  * message attaches to it until the next user message. The in-flight
  * `streamingMessage` appends to the last turn — if the last message is a user
- * message, it opens that new turn.
+ * message, it opens that new turn. Without parentID, projectTurnRecords drops
+ * assistant messages — completed turns rendered empty.
  *
  * `TurnStreamState` derives from these props, not timestamps: the streaming
  * entry is stripped of its completion stamp while `isStreaming` is true, and
  * `stopReason` (e.g. 'aborted', 'refusal') overrides its finish reason once
  * the turn ends.
  */
-export function projectTideTurns(
+export function buildChatMessageEntries(
   messages: Message[],
-  streamingMessage: Message | null,
+  streamingMessage?: Message | null,
   isStreaming: boolean = streamingMessage != null,
   stopReason: string | null = streamingMessage?.stopReason ?? null,
-  options?: ProjectTideTurnsOptions,
-): TurnProjectionResult {
+): ChatMessageEntry[] {
   const entries: ChatMessageEntry[] = [];
   let lastUserId: string | undefined;
 
@@ -179,6 +180,17 @@ export function projectTideTurns(
     entries.push(entry);
   }
 
+  return entries;
+}
+
+export function projectTideTurns(
+  messages: Message[],
+  streamingMessage: Message | null,
+  isStreaming: boolean = streamingMessage != null,
+  stopReason: string | null = streamingMessage?.stopReason ?? null,
+  options?: ProjectTideTurnsOptions,
+): TurnProjectionResult {
+  const entries = buildChatMessageEntries(messages, streamingMessage, isStreaming, stopReason);
   return projectTurnRecords(entries, {
     showTextJustificationActivity: options?.showTextJustificationActivity ?? false,
     showTurnChangedFiles: options?.showTurnChangedFiles ?? false,

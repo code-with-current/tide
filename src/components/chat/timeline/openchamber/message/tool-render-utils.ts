@@ -44,3 +44,18 @@ export const getToolDescriptionFallback = (
     const globPattern = normalizeToolName(toolName) === 'glob' ? input?.pattern : undefined;
     return typeof globPattern === 'string' ? globPattern : '';
 };
+
+// NEW Tide seam (not upstream): the Tide adapter passes ToolCallStatus through
+// unmapped and its parts carry no per-part timestamps, so tool finality must be
+// the Tide status vocabulary — upstream's state.time.end check would hide every
+// finished tool row. 'awaiting_input' (permission pause) stays active.
+const ACTIVE_TOOL_STATUSES = new Set(['pending', 'running', 'awaiting_input']);
+const FINALIZED_TOOL_STATUSES = new Set(['executed', 'failed', 'rejected', 'timeout', 'aborted', 'partial']);
+
+export const isActiveToolStatus = (status: unknown): boolean => {
+    return typeof status === 'string' && ACTIVE_TOOL_STATUSES.has(status);
+};
+
+export const isFinalizedToolStatus = (status: unknown): boolean => {
+    return typeof status === 'string' && FINALIZED_TOOL_STATUSES.has(status);
+};

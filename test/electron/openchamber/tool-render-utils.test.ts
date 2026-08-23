@@ -2,7 +2,38 @@
  *  bun:test converted to vitest; imports repointed at the Tide port. */
 import { describe, expect, test } from 'vitest';
 
-import { isExpandableTool, isStaticTool } from '../../../src/components/chat/timeline/openchamber/message/tool-render-utils';
+import {
+    isActiveToolStatus,
+    isExpandableTool,
+    isFinalizedToolStatus,
+    isStaticTool,
+} from '../../../src/components/chat/timeline/openchamber/message/tool-render-utils';
+
+describe('Tide tool-status classification', () => {
+    test('finalized statuses cover the Tide vocabulary without state.time', () => {
+        expect(isFinalizedToolStatus('executed')).toBe(true);
+        expect(isFinalizedToolStatus('failed')).toBe(true);
+        expect(isFinalizedToolStatus('rejected')).toBe(true);
+        expect(isFinalizedToolStatus('timeout')).toBe(true);
+        expect(isFinalizedToolStatus('aborted')).toBe(true);
+        expect(isFinalizedToolStatus('partial')).toBe(true);
+    });
+
+    test('active statuses stay unfinalized, including awaiting_input', () => {
+        expect(isFinalizedToolStatus('pending')).toBe(false);
+        expect(isFinalizedToolStatus('running')).toBe(false);
+        expect(isFinalizedToolStatus('awaiting_input')).toBe(false);
+        expect(isFinalizedToolStatus(undefined)).toBe(false);
+    });
+
+    test('isActiveToolStatus covers pending, running, and awaiting_input only', () => {
+        expect(isActiveToolStatus('pending')).toBe(true);
+        expect(isActiveToolStatus('running')).toBe(true);
+        expect(isActiveToolStatus('awaiting_input')).toBe(true);
+        expect(isActiveToolStatus('executed')).toBe(false);
+        expect(isActiveToolStatus('started')).toBe(false);
+    });
+});
 
 describe('tool rendering classification', () => {
     test('keeps navigation tools compact', () => {

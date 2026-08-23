@@ -3,9 +3,11 @@ import { describe, expect, test } from 'vitest';
 import type { Block, Message, ToolBlock } from '../../../src/types';
 import {
   blockToPart,
+  buildChatMessageEntries,
   projectTideTurns,
   toChatMessageEntry,
 } from '../../../src/components/chat/timeline/openchamber/lib/tide-adapter';
+import { projectTurnRecords } from '../../../src/components/chat/timeline/openchamber/lib/turns/project-turn-records';
 import type { OcPart, OcReasoningPart, OcTextPart, OcToolPart } from '../../../src/components/chat/timeline/openchamber/types/opencode-parts';
 
 const seq = { createdAtSeq: 1, modifiedAtSeq: 2 };
@@ -147,6 +149,59 @@ describe('toChatMessageEntry', () => {
     const entry = toChatMessageEntry(message('m6', 'user', { mentions, attachments: [{ path: 'a.ts', kind: 'code' as const }] }));
     expect(entry.info.mentions).toEqual(mentions);
     expect(entry.info.attachments).toEqual([{ path: 'a.ts', kind: 'code' }]);
+  });
+});
+
+describe('buildChatMessageEntries (timeline production path)', () => {
+  test('static assistant entries carry parentID so completed turns keep their content', () => {
+    const user = message('u1', 'user', { content: 'check knowledge base' });
+    const assistant = message('a1', 'assistant', {
+      totalMs: 100,
+      stopReason: 'stop',
+      blocks: [
+        toolBlock('tc1', { status: 'executed', output: 'ok' }),
+        textBlock('t1', 'found it', true),
+      ],
+    });
+
+    const entries = buildChatMessageEntries([user, assistant]);
+    expect(entries[1]!.info.parentID).toBe('u1');
+
+    const projection = projectTurnRecords(entries);
+    expect(projection.turns).toHaveLength(1);
+    const turn = projection.turns[0]!;
+    expect(turn.assistantMessageIds).toEqual(['a1']);
+    expect(turn.hasTools).toBe(true);
+    expect(turn.summaryText).toBe('found it');
+  });
+
+  test('regression guard: parentless assistant entries are dropped by the projection', () => {
+    // Documents why the timeline must build entries through
+    // buildChatMessageEntries: projectTurnRecords drops assistant messages
+    // without parentID, which erased finished turns' tool blocks entirely.
+    const user = message('u1', 'user', { content: 'go' });
+    const assistant = message('a1', 'assistant', {
+      totalMs: 10,
+      blocks: [toolBlock('tc1'), textBlock('t1', 'ans', true)],
+    });
+
+    const bare = [user, assistant].map((msg) => toChatMessageEntry(msg));
+    const projection = projectTurnRecords(bare);
+
+    expect(projection.turns[0]!.assistantMessageIds).toEqual([]);
+  });
+
+  test('streaming entry mirrors projectTideTurns: parentID, stripped completion, stopReason override', () => {
+    const user = message('u1', 'user', { content: 'go' });
+    const streaming = message('a1', 'assistant', { content: 'partial', totalMs: 50 });
+
+    const live = buildChatMessageEntries([user], streaming, true, null);
+    expect(live[1]!.info.parentID).toBe('u1');
+    expect(live[1]!.info.time.completed).toBeUndefined();
+    expect(live[1]!.info.finish).toBeUndefined();
+
+    const stopped = buildChatMessageEntries([user], streaming, false, 'aborted');
+    expect(stopped[1]!.info.finish).toBe('aborted');
   });
 });
 

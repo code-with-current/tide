@@ -77,7 +77,7 @@ import {
 } from '../tool-diff-utils';
 import { useStreamingTextThrottle } from '../../hooks/use-streaming-text-throttle';
 import { getStreamingOutputAppend, getToolOutput } from '../tool-output';
-import { getToolDescriptionFallback } from '../tool-render-utils';
+import { getToolDescriptionFallback, isFinalizedToolStatus } from '../tool-render-utils';
 import { useChildToolParts } from '../agent-nesting-context';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
@@ -1300,11 +1300,6 @@ ToolExpandedContent.displayName = 'ToolExpandedContent';
 
 /** R3: failed-ish display group (failed|timeout|aborted|partial) plus rejected. */
 const FAILED_OR_REJECTED_STATUSES = new Set(['failed', 'timeout', 'aborted', 'partial', 'rejected']);
-const FINALIZED_STATUSES = new Set(['executed', 'failed', 'timeout', 'aborted', 'partial', 'rejected']);
-
-const isFinalizedStatus = (status: string | undefined): boolean => {
-  return typeof status === 'string' && FINALIZED_STATUSES.has(status);
-};
 
 const SHOW_TOOL_FILE_ICONS = true; // Seam: upstream read this from useUIStore; no Tide setting exists yet.
 
@@ -1329,7 +1324,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
   const isAgentTool = tool === 'task';
 
   const status = state?.status as string | undefined;
-  const isFinalized = isFinalizedStatus(status);
+  const isFinalized = isFinalizedToolStatus(status);
   const isError = typeof status === 'string' && FAILED_OR_REJECTED_STATUSES.has(status);
 
   const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);

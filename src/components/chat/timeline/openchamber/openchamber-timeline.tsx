@@ -25,12 +25,12 @@ import type { Message } from '@/types';
 import { useChatAutoFollow } from './use-chat-auto-follow';
 import { VirtualizedMessageList, type TimelineRow } from './virtualized-message-list';
 import { useChatTimelineController } from './hooks/use-chat-timeline-controller';
-import { toChatMessageEntry } from './lib/tide-adapter';
+import { buildChatMessageEntries } from './lib/tide-adapter';
 import { TurnItemMemoized } from './components/turn-item';
 import { OpenChamberChatMessage } from './chat-message';
 import { ChatEmptyStateMemoized } from './chat-empty-state';
 import { CompactedDivider } from '../../blocks/compacted-divider';
-import type { ChatMessageEntry, Turn } from './lib/turns/types';
+import type { Turn } from './lib/turns/types';
 import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 import { cn } from '@/lib/utils';
 import './openchamber-chat.css';
@@ -98,42 +98,22 @@ function OpenChamberTimelineImpl({
   }, [messages.length, lastRole, scrollToBottomOnSend]);
 
   // ── Tide → OpenChamber projection (task 8) ─────────────────────────────
+  // All entries (static + in-flight) go through buildChatMessageEntries so
+  // every assistant entry carries parentID — projectTurnRecords drops
+  // parentless assistant messages, which erased finished turns' content.
   // Memoize on the `messages` reference — the array rebuilds on every store
   // commit, so identity IS the change signal.
-  const staticEntries = useMemo(
-    () => messages.map((message) => toChatMessageEntry(message)),
-    [messages],
-  );
-
-  // Streaming-entry conversion mirrors `projectTideTurns` in lib/tide-adapter:
-  // the in-flight entry is appended to the controller input so the projection
-  // folds it into the last turn (or opens the new one), with its completion
-  // stamp + finish stripped while live and `stopReason` overriding finish once
-  // the turn ends. Without the append, buildLiveStreamingEntry would never
-  // find the live message inside the streaming turn.
-  const lastUserId = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === 'user') return messages[index].id;
-    }
-    return undefined;
-  }, [messages]);
-
-  const streamingEntry = useMemo<ChatMessageEntry | undefined>(() => {
-    if (!streamingMessage) return undefined;
-    const entry = toChatMessageEntry(streamingMessage);
-    if (lastUserId) entry.info.parentID = lastUserId;
-    if (isStreaming) {
-      entry.info.time.completed = undefined;
-      entry.info.finish = undefined;
-    }
-    if (stopReason) entry.info.finish = stopReason;
-    return entry;
-  }, [streamingMessage, lastUserId, isStreaming, stopReason]);
-
   const controllerMessages = useMemo(
-    () => (streamingEntry ? [...staticEntries, streamingEntry] : staticEntries),
-    [staticEntries, streamingEntry],
+    () => buildChatMessageEntries(messages, streamingMessage, isStreaming, stopReason ?? streamingMessage?.stopReason ?? null),
+    [messages, streamingMessage, isStreaming, stopReason],
   );
+
+  // The in-flight entry is the last element while a streaming message exists;
+  // identity is shared with controllerMessages for the controller's
+  // activeStreamingMessageId matching.
+  const streamingEntry = streamingMessage
+    ? controllerMessages[controllerMessages.length - 1]
+    : undefined;
 
   const {
     turnRecords,

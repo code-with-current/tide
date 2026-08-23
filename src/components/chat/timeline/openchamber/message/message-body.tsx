@@ -58,7 +58,7 @@ import { ToolRevealOnMount } from './parts/tool-reveal-on-mount';
 import { StaticToolRow } from './parts/progressive-group';
 import { ToolPartMemoized as ToolPart } from './parts/tool-part';
 import { TurnActivityMemoized as TurnActivity } from '../components/turn-activity';
-import { isExpandableTool, isStandaloneTool } from './tool-render-utils';
+import { isActiveToolStatus, isExpandableTool, isFinalizedToolStatus, isStandaloneTool } from './tool-render-utils';
 import { getAgentColor } from '../lib/agent-colors';
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -1014,35 +1014,17 @@ const AssistantMessageBody = React.memo(({
   const hasTools = toolParts.length > 0;
 
   const hasPendingTools = React.useMemo(() => {
-    return toolParts.some((toolPart) => {
-      const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
-      const status = state?.status;
-      return status === 'pending' || status === 'running' || status === 'started';
-    });
+    return toolParts.some((toolPart) => isActiveToolStatus(toolPart.state?.status));
   }, [toolParts]);
 
   const isActiveTool = React.useCallback((toolPart: OcToolPart): boolean => {
-    const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
-    const status = state?.status;
-    return status === 'pending' || status === 'running' || status === 'started';
+    return isActiveToolStatus(toolPart.state?.status);
   }, []);
 
+  // Seam: upstream required state.time.end for finality; Tide parts carry no
+  // per-part timestamps — finality is the Tide status vocabulary.
   const isToolFinalized = React.useCallback((toolPart: OcToolPart) => {
-    const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
-    const status = state?.status;
-    if (status === 'pending' || status === 'running' || status === 'started') {
-      return false;
-    }
-    const time = state?.time as Record<string, unknown> | undefined ?? {};
-    const endTime = typeof time?.end === 'number' ? time.end : undefined;
-    const startTime = typeof time?.start === 'number' ? time.start : undefined;
-    if (typeof endTime !== 'number') {
-      return false;
-    }
-    if (typeof startTime === 'number' && endTime < startTime) {
-      return false;
-    }
-    return true;
+    return isFinalizedToolStatus(toolPart.state?.status);
   }, []);
 
   const shouldShowTool = React.useCallback((toolPart: OcToolPart): boolean => {
