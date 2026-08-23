@@ -14,6 +14,7 @@ import { buildToolset, formatArgPreview, resolveToolName } from './tools/registr
 import { mcpToolsetForWorkspace } from './mcp/toolset.js';
 import { getToolMeta } from './tools/tool-meta.js';
 import { runLoadSkill } from './tools/load-skill.js';
+import { SKILLS_BOOTSTRAP, mergeBuiltinSkills } from './skills/builtin.js';
 import { getSessionTodos, renderTodoPlanLines } from './tools/todo-write.js';
 import { scanProjectEntries } from './project-context.js';
 import { createExtensionsStore } from '../extensionsStore.js';
@@ -338,17 +339,25 @@ export async function runTurn(wc: WebContents, payload: RunTurnPayload) {
 
   const skillResult = await processSkillPipeline(wc, turn, convo, root, priorSkillRef, turnController);
   systemPrompt = injectSkillBodies(systemPrompt, skillResult.skillBodies);
+  if (SKILLS_BOOTSTRAP) {
+    systemPrompt += '\n\n# Builtin Skills\n' + SKILLS_BOOTSTRAP;
+  }
   systemPrompt = injectTodoPlan(systemPrompt, sessionId);
   systemPrompt = injectRagDirective(systemPrompt, workspaceId);
 
   // Skill discovery catalog — rendered into the load_skill tool description
-  // (OpenCode pattern), not the system prompt. Disabled skills are excluded.
+  // (OpenCode pattern), not the system prompt. Disabled skills are excluded;
+  // builtin skills are merged in after the scanned ones.
   let skillIndex: import('./tools/tool-context.js').SkillSummary[] = [];
   try {
-    skillIndex = scanProjectEntries(root).skills
-      .filter((s) => !skillResult.disabledSkills.includes(s.name))
+    const disabled = skillResult.disabledSkills;
+    const scanned = scanProjectEntries(root).skills
+      .filter((s) => !disabled.includes(s.name))
       .map((s) => ({ name: s.name, description: s.description, absPath: s.absPath }));
-  } catch {}
+    skillIndex = mergeBuiltinSkills(scanned, disabled);
+  } catch {
+    try { skillIndex = mergeBuiltinSkills([], skillResult.disabledSkills); } catch {}
+  }
 
   const model = resolveModel(provider, { modelId, contextWindow: 0 } as any);
   const modelSupportsThinking = supportsThinking(modelId, modelEntry);
