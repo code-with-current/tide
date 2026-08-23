@@ -4,6 +4,7 @@
 
 import { memo, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { TOOL_TEXT_COLOR } from '@/lib/tool-colors';
 import {
   FileSearch,
   FilePen,
@@ -91,30 +92,7 @@ const ICON_COLOR: Partial<Record<ToolName, string>> = {
   mcp: 'bg-indigo-300',
 };
 
-const TEXT_COLOR: Partial<Record<ToolName, string>> = {
-  read_file: 'text-sky-400',
-  read_media_file: 'text-sky-400',
-  glob: 'text-sky-400',
-  grep: 'text-sky-400',
-  memory: 'text-muted-foreground',
-  edit_file: 'text-amber-400',
-  multi_edit: 'text-amber-400',
-  write_file: 'text-amber-400',
-  notebook_edit: 'text-amber-400',
-  bash: 'text-green-400',
-  bash_output: 'text-green-400',
-  kill_shell: 'text-green-400',
-  git: 'text-orange-400',
-  dispatch_agent: 'text-purple-400',
-  todo_write: 'text-blue-400',
-  web_fetch: 'text-cyan-400',
-  web_search: 'text-cyan-400',
-  load_skill: 'text-violet-400',
-  ask_followup_question: 'text-warning',
-  exit_plan_mode: 'text-teal-400',
-  compact: 'text-slate-400',
-  mcp: 'text-indigo-400',
-};
+const TEXT_COLOR = TOOL_TEXT_COLOR as Partial<Record<ToolName, string>>;
 
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07/g;
 
