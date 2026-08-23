@@ -34,7 +34,6 @@ import { CompactedDivider } from '../../blocks/compacted-divider';
 import { PanelActionsProvider } from './panel-actions-context';
 import { useUi } from '@/lib/stores/ui';
 import { effectiveTurnExpanded } from './lib/turns/effective-turn-expansion';
-import { TurnSummaryRow } from './components/turn-summary-row';
 import type { Turn, TurnRecord } from './lib/turns/types';
 import type { StreamingTailEntry } from './lib/turns/streaming-tail-entry';
 import { cn } from '@/lib/utils';
@@ -207,16 +206,14 @@ function OpenChamberTimelineImpl({
   // Static turn rows: group state from the controller; NO streaming-only
   // props (isStreamingRow/pendingToolCallIds/onApprove/onReject/
   // onAnswerFollowup are tail-row-only per the task-8 brief).
-  // Compact mode: a collapsed turn renders ONLY its summary row (the row
-  // shrinks; the virtualizer re-measures normally). Auto-collapse on finish
-  // is not explicit code — when the tail finishes, streamingTailEntry → null
-  // and this renderer takes over with no manual expansion yet, i.e. collapsed.
+  // Compact mode reuses the SAME single render path — it only feeds the
+  // effective expansion into the existing activity group (ProgressiveGroup),
+  // which is the collapsible container around the tool blocks. User message
+  // and result text are ordinary parts and stay visible in both states.
   const renderStaticTurnContent = useCallback(
     (turn: TurnRecord) => {
-      const isGroupExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? false;
-      const onToggleGroup = () => toggleTurnGroup(turn.turnId);
-      const expanded = effectiveTurnExpanded(chatView, turnUiStates.get(turn.turnId));
-      const content = (
+      const isGroupExpanded = effectiveTurnExpanded(chatView, turnUiStates.get(turn.turnId));
+      return (
         <TurnItemMemoized
           turn={turn}
           renderMessage={(entry) => (
@@ -224,24 +221,11 @@ function OpenChamberTimelineImpl({
               entry={entry}
               turn={turn}
               isGroupExpanded={isGroupExpanded}
-              onToggleGroup={onToggleGroup}
+              onToggleGroup={() => toggleTurnGroup(turn.turnId)}
               directory={directory}
             />
           )}
         />
-      );
-      if (chatView === 'stream') return content;
-      return (
-        <>
-          <TurnSummaryRow
-            turn={turn}
-            diffStats={turn.diffStats}
-            changedFiles={turn.changedFiles}
-            expanded={expanded}
-            onToggle={onToggleGroup}
-          />
-          {expanded ? content : null}
-        </>
       );
     },
     [chatView, turnUiStates, toggleTurnGroup, directory],
