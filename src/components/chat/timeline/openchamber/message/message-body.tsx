@@ -51,6 +51,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../markdown/markdown-renderer';
 import { TextSelectionMenu } from './text-selection-menu';
 import { Icon, FileTypeIcon } from '../icon';
+import { GitFork } from 'lucide-react';
+import { initiateFork } from '@/lib/queries';
 import { TurnChangedFilesDropdown } from '../turn-changed-files-dropdown';
 import { formatTimestampForDisplay } from './time-format';
 import type { TimeFormatPreference } from '../lib/time-format';
@@ -266,7 +268,7 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
   return (
     <div className="mt-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="typography-meta font-semibold text-foreground">Shell command</span>
+        <span className="typography-meta font-semibold text-foreground">Shell</span>
         {status ? (
           <span className={cn(
             'inline-flex h-5 items-center rounded px-1.5 text-[11px] leading-none',
@@ -716,13 +718,15 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
 interface AssistantMessageActionButtonsProps {
   hasCopyableText: boolean;
   isTouchContext: boolean;
+  sessionId?: string;
   onCopyMessage?: () => void | boolean | Promise<void | boolean>;
 }
 
-/** Seam: upstream also offered TTS / review-transfer / save-as-image buttons; all three are dropped (see header). */
+/** Seam: upstream also offered TTS / review-transfer / save-as-image buttons; TTS and save-as-image are dropped (see header). */
 const AssistantMessageActionButtons = React.memo(({
   hasCopyableText,
   isTouchContext,
+  sessionId,
   onCopyMessage,
 }: AssistantMessageActionButtonsProps) => {
   const [copyHintVisible, setCopyHintVisible] = React.useState(false);
@@ -843,7 +847,28 @@ const AssistantMessageActionButtons = React.memo(({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={6}>Copy answer</TooltipContent>
+          <TooltipContent sideOffset={6}>Copy</TooltipContent>
+        </Tooltip>
+      )}
+      {sessionId && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label="Fork from here"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                void initiateFork(sessionId, undefined, 'result');
+              }}
+            >
+              <GitFork className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>Fork from here</TooltipContent>
         </Tooltip>
       )}
     </>
@@ -1186,9 +1211,10 @@ const AssistantMessageBody = React.memo(({
     <AssistantMessageActionButtons
       hasCopyableText={hasCopyableText}
       isTouchContext={isTouchContext}
+      sessionId={sessionId}
       onCopyMessage={onCopyMessage}
     />
-  ), [hasCopyableText, isTouchContext, onCopyMessage]);
+  ), [hasCopyableText, isTouchContext, sessionId, onCopyMessage]);
 
   const lastRenderableTextPartIndex = React.useMemo(() => {
     if (!shouldShowStandaloneMessageActions) {
