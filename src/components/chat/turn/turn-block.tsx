@@ -28,7 +28,7 @@ export const TurnBlock = memo(function TurnBlock({
    *  a switch — followup popups and stream reads must key to the owner or they
    *  land on the wrong session. Falls back to activeSessionId. */
   sessionId?: string | null;
-  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean | 'session') => void;
+  onApproveToolCalls?: (ids: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   onRejectToolCalls?: (ids: string[], reason?: string) => void;
 }) {
   const activeSessionId = useUi(s => s.activeSessionId);
@@ -123,7 +123,9 @@ export const TurnBlock = memo(function TurnBlock({
           compacting={compacting}
         />
         {streaming && !compacting && (
-          <TurnWorkingFooter startedAt={message.createdAt} />
+          <div className='mt-2'>
+            <TurnWorkingFooter startedAt={message.createdAt} />
+          </div>
         )}
       </div>
     </PermissionSurfaceContext.Provider>

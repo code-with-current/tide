@@ -176,21 +176,6 @@ export function clearSessionRules(sessionId: string): void {
 
 // ─── Unified rule writer (replaces addSessionRule + addProjectRule) ────
 
-/** Session-scoped "always allow" — derived smart glob, in-memory only (dies
- *  with the app run). The "Accept this session" card action. Returns the
- *  rule spec for logging. */
-export function addSessionPermissionRule(
-  sessionId: string,
-  toolName: string,
-  args: Record<string, unknown>,
-): string | null {
-  const spec = deriveRuleSpec(toolName, args);
-  const rule = parseRule(spec);
-  if (!rule) return null;
-  addSessionRule(sessionId, 'allow', rule);
-  return spec;
-}
-
 /** Add an "always allow" rule to `.agents/settings.json` and the in-memory session rules (immediate effect) via deriveRuleSpec's smart globs. */
 export function addPermissionRule(
   sessionId: string,

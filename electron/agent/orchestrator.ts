@@ -25,7 +25,7 @@ import { supportsThinking, supportsVision, contextWindowSize, resolveMaxOutputTo
 import { mediaMimeFor } from './tools/read-media-file.js';
 import type { ToolResult } from './tools/types.js';
 import { resolvePermission, abortPermission, clearSession, getPendingAsk, pendingAskIds } from './permission-resolver.js';
-import { loadPermissionRules, addPermissionRule, addSessionPermissionRule } from './permissions/rules.js';
+import { loadPermissionRules, addPermissionRule } from './permissions/rules.js';
 import { resolveFollowup, abortFollowup, clearFollowupSession } from './followup-resolver.js';
 import { resolveProtocolOptions, resolveReasoning } from './protocols/index.js';
 import type { ReasoningInstruction } from './protocols/index.js';
@@ -190,17 +190,10 @@ export function registerAgentSdkHandlers(ipcMain: Electron.IpcMain, opts?: { sin
   });
 
   ipcMain.handle(AGENT_COMMANDS.approve,
-    (_e, sessionId: string, toolCallIds: string[], newMode?: AutonomyMode, remember?: boolean | 'session') => {
+    (_e, sessionId: string, toolCallIds: string[], newMode?: AutonomyMode, remember?: boolean) => {
       if (remember && toolCallIds[0]) {
         const ask = getPendingAsk(sessionId, toolCallIds[0]);
-        if (ask) {
-          if (remember === 'session') {
-            // In-memory rule for the rest of this app run — no file write.
-            addSessionPermissionRule(sessionId, ask.toolName, ask.args);
-          } else {
-            addPermissionRule(sessionId, ask.workspaceRoot, ask.toolName, ask.args);
-          }
-        }
+        if (ask) addPermissionRule(sessionId, ask.workspaceRoot, ask.toolName, ask.args);
       }
       if (newMode) {
         try { sessions.updateSessionSettings(sessionId, { autonomyMode: newMode }); } catch {}

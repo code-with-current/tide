@@ -446,7 +446,7 @@ declare global {
         payload: import('../lib/agent/events').RunTurnPayload,
       ): Promise<void>;
       abortTurn(sessionId: string): Promise<void>;
-      approveToolCalls(sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean | 'session'): Promise<void>;
+      approveToolCalls(sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean): Promise<void>;
       rejectToolCalls(
         sessionId: string,
         toolCallIds: string[],

@@ -13,7 +13,7 @@ function ipcApprove(
   sessionId: string,
   ids: string[],
   newMode?: AutonomyMode,
-  remember?: boolean | 'session',
+  remember?: boolean,
 ) {
   if (!sessionId || !window.tideIpc) return;
   window.tideIpc.approveToolCalls(sessionId, ids, newMode, remember);

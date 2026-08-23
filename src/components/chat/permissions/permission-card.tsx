@@ -28,9 +28,8 @@ export function PermissionCard({
   /** Epoch ms when the orchestrator will auto-reject. Optional. */
   timeoutAt?: number;
   /** Approve, optionally escalating the autonomy mode for the turn and/or
-   *  adding an "always allow" rule ('session' = in-memory for this app run,
-   *  true = persisted to .agent/settings.json). */
-  onApprove?: (newMode?: AutonomyMode, remember?: boolean | 'session') => void;
+   *  persisting a matching allow rule to .agents/settings.json. */
+  onApprove?: (newMode?: AutonomyMode, remember?: boolean) => void;
   onReject?: (reason?: string) => void;
 }) {
   const blocked = call.gateDecision === 'blocked';
@@ -186,9 +185,9 @@ export function PermissionCard({
                 ...(allowDisplay
                   ? [{
                       label: `Allow (${allowDisplay})`,
-                      hint: 'Auto-allow matching calls this session',
+                      hint: 'Save rule to .agents/settings.json',
                       icon: <FileClock />,
-                      onSelect: () => onApprove?.(undefined, 'session'),
+                      onSelect: () => onApprove?.(undefined, true),
                     }]
                   : []),
                 {

@@ -552,7 +552,7 @@ export const ToolRow = memo(function ToolRow({
   const approveOne = permSurface?.onApprove;
   const rejectOne = permSurface?.onReject;
   const handleApprove = approveOne
-    ? (newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean | 'session') =>
+    ? (newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) =>
         approveOne(call.id, newMode, remember)
     : undefined;
   const handleReject = rejectOne ? (reason?: string) => rejectOne(call.id, reason) : undefined;

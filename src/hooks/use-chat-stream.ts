@@ -24,7 +24,7 @@ function removePendingPermissionCards(sessionId: string, ids: string[]): void {
 export function useChatStream(): {
   start: (args: ChatStreamStartArgs) => Promise<void>;
   abort: (sessionId: string) => void;
-  approveToolCalls: (sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean | 'session') => void;
+  approveToolCalls: (sessionId: string, toolCallIds: string[], newMode?: 'plan' | 'ask' | 'edit' | 'full', remember?: boolean) => void;
   rejectToolCalls: (sessionId: string, toolCallIds: string[], reason?: string) => void;
   submitFollowup: (sessionId: string, toolCallId: string, answer: string) => Promise<boolean>;
 } {
@@ -81,7 +81,7 @@ export function useChatStream(): {
       sessionId: string,
       toolCallIds: string[],
       newMode?: 'plan' | 'ask' | 'edit' | 'full',
-      remember?: boolean | 'session',
+      remember?: boolean,
     ) => {
       if (!ipc) return;
       ipc.approveToolCalls(sessionId, toolCallIds, newMode, remember);
