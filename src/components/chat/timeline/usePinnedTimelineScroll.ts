@@ -51,6 +51,10 @@ export function usePinnedTimelineScroll(
   messageCount: number,
   lastRole?: 'user' | 'assistant',
   sessionKey?: string | null,
+  /** Turn is paused at a permission gate — content is frozen. The follow
+   *  chase must not re-target on re-renders (card countdown ticks, inline
+   *  card mounts) or the viewport visibly fights the user. */
+  paused = false,
 ) {
   const [atBottom, setAtBottom] = useState(true);
   const [unread, setUnread] = useState(false);
@@ -339,6 +343,12 @@ export function usePinnedTimelineScroll(
       stopAnim();
       return;
     }
+    // Permission-gated pause: content is frozen and the permission UI is
+    // up. Bail BEFORE the chase — re-renders during the pause (card mount,
+    // countdown ticks) would otherwise re-target the bottom every commit
+    // and visibly fight the user. Bookkeeping above still ran, so nothing
+    // is misread as growth when the turn resumes.
+    if (paused) return;
     if (settling.current) return;
     // The chase lags the tail by design, so an in-flight animation keeps
     // the follow alive even when the lag pushes atBottom outside its band.
@@ -362,7 +372,10 @@ export function usePinnedTimelineScroll(
         stopAnim();
         el.scrollTop = target;
         pinFresh.current = false;
-      } else {
+      } else if (Math.abs(target - el.scrollTop) > 1) {
+        // Convergence guard: re-targeting while already at the bottom is a
+        // no-op scroll write, but repeated commits make even no-op writes
+        // visible as jitter on some drivers. Skip when we're already there.
         animateTo(target);
       }
     }

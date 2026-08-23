@@ -60,7 +60,9 @@ function ChatTimelineImpl({
   const listActive = !isEmpty && !(sessionLoading && messages.length === 0);
   const totalCount = messages.length + (streamingMessage ? 1 : 0);
   const lastRole = (streamingMessage ?? messages[messages.length - 1])?.role;
-  const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole, sessionId);
+  // Turn frozen at a permission gate → freeze the follow too (see hook).
+  const permissionPaused = (pendingToolCallIds?.length ?? 0) > 0;
+  const { unread, pinned, scrollToBottom } = usePinnedTimelineScroll(scrollRef, isStreaming, totalCount, lastRole, sessionId, permissionPaused);
 
   const virtualizer = useVirtualizer({
     count: listActive ? totalCount : 0,
