@@ -6,10 +6,10 @@
  *  turn footer (model/variant/agent/duration/timestamp).
  *
  *  Adaptations (each per brief ruling or the judgment rubric):
- *  - Placeholder seams (ruling 2/3): `TurnChangedFilesDropdown` (Task 5) and
- *    `TurnActivity` (Task 6) are local no-render placeholders at the bottom of
- *    this file; `ToolPart` arrived in Task 4 (`./parts/tool-part`, memoized
- *    export).
+ *  - Placeholder seam (ruling 2/3): `TurnActivity` (Task 6) is a local no-render
+ *    placeholder at the bottom of this file; `ToolPart` arrived in Task 4
+ *    (`./parts/tool-part`, memoized export) and `TurnChangedFilesDropdown` in Task 5
+ *    (`../turn-changed-files-dropdown`).
  *  - Permanently dropped branches (ruling 2): MessageFilesDisplay/FileAttachment,
  *    SaveProjectPlanDialog, ForkSessionDialog, useMessageTTS, useProviderLogo
  *    (footer always renders the Icon fallback), useChatSurfaceMode (surface is
@@ -51,6 +51,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../markdown/markdown-renderer';
 import { TextSelectionMenu } from './text-selection-menu';
 import { Icon, FileTypeIcon } from '../icon';
+import { TurnChangedFilesDropdown } from '../turn-changed-files-dropdown';
 import { formatTimestampForDisplay } from './time-format';
 import type { TimeFormatPreference } from '../lib/time-format';
 import { ToolRevealOnMount } from './parts/tool-reveal-on-mount';
@@ -1635,7 +1636,6 @@ const AssistantMessageBody = React.memo(({
                 </Tooltip>
               ) : null}
               {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                /* Task 5 placeholder — see file header. */
                 <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
               ) : null}
               {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
@@ -1723,11 +1723,6 @@ export const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) =
 // nothing; the importing sites above keep upstream's prop contracts so the
 // swap-in is a single import change.
 // ---------------------------------------------------------------------------
-
-/** PLACEHOLDER — Task 5 replaces with the ported TurnChangedFilesDropdown. Renders nothing. */
-const TurnChangedFilesDropdown: React.FC<{
-  activityParts?: TurnActivityRecord[];
-}> = () => null;
 
 /** PLACEHOLDER — Task 6 replaces with the ported TurnActivity. Renders nothing. */
 const TurnActivity: React.FC<{

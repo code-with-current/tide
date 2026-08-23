@@ -65,6 +65,11 @@ import {
   RefreshCw,
   ScanSearch,
   WrapText,
+  CircleHelp,
+  CircleX,
+  CircleDot,
+  CircleCheckBig,
+  ChevronsUp,
   type LucideProps,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -126,7 +131,14 @@ export type IconName =
   // ToolPart (Task 4) additions — nearest lucide equivalents for upstream Remixicons:
   | 'list-unordered'
   | 'node-tree'
-  | 'code-box';
+  | 'code-box'
+  // Cards/status rows (Task 5) additions:
+  | 'question'
+  | 'edit'
+  | 'close-circle'
+  | 'record-circle'
+  | 'checkbox-circle'
+  | 'arrow-up-double';
 
 const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'file-copy': Copy,
@@ -187,6 +199,13 @@ const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'list-unordered': List,
   'node-tree': ListTree,
   'code-box': SquareCode,
+  // Cards/status rows (Task 5) additions:
+  question: CircleHelp,
+  edit: Pencil,
+  'close-circle': CircleX,
+  'record-circle': CircleDot,
+  'checkbox-circle': CircleCheckBig,
+  'arrow-up-double': ChevronsUp,
 };
 
 export interface IconProps extends Omit<LucideProps, 'name'> {
