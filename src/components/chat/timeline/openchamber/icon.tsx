@@ -17,7 +17,9 @@ import {
   Brain,
   Check,
   Circle,
+  SquareCode,
   ClipboardList,
+  ListTree,
   Clock,
   Columns2,
   Copy,
@@ -120,7 +122,11 @@ export type IconName =
   | 'loader-4'
   | 'arrow-up-s'
   | 'arrow-down-s'
-  | 'stack';
+  | 'stack'
+  // ToolPart (Task 4) additions — nearest lucide equivalents for upstream Remixicons:
+  | 'list-unordered'
+  | 'node-tree'
+  | 'code-box';
 
 const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'file-copy': Copy,
@@ -177,6 +183,10 @@ const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'arrow-up-s': ChevronUp,
   'arrow-down-s': ChevronDown,
   stack: Layers,
+  // ToolPart (Task 4) additions:
+  'list-unordered': List,
+  'node-tree': ListTree,
+  'code-box': SquareCode,
 };
 
 export interface IconProps extends Omit<LucideProps, 'name'> {

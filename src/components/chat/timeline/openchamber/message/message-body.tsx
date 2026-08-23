@@ -6,9 +6,10 @@
  *  turn footer (model/variant/agent/duration/timestamp).
  *
  *  Adaptations (each per brief ruling or the judgment rubric):
- *  - Placeholder seams (ruling 2/3): `ToolPart` (Task 4), `TurnChangedFilesDropdown`
- *    (Task 5), `TurnActivity` (Task 6) are local no-render placeholders at the
- *    bottom of this file.
+ *  - Placeholder seams (ruling 2/3): `TurnChangedFilesDropdown` (Task 5) and
+ *    `TurnActivity` (Task 6) are local no-render placeholders at the bottom of
+ *    this file; `ToolPart` arrived in Task 4 (`./parts/tool-part`, memoized
+ *    export).
  *  - Permanently dropped branches (ruling 2): MessageFilesDisplay/FileAttachment,
  *    SaveProjectPlanDialog, ForkSessionDialog, useMessageTTS, useProviderLogo
  *    (footer always renders the Icon fallback), useChatSurfaceMode (surface is
@@ -54,6 +55,7 @@ import { formatTimestampForDisplay } from './time-format';
 import type { TimeFormatPreference } from '../lib/time-format';
 import { ToolRevealOnMount } from './parts/tool-reveal-on-mount';
 import { StaticToolRow } from './parts/progressive-group';
+import { ToolPartMemoized as ToolPart } from './parts/tool-part';
 import { isExpandableTool, isStandaloneTool } from './tool-render-utils';
 import { getAgentColor } from '../lib/agent-colors';
 
@@ -1411,7 +1413,6 @@ const AssistantMessageBody = React.memo(({
           rendered.push(
             <FadeInOnReveal key={`tool-${toolPart.id ?? toolPartId}`}>
               <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id ?? toolPartId)} wipe>
-                {/* Task 4 placeholder — see file header. */}
                 <ToolPart
                   part={toolPart}
                   isExpanded={expandedTools.has(toolPart.id ?? toolPartId)}
@@ -1722,18 +1723,6 @@ export const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) =
 // nothing; the importing sites above keep upstream's prop contracts so the
 // swap-in is a single import change.
 // ---------------------------------------------------------------------------
-
-/** PLACEHOLDER — Task 4 replaces with ../parts/tool-part (upstream ToolPart.tsx). Renders nothing. */
-const ToolPart: React.FC<{
-  part: OcToolPart;
-  isExpanded: boolean;
-  onToggle: (toolId: string) => void;
-  isMobile: boolean;
-  alwaysShowActions: boolean;
-  onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-  onShowPopup: (content: ToolPopupContent) => void;
-  animateTailText: boolean;
-}> = () => null;
 
 /** PLACEHOLDER — Task 5 replaces with the ported TurnChangedFilesDropdown. Renders nothing. */
 const TurnChangedFilesDropdown: React.FC<{

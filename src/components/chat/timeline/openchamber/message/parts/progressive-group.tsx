@@ -1,7 +1,7 @@
 /** Ported from openchamber/openchamber (MIT): packages/ui/src/components/chat/message/parts/ProgressiveGroup.tsx.
  *  Adaptations:
- *  - Ruling 3: `ToolPart` is a local no-render placeholder (Task 4 swaps the
- *    import); expandable/fallback tool rows therefore render nothing until then.
+ *  - Ruling 3: `ToolPart` comes from `./tool-part` (Task 4's port, memoized
+ *    export).
  *  - Ruling 5: upstream's `Text` app component (`variant="generate-effect"`)
  *    becomes a plain `<span>` with the same classes; `stack` icon via the shim.
  *  - Store seams (ruling 6): `useDirectoryStore`/`useDirectoryStore.currentDirectory`
@@ -25,6 +25,7 @@ import type { ContentChangeReason } from '../types';
 import type { ToolPopupContent } from '../types';
 import { MinDurationShineText } from './min-duration-shine-text';
 import { ToolRevealOnMount } from './tool-reveal-on-mount';
+import { ToolPartMemoized as ToolPart } from './tool-part';
 import { FileTypeIcon } from '../../icon';
 import { Icon } from '../../icon';
 import { FadeInOnReveal } from '../fade-in-on-reveal';
@@ -395,7 +396,6 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
   animateTailText,
   animateRows,
 }) => {
-  void isExpanded; // Ruling-3 placeholder: ToolPart renders nothing until Task 4.
   const handleToggle = React.useCallback(() => {
     onToggleTool(activity.id);
   }, [activity.id, onToggleTool]);
@@ -1020,17 +1020,3 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
 export default React.memo(ProgressiveGroup);
 export { ProgressiveGroup };
 
-// ---------------------------------------------------------------------------
-// Ruling-3 placeholder seam: Task 4 replaces this with the real ToolPart
-// (../parts/tool-part). Renders nothing; the surrounding row machinery
-// (reveal animation, memo comparators, toggling) keeps upstream's contracts.
-// ---------------------------------------------------------------------------
-const ToolPart: React.FC<{
-  part: OcToolPart;
-  isExpanded: boolean;
-  onToggle: (toolId: string) => void;
-  isMobile: boolean;
-  onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-  onShowPopup: (content: ToolPopupContent) => void;
-  animateTailText: boolean;
-}> = () => null;

@@ -4,10 +4,11 @@
  *    `getDefaultTheme` registry is replaced by Task 2's registered CSS-variable
  *    theme (`openchamber-md`, via `ensureMarkdownShikiTheme`) + a next-themes
  *    `resolveDark` for `themeType` — same pattern as markdown-renderer-impl.
- *  - `toolRenderers` (Task 4, out of scope): local fallbacks at the top of this
- *    file stand in — the specialized todo/list/grep/glob/web-search renderers
- *    return null (generic fallback renders) and `parseReadToolOutput` falls
- *    back to plain line splitting. Task 4 replaces these with real imports.
+ *  - Task 4: the specialized todo/list/grep/glob/web-search renderers,
+ *    `parseReadToolOutput` and `formatInputForDisplay` are imported from
+ *    `./tool-renderers`; the tool key is passed through
+ *    `resolveRendererToolName` so Tide tool names resolve onto the upstream
+ *    renderer keys the dialog branches on.
  *  - `JsonTreeView` (ruling 5): OpenChamber app component, not ported — a
  *    minimal recursive disclosure tree is defined locally and exported.
  *  - Mermaid `file://` loading via `runtimeFetch` dropped (runtime-API path);
@@ -29,7 +30,17 @@ import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../markdown/markdown-renderer';
 import { toolDisplayStyles } from '../lib/typography';
-import { getLanguageFromExtension, formatToolInput } from '../lib/tool-helpers';
+import { getLanguageFromExtension } from '../lib/tool-helpers';
+import {
+  formatInputForDisplay,
+  parseReadToolOutput,
+  renderGlobOutput,
+  renderGrepOutput,
+  renderListOutput,
+  renderTodoOutput,
+  renderWebSearchOutput,
+  resolveRendererToolName,
+} from './tool-renderers';
 import { ensureMarkdownShikiTheme, } from '../markdown/markdown-theme';
 import { MARKDOWN_SHIKI_THEME } from '../markdown/markdown-shiki-theme-definition';
 import type { ToolPopupContent, DiffViewMode } from './types';
@@ -51,23 +62,6 @@ interface ToolOutputDialogProps {
 }
 
 const mermaidLoadFailure = (message: string): MermaidLoadFailure => new MermaidLoadFailure(message);
-
-// ---------------------------------------------------------------------------
-// Task-4 placeholder seams (see header). Specialized renderers return null so
-// the generic highlighted-code fallback renders.
-// ---------------------------------------------------------------------------
-
-const renderTodoOutput = (): React.ReactNode => null;
-const renderListOutput = (): React.ReactNode => null;
-const renderGrepOutput = (): React.ReactNode => null;
-const renderGlobOutput = (): React.ReactNode => null;
-const renderWebSearchOutput = (): React.ReactNode => null;
-
-/** Fallback until Task 4's `parseReadToolOutput`: treat content as plain lines. */
-const parseReadToolOutput = (content: string): { type: 'text' | 'file'; lines: Array<{ text: string; lineNumber: number | null; isInfo: boolean }> } => ({
-  type: 'text',
-  lines: content.split('\n').map((text) => ({ text, lineNumber: null, isInfo: false })),
-});
 
 const tryParseJsonOutput = (content: string): { data: unknown; isJson: boolean } => {
   try {
@@ -1167,9 +1161,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                         className="tool-input-surface bg-transparent rounded-xl border border-border/20 font-mono whitespace-pre-wrap text-foreground/90 mx-3"
                         style={toolDisplayStyles.getPopupStyles()}
                       >
-                        {/* Seam: upstream `formatInputForDisplay` arrives with Task 4's
-                            tool-renderers; Tide's tool-helpers has the equivalent pure helper. */}
-                        {formatToolInput(input, (meta.tool as string) ?? '')}
+                        {formatInputForDisplay(input, resolveRendererToolName(meta.tool as string))}
                       </div>
                     )}
                   </div>
@@ -1185,11 +1177,19 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
             ) : popup.content ? (
               <div className="p-4">
                 {(() => {
-                  const tool = popup.metadata?.tool;
+                  const tool = resolveRendererToolName(
+                    typeof popup.metadata?.tool === 'string' ? popup.metadata.tool : undefined,
+                  );
 
                   if (tool === 'todowrite' || tool === 'todoread') {
                     return (
-                      renderTodoOutput() || (
+                      renderTodoOutput(popup.content, {
+                        total: 'Total',
+                        inProgress: 'In progress',
+                        pending: 'Pending',
+                        completed: 'Completed',
+                        cancelled: 'Cancelled',
+                      }) || (
                         <WorkerHighlightedCode
                           language="json"
                           code={popup.content}
@@ -1203,7 +1203,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                   if (tool === 'list') {
                     return (
-                      renderListOutput() || (
+                      renderListOutput(popup.content) || (
                         <pre className="typography-markdown bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
                           {popup.content}
                         </pre>
@@ -1213,7 +1213,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                   if (tool === 'grep') {
                     return (
-                      renderGrepOutput() || (
+                      renderGrepOutput(popup.content) || (
                         <pre className="typography-code bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
                           {popup.content}
                         </pre>
@@ -1223,7 +1223,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                   if (tool === 'glob') {
                     return (
-                      renderGlobOutput() || (
+                      renderGlobOutput(popup.content) || (
                         <pre className="typography-code bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
                           {popup.content}
                         </pre>
@@ -1241,7 +1241,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                   if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web') {
                     return (
-                      renderWebSearchOutput() || (
+                      renderWebSearchOutput(popup.content) || (
                         <WorkerHighlightedCode
                           language="text"
                           code={popup.content}
