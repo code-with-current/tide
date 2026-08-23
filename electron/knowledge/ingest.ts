@@ -27,9 +27,21 @@ export async function ingestDocuments(
   }
   const onProgress = opts.onProgress;
 
+  // Chunk ids are derived from origin, so two docs sharing one origin would
+  // collide and silently overwrite. Keep the LAST occurrence — a re-fetch
+  // list carries the freshest version of each page.
+  const byOrigin = new Map(docs.map((d) => [d.origin, d]));
+
+  const pinned = rag.getMeta('embedderId');
+  if (pinned && pinned !== embedder.id) {
+    throw new Error(
+      `knowledge index built with different embedder ${pinned}; remove sources or switch back (requested ${embedder.id})`,
+    );
+  }
+
   const prepared: PreparedChunk[] = [];
-  for (const doc of docs) {
-    onProgress?.({ sourceId, phase: 'chunking', current: doc.origin });
+  for (const doc of byOrigin.values()) {
+    await onProgress?.({ sourceId, phase: 'chunking', current: doc.origin });
     rag.deleteChunks(
       rag.byPath(doc.origin).filter((c) => c.sourceId === sourceId).map((c) => c.id),
     );
@@ -47,20 +59,24 @@ export async function ingestDocuments(
     });
   }
 
-  // Record before embedding so a crash mid-pass still leaves the id query-time resolution needs to refuse cross-embedder searches.
-  rag.setMeta('embedderId', embedder.id);
-
-  await embedAndStore(rag, embedder, prepared, {
-    onProgress: (e) =>
-      onProgress?.({
+  const { embedded } = await embedAndStore(rag, embedder, prepared, {
+    onProgress: async (e) => {
+      await onProgress?.({
         sourceId,
         phase: 'embedding',
         chunksTotal: e.chunksTotal,
         chunksEmbedded: e.chunksEmbedded,
-      }),
+      });
+    },
   });
 
-  onProgress?.({ sourceId, phase: 'done', chunksTotal: prepared.length, chunksEmbedded: prepared.length });
+  // First-embedder-wins: pin only after a pass actually wrote vectors, so a
+  // failed/empty first pass doesn't lock the shared index to this model.
+  if (embedded > 0) {
+    rag.setMeta('embedderId', embedder.id);
+  }
+
+  await onProgress?.({ sourceId, phase: 'done', chunksTotal: prepared.length, chunksEmbedded: embedded });
   return { chunks: prepared.length };
 }
 
@@ -85,10 +101,15 @@ function splitProse(content: string): string[] {
     if (p.length > MAX_CHUNK_CHARS) {
       flush();
       let start = 0;
+      let lastEnd = 0;
       while (start < p.length) {
-        out.push(p.slice(start, start + MAX_CHUNK_CHARS));
+        const end = Math.min(start + MAX_CHUNK_CHARS, p.length);
+        out.push(p.slice(start, end));
+        lastEnd = end;
+        if (end === p.length) break;
         start += MAX_CHUNK_CHARS - OVERLAP_CHARS;
       }
+      buf = p.slice(Math.max(0, lastEnd - OVERLAP_CHARS), lastEnd);
       continue;
     }
     if (!buf) {
@@ -96,8 +117,10 @@ function splitProse(content: string): string[] {
     } else if (buf.length + p.length + 2 <= MAX_CHUNK_CHARS) {
       buf += `\n\n${p}`;
     } else {
-      const overlap = buf.length > OVERLAP_CHARS ? buf.slice(-OVERLAP_CHARS) : '';
       flush();
+      // Trim the carried overlap so buf stays within budget.
+      const room = MAX_CHUNK_CHARS - p.length - 2;
+      const overlap = room > 0 ? buf.slice(-Math.min(OVERLAP_CHARS, room)) : '';
       buf = overlap ? `${overlap}\n\n${p}` : p;
     }
   }

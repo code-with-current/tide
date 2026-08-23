@@ -8,9 +8,9 @@ import { ingestDocuments } from '../../../electron/knowledge/ingest.js';
 import type { SourceDocument, SourceProgressEvent } from '../../../electron/knowledge/types.js';
 import type { Embedder } from '../../../electron/rag/embedder.js';
 
-function hashEmbedder(): Embedder {
+function hashEmbedder(id: Embedder['id'] = 'local-code-512'): Embedder {
   return {
-    id: 'local-code-512',
+    id,
     dim: 384,
     maxTokens: 512,
     async embed(texts) {
@@ -116,6 +116,75 @@ describe('ingestDocuments', () => {
       expect(row.content).not.toContain('zebra');
     }
     expect(ks.getSource(src.id)?.chunkCount).toBe(0);
+
+    rag.close();
+    ks.close();
+  });
+
+  it('dedupes duplicate origins keeping the last version with accurate counts', async () => {
+    const dbPath = path.join(tmp, 'knowledge', 'index.db');
+    const ks = openKnowledgeStore(dbPath);
+    const rag = openRagStoreAt(dbPath);
+    const src = ks.addSource({ name: 'Dup', kind: 'url', location: 'https://example.com' });
+    const embedder = hashEmbedder();
+
+    const res = await ingestDocuments(ks, rag, embedder, src.id, [
+      { title: 'A', origin: 'example.com/dup', content: 'stale donkey token here. '.repeat(40) },
+      { title: 'A', origin: 'example.com/dup', content: 'fresh falcon token here. '.repeat(40) },
+      { title: 'B', origin: 'example.com/other', content: 'unrelated heron text. '.repeat(40) },
+    ]);
+
+    expect(rag.chunkCount()).toBe(res.chunks);
+    expect(rag.queryByFts('donkey', 5)).toHaveLength(0);
+    expect(rag.queryByFts('falcon', 5).length).toBeGreaterThan(0);
+    for (const row of rag.byPath('example.com/dup')) {
+      expect(row.content).toContain('falcon');
+      expect(row.content).not.toContain('donkey');
+    }
+
+    rag.close();
+    ks.close();
+  });
+
+  it('refuses a different embedder and leaves existing data untouched', async () => {
+    const dbPath = path.join(tmp, 'knowledge', 'index.db');
+    const ks = openKnowledgeStore(dbPath);
+    const rag = openRagStoreAt(dbPath);
+    const src = ks.addSource({ name: 'Pinned', kind: 'url', location: 'https://example.com/pin' });
+
+    await ingestDocuments(ks, rag, hashEmbedder(), src.id, [
+      { title: 'P', origin: 'example.com/pin', content: 'anchored manatee content. '.repeat(40) },
+    ]);
+    const before = rag.chunkCount();
+    expect(before).toBeGreaterThan(0);
+
+    await expect(
+      ingestDocuments(ks, rag, hashEmbedder('cloud-base'), src.id, [
+        { title: 'Q', origin: 'example.com/q', content: 'would-be gopher text. '.repeat(40) },
+      ]),
+    ).rejects.toThrow(/different embedder/);
+
+    expect(rag.chunkCount()).toBe(before);
+    expect(rag.queryByFts('gopher', 5)).toHaveLength(0);
+    expect(rag.getMeta('embedderId')).toBe('local-code-512');
+
+    rag.close();
+    ks.close();
+  });
+
+  it('does not pin the embedder on a zero-chunk pass', async () => {
+    const dbPath = path.join(tmp, 'knowledge', 'index.db');
+    const ks = openKnowledgeStore(dbPath);
+    const rag = openRagStoreAt(dbPath);
+    const src = ks.addSource({ name: 'Empty', kind: 'docs', location: '/tmp/empty' });
+
+    const res = await ingestDocuments(ks, rag, hashEmbedder(), src.id, [
+      { title: 'Blank', origin: 'example.com/blank', content: '   \n\n  ' },
+    ]);
+
+    expect(res.chunks).toBe(0);
+    expect(rag.chunkCount()).toBe(0);
+    expect(rag.getMeta('embedderId')).toBeUndefined();
 
     rag.close();
     ks.close();
