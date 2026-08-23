@@ -51,7 +51,13 @@ export class KnowledgeStore {
     return this.rag.rawDb;
   }
 
-  addSource(input: { name: string; kind: SourceKind; location: string }): KnowledgeSource {
+  addSource(input: {
+    name: string;
+    kind: SourceKind;
+    location: string;
+    /** Omit or empty for the default ['*'] (all workspaces). */
+    enabledWorkspaceIds?: string[];
+  }): KnowledgeSource {
     const id = randomUUID();
     this.db
       .prepare(
@@ -59,6 +65,9 @@ export class KnowledgeStore {
          VALUES (?, ?, ?, ?, ?, 'idle', '["*"]')`,
       )
       .run(id, input.name, input.kind, input.location, Date.now());
+    if (input.enabledWorkspaceIds?.length) {
+      this.setEnabled(id, input.enabledWorkspaceIds);
+    }
     return this.getSource(id)!;
   }
 

@@ -2,22 +2,21 @@ import { useMemo, useState } from 'react';
 import { LibraryBig, Plus, Loader2, Pencil, Trash2, RotateCw } from 'lucide-react';
 import { SettingsHeader, Card } from '../shared';
 import { SourceDialog } from './source-dialog';
+import { WorkspaceScopeSelect, type WorkspaceOption } from './scope-select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Tip } from '@/components/ui/quick-tooltip';
 import { ConfirmPopover } from '@/components/ui/confirm-popover';
 import { toast } from '@/lib/toast';
 import { formatRelative } from '@/lib/utils';
-import { useUi } from '@/lib/stores/ui';
 import {
   useSources,
   useSourcesProgress,
   useAddSource,
   useUpdateSource,
   useRemoveSource,
-  useSetSourceEnabled,
   useReindexSource,
+  useWorkspaces,
 } from '@/lib/queries';
 import type { KnowledgeSource, SourceKind, SourceProgressEvent } from '@/types';
 
@@ -63,15 +62,18 @@ function statusFor(src: KnowledgeSource, progress: SourceProgressEvent | null): 
 }
 
 export function SourcesSection() {
-  const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
-  const sourcesQuery = useSources(activeWorkspaceId);
+  const sourcesQuery = useSources();
   const progress = useSourcesProgress();
   const sources = useMemo(() => sourcesQuery.data?.sources ?? [], [sourcesQuery.data]);
+  const workspacesQuery = useWorkspaces();
+  const workspaces: WorkspaceOption[] = useMemo(
+    () => (workspacesQuery.data ?? []).map((w) => ({ id: w.id, name: w.name })),
+    [workspacesQuery.data],
+  );
 
   const addSource = useAddSource();
   const updateSource = useUpdateSource();
   const removeSource = useRemoveSource();
-  const setEnabled = useSetSourceEnabled();
   const reindex = useReindexSource();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -87,12 +89,24 @@ export function SourcesSection() {
     setDialogOpen(true);
   };
 
-  const handleSave = (input: { name: string; kind: SourceKind; location: string }) => {
+  const handleSave = (input: {
+    name: string;
+    kind: SourceKind;
+    location: string;
+    enabledWorkspaceIds: string[];
+  }) => {
     if (editing) {
       // Only send location when it actually changed — the main process
       // re-enqueues a full re-index whenever a location patch arrives.
-      const patch: { name?: string; location?: string } = { name: input.name };
+      const patch: {
+        name?: string;
+        location?: string;
+        enabledWorkspaceIds?: string[];
+      } = { name: input.name };
       if (input.location !== editing.location) patch.location = input.location;
+      if (!sameScope(input.enabledWorkspaceIds, editing.enabledWorkspaceIds)) {
+        patch.enabledWorkspaceIds = input.enabledWorkspaceIds;
+      }
       updateSource.mutate(
         { id: editing.id, patch },
         {
@@ -143,10 +157,9 @@ export function SourcesSection() {
     });
   };
 
-  const handleToggle = (src: KnowledgeSource, enabled: boolean) => {
-    if (!activeWorkspaceId) return;
-    setEnabled.mutate(
-      { id: src.id, workspaceId: activeWorkspaceId, enabled },
+  const handleScopeChange = (src: KnowledgeSource, enabledWorkspaceIds: string[]) => {
+    updateSource.mutate(
+      { id: src.id, patch: { enabledWorkspaceIds } },
       {
         onSuccess: (res) => {
           if (!res.ok) {
@@ -156,10 +169,6 @@ export function SourcesSection() {
       },
     );
   };
-
-  const isEnabledForWorkspace = (src: KnowledgeSource) =>
-    src.enabledWorkspaceIds.includes('*') ||
-    (activeWorkspaceId ? src.enabledWorkspaceIds.includes(activeWorkspaceId) : false);
 
   const busy = addSource.isPending || updateSource.isPending;
 
@@ -195,10 +204,9 @@ export function SourcesSection() {
                 key={src.id}
                 source={src}
                 progress={progress}
-                hasActiveWorkspace={!!activeWorkspaceId}
-                enabled={isEnabledForWorkspace(src)}
+                workspaces={workspaces}
                 reindexing={reindex.isPending && reindex.variables === src.id}
-                onToggle={(en) => handleToggle(src, en)}
+                onScopeChange={(ids) => handleScopeChange(src, ids)}
                 onEdit={() => handleEdit(src)}
                 onRemove={() => handleRemove(src)}
                 onReindex={() => handleReindex(src)}
@@ -231,27 +239,24 @@ export function SourcesSection() {
 function SourceRow({
   source,
   progress,
-  hasActiveWorkspace,
-  enabled,
+  workspaces,
   reindexing,
-  onToggle,
+  onScopeChange,
   onEdit,
   onRemove,
   onReindex,
 }: {
   source: KnowledgeSource;
   progress: SourceProgressEvent | null;
-  hasActiveWorkspace: boolean;
-  enabled: boolean;
+  workspaces: WorkspaceOption[];
   reindexing: boolean;
-  onToggle: (enabled: boolean) => void;
+  onScopeChange: (enabledWorkspaceIds: string[]) => void;
   onEdit: () => void;
   onRemove: () => void;
   onReindex: () => void;
 }) {
   const status = statusFor(source, progress);
   const isLive = status.detail !== undefined || source.status === 'queued' || source.status === 'indexing';
-  const global = source.enabledWorkspaceIds.includes('*');
 
   return (
     <div className="group flex items-center gap-3 px-4 py-2.5">
@@ -328,22 +333,23 @@ function SourceRow({
       </div>
 
       <div className="flex items-center gap-1.5 shrink-0">
-        {!global && hasActiveWorkspace && (
-          <span className="hidden xl:inline text-[0.65rem] text-muted-foreground/40">
-            this workspace
-          </span>
+        {isLive && (
+          <Loader2 className="size-3 animate-spin text-muted-foreground/60" />
         )}
-        {global && (
-          <span className="text-[0.65rem] text-muted-foreground/40">all workspaces</span>
-        )}
-        <Switch
-          checked={enabled}
-          disabled={!hasActiveWorkspace}
-          onCheckedChange={onToggle}
+        <WorkspaceScopeSelect
+          value={source.enabledWorkspaceIds}
+          workspaces={workspaces}
+          onChange={onScopeChange}
         />
       </div>
     </div>
   );
+}
+
+// Order-insensitive comparison so saving the dialog without touching scope
+// doesn't ship a redundant patch.
+function sameScope(a: string[], b: string[]): boolean {
+  return a.length === b.length && [...a].sort().every((id, i) => id === [...b].sort()[i]);
 }
 
 function StatusBadge({ status }: { status: StatusView }) {

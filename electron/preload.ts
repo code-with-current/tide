@@ -440,9 +440,14 @@ contextBridge.exposeInMainWorld('tideIpc', {
   // sourcesList (query invalidation in useSourcesProgress).
   sourcesList: (workspaceId?: string) =>
     ipcRenderer.invoke('tide:sources:list', workspaceId),
-  sourcesAdd: (name: string, kind: import('./knowledge/types').SourceKind, location: string) =>
-    ipcRenderer.invoke('tide:sources:add', name, kind, location),
-  sourcesUpdate: (id: string, patch: { name?: string; location?: string }) =>
+  sourcesAdd: (
+    name: string,
+    kind: import('./knowledge/types').SourceKind,
+    location: string,
+    enabledWorkspaceIds?: string[],
+  ) =>
+    ipcRenderer.invoke('tide:sources:add', name, kind, location, enabledWorkspaceIds),
+  sourcesUpdate: (id: string, patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] }) =>
     ipcRenderer.invoke('tide:sources:update', id, patch),
   sourcesRemove: (id: string) =>
     ipcRenderer.invoke('tide:sources:remove', id),

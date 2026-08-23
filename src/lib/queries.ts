@@ -912,7 +912,7 @@ export function useAddSource() {
 export function useUpdateSource() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; location?: string } }) =>
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] } }) =>
       api.updateSource(id, patch),
     onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });

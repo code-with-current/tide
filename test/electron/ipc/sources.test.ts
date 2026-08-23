@@ -76,6 +76,18 @@ function registerWith(opts: Registration = {}): void {
   });
 }
 
+/** Add resolves once the row is persisted; the first index pass runs in the
+ *  background — poll until the source reaches the expected terminal status. */
+function waitForStatus(
+  ks: ReturnType<typeof openKnowledgeStore>,
+  id: string,
+  status: string,
+): Promise<void> {
+  return vi.waitFor(() => {
+    expect(ks.getSource(id)?.status).toBe(status);
+  });
+}
+
 describe('tide:sources ipc handlers', () => {
   it('add enqueues the job, lands idle with chunks, and pushes progress', async () => {
     registerWith();
@@ -85,6 +97,7 @@ describe('tide:sources ipc handlers', () => {
     expect(result.id).toBeTruthy();
 
     const ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    await waitForStatus(ks, result.id!, 'idle');
     const src = ks.getSource(result.id!);
     expect(src?.status).toBe('idle');
     expect(src?.chunkCount).toBeGreaterThan(0);
@@ -124,6 +137,7 @@ describe('tide:sources ipc handlers', () => {
 
     releaseFetch();
     await pending;
+    await waitForStatus(ks, srcId!, 'idle');
     expect(ks.getSource(srcId!)?.status).toBe('idle');
     ks.close();
   });
@@ -191,6 +205,7 @@ describe('tide:sources ipc handlers', () => {
     registerWith();
     const added = (await handlerFor('tide:sources:add')('Doomed', 'url', 'https://doomed')) as { ok: boolean; id: string };
     let ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    await waitForStatus(ks, added.id!, 'idle');
     expect(ks.rag.chunksBySource(added.id!).length).toBeGreaterThan(0);
     ks.close();
 
@@ -245,7 +260,11 @@ describe('tide:sources ipc handlers', () => {
       },
     });
     const added = (await handlerFor('tide:sources:add')('E', 'url', 'https://e1')) as { ok: boolean; id: string };
-    expect(fetchCalls).toBe(1);
+    await vi.waitFor(() => expect(fetchCalls).toBe(1));
+    // Let the first pass finish so the update's reindex isn't coalesced with it.
+    const preKs = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    await waitForStatus(preKs, added.id, 'idle');
+    preKs.close();
 
     const renameOnly = (await handlerFor('tide:sources:update')(added.id, { name: 'Renamed' })) as { ok: boolean };
     expect(renameOnly.ok).toBe(true);
@@ -272,8 +291,8 @@ describe('tide:sources ipc handlers', () => {
     expect(added.ok).toBe(true);
 
     const ks = openKnowledgeStore(path.join(tmp, 'knowledge', 'index.db'));
+    await waitForStatus(ks, added.id!, 'error');
     const src = ks.getSource(added.id!);
-    expect(src?.status).toBe('error');
     expect(src?.error).toBe('network down');
     ks.close();
     expect(sent.some((s) => s.payload.phase === 'failed' && s.payload.sourceId === added.id)).toBe(true);

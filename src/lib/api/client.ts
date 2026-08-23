@@ -847,16 +847,21 @@ export interface AddSourceInput {
   name: string;
   kind: SourceKind;
   location: string;
+  /** ['*'] = available in all workspaces (default). */
+  enabledWorkspaceIds?: string[];
 }
 
-/** Add a source and run its first index pass. The mutation resolves when the
- *  ingestion job finishes; live status arrives via subscribeSourcesProgress. */
+/** Add a source. The row is persisted immediately; the first index pass runs
+ *  in the background and reports via subscribeSourcesProgress. */
 export async function addSource(input: AddSourceInput): Promise<{ ok: boolean; id?: string; error?: string }> {
-  if (ipc && ipc.sourcesAdd) return ipc.sourcesAdd(input.name, input.kind, input.location);
+  if (ipc && ipc.sourcesAdd) return ipc.sourcesAdd(input.name, input.kind, input.location, input.enabledWorkspaceIds);
   return { ok: false, error: 'IPC unavailable (browser dev mode)' };
 }
 
-export async function updateSource(id: string, patch: { name?: string; location?: string }): Promise<{ ok: boolean; error?: string }> {
+export async function updateSource(
+  id: string,
+  patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] },
+): Promise<{ ok: boolean; error?: string }> {
   if (ipc && ipc.sourcesUpdate) return ipc.sourcesUpdate(id, patch);
   return { ok: false, error: 'IPC unavailable (browser dev mode)' };
 }

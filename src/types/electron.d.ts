@@ -468,10 +468,11 @@ declare global {
         name: string,
         kind: import('./index').SourceKind,
         location: string,
+        enabledWorkspaceIds?: string[],
       ): Promise<{ ok: boolean; id?: string; error?: string }>;
       sourcesUpdate(
         id: string,
-        patch: { name?: string; location?: string },
+        patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] },
       ): Promise<{ ok: boolean; error?: string }>;
       sourcesRemove(id: string): Promise<{ ok: boolean; error?: string }>;
       sourcesSetEnabled(

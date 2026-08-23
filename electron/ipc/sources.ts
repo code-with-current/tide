@@ -111,12 +111,22 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
 
   ipcMain.handle(
     'tide:sources:add',
-    async (_e, name: string, kind: SourceKind, location: string): Promise<{ ok: boolean; id?: string; error?: string }> => {
+    async (
+      _e,
+      name: string,
+      kind: SourceKind,
+      location: string,
+      enabledWorkspaceIds?: string[],
+    ): Promise<{ ok: boolean; id?: string; error?: string }> => {
       if (!name?.trim()) return { ok: false, error: 'name is required' };
       if (!['url', 'docs', 'crawl', 'repo'].includes(kind)) {
         return { ok: false, error: `unsupported source kind '${kind}'` };
       }
       if (!location?.trim()) return { ok: false, error: 'location is required' };
+      if (enabledWorkspaceIds !== undefined &&
+          (!Array.isArray(enabledWorkspaceIds) || enabledWorkspaceIds.some((w) => typeof w !== 'string' || !w.trim()))) {
+        return { ok: false, error: 'enabledWorkspaceIds must be an array of workspace ids' };
+      }
       const duplicate = knowledge()
         .listSources()
         .find((s) => s.kind === kind && s.location === location.trim());
@@ -125,26 +135,51 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
       }
       let id: string;
       try {
-        id = knowledge().addSource({ name: name.trim(), kind, location: location.trim() }).id;
+        id = knowledge()
+          .addSource({
+            name: name.trim(),
+            kind,
+            location: location.trim(),
+            ...(enabledWorkspaceIds?.length ? { enabledWorkspaceIds } : {}),
+          })
+          .id;
       } catch (err) {
         log.error('add failed', { err });
         return fail(err);
       }
-      try {
-        await manager.enqueue(id);
-        return { ok: true, id };
-      } catch (err) {
-        return { ok: true, id, error: err instanceof Error ? err.message : String(err) };
-      }
+      // The row is persisted — resolve immediately so the dialog can close and
+      // the list can show live progress. Ingestion failures surface as
+      // status=error on the row, not as an add failure.
+      manager.enqueue(id).catch((err) => {
+        log.warn('first index pass failed', { id, err });
+        try {
+          knowledge().markStatus(id, 'error', err instanceof Error ? err.message : String(err));
+        } catch {
+          /* store already failing — nothing more to do */
+        }
+      });
+      return { ok: true, id };
     },
   );
 
   ipcMain.handle(
     'tide:sources:update',
-    async (_e, id: string, patch: { name?: string; location?: string }): Promise<{ ok: boolean; error?: string }> => {
+    async (
+      _e,
+      id: string,
+      patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] },
+    ): Promise<{ ok: boolean; error?: string }> => {
       try {
-        if (!knowledge().updateSource(id, patch ?? {})) {
+        const { enabledWorkspaceIds, ...fields } = patch ?? {};
+        if (enabledWorkspaceIds !== undefined &&
+            (!Array.isArray(enabledWorkspaceIds) || enabledWorkspaceIds.some((w) => typeof w !== 'string' || !w.trim()))) {
+          return { ok: false, error: 'enabledWorkspaceIds must be an array of workspace ids' };
+        }
+        if (!knowledge().updateSource(id, fields)) {
           return { ok: false, error: `unknown knowledge source ${id}` };
+        }
+        if (enabledWorkspaceIds !== undefined) {
+          knowledge().setEnabled(id, enabledWorkspaceIds);
         }
         // A location edit invalidates the stored chunks — reindex automatically.
         if (patch?.location?.trim()) {
