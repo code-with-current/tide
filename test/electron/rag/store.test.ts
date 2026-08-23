@@ -49,7 +49,7 @@ describe('RagStore', () => {
     store.close();
     const reopened = openRagStore('ws-a');
     expect(reopened.chunkCount()).toBe(0);
-    expect(reopened.getMeta('schemaVersion')).toBe('1');
+    expect(reopened.getMeta('schemaVersion')).toBe('2');
     reopened.close();
   });
 

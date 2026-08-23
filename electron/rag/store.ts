@@ -25,6 +25,8 @@ export interface ChunkRow {
   embedderId: string;
   /** ms since epoch when the row was inserted. */
   createdAt: number;
+  /** Knowledge source this chunk belongs to; null/undefined for workspace code chunks. */
+  sourceId?: string | null;
 }
 
 /** What a vector search hit looks like — chunk row + cosine similarity. */
@@ -40,16 +42,20 @@ export interface FtsHit extends ChunkRow {
   rank: number;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const EMBED_DIM = 384;
 
 /** Open (or create) the per-workspace RAG index. Loads sqlite-vec,
  *  runs migrations idempotently, prepares statements on the instance
  *  for fast repeated calls. */
 export function openRagStore(workspaceId: string): RagStore {
-  const root = path.join(appDataDir(), 'rag', workspaceId);
-  fs.mkdirSync(root, { recursive: true });
-  const dbPath = path.join(root, 'index.db');
+  return openRagStoreAt(path.join(appDataDir(), 'rag', workspaceId, 'index.db'));
+}
+
+/** Open (or create) a RAG index at an explicit path (e.g. the global
+ *  knowledge-sources index). Same setup as openRagStore. */
+export function openRagStoreAt(dbPath: string): RagStore {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
@@ -62,7 +68,7 @@ export function openRagStore(workspaceId: string): RagStore {
   } catch (e) {
     db.close();
     throw new Error(
-      `Failed to load sqlite-vec extension for workspace ${workspaceId}: ` +
+      `Failed to load sqlite-vec extension for ${dbPath}: ` +
         (e instanceof Error ? e.message : String(e)),
     );
   }
@@ -124,7 +130,12 @@ function migrate(db: DB): void {
     `);
   }
 
-  // Future migrations: append `if (current < 2) { ... }` blocks here.
+  if (current < 2) {
+    db.exec('ALTER TABLE chunks ADD COLUMN sourceId TEXT');
+    db.exec('CREATE INDEX IF NOT EXISTS chunks_by_source ON chunks(sourceId)');
+  }
+
+  // Future migrations: append `if (current < 3) { ... }` blocks here.
   // Never EDIT a past migration — only add new ones.
 
   db.prepare(
@@ -182,8 +193,8 @@ export class RagStore {
     const out: { id: string; rowid: number }[] = [];
     const tx = this.db.transaction((rs: ChunkRow[]) => {
       const stmt = this.db.prepare(`
-        INSERT INTO chunks(id, path, symbol, content, contentHash, startLine, endLine, embedderId, createdAt)
-        VALUES (@id, @path, @symbol, @content, @contentHash, @startLine, @endLine, @embedderId, @createdAt)
+        INSERT INTO chunks(id, path, symbol, content, contentHash, startLine, endLine, embedderId, createdAt, sourceId)
+        VALUES (@id, @path, @symbol, @content, @contentHash, @startLine, @endLine, @embedderId, @createdAt, @sourceId)
         ON CONFLICT(id) DO UPDATE SET
           path = excluded.path,
           symbol = excluded.symbol,
@@ -191,7 +202,8 @@ export class RagStore {
           contentHash = excluded.contentHash,
           startLine = excluded.startLine,
           endLine = excluded.endLine,
-          embedderId = excluded.embedderId
+          embedderId = excluded.embedderId,
+          sourceId = excluded.sourceId
         RETURNING rowid
       `);
       // FTS5 doesn't support UPSERT — delete + insert within the same
@@ -204,7 +216,9 @@ export class RagStore {
       for (const r of rs) {
         // RETURNING inside ON CONFLICT upsert works in sqlite ≥ 3.35;
         // better-sqlite3 ships a recent sqlite.
-        const rowidRow = stmt.get(r) as { rowid: number };
+        const rowidRow = stmt.get({ ...r, sourceId: r.sourceId ?? null }) as {
+          rowid: number;
+        };
         ftsDelete.run(r.id);
         ftsInsert.run(r.id, r.content, r.symbol, r.path);
         out.push({ id: r.id, rowid: rowidRow.rowid });
