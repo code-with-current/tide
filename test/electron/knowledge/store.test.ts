@@ -27,12 +27,20 @@ describe('knowledge source registry', () => {
     ks.setEnabled(src.id, ['ws-1', 'ws-2']);
     expect(ks.getSource(src.id)?.enabledWorkspaceIds).toEqual(['ws-1', 'ws-2']);
 
+    const fresh = ks.addSource({ name: 'Fresh', kind: 'url', location: 'https://f' });
+    ks.setEnabled(fresh.id, ['*']);
+    expect(ks.getSource(fresh.id)?.enabledWorkspaceIds).toEqual(['*']);
+    ks.setEnabled(fresh.id, ['ws-1', '*']);
+    expect(ks.getSource(fresh.id)?.enabledWorkspaceIds).toEqual(['ws-1']);
+    expect(ks.enabledSourceIdsFor('ws-1')).toContain(fresh.id);
+    expect(ks.enabledSourceIdsFor('ws-other')).not.toContain(fresh.id);
+
+    expect(ks.getSource(src.id)?.lastIndexedAt).toBeNull();
+    ks.markStatus(src.id, 'idle');
+    expect(ks.getSource(src.id)?.lastIndexedAt).toBeNull();
+
     ks.markStatus(src.id, 'indexing');
     expect(ks.getSource(src.id)?.status).toBe('indexing');
-
-    ks.markStatus(src.id, 'error', 'boom');
-    expect(ks.getSource(src.id)?.status).toBe('error');
-    expect(ks.getSource(src.id)?.error).toBe('boom');
 
     const before = Date.now() - 1;
     ks.markStatus(src.id, 'idle');
@@ -42,12 +50,24 @@ describe('knowledge source registry', () => {
     expect(idle.lastIndexedAt).not.toBeNull();
     expect(idle.lastIndexedAt!).toBeGreaterThanOrEqual(before);
 
+    ks.markStatus(src.id, 'error', 'boom');
+    expect(ks.getSource(src.id)?.status).toBe('error');
+    expect(ks.getSource(src.id)?.error).toBe('boom');
+
+    ks.markStatus(src.id, 'idle');
+    const recovered = ks.getSource(src.id)!;
+    expect(recovered.status).toBe('idle');
+    expect(recovered.error).toBeNull();
+    expect(recovered.lastIndexedAt).toBe(idle.lastIndexedAt);
+
     ks.setChunkCount(src.id, 7);
     expect(ks.getSource(src.id)?.chunkCount).toBe(7);
 
     ks.deleteSource(src.id);
-    expect(ks.listSources()).toHaveLength(0);
     expect(ks.getSource(src.id)).toBeNull();
+    expect(ks.listSources().map((s) => s.name)).toEqual(['Fresh']);
+    ks.deleteSource(fresh.id);
+    expect(ks.listSources()).toHaveLength(0);
     ks.close();
   });
 

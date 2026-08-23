@@ -285,17 +285,22 @@ export class RagStore {
   /** Delete chunk + FTS + vector rows by chunk id; vec0 has no FK cascade, so all three deletes are explicit and vec0 deletes by the +chunkId aux column. */
   deleteChunks(chunkIds: string[]): void {
     if (chunkIds.length === 0) return;
-    const tx = this.db.transaction((ids: string[]) => {
-      const delFts = this.db.prepare('DELETE FROM chunks_fts WHERE chunkId = ?');
-      const delVec = this.db.prepare('DELETE FROM chunks_vec WHERE chunkId = ?');
-      const delChunk = this.db.prepare('DELETE FROM chunks WHERE id = ?');
-      for (const id of ids) {
-        delVec.run(id);
-        delFts.run(id);
-        delChunk.run(id);
-      }
-    });
-    tx(chunkIds);
+    this.db.transaction(() => this.deleteChunkRows(chunkIds))();
+  }
+
+  /** Same deletes as deleteChunks but WITHOUT opening a transaction — for
+   *  callers composing them into a larger transaction on this connection
+   *  (better-sqlite3 rejects nested transactions). */
+  deleteChunkRows(chunkIds: string[]): void {
+    if (chunkIds.length === 0) return;
+    const delFts = this.db.prepare('DELETE FROM chunks_fts WHERE chunkId = ?');
+    const delVec = this.db.prepare('DELETE FROM chunks_vec WHERE chunkId = ?');
+    const delChunk = this.db.prepare('DELETE FROM chunks WHERE id = ?');
+    for (const id of chunkIds) {
+      delVec.run(id);
+      delFts.run(id);
+      delChunk.run(id);
+    }
   }
 
   /** Top-k vector search. Returns chunks sorted by similarity (desc).

@@ -43,7 +43,12 @@ function rowToSource(r: SourceRow): KnowledgeSource {
 }
 
 export class KnowledgeStore {
-  constructor(private readonly db: DB, private readonly rag: RagStore) {}
+  constructor(private readonly rag: RagStore) {}
+
+  // Lazy so a reopened/replaced RagStore isn't orphaned by a construction-time snapshot.
+  private get db(): DB {
+    return this.rag.rawDb;
+  }
 
   addSource(input: { name: string; kind: SourceKind; location: string }): KnowledgeSource {
     const id = randomUUID();
@@ -69,17 +74,34 @@ export class KnowledgeStore {
   }
 
   setEnabled(id: string, ids: string[]): void {
+    // '*' alongside concrete ids is ambiguous — concrete ids always win.
+    const normalized =
+      ids.includes('*') && ids.length > 1 ? ids.filter((w) => w !== '*') : ids;
     this.db
       .prepare('UPDATE sources SET enabledWorkspaceIds = ? WHERE id = ?')
-      .run(JSON.stringify(ids), id);
+      .run(JSON.stringify(normalized), id);
   }
 
   markStatus(id: string, status: KnowledgeSource['status'], error?: string): void {
     // A successful index pass stamps lastIndexedAt on the transition back to idle.
     if (status === 'idle') {
-      this.db
-        .prepare("UPDATE sources SET status = 'idle', error = NULL, lastIndexedAt = ? WHERE id = ?")
-        .run(Date.now(), id);
+      // Stamp lastIndexedAt only for a genuinely completed index pass ('indexing'→'idle');
+      // boot-time stale-status resolution or error recovery must not fabricate timestamps.
+      const cur = this.db.prepare('SELECT status FROM sources WHERE id = ?').get(id) as
+        | { status?: string }
+        | undefined;
+      if (!cur) return;
+      if (cur.status === 'indexing') {
+        this.db
+          .prepare(
+            "UPDATE sources SET status = 'idle', error = NULL, lastIndexedAt = ? WHERE id = ?",
+          )
+          .run(Date.now(), id);
+      } else {
+        this.db
+          .prepare("UPDATE sources SET status = 'idle', error = NULL WHERE id = ?")
+          .run(id);
+      }
       return;
     }
     this.db
@@ -92,8 +114,12 @@ export class KnowledgeStore {
   }
 
   deleteSource(id: string): void {
-    this.rag.deleteChunks(this.rag.chunksBySource(id));
-    this.db.prepare('DELETE FROM sources WHERE id = ?').run(id);
+    // One transaction on the shared connection: chunk cascade + registry row
+    // must not be torn apart by a crash (deleteChunkRows avoids nested tx).
+    this.db.transaction(() => {
+      this.rag.deleteChunkRows(this.rag.chunksBySource(id));
+      this.db.prepare('DELETE FROM sources WHERE id = ?').run(id);
+    })();
   }
 
   enabledSourceIdsFor(workspaceId: string): string[] {
@@ -116,18 +142,23 @@ export class KnowledgeStore {
 
 export function openKnowledgeStore(dbPath: string = knowledgeDbPath()): KnowledgeStore {
   const rag = openRagStoreAt(dbPath);
-  rag.runRaw(`CREATE TABLE IF NOT EXISTS sources (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    location TEXT NOT NULL,
-    createdAt INTEGER NOT NULL,
-    lastIndexedAt INTEGER,
-    status TEXT NOT NULL DEFAULT 'idle',
-    error TEXT,
-    chunkCount INTEGER NOT NULL DEFAULT 0,
-    embedderId TEXT,
-    enabledWorkspaceIds TEXT NOT NULL DEFAULT '["*"]'
-  )`);
-  return new KnowledgeStore(rag.rawDb, rag);
+  try {
+    rag.runRaw(`CREATE TABLE IF NOT EXISTS sources (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      location TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      lastIndexedAt INTEGER,
+      status TEXT NOT NULL DEFAULT 'idle',
+      error TEXT,
+      chunkCount INTEGER NOT NULL DEFAULT 0,
+      embedderId TEXT,
+      enabledWorkspaceIds TEXT NOT NULL DEFAULT '["*"]'
+    )`);
+  } catch (e) {
+    rag.close();
+    throw e;
+  }
+  return new KnowledgeStore(rag);
 }
