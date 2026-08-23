@@ -6,6 +6,7 @@
 import { ShieldAlert, ShieldBan, Timer, MessageCircleQuestion, FileClock, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { AutonomyMode, ToolCall } from '@/types';
+import { allowRuleLabel } from '@/lib/permission-label';
 import { Button } from '@/components/ui/button';
 import { SplitButton } from '@/components/ui/split-button';
 
@@ -62,12 +63,9 @@ export function PermissionCard({
     ? (call.display?.kind === 'command' ? call.display.command : call.argPreview) || '(no command)'
     : call.argPreview;
 
-  // `bash(cat)` → "cat *", `bash(npx cowsay:*)` → "npx cowsay:*",
-  // `edit_file(src/lib/*)` → "src/lib/*", bare `git` → "git *".
-  const allowDisplay = call.allowRule
-    ? call.allowRule.replace(/^[a-z_]+\((.*)\)$/i, '$1').trim() +
-      (/[*:]/.test(call.allowRule) ? '' : ' *')
-    : `${call.toolName} *`;
+  // Dynamic per-command label — mirrors the exact session rule main derives
+  // (e.g. `cat` → "cat *", `git push` → "git push *", edits → "src/lib/*").
+  const allowDisplay = allowRuleLabel(call);
 
   const handleReject = () => {
     if (explaining && reason.trim()) onReject?.(reason.trim());
