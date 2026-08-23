@@ -21,6 +21,7 @@ import {
 import { fetchUrl } from '../knowledge/fetchers/url.js';
 import { fetchDocs } from '../knowledge/fetchers/docs.js';
 import { fetchCrawl } from '../knowledge/fetchers/crawl.js';
+import { fetchRepo } from '../knowledge/fetchers/repo.js';
 import type { SourceKind, SourceProgressEvent } from '../knowledge/types.js';
 
 const log = createLogger('sources');
@@ -62,6 +63,7 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
     url: fetchUrl,
     docs: (location) => fetchDocs(location, { allowedRoots: [appDataDir()] }),
     crawl: (location) => fetchCrawl(location),
+    repo: (location) => fetchRepo(location),
     ...opts.fetchers,
   };
 
