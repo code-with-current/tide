@@ -681,8 +681,8 @@ const ToolScrollableTextOutput: React.FC<{
             className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
             onClick={handleCopyOutput}
             onPointerDown={(event) => event.stopPropagation()}
-            aria-label={copiedJson ? 'Copied' : 'Copy output'}
-            title={copiedJson ? 'Copied' : 'Copy output'}
+            aria-label={copiedJson ? 'Copied' : 'Copy'}
+            title={copiedJson ? 'Copied' : 'Copy'}
           >
             <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
           </Button>

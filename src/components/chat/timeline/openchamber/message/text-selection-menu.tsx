@@ -375,7 +375,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             'hover:bg-[var(--interactive-hover)]',
             'transition-colors duration-150',
           )}
-          title="Copy selection"
+          title="Copy"
           type="button"
         >
           <Icon name="file-copy" className="h-4 w-4" />

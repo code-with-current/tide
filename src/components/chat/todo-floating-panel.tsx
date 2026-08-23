@@ -43,7 +43,7 @@ export function TodoFloatingPanel({ sessionId }: { sessionId: string | null | un
       : `${open} remaining`;
 
   return (
-    <div className="todo-floating-panel absolute top-3 right-3 z-[1] w-90 max-w-[calc(100%-1.5rem)] max-h-[60vh] flex flex-col pointer-events-auto">
+    <div className="todo-floating-panel absolute top-3 right-3 z-[50] w-90 max-w-[calc(100%-1.5rem)] max-h-[60vh] flex flex-col pointer-events-auto">
       <div
         className="border border-white/10 shadow-lg backdrop-blur-md overflow-hidden rounded-xl"
         style={{ background: 'color-mix(in srgb, var(--background) 78%, transparent)' }}

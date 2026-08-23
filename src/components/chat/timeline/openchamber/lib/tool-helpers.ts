@@ -65,7 +65,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
   },
 
   bash: {
-    displayName: 'Shell Command',
+    displayName: 'Shell',
     category: 'system',
     outputLanguage: 'text',
     inputFields: [
@@ -76,7 +76,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
   },
 
   grep: {
-    displayName: 'Search Files',
+    displayName: 'Search',
     category: 'search',
     outputLanguage: 'text',
     inputFields: [
@@ -86,7 +86,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     ]
   },
   glob: {
-    displayName: 'Find Files',
+    displayName: 'Find',
     category: 'search',
     outputLanguage: 'text',
     inputFields: [
@@ -95,7 +95,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     ]
   },
   list: {
-    displayName: 'List Directory',
+    displayName: 'List',
     category: 'file',
     outputLanguage: 'text',
     inputFields: [
@@ -105,7 +105,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
   },
 
     task: {
-    displayName: 'Agent Task',
+    displayName: 'Agent',
     category: 'ai',
     outputLanguage: 'markdown',
     inputFields: [
@@ -295,7 +295,7 @@ export function detectToolOutputLanguage(
 
 export function getLanguageFromExtension(filePath: string): string | null {
   const ext = filePath.split('.').pop()?.toLowerCase();
-  
+
   // Handle special filenames without extensions
   const filename = filePath.split('/').pop()?.toLowerCase() || '';
   const filenameMap: Record<string, string> = {
@@ -347,7 +347,7 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'bun.lockb': 'text',
     'bun.lock': 'json',
   };
-  
+
   if (filenameMap[filename]) {
     return filenameMap[filename];
   }
