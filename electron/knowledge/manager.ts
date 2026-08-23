@@ -7,7 +7,15 @@ import { ingestDocuments } from './ingest.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeSource, SourceDocument, SourceKind, SourceProgressEvent } from './types.js';
 
-export type SourceFetcher = (location: string) => Promise<SourceDocument[]>;
+export interface FetcherCallOptions {
+  /** Crawl-style page progress, mapped onto SourceProgressEvent by the manager. */
+  onPage?: (pagesSeen: number, current: string) => void;
+}
+
+export type SourceFetcher = (
+  location: string,
+  opts?: FetcherCallOptions,
+) => Promise<SourceDocument[]>;
 
 /** Either a ready embedder or a lazy resolver invoked inside the job — the
  *  global embedder config may not be readable at manager construction. */
@@ -47,7 +55,10 @@ export function createKnowledgeManager(deps: {
         const fetcher = deps.fetchers[cur.kind];
         if (!fetcher) throw new Error(`no fetcher registered for kind '${cur.kind}'`);
         deps.broadcast({ sourceId, phase: 'fetching', current: cur.location });
-        const docs = await fetcher(cur.location);
+        const docs = await fetcher(cur.location, {
+          onPage: (pagesSeen, current) =>
+            deps.broadcast({ sourceId, phase: 'fetching', pagesSeen, current }),
+        });
 
         if (!ks.getSource(sourceId)) {
           purgeOrphans(ks, sourceId);

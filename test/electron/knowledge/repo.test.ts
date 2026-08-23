@@ -44,6 +44,8 @@ describe('fetchRepo url validation', () => {
     await expect(fetchRepo('https://example.com/acme/widgets')).rejects.toThrow(/unsupported git host/);
     await expect(fetchRepo('https://github.com/acme')).rejects.toThrow(/<owner>\/<repo>/);
     await expect(fetchRepo('https://github.com/')).rejects.toThrow(/<owner>\/<repo>/);
+    await expect(fetchRepo('https://github.com/acme/widgets/tree/main')).rejects.toThrow(/<owner>\/<repo>/);
+    await expect(fetchRepo('file:///tmp/%zz/repo')).rejects.toThrow(/invalid repo url/);
   });
 
   it('normalizes https urls to origin+pathname before handing them to the cloner', async () => {

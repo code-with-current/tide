@@ -62,7 +62,7 @@ export function registerSourcesHandlers(opts: SourcesHandlerOptions = {}): void 
   const fetchers: Partial<Record<SourceKind, SourceFetcher>> = {
     url: fetchUrl,
     docs: (location) => fetchDocs(location, { allowedRoots: [appDataDir()] }),
-    crawl: (location) => fetchCrawl(location),
+    crawl: (location, fopts) => fetchCrawl(location, fopts?.onPage ? { onPage: fopts.onPage } : undefined),
     repo: (location) => fetchRepo(location),
     ...opts.fetchers,
   };

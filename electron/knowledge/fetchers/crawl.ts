@@ -31,13 +31,17 @@ export async function fetchCrawl(rootUrl: string, opts: CrawlOptions = {}): Prom
   const seen = new Set<string>([normalize(start).toString()]);
   let queue: QueueEntry[] = [{ url: start.toString(), depth: 0 }];
   const docs: SourceDocument[] = [];
+  let attempts = 0;
   let pagesSeen = 0;
 
-  while (queue.length > 0 && pagesSeen < maxPages) {
+  while (queue.length > 0 && attempts < maxPages) {
     const level = queue;
     queue = [];
     for (const entry of level) {
-      if (entry.depth > maxDepth || pagesSeen >= maxPages) continue;
+      // Failed fetches consume budget too — a hub page full of dead links must
+      // not burn unbounded timeouts.
+      if (entry.depth > maxDepth || attempts >= maxPages) continue;
+      attempts += 1;
 
       let pageDocs: SourceDocument[] = [];
       let linked: string[] = [];

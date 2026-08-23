@@ -146,4 +146,32 @@ describe('fetchCrawl', () => {
     await expect(fetchCrawl('file:///etc')).rejects.toThrow(/unsupported crawl root/);
     expect(mock).not.toHaveBeenCalled();
   });
+
+  it('counts failed fetches against the page budget', async () => {
+    const mock = site({
+      'https://example.com/': page(['/dead1', '/dead2', '/dead3', '/dead4', '/dead5']),
+    });
+    vi.stubGlobal('fetch', mock);
+
+    const docs = await fetchCrawl('https://example.com/', { maxPages: 3 });
+
+    expect(fetchedUrls(mock)).toHaveLength(3);
+    expect(docs.map((d) => d.origin)).toEqual(['example.com']);
+  });
+
+  it('reports page progress through onPage', async () => {
+    const mock = site({
+      'https://example.com/': page(['/a']),
+      'https://example.com/a': page([]),
+    });
+    vi.stubGlobal('fetch', mock);
+    const seen: Array<[number, string]> = [];
+
+    await fetchCrawl('https://example.com/', { onPage: (n, current) => seen.push([n, current]) });
+
+    expect(seen).toEqual([
+      [1, 'https://example.com/'],
+      [2, 'https://example.com/a'],
+    ]);
+  });
 });

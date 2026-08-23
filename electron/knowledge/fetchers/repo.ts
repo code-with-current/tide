@@ -57,7 +57,7 @@ function parseRepoUrl(raw: string): { url: string; slug: string } {
     throw new Error(`invalid repo url: ${raw}`);
   }
   if (u.protocol === 'file:') {
-    const segs = decodeURIComponent(u.pathname).split('/').filter(Boolean);
+    const segs = safeDecode(u.pathname).split('/').filter(Boolean);
     if (segs.length < 2) throw new Error(`invalid repo url: ${raw}`);
     return { url: raw, slug: `${segs[segs.length - 2]}/${trimGitSuffix(segs[segs.length - 1])}` };
   }
@@ -68,7 +68,7 @@ function parseRepoUrl(raw: string): { url: string; slug: string } {
     throw new Error(`unsupported git host '${u.hostname}': expected one of ${[...GIT_HOSTS].join(', ')}`);
   }
   const segs = u.pathname.split('/').filter(Boolean);
-  if (segs.length < 2) {
+  if (segs.length !== 2) {
     throw new Error(`unsupported repo url '${raw}': expected <owner>/<repo> path`);
   }
   // origin+pathname drops any embedded credentials and fragment.
@@ -77,6 +77,14 @@ function parseRepoUrl(raw: string): { url: string; slug: string } {
 
 function trimGitSuffix(name: string): string {
   return name.replace(/\.git$/, '');
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new Error(`invalid repo url: malformed percent-encoding '${value}'`);
+  }
 }
 
 async function defaultCloner(repoUrl: string, destDir: string): Promise<void> {
@@ -104,7 +112,7 @@ function runGit(args: string[]): Promise<void> {
       reject(new Error(`timed out after ${CLONE_TIMEOUT_MS}ms`));
     }, CLONE_TIMEOUT_MS);
     child.stderr?.on('data', (d: Buffer) => {
-      stderr += d.toString('utf8');
+      if (stderr.length < 65_536) stderr += d.toString('utf8');
     });
     child.on('error', (err) => {
       clearTimeout(timer);
