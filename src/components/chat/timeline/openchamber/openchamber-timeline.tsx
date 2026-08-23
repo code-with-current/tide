@@ -223,12 +223,13 @@ function OpenChamberTimelineImpl({
               isGroupExpanded={isGroupExpanded}
               onToggleGroup={() => toggleTurnGroup(turn.turnId)}
               directory={directory}
+              sessionId={sessionId ?? undefined}
             />
           )}
         />
       );
     },
-    [chatView, turnUiStates, toggleTurnGroup, directory],
+    [chatView, turnUiStates, toggleTurnGroup, directory, sessionId],
   );
 
   // Streaming tail: same OpenChamberChatMessage-based renderMessage so live
@@ -255,6 +256,7 @@ function OpenChamberTimelineImpl({
                   isGroupExpanded={isGroupExpanded}
                   onToggleGroup={() => toggleTurnGroup(tail.turn.turnId)}
                   directory={directory}
+                  sessionId={sessionId ?? undefined}
                 />
               )}
             />
@@ -275,12 +277,13 @@ function OpenChamberTimelineImpl({
             onReject={onRejectToolCalls}
             onAnswerFollowup={onAnswerFollowup}
             directory={directory}
+            sessionId={sessionId ?? undefined}
           />
           {isStreaming && <TurnWorkingFooter startedAt={streamingMessage?.createdAt} />}
         </>
       );
     },
-    [turnUiStates, toggleTurnGroup, pendingToolCallIds, onApproveToolCalls, onRejectToolCalls, onAnswerFollowup, directory, isStreaming, streamingMessage?.createdAt],
+    [turnUiStates, toggleTurnGroup, pendingToolCallIds, onApproveToolCalls, onRejectToolCalls, onAnswerFollowup, directory, sessionId, isStreaming, streamingMessage?.createdAt],
   );
 
   const renderRowContent = useCallback(

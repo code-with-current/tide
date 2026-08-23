@@ -208,6 +208,9 @@ interface OpenChamberChatMessageProps {
   /** Tide wiring (task 8): active workspace root threaded to MessageBody's
    *  `directory` store seam (path-relative rendering). */
   directory?: string;
+  /** Tide wiring: session id for message actions (fork). The tide-adapter does
+   *  not stamp info.sessionID, so the timeline threads its own prop down. */
+  sessionId?: string | null;
 }
 
 const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
@@ -221,6 +224,7 @@ const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
   isGroupExpanded,
   onToggleGroup,
   directory,
+  sessionId,
 }) => {
   const { showReasoningTraces, stickyUserHeader, chatRenderMode } = CHAT_DISPLAY_DEFAULTS;
   const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -793,7 +797,7 @@ const OpenChamberChatMessageImpl: React.FC<OpenChamberChatMessageProps> = ({
             ) : (
               <div className="relative">
                 <MessageBody
-                  sessionId={entry.info.sessionID}
+                  sessionId={sessionId ?? entry.info.sessionID}
                   messageId={entry.info.id}
                   parts={visibleParts}
                   isUser={isUser}
@@ -898,6 +902,7 @@ export const OpenChamberChatMessage = React.memo(OpenChamberChatMessageImpl, (pr
     && prev.isGroupExpanded === next.isGroupExpanded
     && prev.onToggleGroup === next.onToggleGroup
     && prev.directory === next.directory
+    && prev.sessionId === next.sessionId
     && areRelevantTurnGroupingContextsEqual(
       deriveTurnGroupingContext(prev),
       deriveTurnGroupingContext(next),
