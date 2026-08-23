@@ -89,8 +89,12 @@ export function SourcesSection() {
 
   const handleSave = (input: { name: string; kind: SourceKind; location: string }) => {
     if (editing) {
+      // Only send location when it actually changed — the main process
+      // re-enqueues a full re-index whenever a location patch arrives.
+      const patch: { name?: string; location?: string } = { name: input.name };
+      if (input.location !== editing.location) patch.location = input.location;
       updateSource.mutate(
-        { id: editing.id, patch: { name: input.name, location: input.location } },
+        { id: editing.id, patch },
         {
           onSuccess: (res) => {
             if (res.ok) {
@@ -157,6 +161,8 @@ export function SourcesSection() {
     src.enabledWorkspaceIds.includes('*') ||
     (activeWorkspaceId ? src.enabledWorkspaceIds.includes(activeWorkspaceId) : false);
 
+  const busy = addSource.isPending || updateSource.isPending;
+
   return (
     <>
       <SettingsHeader
@@ -170,7 +176,7 @@ export function SourcesSection() {
         }
       />
 
-      {sources.length > 0 ? (
+      {sourcesQuery.isPending ? null : sources.length > 0 ? (
         <Card>
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border/60">
             <span className="shrink-0 text-muted-foreground/50">
@@ -212,6 +218,7 @@ export function SourcesSection() {
         }}
         onSave={handleSave}
         initial={editing}
+        busy={busy}
       />
     </>
   );

@@ -43,9 +43,13 @@ export interface SourceDialogProps {
   onSave: (input: { name: string; kind: SourceKind; location: string }) => void;
   /** Present in edit mode (kind cannot change). */
   initial?: KnowledgeSource | null;
+  /** Disables the submit button while a save is in flight. The add IPC
+   *  resolves only when the first index pass finishes — without this a second
+   *  click during a long crawl hits the duplicate-location guard. */
+  busy?: boolean;
 }
 
-export function SourceDialog({ open, onClose, onSave, initial }: SourceDialogProps) {
+export function SourceDialog({ open, onClose, onSave, initial, busy }: SourceDialogProps) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<SourceKind>('url');
   const [location, setLocation] = useState('');
@@ -143,7 +147,7 @@ export function SourceDialog({ open, onClose, onSave, initial }: SourceDialogPro
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSubmit}>
+          <Button size="sm" onClick={handleSubmit} disabled={busy}>
             {initial ? 'Save' : 'Add & index'}
           </Button>
         </DialogFooter>
