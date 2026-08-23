@@ -168,6 +168,25 @@ describe('projectTideTurns', () => {
     expect(turn.summary.sourcePartId).toBe('t2');
   });
 
+  test('summary prefers the isAnswer block over trailing narration', () => {
+    const user = message('u1', 'user', { content: 'go' });
+    const assistant = message('a1', 'assistant', {
+      totalMs: 100,
+      blocks: [
+        toolBlock('tc1'),
+        textBlock('t-ans', 'The answer.', true),
+        textBlock('t-nar', 'Follow-up narration after the answer.', false),
+      ],
+    });
+
+    const projection = projectTideTurns([user, assistant], null);
+
+    const turn = projection.turns[0]!;
+    expect(turn.summaryText).toBe('The answer.');
+    expect(turn.summary.sourcePartId).toBe('t-ans');
+    expect(turn.summaryText).not.toBe('Follow-up narration after the answer.');
+  });
+
   test('reasoning block becomes a reasoning activity record', () => {
     const user = message('u1', 'user', { content: 'go' });
     const assistant = message('a1', 'assistant', {

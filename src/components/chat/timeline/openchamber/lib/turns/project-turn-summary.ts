@@ -1,4 +1,4 @@
-/** Ported from openchamber/openchamber (MIT): packages/ui/src/components/chat/lib/turns/projectTurnSummary.ts. No adaptations beyond the vendored types; Tide never sets `summary` on messages, so the compaction/diff paths stay dormant. */
+/** Ported from openchamber/openchamber (MIT): packages/ui/src/components/chat/lib/turns/projectTurnSummary.ts. Tide adaptation: before the upstream positional passes, prefer the text part carrying `metadata.isAnswer === true` (stashed by the tide-adapter from Tide's TextBlock.isAnswer) — upstream's "last text part" heuristic would pick trailing narration if Tide emits text after the answer block. Falls back to the upstream logic unchanged when no such part exists. Tide never sets `summary` on messages, so the compaction/diff paths stay dormant. */
 
 import type { ChatMessageEntry, TurnChangedFile, TurnDiffStats, TurnSummaryRecord } from './types';
 
@@ -29,7 +29,32 @@ const isCompactionSummaryMessage = (message: ChatMessageEntry): boolean => {
   return (message.info as { summary?: unknown }).summary === true;
 };
 
+const isAnswerTextPart = (part: unknown): boolean => {
+  return (part as { metadata?: { isAnswer?: unknown } }).metadata?.isAnswer === true;
+};
+
 export const projectTurnSummary = (assistantMessages: ChatMessageEntry[]): TurnSummaryRecord => {
+  for (let messageIndex = assistantMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const assistantMessage = assistantMessages[messageIndex];
+    if (!assistantMessage) continue;
+    if (isCompactionSummaryMessage(assistantMessage)) continue;
+
+    for (let partIndex = assistantMessage.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = assistantMessage.parts[partIndex];
+      if (!part || part.type !== 'text') continue;
+      if (!isAnswerTextPart(part)) continue;
+
+      const text = getTextFromPart(part);
+      if (!text) continue;
+
+      return {
+        text,
+        sourceMessageId: assistantMessage.info.id,
+        sourcePartId: part.id ?? `${assistantMessage.info.id}-part-${partIndex}-text`,
+      };
+    }
+  }
+
   for (let messageIndex = assistantMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
     const assistantMessage = assistantMessages[messageIndex];
     if (!assistantMessage) continue;
