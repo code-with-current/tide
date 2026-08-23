@@ -458,6 +458,32 @@ declare global {
       onRagInitProgress: (cb: (e: import('./index').RagInitProgressEvent) => void) => () => void;
       onRagDownloadProgress: (cb: (e: import('./index').RagDownloadProgressEvent) => void) => () => void;
 
+      // ── Knowledge sources (settings → Knowledge) ──
+      sourcesList(workspaceId?: string): Promise<{
+        sources: import('./index').KnowledgeSource[];
+        enabledSourceIds: string[];
+        error?: string;
+      }>;
+      sourcesAdd(
+        name: string,
+        kind: import('./index').SourceKind,
+        location: string,
+      ): Promise<{ ok: boolean; id?: string; error?: string }>;
+      sourcesUpdate(
+        id: string,
+        patch: { name?: string; location?: string },
+      ): Promise<{ ok: boolean; error?: string }>;
+      sourcesRemove(id: string): Promise<{ ok: boolean; error?: string }>;
+      sourcesSetEnabled(
+        id: string,
+        workspaceId: string,
+        enabled: boolean,
+      ): Promise<{ ok: boolean; error?: string }>;
+      sourcesReindex(id: string): Promise<{ ok: boolean; error?: string }>;
+      /** Progress pushes on tide:sources:progress; returns an unsubscribe fn. */
+      onSourcesProgress(cb: (e: import('./index').SourceProgressEvent) => void): () => void;
+      removeAllSourcesListeners(): void;
+
       // ─────────────────────────────────────────────────────────
       // Agent (tool-calling loop). Replaces the old chat:stream trio.
       // ─────────────────────────────────────────────────────────

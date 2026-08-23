@@ -127,6 +127,15 @@ export class KnowledgeStore {
     }
   }
 
+  updateSource(id: string, patch: { name?: string; location?: string }): KnowledgeSource | null {
+    const cur = this.getSource(id);
+    if (!cur) return null;
+    const name = patch.name?.trim() || cur.name;
+    const location = patch.location?.trim() || cur.location;
+    this.db.prepare('UPDATE sources SET name = ?, location = ? WHERE id = ?').run(name, location, id);
+    return this.getSource(id);
+  }
+
   setChunkCount(id: string, n: number): void {
     this.db.prepare('UPDATE sources SET chunkCount = ? WHERE id = ?').run(n, id);
   }

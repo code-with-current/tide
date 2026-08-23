@@ -725,3 +725,13 @@ export {
   isToolBlock,
   isFollowupBlock,
 } from './block';
+
+// ─── Knowledge sources ──────────────────────────────────────────────────
+// Re-exported so the renderer can import them from '@/types'. The definitions
+// live in electron/knowledge/types.ts (single source of truth shared with the
+// main process).
+export type {
+  KnowledgeSource,
+  SourceKind,
+  SourceProgressEvent,
+} from '../../electron/knowledge/types';
