@@ -193,11 +193,11 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
   }, [resolved, focus, d?.reasoning, report, hasReasoning]);
 
   return (
-    <div className="flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden bg-card">
+    <div className="oc-chat flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden bg-card">
       {/* Header — agent badge, status, elapsed, task (clamped, click
           expands), usage, close. Focus survives close so reopening returns
           to the same dispatch. */}
-      <div className="flex flex-col gap-1.5 border-b border-border px-3 py-2.5">
+      <div className="flex flex-col gap-1.5 border-b border-border bg-sidebar px-3 py-2.5">
         <div className="flex items-start gap-1.5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             {resolved ? (
@@ -241,7 +241,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                     title={`${d?.dispatchId ?? focus} — click to copy`}
                     className="shrink-0 max-w-[8rem] truncate font-mono text-[0.6875rem] text-muted-foreground/50 transition-colors hover:text-foreground"
                   >
-                    {idCopied ? 'copied ✓' : d?.dispatchId ?? focus}
+                    {idCopied ? 'Copied ✓' : d?.dispatchId ?? focus}
                   </button>
                 )}
               </>
