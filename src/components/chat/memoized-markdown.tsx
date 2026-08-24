@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { remarkFilePaths } from '@/lib/remark/file-paths';
 import { useUi } from '@/lib/stores/ui';
-import { langFromPath } from './turn/turn-block';
+import { getLanguageFromExtension } from '@/components/chat/timeline/openchamber/lib/tool-helpers';
 import { MermaidDiagram } from './mermaid-diagram';
 
 const WRAP_ICON =
@@ -137,7 +137,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
       const filePath = link.dataset.filePath;
       if (!filePath || !activeSessionId) return;
       e.preventDefault();
-      openFile(activeSessionId, { id: filePath, path: filePath, language: langFromPath(filePath) });
+      openFile(activeSessionId, { id: filePath, path: filePath, language: getLanguageFromExtension(filePath) ?? 'text' });
     },
     [openFile, activeSessionId],
   );

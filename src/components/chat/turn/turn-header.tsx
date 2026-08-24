@@ -3,8 +3,17 @@ import { Check, X, AlertTriangle, AlertCircle, Clock } from 'lucide-react';
 import type { Block, Turn } from '@/types';
 import { cn } from '@/lib/utils';
 import { isFailedStatus } from '@/lib/stream/block-state';
-import { stepsCount } from '@/components/blocks/process-state';
 import { PixelLoader } from '@/components/ui/pixel-loader';
+
+function stepsCount(blocks: Block[] | undefined): number {
+  if (!blocks) return 0;
+  let n = 0;
+  for (const b of blocks) {
+    if (b.kind === 'reasoning') { if (!b.parentToolCallId) n++; continue; }
+    if (b.kind === 'tool') n++;
+  }
+  return n;
+}
 
 /** Format ms as whole seconds: "14s", "1m30s". No sub-second/ms precision. */
 function formatDuration(ms?: number): string {

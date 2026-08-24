@@ -19,14 +19,29 @@ import type { Block, Session, ToolBlock } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
-import { useSession, useDispatches } from '@/lib/queries';
+import { useSession, useDispatches, useWorkspaces } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { PixelLoader } from '@/components/ui/pixel-loader';
-import { ThinkingBlock } from '@/components/blocks/thinking-block';
-import { AgentStatusChip } from '@/components/blocks/tool-chips';
 import { agentStatusOf } from '@/components/blocks/agent-status';
-import { StreamBlocks } from '@/components/chat/turn/stream-blocks';
-import { AnswerBlock } from '@/components/chat/blocks/answer-block';
+import { blockToPart } from '@/components/chat/timeline/openchamber/lib/tide-adapter';
+import { OpenChamberChatMessage } from '@/components/chat/timeline/openchamber/chat-message';
+
+/** Ported-row status cue (replaces the legacy AgentStatusChip): orbit loader
+ *  while running, colored dot once finalized — matches tool-part's cues. */
+function AgentStatusDot({ status }: { status: ReturnType<typeof agentStatusOf> }) {
+  if (status === 'running') return <PixelLoader variant="orbit" size="xs" />;
+  const color =
+    status === 'done' ? 'var(--status-success)'
+    : status === 'error' ? 'var(--status-error)'
+    : 'var(--muted-foreground)';
+  return (
+    <span
+      className="inline-block size-1.5 shrink-0 rounded-full"
+      style={{ backgroundColor: color }}
+      title={status}
+    />
+  );
+}
 
 function formatSecs(s: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`;
@@ -88,8 +103,11 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
   const setFocusedDispatch = useUi((s) => s.setFocusedDispatch);
   const liveBlocks = useUi((s) => s.streams[sessionId]?.blocks);
   const parentStreaming = useUi((s) => s.streams[sessionId]?.isStreaming ?? false);
+  const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);
   const { data: session } = useSession(sessionId);
   const { data: dispatches } = useDispatches(sessionId);
+  const { data: workspaces } = useWorkspaces();
+  const directory = workspaces?.find((w) => w.id === activeWorkspaceId)?.path;
 
   const resolved = useMemo(() => {
     if (!focus) return null;
@@ -137,6 +155,31 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
   const toolCount = root.tools;
   const hasReasoning = root.reasoning;
 
+  /** Child blocks → ported message entry. The dispatch report rides as an
+   *  isAnswer text part and the persisted reasoning summary as a reasoning
+   *  part, so OpenChamberChatMessage renders everything with chat parity. */
+  const entry = useMemo(() => {
+    if (!resolved) return null;
+    const childBlocks = resolved.list.filter(
+      (b) => b.kind !== 'followup' && b.parentToolCallId === focus,
+    );
+    const synth: Block[] = [];
+    if (d?.reasoning && !hasReasoning) {
+      synth.push({ kind: 'reasoning', id: `${focus}-legacy-reasoning`, text: d.reasoning, createdAtSeq: 0, modifiedAtSeq: 0 });
+    }
+    if (report) {
+      synth.push({ kind: 'text', id: `${focus}-report`, text: report, isAnswer: true, createdAtSeq: 0, modifiedAtSeq: 0 });
+    }
+    return {
+      info: {
+        id: `agent-${focus}`,
+        role: 'assistant' as const,
+        time: { created: Date.now() },
+      },
+      parts: [...childBlocks, ...synth].map(blockToPart),
+    };
+  }, [resolved, focus, d?.reasoning, report, hasReasoning]);
+
   return (
     <div className="flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden bg-card">
       {/* Header — agent badge, status, elapsed, task (clamped, click
@@ -153,7 +196,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                 {!!resolved.dispatch.arguments?.resumeFrom && (
                   <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[0.75rem] text-muted-foreground">↻ resumed</span>
                 )}
-                <AgentStatusChip status={status} />
+                <AgentStatusDot status={status} />
                 {running ? (
                   <LiveElapsed />
                 ) : resolved.dispatch.durationMs != null ? (
@@ -203,32 +246,21 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
-      {/* Body — the dispatch's child stream via StreamBlocks (the main chat's
-          stream renderer rooted at the dispatch), with the dispatch report as
-          an AnswerBlock last. Spacing mirrors the chat: the scroll container
-          carries the timeline's px-6 py-3, the content column TurnBlock's
-          flex flex-col gap-0. Auto-follows while the dispatch runs. */}
+      {/* Body — the dispatch's child blocks projected into a synthetic
+          assistant entry and rendered through OpenChamberChatMessage (same
+          renderer as the main timeline), report riding as the answer part.
+          Auto-follows while the dispatch runs. */}
       <div ref={bodyRef} className="flex-1 min-h-0 scroll min-w-0 overflow-y-auto px-6 py-3">
+        {resolved && entry ? (
+          <OpenChamberChatMessage
+            entry={entry}
+            isStreamingRow={running}
+            sessionId={sessionId}
+            directory={directory}
+          />
+        ) : null}
         {resolved ? (
           <div className="flex flex-col gap-0">
-            {/* Legacy fallback: persisted dispatch displays carry a reasoning
-                summary even when no parented reasoning blocks were recorded. */}
-            {d?.reasoning && !hasReasoning && (
-              <ThinkingBlock text={d.reasoning} streaming={running} variant="stream" />
-            )}
-            <StreamBlocks
-              blocks={resolved.list}
-              streaming={running}
-              sessionId={sessionId}
-              rootId={focus}
-            />
-            {report && (
-              <AnswerBlock
-                text={report}
-                streaming={running}
-                hasProcessContent={root.any || !!d?.reasoning}
-              />
-            )}
             {running && !root.any && !d?.reasoning && (
               <div className="flex items-center gap-1.5 px-1 text-[0.7857rem] text-muted-foreground/70">
                 <PixelLoader variant="orbit" size="xs" />
@@ -273,7 +305,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                       {rowTask}
                     </span>
                   )}
-                  {block && <AgentStatusChip status={agentStatusOf(block)} />}
+                  {block && <AgentStatusDot status={agentStatusOf(block)} />}
                   <span className="shrink-0 text-[0.75rem] text-muted-foreground/70">
                     {formatRelative(h.updatedAt)}
                   </span>
