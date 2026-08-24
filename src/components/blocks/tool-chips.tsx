@@ -4,6 +4,7 @@
 
 import { memo, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { TOOL_TEXT_COLOR } from '@/lib/tool-colors';
 import {
   FileSearch,
   FilePen,
@@ -26,7 +27,6 @@ import {
   Check,
   Copy,
   X,
-  Loader2,
   ExternalLink,
   Image as ImageIcon,
   Database,
@@ -38,6 +38,7 @@ import { toolLabel } from '@/lib/tool-labels';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { useUi } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 import { agentStatusOf, type AgentStatus } from './agent-status';
 
 const ICON: Partial<Record<ToolName, React.ReactNode>> = {
@@ -91,30 +92,7 @@ const ICON_COLOR: Partial<Record<ToolName, string>> = {
   mcp: 'bg-indigo-300',
 };
 
-const TEXT_COLOR: Partial<Record<ToolName, string>> = {
-  read_file: 'text-sky-400',
-  read_media_file: 'text-sky-400',
-  glob: 'text-sky-400',
-  grep: 'text-sky-400',
-  memory: 'text-muted-foreground',
-  edit_file: 'text-amber-400',
-  multi_edit: 'text-amber-400',
-  write_file: 'text-amber-400',
-  notebook_edit: 'text-amber-400',
-  bash: 'text-green-400',
-  bash_output: 'text-green-400',
-  kill_shell: 'text-green-400',
-  git: 'text-orange-400',
-  dispatch_agent: 'text-purple-400',
-  todo_write: 'text-blue-400',
-  web_fetch: 'text-cyan-400',
-  web_search: 'text-cyan-400',
-  load_skill: 'text-violet-400',
-  ask_followup_question: 'text-warning',
-  exit_plan_mode: 'text-teal-400',
-  compact: 'text-slate-400',
-  mcp: 'text-indigo-400',
-};
+const TEXT_COLOR = TOOL_TEXT_COLOR as Partial<Record<ToolName, string>>;
 
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07/g;
 
@@ -163,7 +141,7 @@ export function AgentStatusChip({ status }: { status: AgentStatus }) {
     >
       {status === 'running' ? (
         <>
-          <Loader2 className="size-2.5 animate-spin" />
+          <PixelLoader variant="orbit" size="xs" />
           running…
         </>
       ) : status === 'done' ? (
@@ -835,7 +813,7 @@ function StatusGlyph({ call }: { call: ToolCall }) {
       return <MessageCircleQuestionMark className="size-3 text-primary animate-pulse" />;
     case 'pending':
     case 'running':
-      return <Loader2 className="size-3 text-muted-foreground animate-spin" />;
+      return <PixelLoader variant="orbit" size="xs" className="text-muted-foreground" />;
     default:
       return <X className="size-3 text-warning" />;
   }

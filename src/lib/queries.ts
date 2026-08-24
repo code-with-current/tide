@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import * as api from './api/client';
 import { useUi, COMPOSER_NEW_KEY, FORK_ATTACHMENT_PATH } from './stores/ui';
 import { toast } from './toast';
-import type { RagDownloadProgressEvent, RagInitProgressEvent, ReasoningOption, WorkspaceProgressEvent } from '@/types';
+import type { RagDownloadProgressEvent, RagInitProgressEvent, ReasoningOption, SourceProgressEvent, WorkspaceProgressEvent } from '@/types';
 
 /** Module-level QueryClient singleton. Exported so non-React code (e.g. shortcutActions.ts) can read cached query data without a hook context. */
 export const queryClient = new QueryClient({
@@ -29,6 +29,7 @@ export const qk = {
   gitStatus: (workspaceId: string) => ['gitStatus', workspaceId] as const,
   sessionMessagesV2: (sessionId: string) => ['session-messages-v2', sessionId] as const,
   ragStatus: (workspaceId: string) => ['ragStatus', workspaceId] as const,
+  sources: (workspaceId?: string) => ['sources', workspaceId ?? 'global'] as const,
   agentSettings: ['agentSettings'] as const,
 };
 
@@ -886,5 +887,74 @@ export function useRagDownloadProgress(): RagDownloadProgressEvent | null {
     });
     return unsubscribe;
   }, []);
+  return event;
+}
+
+// ============================================================
+// Knowledge sources
+// ============================================================
+
+export function useSources(workspaceId?: string | null) {
+  return useQuery({
+    queryKey: qk.sources(workspaceId ?? undefined),
+    queryFn: () => api.listSources(workspaceId ?? undefined),
+  });
+}
+
+export function useAddSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: api.AddSourceInput) => api.addSource(input),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+  });
+}
+
+export function useUpdateSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] } }) =>
+      api.updateSource(id, patch),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+  });
+}
+
+export function useRemoveSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.removeSource(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+  });
+}
+
+export function useSetSourceEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, workspaceId, enabled }: { id: string; workspaceId: string; enabled: boolean }) =>
+      api.setSourceEnabled(id, workspaceId, enabled),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+  });
+}
+
+export function useReindexSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.reindexSource(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+  });
+}
+
+/** Live ingestion progress for the sources list. Every event also invalidates
+ *  all sources queries so status/chunkCount re-fetch without waiting for
+ *  staleTime. */
+export function useSourcesProgress(): SourceProgressEvent | null {
+  const qc = useQueryClient();
+  const [event, setEvent] = useState<SourceProgressEvent | null>(null);
+  useEffect(() => {
+    const unsubscribe = api.subscribeSourcesProgress((e) => {
+      setEvent(e);
+      void qc.invalidateQueries({ queryKey: ['sources'] });
+    });
+    return unsubscribe;
+  }, [qc]);
   return event;
 }

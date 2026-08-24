@@ -1,0 +1,440 @@
+/* Ported from openchamber/openchamber (MIT): packages/ui/src/styles/index.css
+ * (markdown-content block) + styles/design-system.css (token scaffolding).
+ *
+ * Adaptation for Tide: upstream generates `--surface-*` / `--interactive-*` /
+ * `--status-*` tokens at runtime from its theme registry (cssGenerator.ts).
+ * Tide has static shadcn-style tokens toggled by a `.dark` class on <html>
+ * (next-themes `class` strategy), so those tokens are re-expressed here as
+ * aliases of Tide's existing `--background/--card/--muted/...` variables,
+ * scoped under `.oc-chat`. Dark values resolve through Tide's own `.dark`
+ * overrides — only the tokens Tide has no equivalent for (status colors,
+ * syntax palette, markdown typography) carry their own light/dark values.
+ * App-shell tokens unrelated to chat (safe areas, glass surfaces, scrollbars,
+ * sidebar, charts) are deliberately not ported.
+ */
+
+.oc-chat {
+  /* ── Surface tokens (upstream Theme.colors.surface.*) ─────────────── */
+  --surface-background: var(--background);
+  --surface-foreground: var(--foreground);
+  --surface-muted: var(--muted);
+  --surface-muted-foreground: var(--muted-foreground);
+  --surface-elevated: var(--card);
+  --surface-elevated-foreground: var(--card-foreground);
+  --surface-overlay: var(--popover);
+  --surface-subtle: var(--accent);
+
+  /* ── Interactive tokens (upstream Theme.colors.interactive.*) ─────── */
+  --interactive-hover: var(--accent);
+  --interactive-active: var(--accent);
+  --interactive-border: var(--border);
+  --interactive-border-hover: var(--border);
+  --interactive-border-focus: var(--ring);
+  --interactive-focus-ring: var(--ring);
+
+  /* ── Status tokens (upstream Theme.colors.status.*) ───────────────── */
+  --status-success: hsl(142 71% 40%);
+  --status-warning: hsl(38 92% 42%);
+  --status-error: var(--destructive);
+  --status-info: hsl(217 91% 55%);
+
+  /* ── Markdown typography (upstream semantic typography defaults) ──── */
+  --text-markdown: 0.9375rem;
+  --text-code: 0.8125rem;
+  --text-meta: 0.875rem;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Liberation Mono', Menlo, monospace;
+
+  /* ── Markdown prose tokens (upstream --markdown-* var fallbacks) ──── */
+  --markdown-paragraph-spacing: 0.75rem;
+  --markdown-heading1: var(--primary);
+  --markdown-heading2: var(--primary);
+  --markdown-heading3: var(--primary);
+  --markdown-heading4: var(--foreground);
+  --markdown-link: var(--primary);
+  --markdown-link-hover: var(--primary);
+  --markdown-blockquote: var(--muted-foreground);
+  --markdown-blockquote-border: var(--border);
+  --markdown-inline-code: var(--foreground);
+  --markdown-inline-code-bg: var(--surface-muted);
+
+  /* ── Syntax palette (mirrors markdown-syntax-vars.ts, pinned to dark) ──
+     The renderer applies the same vars as inline styles from
+     getMarkdownSyntaxVars(); these CSS values are the static fallback so
+     code still colors when the inline pass has not run. Code blocks use the
+     dark palette in both themes. */
+  --md-syntax-foreground: hsl(226 30% 86%);
+  --md-syntax-comment: hsl(222 14% 62%);
+  --md-syntax-string: hsl(138 44% 66%);
+  --md-syntax-number: hsl(268 60% 76%);
+  --md-syntax-keyword: hsl(302 48% 74%);
+  --md-syntax-operator: hsl(220 12% 70%);
+  --md-syntax-function: hsl(207 82% 70%);
+  --md-syntax-type: hsl(186 55% 64%);
+  --md-syntax-variable: hsl(218 26% 82%);
+  --md-syntax-property: hsl(184 46% 68%);
+  --md-syntax-inserted: hsl(142 60% 52%);
+  --md-syntax-deleted: var(--destructive);
+
+  color-scheme: light;
+}
+
+.dark .oc-chat {
+  --status-success: hsl(142 60% 52%);
+  --status-warning: hsl(42 88% 60%);
+  --status-info: hsl(213 90% 66%);
+
+  /* Syntax palette is pinned to the dark values in the base scope. */
+
+  color-scheme: dark;
+}
+
+/* ── KaTeX theme overrides (ported from upstream index.css) ──────────── */
+.oc-chat .katex {
+  color: var(--foreground);
+}
+
+.oc-chat .katex .mord,
+.oc-chat .katex .mopen,
+.oc-chat .katex .mclose,
+.oc-chat .katex .mbin,
+.oc-chat .katex .mrel,
+.oc-chat .katex .mpunct,
+.oc-chat .katex .mop,
+.oc-chat .katex .minner {
+  color: inherit;
+}
+
+.oc-chat .katex-error {
+  color: var(--destructive);
+}
+
+/* ── markdown-content typography (ported from upstream index.css) ────── */
+.oc-chat .markdown-content {
+  font-family: inherit;
+  font-size: var(--text-markdown);
+  line-height: inherit;
+}
+
+.oc-chat .markdown-content p,
+.oc-chat .markdown-content li,
+.oc-chat .markdown-content blockquote,
+.oc-chat .markdown-content td,
+.oc-chat .markdown-content th {
+  line-height: inherit;
+}
+
+/* Restore paragraph block spacing (Tailwind preflight zeroes <p> margins). */
+.oc-chat .markdown-content p {
+  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+}
+
+/* The renderer wraps each block in a display:contents [data-md-block]
+   element; drop the trailing margin on the last paragraph of the last block
+   so messages don't gain extra space at the bottom. */
+.oc-chat .markdown-content > [data-md-block]:last-child p:last-child {
+  margin-bottom: 0;
+}
+
+/* Tool cards (code size) and reasoning (meta size, dimmed) are compact. */
+.oc-chat .markdown-content.markdown-tool p,
+.oc-chat .markdown-content.markdown-reasoning p {
+  margin-bottom: 0;
+}
+
+.oc-chat .markdown-content.markdown-tool {
+  font-size: var(--text-code) !important;
+}
+
+.oc-chat .markdown-content.markdown-reasoning {
+  font-size: var(--text-markdown);
+  color: var(--surface-muted-foreground);
+  --markdown-heading1: inherit;
+  --markdown-heading2: inherit;
+  --markdown-heading3: inherit;
+  --markdown-heading4: inherit;
+  --markdown-link: inherit;
+  --markdown-link-hover: var(--surface-foreground);
+  --markdown-blockquote: inherit;
+}
+
+.oc-chat .markdown-content.markdown-reasoning p,
+.oc-chat .markdown-content.markdown-reasoning li,
+.oc-chat .markdown-content.markdown-reasoning td,
+.oc-chat .markdown-content.markdown-reasoning th,
+.oc-chat .markdown-content.markdown-reasoning h1,
+.oc-chat .markdown-content.markdown-reasoning h2,
+.oc-chat .markdown-content.markdown-reasoning h3,
+.oc-chat .markdown-content.markdown-reasoning h4,
+.oc-chat .markdown-content.markdown-reasoning h5,
+.oc-chat .markdown-content.markdown-reasoning h6,
+.oc-chat .markdown-content.markdown-reasoning strong,
+.oc-chat .markdown-content.markdown-reasoning b,
+.oc-chat .markdown-content.markdown-reasoning em,
+.oc-chat .markdown-content.markdown-reasoning del {
+  color: var(--surface-muted-foreground) !important;
+}
+
+.oc-chat .markdown-content.markdown-reasoning a,
+.oc-chat .markdown-content [data-openchamber-file-link='true'] {
+  color: var(--surface-muted-foreground);
+}
+
+.oc-chat .markdown-content.markdown-reasoning a:hover {
+  color: var(--surface-foreground) !important;
+}
+
+.oc-chat .markdown-content.markdown-tool code,
+.oc-chat .markdown-content.markdown-tool pre {
+  font-size: inherit !important;
+}
+
+/* Headers: proportional, not oversized. */
+.oc-chat .markdown-content h1 {
+  font-size: 1.125em;
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.oc-chat .markdown-content h2 {
+  font-size: 1.0625em;
+  font-weight: 600;
+  margin-top: 0.875em;
+  margin-bottom: 0.375em;
+}
+
+.oc-chat .markdown-content h3 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+
+.oc-chat .markdown-content h4,
+.oc-chat .markdown-content h5,
+.oc-chat .markdown-content h6 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 0.625em;
+  margin-bottom: 0.25em;
+}
+
+.oc-chat .markdown-content code,
+.oc-chat .markdown-content pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+
+.oc-chat .markdown-content code[data-markdown='inline-code'] {
+  background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
+  color: var(--markdown-inline-code, var(--foreground)) !important;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+.oc-chat .markdown-content h1 {
+  color: var(--markdown-heading1, var(--primary));
+}
+
+.oc-chat .markdown-content h2 {
+  color: var(--markdown-heading2, var(--primary));
+}
+
+.oc-chat .markdown-content h3 {
+  color: var(--markdown-heading3, var(--primary));
+}
+
+.oc-chat .markdown-content h4,
+.oc-chat .markdown-content h5,
+.oc-chat .markdown-content h6 {
+  color: var(--markdown-heading4, var(--foreground));
+}
+
+.oc-chat .markdown-content a {
+  color: var(--markdown-link, var(--primary));
+}
+
+.oc-chat .markdown-content a:hover {
+  color: var(--markdown-link-hover, var(--primary));
+}
+
+.oc-chat .markdown-content [data-openchamber-file-link='true'] {
+  color: var(--markdown-link, var(--primary));
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.oc-chat .markdown-content [data-openchamber-file-link='true']:hover {
+  color: var(--markdown-link-hover, var(--primary));
+}
+
+.oc-chat .markdown-content a[data-openchamber-agent-mention='true'],
+.oc-chat .markdown-content a[data-skill-name] {
+  color: var(--primary);
+}
+
+.oc-chat .markdown-content a[data-openchamber-agent-mention='true']:hover,
+.oc-chat .markdown-content a[data-skill-name]:hover {
+  color: var(--primary);
+}
+
+.oc-chat .markdown-content blockquote {
+  color: var(--markdown-blockquote, var(--muted-foreground));
+  border-left-color: var(--markdown-blockquote-border, var(--border));
+}
+
+.oc-chat .markdown-content hr {
+  border-color: var(--border);
+}
+
+.oc-chat .markdown-content strong {
+  color: var(--foreground);
+}
+
+.oc-chat .markdown-content em {
+  color: var(--foreground);
+}
+
+.oc-chat .markdown-content del {
+  color: var(--muted-foreground);
+}
+
+/* Restore default list styling inside markdown content — Tailwind preflight. */
+.oc-chat .markdown-content ul,
+.oc-chat .markdown-content ol {
+  padding-left: 2em !important;
+}
+
+.oc-chat .markdown-content ul {
+  list-style-type: none !important;
+}
+
+.oc-chat .markdown-content ul > li {
+  position: relative;
+}
+
+.oc-chat .markdown-content ul > li::before {
+  content: '–';
+  position: absolute;
+  left: -1.25em;
+  color: inherit;
+}
+
+.oc-chat .markdown-content ol {
+  list-style-type: decimal !important;
+  list-style-position: outside !important;
+}
+
+.oc-chat .markdown-content li {
+  display: list-item !important;
+}
+
+/* ── Code block internals (decorate.ts line layout) ──────────────────── */
+.oc-chat .markdown-content [data-md-code-lines] {
+  display: block;
+  min-width: 100%;
+}
+
+.oc-chat .markdown-content [data-md-code-line] {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  min-width: 100%;
+}
+
+.oc-chat .markdown-content [data-md-code-line-number] {
+  align-self: stretch;
+  padding-right: 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.oc-chat .markdown-content [data-md-code-line-content] {
+  min-width: 0;
+}
+
+.oc-chat .markdown-content [data-md-code-line-break] {
+  display: none;
+}
+
+/* ── Mermaid blocks ──────────────────────────────────────────────────── */
+.oc-chat [data-markdown='mermaid-block'] {
+  position: relative;
+  border-radius: 0.75rem;
+  border: 1px solid var(--interactive-border);
+  background: var(--surface-elevated);
+  padding: 0.5rem;
+}
+
+.oc-chat [data-markdown='mermaid-block'] [data-markdown='mermaid-scroll'] {
+  overflow: auto;
+  min-width: 0;
+}
+
+.oc-chat [data-markdown='mermaid-block'][data-mermaid-render='svg'] [data-markdown='mermaid-scroll'] {
+  overflow: hidden;
+}
+
+.oc-chat [data-markdown='mermaid-block'] [data-markdown='mermaid-viewport'] {
+  width: 100%;
+  min-width: 0;
+  height: min(24rem, 70vh);
+  min-height: 12rem;
+  overflow: hidden;
+  touch-action: none;
+  border-radius: 0.5rem;
+  background: var(--surface-elevated);
+}
+
+.oc-chat [data-markdown='mermaid-block'] [data-markdown='mermaid'] {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.oc-chat [data-markdown='mermaid-block'][data-mermaid-panning='true'] [data-markdown='mermaid-viewport'] {
+  cursor: grabbing;
+}
+
+.oc-chat [data-markdown='mermaid-block'] [data-markdown='mermaid-ascii'] {
+  margin: 0;
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+  font-family: var(--font-mono);
+  color: var(--surface-foreground);
+  background: transparent;
+}
+
+.oc-chat [data-markdown='mermaid-block'] [data-markdown='mermaid'] svg {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
+  max-width: none !important;
+  display: block;
+  background: var(--surface-elevated);
+}
+
+/* ── Gallery caption meta (MarkdownImageGallery) ─────────────────────── */
+.oc-chat .typography-meta {
+  font-size: var(--text-meta);
+}
+
+/* ── Sticky user header vs. floating todo HUD (Tide-native) ────────────
+   The ported TurnItem pins the user message to the top of the scrollport
+   while its turn scrolls past; Tide's TodoFloatingPanel (mounted above the
+   timeline in main-screen) owns that same top-right region. When the HUD is
+   present, the stuck bubble would slide underneath it — so the sticky
+   affordance yields (header scrolls normally) until the HUD is dismissed
+   or the list settles+is dismissed. Scoped from <body> because the HUD is
+   a sibling of the timeline, not a descendant of .oc-chat. */
+body:has(.todo-floating-panel) .oc-sticky-user-header {
+  position: relative;
+}

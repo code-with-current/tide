@@ -21,6 +21,29 @@ function removePendingPermissionCards(sessionId: string, ids: string[]): void {
   useUi.getState().removePermissionCards(sessionId, ids);
 }
 
+/** Flip approved tool rows back to `running` so the inline permission cards
+ *  unmount — the next tool_result for the same id lands the final status. */
+function markApprovedToolCallsRunning(sessionId: string, ids: string[]): void {
+  const stream = useUi.getState().streams[sessionId];
+  if (!stream) return;
+  const idSet = new Set(ids);
+  const patch: Partial<SessionStream> = {};
+  if (stream.toolCalls.some((c) => idSet.has(c.id) && c.status === 'awaiting_input')) {
+    patch.toolCalls = stream.toolCalls.map((c) =>
+      idSet.has(c.id) && c.status === 'awaiting_input' ? { ...c, status: 'running' as const } : c,
+    );
+  }
+  const blocks = stream.blocks;
+  if (blocks?.some((b) => b.kind === 'tool' && b.toolCallId != null && idSet.has(b.toolCallId) && b.status === 'awaiting_input')) {
+    patch.blocks = blocks.map((b) =>
+      b.kind === 'tool' && b.toolCallId != null && idSet.has(b.toolCallId) && b.status === 'awaiting_input'
+        ? { ...b, status: 'running' as const }
+        : b,
+    );
+  }
+  if (patch.toolCalls || patch.blocks) useUi.getState().patchStream(sessionId, patch);
+}
+
 export function useChatStream(): {
   start: (args: ChatStreamStartArgs) => Promise<void>;
   abort: (sessionId: string) => void;
@@ -85,6 +108,7 @@ export function useChatStream(): {
     ) => {
       if (!ipc) return;
       ipc.approveToolCalls(sessionId, toolCallIds, newMode, remember);
+      markApprovedToolCallsRunning(sessionId, toolCallIds);
       // Mode escalation auto-approves every other pending ask main-side —
       // dismiss their cards in the same pass so no dead cards linger.
       const dismissIds = newMode
@@ -327,11 +351,21 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
       // their own permission_required; accumulate so all cards render and
       // each can be approved independently. Replacing here stranded the
       // others' awaits with no UI to resolve them.
-      const prev = state.permissionRequest;
-      if (!prev) return { ...state, permissionRequest: { toolCalls: event.toolCalls, timeoutAt: event.timeoutAt } };
+      // Flag the gated rows in the legacy toolCalls mirror (blocks are patched
+      // by the stream reducer) — the inline PermissionCard mounts only on
+      // pending|awaiting_input, but tool_executing already marked them running.
+      const gatedIds = new Set(event.toolCalls.map((t: { id: string }) => t.id));
+      const toolCalls = state.toolCalls.some((c) => gatedIds.has(c.id) && c.status !== 'awaiting_input')
+        ? state.toolCalls.map((c) =>
+            gatedIds.has(c.id) && c.status !== 'awaiting_input' ? { ...c, status: 'awaiting_input' as const } : c,
+          )
+        : state.toolCalls;
+      const base = toolCalls === state.toolCalls ? state : { ...state, toolCalls };
+      const prev = base.permissionRequest;
+      if (!prev) return { ...base, permissionRequest: { toolCalls: event.toolCalls, timeoutAt: event.timeoutAt } };
       const seen = new Set(prev.toolCalls.map((t) => t.id));
       const merged = [...prev.toolCalls, ...event.toolCalls.filter((t: { id: string }) => !seen.has(t.id))];
-      return { ...state, permissionRequest: { toolCalls: merged, timeoutAt: event.timeoutAt ?? prev.timeoutAt } };
+      return { ...base, permissionRequest: { toolCalls: merged, timeoutAt: event.timeoutAt ?? prev.timeoutAt } };
     }
     case 'followup_required':
       // Fire the options popup directly. Unlike persisted followup blocks

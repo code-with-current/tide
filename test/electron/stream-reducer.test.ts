@@ -162,3 +162,43 @@ describe('applyDelta — concurrent sub-agent interleaving', () => {
     expect(texts.find((b) => b.id === 'a-seg')?.kind === 'text' ? (texts.find((b) => b.id === 'a-seg') as any).text : '').toBe('child text');
   });
 });
+
+describe('permission_required — gated tool rows', () => {
+  const toolStart = (id: string, name = 'bash'): AgentEvent =>
+    ({ type: 'tool_call_start', sessionId: 's', seq: ++seq, messageId: 'm', toolCallId: id, blockId: id, toolName: name }) as AgentEvent;
+  const toolExecuting = (id: string): AgentEvent =>
+    ({ type: 'tool_executing', sessionId: 's', seq: ++seq, toolCallId: id }) as AgentEvent;
+  const permissionRequired = (id: string): AgentEvent =>
+    ({ type: 'permission_required', sessionId: 's', seq: ++seq, toolCalls: [{ id }], timeoutAt: Date.now() + 1000 }) as AgentEvent;
+
+  it('flags a running tool block as awaiting_input when the gate asks (tool_executing fires before the ask)', () => {
+    let s = initial();
+    s = reduceStream(s, toolStart('t1'));
+    s = reduceStream(s, toolExecuting('t1'));
+    const b0 = s.blocks?.[0];
+    expect(b0 && b0.kind === 'tool' ? b0.status : undefined).toBe('running');
+
+    s = reduceStream(s, permissionRequired('t1'));
+    const b1 = s.blocks?.[0];
+    expect(b1 && b1.kind === 'tool' ? b1.status : undefined).toBe('awaiting_input');
+  });
+
+  it('is idempotent for repeated asks and leaves other blocks untouched', () => {
+    let s = initial();
+    s = reduceStream(s, toolStart('t1'));
+    s = reduceStream(s, toolStart('t2'));
+    s = reduceStream(s, toolExecuting('t2'));
+    s = reduceStream(s, permissionRequired('t2'));
+    s = reduceStream(s, permissionRequired('t2'));
+    const statuses = (s.blocks ?? []).map((b) => (b.kind === 'tool' ? b.status : b.kind));
+    expect(statuses).toEqual(['pending', 'awaiting_input']);
+  });
+
+  it('ignores asks for unknown tool ids (no block to flag)', () => {
+    let s = initial();
+    s = reduceStream(s, toolStart('t1'));
+    const before = s.blocks;
+    s = reduceStream(s, permissionRequired('ghost'));
+    expect(s.blocks).toBe(before);
+  });
+});

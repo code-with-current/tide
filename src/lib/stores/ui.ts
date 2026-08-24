@@ -199,6 +199,20 @@ export function terminalScopeKey(s: { activeSessionId: string | null; activeDraf
   return 'default';
 }
 
+/** Right-panel scope key — mirrors the tabs store's session keying so a
+ *  session's panel open state and active tab always resolve together. */
+export function rightPanelKey(s: { activeSessionId: string | null }): string {
+  return s.activeSessionId ?? 'default';
+}
+
+/** Read the active session's right-panel open state. Missing entry = closed. */
+export function isRightPanelOpen(s: {
+  activeSessionId: string | null;
+  rightPanelOpen: Record<string, boolean>;
+}): boolean {
+  return s.rightPanelOpen[rightPanelKey(s)] ?? false;
+}
+
 /** Make a terminal name unique within a session by appending a numbered suffix ("name (1)", "name (2)") when the base name is taken — Finder/VS Code convention. The (N) suffix counts toward comparison so re-adding "test" with "test (1)" present lands on "test (2)". */
 function dedupeTerminalName(base: string, existing: TerminalInstance[]): string {
   const taken = new Set(existing.map((t) => t.name));
@@ -245,7 +259,11 @@ interface UiState {
   /** Native window fullscreen state, bridged from main. The macOS
    *  traffic-light spacer collapses to zero while fullscreen (buttons hide). */
   isFullScreen: boolean;
-  rightPanelOpen: boolean;
+  /** Right-panel open state per session (keyed by sessionId; 'default' when
+   *  none). Missing entry = closed — fresh sessions and first launches start
+   *  collapsed, and each session restores its own toggle on switch and across
+   *  restarts (persisted). */
+  rightPanelOpen: Record<string, boolean>;
   /** Dedicated file-viewer panel (separate from the tabbed right panel). */
   fileViewerOpen: boolean;
   /** Right-sheet (file viewer / commit details) width as a viewport percentage (25–70). Persisted. */
@@ -561,7 +579,7 @@ export const useUi = create<UiState>()(
   activeWorkspaceId: null,
   activeSessionId: null,
   isFullScreen: false,
-  rightPanelOpen: true,
+  rightPanelOpen: {},
   fileViewerOpen: false,
   sheetWidth: 40,
   setSheetWidth: (w) => set({ sheetWidth: Math.max(25, Math.min(60, w)) }),
@@ -624,7 +642,9 @@ export const useUi = create<UiState>()(
   setMainView: (mainView) =>
     set((s) => ({
       mainView,
-      rightPanelOpen: mainView === 'chat' && s.mainView === 'new' ? false : s.rightPanelOpen,
+      ...(mainView === 'chat' && s.mainView === 'new'
+        ? { rightPanelOpen: { ...s.rightPanelOpen, [rightPanelKey(s)]: false } }
+        : {}),
     })),
   addComposerAttachment: (key, f) =>
     set((state) => {
@@ -803,7 +823,6 @@ export const useUi = create<UiState>()(
       activeDraftId: null,
       mainView: 'chat',
       sessionLastActive,
-      rightPanelOpen: state.mainView === 'new' ? false : state.rightPanelOpen,
     });
     if (activeSessionId) get().setPendingFork(null);
 
@@ -839,6 +858,7 @@ export const useUi = create<UiState>()(
     const { [sessionId]: _cpr, ...restComposerPendingReads } = state.composerPendingReads;
     const { [sessionId]: _cd, ...restComposerDrafts } = state.composerDrafts;
     const { [sessionId]: _ss, ...restSessionSettings } = state.sessionSettings;
+    const { [sessionId]: _rp, ...restRightPanelOpen } = state.rightPanelOpen;
     const killedIds = new Set(terms.map((t) => t.id));
     set({
       terminals: restTerminals,
@@ -855,10 +875,16 @@ export const useUi = create<UiState>()(
       composerPendingReads: restComposerPendingReads,
       composerDrafts: restComposerDrafts,
       sessionSettings: restSessionSettings,
+      rightPanelOpen: restRightPanelOpen,
     });
   },
-  toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
-  setRightPanel: (open) => set({ rightPanelOpen: open }),
+  toggleRightPanel: () =>
+    set((s) => {
+      const key = rightPanelKey(s);
+      return { rightPanelOpen: { ...s.rightPanelOpen, [key]: !(s.rightPanelOpen[key] ?? false) } };
+    }),
+  setRightPanel: (open) =>
+    set((s) => ({ rightPanelOpen: { ...s.rightPanelOpen, [rightPanelKey(s)]: open } })),
   toggleFileViewer: () => set((s) => ({ fileViewerOpen: !s.fileViewerOpen })),
   setCommitDetail: (c) => set({ commitDetail: c }),
   toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
@@ -1123,15 +1149,17 @@ export const useUi = create<UiState>()(
       // terminal tab is what's on screen (leaves other tabs like Files
           // untouched). Keyed off the viewer's scope (activeSessionId), not
       // the terminal bucket (which may be a draft).
-      const viewerKey = s.activeSessionId ?? 'default';
+      const viewerKey = rightPanelKey(s);
       const panelShowingTerminal =
         list.length === 0 &&
-        s.rightPanelOpen &&
+        (s.rightPanelOpen[viewerKey] ?? false) &&
         useTabs.getState().active[viewerKey] === 'terminal';
       return {
         terminals: { ...s.terminals, [sessionId]: list },
         activeTerminal: { ...s.activeTerminal, [sessionId]: newActive },
-        ...(panelShowingTerminal ? { rightPanelOpen: false } : {}),
+        ...(panelShowingTerminal
+          ? { rightPanelOpen: { ...s.rightPanelOpen, [viewerKey]: false } }
+          : {}),
         // Drop any ports detected for the closed terminal — the dev
         // server behind them is gone.
         ...(s.terminalPorts[id]
@@ -1331,6 +1359,7 @@ export const useUi = create<UiState>()(
         thinkingLevel: s.thinkingLevel,
         starredModels: s.starredModels,
         leftPanelOpen: s.leftPanelOpen,
+        rightPanelOpen: s.rightPanelOpen,
         sessionsPanelOpen: s.sessionsPanelOpen,
         sidebarMode: s.sidebarMode,
         sidebarWidth: s.sidebarWidth,
@@ -1367,10 +1396,6 @@ export const useUi = create<UiState>()(
         // died with the app. Force the running set empty so a stale persisted
         // blob can't restore running indicators for dead turns.
         runningSessionIds: [],
-        // The right panel always starts closed after a restart — it shows
-        // session-scoped data (terminal, files, inspector) that belongs to
-        // the previous app run, not a fresh start.
-        rightPanelOpen: false,
         // Strip 'default'-bucket terminals left by the pre-draft-keying bug:
         // they were draft-phase strays that leaked into every new-session
         // screen. Real buckets are session ids or 'draft:<id>' — never bare.

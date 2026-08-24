@@ -1,8 +1,15 @@
-/** memory tool — semantic + full-text search over the workspace RAG index. Verifies RAG is enabled, opens the store, resolves the embedder that built the index, embeds the query, and merges vector + FTS top-K via reciprocal rank fusion (RRF, k=60). Read-only and auto-approved. */
+/** memory tool — semantic + full-text search over the workspace RAG index,
+ *  fused with the global knowledge-sources index (filtered to sources
+ *  enabled for this workspace). Verifies RAG, opens both stores, resolves
+ *  the embedder that built each index, embeds the query, and merges
+ *  vector + FTS top-K via reciprocal rank fusion (RRF, k=60). Knowledge
+ *  hits are labeled with their doc origin so the model can cite
+ *  "docs.react.dev" vs repo files. Read-only and auto-approved. */
 
 import { tool } from 'ai';
 import { z } from 'zod';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
 import type { ToolContext } from './tool-context.js';
 import { openRagStore, type VectorHit, type FtsHit } from '../../rag/store.js';
 import { resolveForQuery } from '../../rag/resolve.js';
@@ -10,6 +17,8 @@ import { localModelExists } from '../../rag/local-onnx-embedder.js';
 import { isRagCloudConfigured } from '../system-model.js';
 import { hydrateRagConfig } from '../../configStore.js';
 import * as workspaceStore from '../../store.js';
+import { knowledgeDbPath, openKnowledgeStore } from '../../knowledge/store.js';
+import type { Embedder } from '../../rag/embedder.js';
 import type { ToolResult, ToolRegistration } from './types';
 
 const DEFAULT_K = 5;
@@ -17,6 +26,21 @@ const MAX_K = 20;
 /** RRF constant. Standard value from the original TREC paper; balances
  *  head vs tail of the rankings without tuning. */
 const RRF_K = 60;
+
+/** Knowledge hit decorated with its source's display name so results can cite the origin ("React Docs · react.dev/guide") distinctly from repo files. */
+type KnowledgeHit = (VectorHit | FtsHit) & { sourceName: string };
+
+const NO_KNOWLEDGE: { hits: KnowledgeHit[]; total: number } = { hits: [], total: 0 };
+
+/** Tagged preparation failures: the workspace half surfaces these fatally;
+ *  the knowledge half treats any of them as "no knowledge results". */
+class RagUnusableError extends Error {}
+class QueryEmbedError extends Error {}
+
+interface PreparedQuery {
+  embedderId: string;
+  queryVec: number[];
+}
 
 /** Shared body — testable without the SDK wrapper. ctx-free; the
  *  workspaceId comes from the caller (the SDK factory pulls it from
@@ -36,82 +60,114 @@ export async function runMemory(
     };
   }
 
-  // 1. Workspace must be in the enabled list. The hint is actionable:
-  //    the user (or model, if it has shell access) can navigate to
-  //    Settings → Memory & RAG and toggle it on.
-  const enabled = workspaceStore.listRagEnabledWorkspaces();
-  if (!enabled.includes(workspaceId)) {
-    return {
-      status: 'executed',
-      output:
-        `RAG is not enabled for this workspace. ` +
-        `Enable it in Settings → Memory & RAG (toggles the Switch on for this workspace; ` +
-        `ingestion will run automatically on first enable).`,
-    };
-  }
+  // 1. Workspace gate governs only the workspace half — a workspace with
+  //    RAG disabled still reaches registered knowledge sources.
+  const wsEnabled =
+    workspaceStore.listRagEnabledWorkspaces().includes(workspaceId);
 
-  // 2. Open the store. If this throws (sqlite-vec missing, db corrupt),
-  //    surface the actual error rather than a generic "failed".
-  let ragStore;
-  try {
-    ragStore = openRagStore(workspaceId);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { status: 'failed', output: `Failed to open RAG index: ${msg}` };
-  }
-
-  try {
-    const total = ragStore.chunkCount();
-    if (total === 0) {
-      return {
-        status: 'executed',
-        output:
-          `RAG index for this workspace is empty. ` +
-          `Re-trigger ingestion from Settings → Memory & RAG → Re-index.`,
-      };
-    }
-
-    // 3. Resolve the query-time embedder. resolveForQuery refuses to cross
-    //    embedders — a local-built index whose runtime died throws rather
-    //    than silently re-embedding via cloud (vectors would mismatch).
-    const ws = workspaceStore.listWorkspaces().find((w) => w.id === workspaceId);
-    const ragConfig = hydrateRagConfig(ws?.ragConfig);
-    let embedder;
+  // 2. Open the workspace store. If this throws (sqlite-vec missing, db
+  //    corrupt), surface the actual error rather than a generic "failed".
+  let ragStore: ReturnType<typeof openRagStore> | null = null;
+  if (wsEnabled) {
     try {
-      ({ embedder } = resolveForQuery({
-        config: ragConfig,
-        localAvailable: localModelExists(),
-        cloudConfigured: isRagCloudConfigured(),
-      }));
+      ragStore = openRagStore(workspaceId);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      return {
-        status: 'failed',
-        output: `RAG index unusable: ${msg}`,
-      };
+      return { status: 'failed', output: `Failed to open RAG index: ${msg}` };
     }
+  }
 
-    // 4. Embed the query + run both searches.
+  try {
+    const wsTotal = ragStore?.chunkCount() ?? 0;
+
+    // 3. Query preparation (embedder resolution + query embedding) is lazy
+    //    and memoized: paid at most once, and never started when no half
+    //    ends up needing it. Failures are tagged so the workspace half can
+    //    surface them fatally while the knowledge half swallows them.
     const kClamped = Math.min(Math.max(k, 1), MAX_K);
-    let queryVec: number[];
-    try {
-      const vecs = await embedder.embed([query]);
-      queryVec = vecs[0];
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { status: 'failed', output: `Embedding query failed: ${msg}` };
+    let prepared: PreparedQuery | null = null;
+    const prepareQuery = async (): Promise<PreparedQuery> => {
+      if (!prepared) {
+        let embedder: Embedder;
+        let embedderId: string;
+        try {
+          const ws = workspaceStore.listWorkspaces().find((w) => w.id === workspaceId);
+          const ragConfig = hydrateRagConfig(ws?.ragConfig);
+          ({ embedder, embedderId } = resolveForQuery({
+            config: ragConfig,
+            localAvailable: localModelExists(),
+            cloudConfigured: isRagCloudConfigured(),
+          }));
+        } catch (e: unknown) {
+          throw new RagUnusableError(
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+        try {
+          const vecs = await embedder.embed([query]);
+          prepared = { embedderId, queryVec: vecs[0] };
+        } catch (e: unknown) {
+          throw new QueryEmbedError(
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
+      return prepared;
+    };
+
+    if (wsEnabled) {
+      try {
+        await prepareQuery();
+      } catch (e: unknown) {
+        if (e instanceof RagUnusableError) {
+          return { status: 'failed', output: `RAG index unusable: ${e.message}` };
+        }
+        return { status: 'failed', output: `Embedding query failed: ${(e as Error).message}` };
+      }
     }
 
-    const vecHits = ragStore.queryByVector(queryVec, kClamped);
-    const ftsHits = ragStore.queryByFts(query, kClamped);
+    let wsFused: Array<VectorHit | FtsHit> = [];
+    if (ragStore && wsTotal > 0) {
+      const { queryVec } = await prepareQuery();
+      wsFused = fuse(
+        ragStore.queryByVector(queryVec, kClamped),
+        ragStore.queryByFts(query, kClamped),
+        kClamped,
+      );
+    }
 
-    // 5. Reciprocal rank fusion.
-    const fused = fuse(vecHits, ftsHits, kClamped);
+    const knowledge = await searchKnowledgeSources({
+      workspaceId,
+      query,
+      k: kClamped,
+      prepareQuery,
+    });
+
+    // 5. Reciprocal rank fusion: within each store first, then across stores.
+    const fused = fuse(wsFused, knowledge.hits, kClamped);
+    const grandTotal = wsTotal + knowledge.total;
 
     if (fused.length === 0) {
+      if (!wsEnabled) {
+        return {
+          status: 'executed',
+          output:
+            `RAG is not enabled for this workspace. ` +
+            `Enable it in Settings → Memory & RAG (toggles the Switch on for this workspace; ` +
+            `ingestion will run automatically on first enable).`,
+        };
+      }
+      if (wsTotal === 0) {
+        return {
+          status: 'executed',
+          output:
+            `RAG index for this workspace is empty. ` +
+            `Re-trigger ingestion from Settings → Memory & RAG → Re-index.`,
+        };
+      }
       return {
         status: 'executed',
-        output: `No matches for "${query}" across ${total} indexed chunks.`,
+        output: `No matches for "${query}" across ${grandTotal} indexed chunks.`,
       };
     }
 
@@ -119,8 +175,10 @@ export async function runMemory(
     //    readable and avoid bloating the model's context.
     const BODY_CAP = 1500;
     const lines = fused.map((hit, i) => {
-      const loc = `${shortPath(hit.path)}:${hit.startLine}` +
-        (hit.symbol ? ` (${hit.symbol})` : '');
+      const loc = 'sourceName' in hit
+        ? `[${hit.sourceName}] ${hit.path}`
+        : `${shortPath(hit.path)}:${hit.startLine}` +
+          (hit.symbol ? ` (${hit.symbol})` : '');
       const sim = 'similarity' in hit
         ? ` · ${Math.round(hit.similarity * 100)}%`
         : '';
@@ -132,7 +190,7 @@ export async function runMemory(
 
     const text =
       `Found ${fused.length} relevant chunk${fused.length === 1 ? '' : 's'} ` +
-      `for "${query}" (out of ${total}):\n\n${lines.join('\n\n')}`;
+      `for "${query}" (out of ${grandTotal}):\n\n${lines.join('\n\n')}`;
 
     return {
       status: 'executed',
@@ -141,7 +199,69 @@ export async function runMemory(
       display: { kind: 'text', text },
     };
   } finally {
-    ragStore.close();
+    ragStore?.close();
+  }
+}
+
+/** Search the global knowledge-sources index. Best-effort by design: any
+ *  failure here (db missing/corrupt, registry error) degrades to "no
+ *  knowledge results" so a broken global DB never fails the tool. */
+async function searchKnowledgeSources(opts: {
+  workspaceId: string;
+  query: string;
+  k: number;
+  prepareQuery: () => Promise<PreparedQuery>;
+}): Promise<{ hits: KnowledgeHit[]; total: number }> {
+  try {
+    const dbPath = knowledgeDbPath();
+    // existsSync guard: openRagStoreAt would otherwise create an empty db as a side effect of every query.
+    if (!fs.existsSync(dbPath)) return NO_KNOWLEDGE;
+    const ks = openKnowledgeStore(dbPath);
+    try {
+      const { embedderId, queryVec } = await opts.prepareQuery();
+      // First-embedder-wins pinning (meta.embedderId): silently skip on
+      // mismatch — unlike the workspace path, which surfaces an error.
+      const pinned = ks.rag.getMeta('embedderId');
+      if (pinned && pinned !== embedderId) return NO_KNOWLEDGE;
+
+      const enabledIds = new Set(ks.enabledSourceIdsFor(opts.workspaceId));
+      const sources = ks.listSources();
+      // Total counts only what this workspace can see — chunks behind
+      // disabled sources must not leak into the reported coverage.
+      const visibleChunks = sources
+        .filter((s) => enabledIds.has(s.id))
+        .reduce((n, s) => n + s.chunkCount, 0);
+      if (enabledIds.size === 0 || visibleChunks === 0) return NO_KNOWLEDGE;
+
+      const names = new Map(ks.listSources().map((s) => [s.id, s.name] as const));
+      // Over-fetch then filter by sourceId: cheap post-filtering beats
+      // sqlite-vec metadata-filter complexity (plan decision 4).
+      const overFetch = opts.k * 3;
+      const isEnabled = (
+        h: VectorHit | FtsHit,
+      ): h is (VectorHit | FtsHit) & { sourceId: string } =>
+        h.sourceId != null && enabledIds.has(h.sourceId);
+      const kVec = ks.rag.queryByVector(queryVec, overFetch).filter(isEnabled);
+      const kFts = ks.rag.queryByFts(opts.query, overFetch).filter(isEnabled);
+      const hits: KnowledgeHit[] = fuse(kVec, kFts, opts.k).map((h) => ({
+        ...h,
+        sourceName: names.get(h.sourceId) ?? h.sourceId,
+      }));
+      return { hits, total: visibleChunks };
+    } finally {
+      // A close() failure here must not discard already-computed hits.
+      try {
+        ks.close();
+      } catch {
+        /* nothing actionable */
+      }
+    }
+  } catch (e) {
+    console.warn(
+      '[memory] knowledge search skipped:',
+      e instanceof Error ? e.message : String(e),
+    );
+    return NO_KNOWLEDGE;
   }
 }
 
@@ -186,8 +306,10 @@ export function createMemoryTool(ctx: ToolContext) {
   return tool({
     description:
       'FIRST tool to call for ANY codebase question. Searches the workspace RAG index ' +
-      'by meaning and returns ranked code chunks in ~0.5s. Call this BEFORE directory_tree, ' +
-      'list_dir, read_file, or grep. Returns file path + line range + source body for each match. ' +
+      'and registered knowledge sources by meaning and returns ranked chunks in ~0.5s. ' +
+      'Call this BEFORE directory_tree, list_dir, read_file, or grep. Returns file path + ' +
+      'line range + source body for each match; knowledge-source hits are labeled [source] origin ' +
+      '(e.g. [React Docs] react.dev/learn) — cite that origin when using them. ' +
       'Example: memory({ query: "how is authentication handled" }) → returns the auth files + code.',
     inputSchema: z.object({
       query: z
@@ -218,8 +340,9 @@ export const memoryTool: ToolRegistration = {
     name: 'memory' as const,
     description:
       'FIRST tool to call for ANY codebase question. Searches the workspace RAG index ' +
-      'by meaning and returns ranked code chunks in ~0.5s. Call BEFORE directory_tree, ' +
-      'list_dir, read_file, or grep. Returns file path + line range + source body.',
+      'and registered knowledge sources by meaning and returns ranked chunks in ~0.5s. ' +
+      'Call BEFORE directory_tree, list_dir, read_file, or grep. Returns file path + line ' +
+      'range + source body; knowledge-source hits are labeled [source] origin.',
     input_schema: {
       type: 'object' as const,
       properties: {

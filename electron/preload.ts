@@ -434,6 +434,36 @@ contextBridge.exposeInMainWorld('tideIpc', {
     return () => ipcRenderer.off('tide:rag:downloadProgress', listener);
   },
 
+  // ── Knowledge sources (settings → Knowledge) ──
+  // Registry CRUD + per-workspace enablement + reindex enqueueing. Progress
+  // pushes arrive on 'tide:sources:progress'; the renderer re-fetches via
+  // sourcesList (query invalidation in useSourcesProgress).
+  sourcesList: (workspaceId?: string) =>
+    ipcRenderer.invoke('tide:sources:list', workspaceId),
+  sourcesAdd: (
+    name: string,
+    kind: import('./knowledge/types').SourceKind,
+    location: string,
+    enabledWorkspaceIds?: string[],
+  ) =>
+    ipcRenderer.invoke('tide:sources:add', name, kind, location, enabledWorkspaceIds),
+  sourcesUpdate: (id: string, patch: { name?: string; location?: string; enabledWorkspaceIds?: string[] }) =>
+    ipcRenderer.invoke('tide:sources:update', id, patch),
+  sourcesRemove: (id: string) =>
+    ipcRenderer.invoke('tide:sources:remove', id),
+  sourcesSetEnabled: (id: string, workspaceId: string, enabled: boolean) =>
+    ipcRenderer.invoke('tide:sources:setEnabled', id, workspaceId, enabled),
+  sourcesReindex: (id: string) =>
+    ipcRenderer.invoke('tide:sources:reindex', id),
+  onSourcesProgress: (cb: (e: unknown) => void) => {
+    const listener = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on('tide:sources:progress', listener);
+    return () => ipcRenderer.off('tide:sources:progress', listener);
+  },
+  removeAllSourcesListeners: () => {
+    ipcRenderer.removeAllListeners('tide:sources:progress');
+  },
+
   // ── Agent (tool-calling loop) ──
   runTurn: (payload) => ipcRenderer.invoke('agent:runTurn', payload),
   abortTurn: (sessionId) => ipcRenderer.invoke('agent:abort', sessionId),

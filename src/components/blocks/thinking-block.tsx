@@ -4,10 +4,12 @@
  * chrome — phase rows / flat rail render directly. */
 
 import { memo, useEffect, useRef, useState } from 'react';
-import { Brain, ChevronDown, Code2, Compass, Loader2, Search, ShieldCheck, Sparkles } from 'lucide-react';
+import { Brain, ChevronDown, Code2, Compass, Search, ShieldCheck, Sparkles } from 'lucide-react';
 import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
+import { CyclingDotsLabel } from '@/components/ui/cycling-dots-label';
+import { PixelLoader } from '@/components/ui/pixel-loader';
 import { derivePhases, type Phase, type PhaseLabel } from '@/components/chat/blocks/reasoning-phases';
 
 const PHASE_ICON: Record<PhaseLabel, typeof Brain> = {
@@ -99,7 +101,7 @@ function PhaseRow({
           ~{phase.estTokens.toLocaleString()} tok
         </span>
         {phaseStreaming ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+          <PixelLoader variant="orbit" size="xs" className="shrink-0 text-muted-foreground" />
         ) : null}
       </button>
       <div
@@ -194,7 +196,22 @@ function ThinkingBlockImpl({
   );
 
   if (variant === 'stream') {
-    return <div className="w-full">{content}</div>;
+    return (
+      <div className="w-full">
+        {/* Stream (Agents panel / stream view): flat rail has no header row,
+            so surface the same streaming Thinking animation while live. */}
+        {streaming && !phases && (
+          <div className="flex h-7 items-center gap-2">
+            <Brain className="size-3.5 shrink-0 animate-pulse text-purple-400" />
+            <CyclingDotsLabel
+              label="Thinking"
+              className="text-[0.8929rem] font-medium text-foreground/80"
+            />
+          </div>
+        )}
+        {content}
+      </div>
+    );
   }
 
   return (
@@ -214,9 +231,16 @@ function ThinkingBlockImpl({
             style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
           />
         </span>
-        <span className="shrink-0 text-[0.8929rem] font-medium text-foreground/80">
-          Thinking
-        </span>
+        {streaming ? (
+          <CyclingDotsLabel
+            label="Thinking"
+            className="shrink-0 text-[0.8929rem] font-medium text-foreground/80"
+          />
+        ) : (
+          <span className="shrink-0 text-[0.8929rem] font-medium text-foreground/80">
+            Thinking
+          </span>
+        )}
         {headerSnippet || streaming ? (
           <span className="inline-flex h-5 min-w-0 flex-1 items-center truncate rounded-md bg-secondary/70 px-1.5 text-[0.8214rem] text-muted-foreground">
             {headerSnippet ?? '…'}
@@ -227,9 +251,6 @@ function ThinkingBlockImpl({
             {meta}
           </span>
         )}
-        {streaming ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-        ) : null}
       </button>
 
       <div

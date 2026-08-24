@@ -1,0 +1,1 @@
+Plain notes file for the docs fetcher fixture.

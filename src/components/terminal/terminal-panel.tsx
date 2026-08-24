@@ -84,12 +84,18 @@ function queueOutput(terminalId: string, data: string) {
 // ghostty-web's FitAddon hardcodes a 15px scrollbar gutter in
 // proposeDimensions, but its scrollbar is an in-canvas overlay — the gutter
 // is dead space on the right edge. Fit from the canvas's own cell metrics
-// instead (cell = bitmap size / grid size; the canvas is 1:1 CSS px).
+// instead. Cell size MUST come from the CSS size: the bitmap (canvas.width)
+// is scaled by devicePixelRatio (2× on retina), so deriving cells from it
+// halves cols/rows and the canvas renders at a quarter of the panel.
 function fitTerminal(term: GhosttyTerminal, wrapper: HTMLDivElement): { cols: number; rows: number } | null {
   const canvas = wrapper.querySelector('canvas');
   if (!canvas || term.cols === 0 || term.rows === 0) return null;
-  const cellW = canvas.width / term.cols;
-  const cellH = canvas.height / term.rows;
+  const styleW = parseFloat(canvas.style.width);
+  const styleH = parseFloat(canvas.style.height);
+  const cssW = styleW > 0 ? styleW : canvas.width / (window.devicePixelRatio || 1);
+  const cssH = styleH > 0 ? styleH : canvas.height / (window.devicePixelRatio || 1);
+  const cellW = cssW / term.cols;
+  const cellH = cssH / term.rows;
   if (!Number.isFinite(cellW) || cellW <= 0 || !Number.isFinite(cellH) || cellH <= 0) return null;
   const cols = Math.max(2, Math.floor(wrapper.clientWidth / cellW));
   const rows = Math.max(1, Math.floor(wrapper.clientHeight / cellH));

@@ -68,7 +68,7 @@ export const AnswerBlock = memo(function AnswerBlock({
               <button
                 type="button"
                 onClick={handleCopy}
-                aria-label={copied ? 'Copied' : 'Copy answer'}
+                aria-label={copied ? 'Copied' : 'Copy'}
                 title={copied ? 'Copied' : 'Copy'}
                 className={cn(
                   'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[0.7857rem] font-medium',
@@ -85,8 +85,8 @@ export const AnswerBlock = memo(function AnswerBlock({
                 <button
                   type="button"
                   onClick={() => initiateFork(sessionId, text, 'result')}
-                  aria-label="Fork from here"
-                  title="Fork from here"
+                  aria-label="Fork the Result"
+                  title="Fork the Result"
                   className={cn(
                     'inline-flex items-center gap-1 h-7 px-2 rounded-md text-[0.7857rem] font-medium',
                     'text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer',

@@ -1,6 +1,6 @@
 /** Shortcut action dispatcher — central registry mapping shortcut ids to handler functions. */
 import type { Session } from '@/types';
-import { useUi } from '@/lib/stores/ui';
+import { useUi, isRightPanelOpen } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 import { toggleTerminalTab } from '@/lib/terminal-tab';
 import { queryClient } from '@/lib/queries';
@@ -68,7 +68,7 @@ const toggleSessions: Action = () => {
 const toggleRightPanel: Action = () => {
   if (!requireMain()) return false;
   const s = useUi.getState();
-  if (s.rightPanelOpen) {
+  if (isRightPanelOpen(s)) {
     s.setRightPanel(false);
     return true;
   }

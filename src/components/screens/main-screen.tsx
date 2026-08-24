@@ -10,7 +10,7 @@ import { EmptyChatState } from "@/components/chat/empty-chat-state";
 import { TimelineSkeleton } from "@/components/chat/turn/turn-skeleton";
 import { NoWorkspaceState } from "@/components/chat/no-workspace-state";
 import { MissingWorkspaceScreen } from "./missing-workspace-screen";
-import { ChatTimeline } from "@/components/chat/timeline/ChatTimeline";
+import { OpenChamberTimeline as ChatTimeline } from "@/components/chat/timeline/openchamber/openchamber-timeline";
 import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
@@ -23,7 +23,7 @@ import { CommitDetailsPanel } from "@/components/right-panel/git/commit-details-
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SheetResizeHandle } from "@/components/ui/sheet-resize-handle";
 import { FloatingPermissionCard } from "@/components/chat/permissions/floating-permission-card";
-import { useUi } from "@/lib/stores/ui";
+import { useUi, isRightPanelOpen } from "@/lib/stores/ui";
 import { useModelOption, useWorkspaces, useSessions, useSession } from "@/lib/queries";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import * as api from "@/lib/api/client";
@@ -65,7 +65,7 @@ export function MainScreen() {
   }, [setSidebarMode]);
   const sidebarWidth = useUi((s) => s.sidebarWidth);
   const setSidebarWidth = useUi((s) => s.setSidebarWidth);
-  const rightPanelOpen = useUi((s) => s.rightPanelOpen);
+  const rightPanelOpen = useUi(isRightPanelOpen);
   const fileViewerOpen = useUi((s) => s.fileViewerOpen);
   const commitDetail = useUi((s) => s.commitDetail);
   const setCommitDetail = useUi((s) => s.setCommitDetail);
@@ -1017,6 +1017,13 @@ export function MainScreen() {
                                 rejectToolCalls(activeSessionId, ids, reason)
                             : undefined
                         }
+                        onAnswerFollowup={
+                          activeSessionId
+                            ? (toolCallId, answer) =>
+                                submitFollowup(activeSessionId, toolCallId, answer)
+                            : undefined
+                        }
+                        directory={activeWorkspace?.path}
                         loadingFallback={<TimelineSkeleton />}
                         retryActive={!!retry}
                         errorBlock={error && !isStreaming ? (

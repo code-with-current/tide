@@ -12,6 +12,7 @@ import {
   FolderCode,
   Palette,
   DownloadCloud,
+  LibraryBig,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/quick-tooltip";
@@ -28,6 +29,7 @@ import { WorkspaceSettingsSection } from "./settings/workspace/workspace";
 import { AgentsSection } from "./settings/extensions/agents";
 import { SkillsSection } from "./settings/extensions/skills";
 import { McpSection } from "./settings/mcp/mcp";
+import { SourcesSection } from "./settings/sources/sources";
 
 type SectionId =
   | "providers"
@@ -40,6 +42,7 @@ type SectionId =
   | "agents"
   | "skills"
   | "mcp"
+  | "sources"
   | "about";
 
 type NavItem = { id: SectionId; label: string; icon: typeof KeyRound };
@@ -62,6 +65,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "providers", label: "LLM Providers", icon: KeyRound },
       { id: "autonomy", label: "Permissions & Caps", icon: Shield },
+      { id: "sources", label: "Knowledge", icon: LibraryBig },
     ],
   },
   {
@@ -197,6 +201,7 @@ export function SettingsScreen() {
             {section === "agents" && <AgentsSection />}
             {section === "skills" && <SkillsSection />}
             {section === "mcp" && <McpSection />}
+            {section === "sources" && <SourcesSection />}
             {section === "updates" && <UpdatesSection />}
             {section === "about" && <AboutSection />}
           </div>

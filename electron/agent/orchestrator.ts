@@ -961,11 +961,12 @@ function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
   const e = raw as { type?: string; [k: string]: unknown };
   const { sessionId } = turn;
 
-  if (e.parentToolCallId) {
-    mirrorSubagentToolEvent(turn, e);
-    return;
-  }
-
+  // Sub-agent permission asks must surface too: they carry parentToolCallId
+  // (their tool block is a nested child row), but the ask itself is a
+  // session-level gate. Routing every parented emit into the mirror dropped
+  // these — the child's withPermission await then hung invisible forever
+  // (the mirror has no permission branch and the resolver has no timeout),
+  // so the parent turn looked finished mid-dispatch while it was parked.
   if (e.type === 'permission') {
     const toolName = resolveToolName((e.toolName as string) ?? 'unknown') as ToolName;
     const args = (e.args ?? {}) as Record<string, unknown>;
@@ -973,6 +974,14 @@ function bridgeToolEmit(wc: WebContents, turn: Turn, raw: unknown): void {
     const toolCallId = (typeof e.toolCallId === 'string' && e.toolCallId) || `perm_${toolName}_${nextSeq(sessionId)}`;
     const tc: ToolCall = { id: toolCallId, messageId: turn.messageId, toolName, arguments: args, argPreview: formatArgPreview(toolName, args), status: 'pending', riskTier: meta?.riskTier ?? 'read_only', gateDecision: e.decision === 'blocked' ? 'blocked' : 'ask', allowRule: (e.ruleSpec as string | undefined) ?? undefined };
     send(wc, sessionId, { type: 'permission_required', sessionId, seq: nextSeq(sessionId), toolCalls: [tc], timeoutAt: Date.now() + turn.permissionTimeoutMs });
+    if (typeof e.parentToolCallId === 'string' && e.parentToolCallId) {
+      patchToolBlock(turn, toolCallId, { status: 'awaiting_input' });
+    }
+    return;
+  }
+
+  if (e.parentToolCallId) {
+    mirrorSubagentToolEvent(turn, e);
     return;
   }
 

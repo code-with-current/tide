@@ -1,4 +1,4 @@
-import { useUi, terminalScopeKey } from '@/lib/stores/ui';
+import { useUi, isRightPanelOpen, terminalScopeKey } from '@/lib/stores/ui';
 import { useTabs } from '@/lib/stores/tabs';
 
 /** Switch the unified right panel to the active scope's terminal tab and
@@ -11,7 +11,7 @@ export function openTerminalTab() {
     s.addTerminal(scope);
   }
   useTabs.getState().addTab(s.activeSessionId ?? 'default', 'terminal');
-  useUi.setState({ rightPanelOpen: true });
+  s.setRightPanel(true);
 }
 
 /** True toggle for the Terminal button / 'T' shortcut: focus the terminal
@@ -21,7 +21,7 @@ export function toggleTerminalTab() {
   const s = useUi.getState();
   const onTerminalTab =
     useTabs.getState().active[s.activeSessionId ?? 'default'] === 'terminal';
-  if (s.rightPanelOpen && onTerminalTab) {
+  if (isRightPanelOpen(s) && onTerminalTab) {
     s.setRightPanel(false);
     return;
   }

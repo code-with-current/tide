@@ -38,6 +38,7 @@ import { initModelCatalog, enrichExistingModels } from './agent/model-capabiliti
 // the baseline ships with the app (electron/data isn't included in the build).
 import bundledModelCatalog from './data/model-prices.json';
 import { registerMcpHandlers } from './ipc/mcp.js';
+import { registerSourcesHandlers } from './ipc/sources.js';
 import { syncAllWorkspaceHooks } from './git-coauthor.js';
 import { initUserServers, initBuiltinServers } from './agent/mcp/pool.js';
 import { migrateOAuthFiles } from './agent/mcp/config.js';
@@ -292,6 +293,9 @@ if (!gotLock) {
         log.warn('mcp builtin init failed', { error: String(e) }),
       );
       registerMcpHandlers(() => activeWorkspace);
+      // Knowledge sources: global registry + ingestion manager. The manager is
+      // created here (singleton per app run); the db opens lazily on first use.
+      registerSourcesHandlers();
       // The renderer pushes the active workspace whenever it changes so the
       // main process can keep `activeWorkspace` fresh for the MCP handlers
       // and (re)connect project-scoped servers in the pool.

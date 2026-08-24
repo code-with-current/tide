@@ -6,7 +6,8 @@ import { createLogger } from '../logger.js';
 import { chunkFile, type Chunk } from './chunker/index.js';
 
 const log = createLogger('rag');
-import { openRagStore, type ChunkRow } from './store.js';
+import { openRagStore, type ChunkRow, type RagStore } from './store.js';
+import type { Embedder } from './embedder.js';
 import { resolveForBuild } from './resolve.js';
 import { localModelExists } from './local-onnx-embedder.js';
 import { isRagCloudConfigured } from '../agent/system-model.js';
@@ -31,6 +32,21 @@ export interface IngestProgressEvent {
 }
 
 export type IngestProgressCb = (e: IngestProgressEvent) => void;
+
+/** A chunk ready to be embedded + stored: the ChunkRow shape minus the
+ *  embedder/timestamp fields that embedAndStore stamps at write time.
+ *  sourceId stays undefined for workspace code chunks; knowledge ingestion
+ *  sets it so hits can be filtered back to their source. */
+export interface PreparedChunk {
+  id: string;
+  path: string;
+  symbol: string;
+  content: string;
+  contentHash: string;
+  startLine: number;
+  endLine: number;
+  sourceId?: string | null;
+}
 
 export interface IngestResult {
   filesSeen: number;
@@ -181,53 +197,9 @@ export async function ingestWorkspace(
     }
 
     // ── Phase 3: embed + store (content-hash dedupe) ─────────────────
-    let embedded = 0;
-    let skipped = 0;
-    for (let i = 0; i < allChunks.length; i += EMBED_BATCH_SIZE) {
-      const batch = allChunks.slice(i, i + EMBED_BATCH_SIZE);
-
-      // Partition batch into needs-embed vs already-stored. A chunk is
-      // skipped when both its id and contentHash match an existing row.
-      const toEmbed: { chunk: Chunk; row: ChunkRow }[] = [];
-      for (const chunk of batch) {
-        const row = toChunkRow(chunk, embedderId);
-        const existing = ragStore.byContentHash(row.contentHash);
-        if (existing && existing.id === row.id && existing.path === row.path) {
-          skipped++;
-        } else {
-          toEmbed.push({ chunk, row });
-        }
-      }
-
-      if (toEmbed.length > 0) {
-        const vectors = await embedder.embed(toEmbed.map(({ chunk }) => chunk.content));
-        if (vectors.length !== toEmbed.length) {
-          throw new Error(
-            `embedder returned ${vectors.length} vectors for ${toEmbed.length} chunks`,
-          );
-        }
-        // Single transaction: chunk rows + FTS rows, then vectors.
-        // Returns rowids to pair with vectors.
-        const rowids = ragStore.upsertChunks(toEmbed.map(({ row }) => row));
-        ragStore.upsertVectors(
-          toEmbed.map(({ row }, idx) => ({
-            rowid: rowids[idx].rowid,
-            chunkId: row.id,
-            embedding: vectors[idx],
-          })),
-        );
-        embedded += toEmbed.length;
-      }
-
-      emit({
-        phase: 'embedding',
-        filesSeen: files.length,
-        chunksTotal: allChunks.length,
-        chunksEmbedded: embedded,
-        currentFile: batch[batch.length - 1]?.path,
-      });
-    }
-
+    const { embedded, skipped } = await embedAndStore(ragStore, embedder, allChunks, {
+      onProgress: (e) => emit({ ...e, filesSeen: files.length }),
+    });
     ragStore.setMeta('lastIngestedAt', String(Date.now()));
     emit({
       phase: 'done',
@@ -254,6 +226,66 @@ export async function ingestWorkspace(
   } finally {
     ragStore.close();
   }
+}
+
+/** Batched embed + write loop shared by workspace ingestion and knowledge
+ *  document ingestion. Skips chunks whose id+path+contentHash match an
+ *  existing row; stamps each written row with the active embedder id.
+ *  Emits 'embedding'-phase progress per batch (filesSeen is left 0 — callers
+ *  override it when they have walk context). */
+export async function embedAndStore(
+  rag: RagStore,
+  embedder: Embedder,
+  rows: PreparedChunk[],
+  opts: { onProgress?: IngestProgressCb } = {},
+): Promise<{ embedded: number; skipped: number }> {
+  let embedded = 0;
+  let skipped = 0;
+  for (let i = 0; i < rows.length; i += EMBED_BATCH_SIZE) {
+    const batch = rows.slice(i, i + EMBED_BATCH_SIZE);
+
+    // Partition batch into needs-embed vs already-stored. A chunk is
+    // skipped when both its id and contentHash match an existing row.
+    const toEmbed: ChunkRow[] = [];
+    for (const r of batch) {
+      const row: ChunkRow = { ...r, sourceId: r.sourceId ?? null, embedderId: embedder.id, createdAt: Date.now() };
+      const existing = rag.byContentHash(row.contentHash);
+      if (existing && existing.id === row.id && existing.path === row.path) {
+        skipped++;
+      } else {
+        toEmbed.push(row);
+      }
+    }
+
+    if (toEmbed.length > 0) {
+      const vectors = await embedder.embed(toEmbed.map((row) => row.content));
+      if (vectors.length !== toEmbed.length) {
+        throw new Error(
+          `embedder returned ${vectors.length} vectors for ${toEmbed.length} chunks`,
+        );
+      }
+      // Single transaction: chunk rows + FTS rows, then vectors.
+      // Returns rowids to pair with vectors.
+      const rowids = rag.upsertChunks(toEmbed);
+      rag.upsertVectors(
+        toEmbed.map((row, idx) => ({
+          rowid: rowids[idx].rowid,
+          chunkId: row.id,
+          embedding: vectors[idx],
+        })),
+      );
+      embedded += toEmbed.length;
+    }
+
+    opts.onProgress?.({
+      phase: 'embedding',
+      filesSeen: 0,
+      chunksTotal: rows.length,
+      chunksEmbedded: embedded,
+      currentFile: batch[batch.length - 1]?.path,
+    });
+  }
+  return { embedded, skipped };
 }
 
 /** Parse a .gitignore file into glob patterns (handles negation, comments, blank lines). */
@@ -354,17 +386,3 @@ function walkSource(
   onProgress(count);
 }
 
-/** Convert a chunker Chunk to a store ChunkRow with the embedder recorded. */
-function toChunkRow(chunk: Chunk, embedderId: string): ChunkRow {
-  return {
-    id: chunk.id,
-    path: chunk.path,
-    symbol: chunk.symbol,
-    content: chunk.content,
-    contentHash: chunk.contentHash,
-    startLine: chunk.startLine,
-    endLine: chunk.endLine,
-    embedderId,
-    createdAt: Date.now(),
-  };
-}
