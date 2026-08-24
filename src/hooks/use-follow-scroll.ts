@@ -74,7 +74,12 @@ export function useFollowScroll(ref: RefObject<HTMLElement | null>, active: bool
   }, [ref, active]);
 
   useEffect(() => {
-    if (!active) engagedRef.current = true;
+    // Re-arm on deactivate; emit so consumers showing a follow indicator
+    // re-render instead of keeping a stale disengaged state.
+    if (!active && engagedRef.current !== true) {
+      engagedRef.current = true;
+      force((n) => n + 1);
+    }
   }, [active]);
 
   return { engaged: engagedRef.current };

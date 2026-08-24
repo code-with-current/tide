@@ -13,7 +13,7 @@
  *  part last. */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, X } from 'lucide-react';
+import { Bot, ChevronDown, X } from 'lucide-react';
 import type { Block, Session, ToolBlock } from '@/types';
 import { cn, formatRelative } from '@/lib/utils';
 import { useUi } from '@/lib/stores/ui';
@@ -123,7 +123,9 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
   // Keep following while the dispatch runs; a live dispatch also follows while
   // the parent turn streams — its report can still grow after the sub-agent's
   // last tool result lands.
-  useFollowScroll(bodyRef, running || (resolved?.live === true && parentStreaming));
+  const { engaged } = useFollowScroll(bodyRef, running || (resolved?.live === true && parentStreaming));
+
+  const [idCopied, setIdCopied] = useState(false);
 
   const [taskExpanded, setTaskExpanded] = useState(false);
   useEffect(() => {
@@ -227,6 +229,21 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                     {(d.usage.inputTokens / 1000).toFixed(1)}k in · {(d.usage.outputTokens / 1000).toFixed(1)}k out
                   </span>
                 )}
+                {(d?.dispatchId || focus) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(d?.dispatchId ?? focus ?? '').then(() => {
+                        setIdCopied(true);
+                        setTimeout(() => setIdCopied(false), 1500);
+                      });
+                    }}
+                    title={`${d?.dispatchId ?? focus} — click to copy`}
+                    className="shrink-0 max-w-[8rem] truncate font-mono text-[0.6875rem] text-muted-foreground/50 transition-colors hover:text-foreground"
+                  >
+                    {idCopied ? 'copied ✓' : d?.dispatchId ?? focus}
+                  </button>
+                )}
               </>
             ) : (
               <span className="text-[0.8571rem] font-medium text-foreground/80">Agents</span>
@@ -262,8 +279,10 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
       {/* Body — the dispatch's child blocks projected into a synthetic
           assistant entry and rendered through OpenChamberChatMessage (same
           renderer as the main timeline), report riding as the answer part.
-          Auto-follows while the dispatch runs. */}
-      <div ref={bodyRef} className="flex-1 min-h-0 scroll min-w-0 overflow-y-auto px-6 py-3">
+          Auto-follows while the dispatch runs; the floating button returns to
+          the live tail after scrolling up. */}
+      <div className="relative flex-1 min-h-0 min-w-0">
+      <div ref={bodyRef} className="absolute inset-0 scroll overflow-y-auto px-6 py-3">
         {resolved && entry ? (
           <OpenChamberChatMessage
             entry={entry}
@@ -327,6 +346,22 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
             })}
           </div>
         )}
+      </div>
+      {!engaged && (
+        <button
+          type="button"
+          aria-label="Scroll to bottom"
+          onClick={() => {
+            const el = bodyRef.current;
+            if (!el) return;
+            el.scrollTop = el.scrollHeight;
+          }}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-2.5 py-1 rounded-full bg-secondary border border-border shadow-lg text-[0.75rem] text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150"
+        >
+          <ChevronDown className="size-3.5" />
+          Live
+        </button>
+      )}
       </div>
     </div>
   );
