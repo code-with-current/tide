@@ -21,7 +21,7 @@ import { useTabs } from '@/lib/stores/tabs';
 import { useSession, useDispatches, useWorkspaces } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { PixelLoader } from '@/components/ui/pixel-loader';
-import { agentStatusOf } from '@/components/blocks/agent-status';
+import { agentStatusOf, agentSessionDisplayName } from '@/components/blocks/agent-status';
 import { blockToPart } from '@/components/chat/timeline/openchamber/lib/tide-adapter';
 import { OpenChamberChatMessage } from '@/components/chat/timeline/openchamber/chat-message';
 
@@ -132,6 +132,10 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
 
   const d = resolved?.dispatch.display?.kind === 'agent' ? resolved.dispatch.display : undefined;
   const agentName = d?.agentName ?? String(resolved?.dispatch.arguments?.name ?? 'agent');
+  const dispatchTitle =
+    d?.title ?? (typeof resolved?.dispatch.arguments?.title === 'string' && resolved.dispatch.arguments.title.trim().length > 0
+      ? resolved.dispatch.arguments.title
+      : undefined);
   const task = d?.task ?? String(resolved?.dispatch.arguments?.task ?? '');
   const report = d?.report ?? resolved?.dispatch.report ?? resolved?.dispatch.output ?? '';
   // Root-scoped stats over the dispatch's children — drives the header count,
@@ -196,8 +200,11 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             {resolved ? (
               <>
-                <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[0.75rem] font-medium text-primary">
-                  {agentName}
+                <span
+                  className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[0.75rem] font-medium text-primary"
+                  title={task}
+                >
+                  {agentSessionDisplayName(agentName, dispatchTitle)}
                 </span>
                 {!!resolved.dispatch.arguments?.resumeFrom && (
                   <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[0.75rem] text-muted-foreground">↻ resumed</span>
@@ -304,7 +311,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
                 >
                   <Bot className="tool-tint size-3 shrink-0 text-purple-400" />
                   <span className="min-w-0 shrink-0 truncate text-[0.8571rem] font-medium text-foreground/80">
-                    {block ? name : h.title}
+                    {block ? agentSessionDisplayName(name, bd?.title) : h.title}
                   </span>
                   {rowTask && (
                     <span className="min-w-0 flex-1 truncate font-mono text-[0.7857rem] text-muted-foreground/80">

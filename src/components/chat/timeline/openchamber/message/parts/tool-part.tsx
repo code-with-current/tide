@@ -48,6 +48,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { toolTextColor } from '@/lib/tool-colors';
+import { agentSessionDisplayName } from '@/components/blocks/agent-status';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { PixelLoader } from '@/components/ui/pixel-loader';
@@ -1549,6 +1550,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         className={cn(
           'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl',
           'items-center cursor-pointer',
+          tool === 'bash' && 'font-mono',
         )}
         onClick={handleMainClick}
         onKeyDown={handleMainKeyDown}
@@ -1595,14 +1597,20 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             >
               {displayName}
             </MinDurationShineText>
-            {isAgentTool && typeof input?.name === 'string' && input.name.trim().length > 0 && (
-              <span
-                className="flex-shrink-0 rounded-md border border-border/60 bg-muted/60 px-1.5 typography-micro leading-4 text-muted-foreground text-[0.75rem]"
-                title={`Sub-agent: ${input.name}`}
-              >
-                {input.name}
-              </span>
-            )}
+            {isAgentTool && typeof input?.name === 'string' && input.name.trim().length > 0 && (() => {
+              const sessionName = agentSessionDisplayName(
+                input.name,
+                typeof input?.title === 'string' && input.title.trim().length > 0 ? input.title : undefined,
+              );
+              return (
+                <span
+                  className="flex-shrink-0 rounded-md border border-border/60 bg-muted/60 px-1.5 typography-micro leading-4 text-muted-foreground text-[0.75rem]"
+                  title={`Sub-agent session: ${sessionName}`}
+                >
+                  {sessionName}
+                </span>
+              );
+            })()}
           </div>
           {tool === 'bash' && typeof effectiveTimeStart === 'number' ? (
             <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
