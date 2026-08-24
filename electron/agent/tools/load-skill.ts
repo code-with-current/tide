@@ -5,6 +5,7 @@ import type { ToolResult, ToolRegistration } from './types';
 import type { ToolContext, SkillSummary } from './tool-context';
 import { withPermission } from '../permission-wrapper';
 import { runReadFile } from './read-file';
+import { getBuiltinSkill } from '../skills/builtin';
 
 const DEFAULT_MAX_LINES = 2000;
 
@@ -14,6 +15,19 @@ export async function runLoadSkill(
   workspaceRoot: string,
 ): Promise<ToolResult> {
   if (!skillPath) return { status: 'failed', output: 'Missing required arg: path' };
+
+  // Builtin skills resolve in memory via virtual ids — never touch disk.
+  if (skillPath.startsWith('builtin:')) {
+    const name = skillPath.slice('builtin:'.length);
+    const skill = getBuiltinSkill(name);
+    if (!skill) return { status: 'failed', output: `'${name}' is not a builtin skill` };
+    return {
+      status: 'executed',
+      output: `Skill "${name}" loaded (${skill.body.length} chars). Read and follow its instructions before taking any other action on the task.`,
+      meta: `${name} · ${skill.body.length} chars`,
+      display: { kind: 'file_loaded', path: skillPath, lines: skill.body.split('\n').length, bytes: skill.body.length, body: skill.body },
+    };
+  }
 
   const res = await runReadFile(skillPath, DEFAULT_MAX_LINES, workspaceRoot);
   if (res.status !== 'executed') {
@@ -46,7 +60,7 @@ export const loadSkillTool: ToolRegistration = {
       properties: {
         path: {
           type: 'string',
-          description: 'Absolute path to the skill\'s SKILL.md file.',
+          description: 'Absolute path to the skill\'s SKILL.md file, or a `builtin:<name>` id from the Available skills list.',
         },
       },
       required: ['path'],
@@ -113,7 +127,7 @@ export function createLoadSkillTool(ctx: ToolContext) {
   return tool({
     description,
     inputSchema: z.object({
-      path: z.string().describe('Absolute path to the skill\'s SKILL.md file, from the Available skills list.'),
+      path: z.string().describe('Absolute path to the skill\'s SKILL.md file, or a `builtin:<name>` id from the Available skills list.'),
     }),
     execute: async ({ path }) =>
       withPermission(ctx, 'load_skill', { path }, () => runLoadSkill(path, ctx.workspaceRoot)),
