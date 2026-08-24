@@ -1664,10 +1664,10 @@ const AssistantMessageBody = React.memo(({
 
         {/* Legacy chat UI's collapsible "files changed" card — path click / Review
             opens the diff viewer via panel actions. Sits below the turn footer. */}
-        {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish && turnFileChangeEntries.length > 0 ? (
+        {!isMiniChatSurface && isLastAssistantInTurn && turnFileChangeEntries.length > 0 ? (
           <FileChanges
             changes={turnFileChangeEntries}
-            streaming={false}
+            streaming={!hasStopFinish}
             onViewFile={(entry) => panelActions?.viewDiff({ path: entry.path, hunks: entry.hunks })}
           />
         ) : null}
