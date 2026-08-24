@@ -8,10 +8,9 @@
  *  (streams[childSessionId] is never populated live), so the body reads the
  *  dispatch ToolBlock and its nested child blocks from the parent's live
  *  stream blocks, falling back to the persisted message blocks once the live
- *  stream resets on the next turn. Children render via StreamBlocks — the
- *  main chat's stream renderer (block-list's stream branch) rooted at the
- *  dispatch instead of the session — so spacing and behavior match the chat
- *  exactly, with the dispatch report as an AnswerBlock last. */
+ *  stream resets on the next turn. Children render via OpenChamberChatMessage
+ *  (same renderer as the main chat), with the dispatch report as the answer
+ *  part last. */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, X } from 'lucide-react';
@@ -176,7 +175,14 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
         role: 'assistant' as const,
         time: { created: Date.now() },
       },
-      parts: [...childBlocks, ...synth].map(blockToPart),
+      parts: [...childBlocks, ...synth].map((b) => {
+        // Strip parentToolCallId: this tab IS the dispatch scope — there is
+        // no dispatch_agent row here for nested parts to render inside, and
+        // message-body filters hasParentToolCall parts from the top level.
+        const part = blockToPart(b);
+        delete part.metadata?.parentToolCallId;
+        return part;
+      }),
     };
   }, [resolved, focus, d?.reasoning, report, hasReasoning]);
 
