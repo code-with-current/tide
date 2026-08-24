@@ -314,7 +314,7 @@ function OpenChamberTimelineImpl({
           // overflow-anchor:none — the auto-follow hook owns every scrollTop
           // write on this container; Chromium's native scroll anchoring would
           // fight it with compensating writes on virtualizer repositions.
-          'h-full overflow-y-auto overflow-x-hidden scroll [overflow-anchor:none] px-6 py-3',
+          'h-full overflow-y-auto overflow-x-hidden scroll [overflow-anchor:none] [scrollbar-gutter:stable] px-6 py-3',
           // Suppress the scrollbar thumb while it jumps on every instant
           // re-pin during live follow; normal scrollbar otherwise.
           isStreaming && state === 'following' && 'chat-streaming',

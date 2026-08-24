@@ -37,6 +37,11 @@ export function PierreDiff({ original, modified, fileDiff, language, sideBySide,
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<PierreFileDiff | null>(null);
+  // Last inputs pushed to the imperative instance. The update effect below
+  // runs on EVERY render (streaming parents re-render at high frequency);
+  // calling instance.render() again would cancel in-flight worker
+  // tokenization and restart it, so it must be skipped when nothing changed.
+  const lastPushed = useRef<{ input: unknown; options: FileDiffOptions<unknown> } | null>(null);
   const appTheme = useUi((s) => s.appTheme);
 
   const parsedDiff = useMemo<FileDiffMetadata>(() => {
@@ -99,9 +104,11 @@ export function PierreDiff({ original, modified, fileDiff, language, sideBySide,
     const instance = instanceRef.current;
     if (instance == null) return;
     const options = buildOptions();
-    const forceRender = !areOptionsEqual(instance.options, options);
+    const prev = lastPushed.current;
+    if (prev != null && prev.input === parsedDiff && areOptionsEqual(prev.options, options)) return;
+    lastPushed.current = { input: parsedDiff, options };
     instance.setOptions(options);
-    instance.render({ fileDiff: parsedDiff, forceRender });
+    instance.render({ fileDiff: parsedDiff, forceRender: prev == null || !areOptionsEqual(prev.options, options) });
   });
 
   useEffect(() => {
@@ -131,6 +138,8 @@ export function PierreFile({ content, name, language, wrap = true }: PierreFileP
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<VirtualizedFile<unknown> | null>(null);
+  // See PierreDiff — dedupe imperative pushes under high-frequency re-renders.
+  const lastPushed = useRef<{ input: unknown; options: FileOptions<unknown> } | null>(null);
   const appTheme = useUi((s) => s.appTheme);
 
   const file = useMemo<FileContents>(() => ({
@@ -180,9 +189,11 @@ export function PierreFile({ content, name, language, wrap = true }: PierreFileP
     const instance = instanceRef.current;
     if (instance == null) return;
     const options = buildOptions();
-    const forceRender = !areOptionsEqual(instance.options, options);
+    const prev = lastPushed.current;
+    if (prev != null && prev.input === file && areOptionsEqual(prev.options, options)) return;
+    lastPushed.current = { input: file, options };
     instance.setOptions(options);
-    instance.render({ file, forceRender });
+    instance.render({ file, forceRender: prev == null || !areOptionsEqual(prev.options, options) });
   });
 
   useEffect(() => {

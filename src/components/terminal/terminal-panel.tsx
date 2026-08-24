@@ -643,11 +643,11 @@ export const TerminalPanel = memo(function TerminalPanel() {
                         else if (e.key === 'Escape') setEditingId(null);
                       }}
                       onBlur={() => commitRename(item.id)}
-                      className="bg-input border border-input rounded px-1 text-xs outline-none focus:border-primary/60 max-w-[10rem]"
+                      className="bg-input border border-input rounded px-1 text-xs font-mono outline-none focus:border-primary/60 max-w-[10rem]"
                     />
                   ) : (
                     <span
-                      className="truncate max-w-[10rem] cursor-text select-none"
+                      className="truncate max-w-[10rem] cursor-text select-none font-mono"
                       title={item.id === active ? 'Click to rename' : undefined}
                       onPointerDown={(e) => {
                         if (item.id !== active) return;
