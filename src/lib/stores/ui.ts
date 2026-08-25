@@ -759,13 +759,18 @@ export const useUi = create<UiState>()(
     set((s) => {
       const patch: Partial<UiState> = { pendingFork };
       // Clearing fork intent drops its attachment — they travel together.
+      // Sweep every slot: the fork attachment lives under the draft key it
+      // was initiated with (or COMPOSER_NEW_KEY), not a fixed slot.
       if (pendingFork === null) {
-        const list = s.composerAttachments[COMPOSER_NEW_KEY];
-        if (list?.some((a) => a.path === FORK_ATTACHMENT_PATH)) {
-          patch.composerAttachments = {
-            ...s.composerAttachments,
-            [COMPOSER_NEW_KEY]: list.filter((a) => a.path !== FORK_ATTACHMENT_PATH),
-          };
+        const dirty = Object.entries(s.composerAttachments).filter(([, list]) =>
+          list?.some((a) => a.path === FORK_ATTACHMENT_PATH),
+        );
+        if (dirty.length > 0) {
+          const next = { ...s.composerAttachments };
+          for (const [key, list] of dirty) {
+            next[key] = list.filter((a) => a.path !== FORK_ATTACHMENT_PATH);
+          }
+          patch.composerAttachments = next;
         }
       }
       return patch;

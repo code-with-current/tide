@@ -365,8 +365,14 @@ export async function initiateFork(
   // stays in its own draft entry in the sidebar. startNewDraft clears any
   // prior fork intent; setPendingFork re-arms it for THIS fork afterwards.
   ui.startNewDraft();
-  ui.clearComposerAttachments(COMPOSER_NEW_KEY);
-  ui.addComposerAttachment(COMPOSER_NEW_KEY, {
+  // Attach to the slot the composer actually reads. startNewDraft just
+  // minted a fresh activeDraftId, and the composer keys attachments by
+  // sessionId ?? activeDraftId ?? COMPOSER_NEW_KEY — writing to
+  // COMPOSER_NEW_KEY here would strand the fork result where nothing
+  // reads it (the first send would carry no prior context).
+  const draftKey = useUi.getState().activeDraftId ?? COMPOSER_NEW_KEY;
+  ui.clearComposerAttachments(draftKey);
+  ui.addComposerAttachment(draftKey, {
     path: FORK_ATTACHMENT_PATH,
     kind: 'paste',
     content: text,
