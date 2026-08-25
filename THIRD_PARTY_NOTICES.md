@@ -26,7 +26,7 @@ SOFTWARE.
 
 ## OpenChamber (openchamber/openchamber)
 
-Files under `src/components/chat/timeline/openchamber/` are adapted from
+Files under `src/components/chat/timeline/` are adapted from
 https://github.com/openchamber/openchamber by Bohdan Triapitsyn and
 contributors, licensed under the MIT License. Copyright (c) 2025 Bohdan
 Triapitsyn.

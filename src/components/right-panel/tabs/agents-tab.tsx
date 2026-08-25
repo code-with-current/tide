@@ -8,7 +8,7 @@
  *  (streams[childSessionId] is never populated live), so the body reads the
  *  dispatch ToolBlock and its nested child blocks from the parent's live
  *  stream blocks, falling back to the persisted message blocks once the live
- *  stream resets on the next turn. Children render via OpenChamberChatMessage
+ *  stream resets on the next turn. Children render via ChatMessage
  *  (same renderer as the main chat), with the dispatch report as the answer
  *  part last. */
 
@@ -22,8 +22,8 @@ import { useSession, useDispatches, useWorkspaces } from '@/lib/queries';
 import { useFollowScroll } from '@/hooks/use-follow-scroll';
 import { PixelLoader } from '@/components/ui/pixel-loader';
 import { agentStatusOf, agentSessionDisplayName } from '@/components/blocks/agent-status';
-import { blockToPart } from '@/components/chat/timeline/openchamber/lib/tide-adapter';
-import { OpenChamberChatMessage } from '@/components/chat/timeline/openchamber/chat-message';
+import { blockToPart } from '@/components/chat/timeline/lib/tide-adapter';
+import { ChatMessage } from '@/components/chat/timeline/chat-message';
 
 /** Ported-row status cue (replaces the legacy AgentStatusChip): orbit loader
  *  while running, colored dot once finalized — matches tool-part's cues. */
@@ -162,7 +162,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
 
   /** Child blocks → ported message entry. The dispatch report rides as an
    *  isAnswer text part and the persisted reasoning summary as a reasoning
-   *  part, so OpenChamberChatMessage renders everything with chat parity. */
+   *  part, so ChatMessage renders everything with chat parity. */
   const entry = useMemo(() => {
     if (!resolved) return null;
     const childBlocks = resolved.list.filter(
@@ -193,7 +193,7 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
   }, [resolved, focus, d?.reasoning, report, hasReasoning]);
 
   return (
-    <div className="oc-chat flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden bg-card">
+    <div className="tide-chat flex flex-col h-full min-h-0 min-w-0 overflow-x-hidden bg-card">
       {/* Header — agent badge, status, elapsed, task (clamped, click
           expands), usage, close. Focus survives close so reopening returns
           to the same dispatch. */}
@@ -277,14 +277,14 @@ export function AgentsTab({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Body — the dispatch's child blocks projected into a synthetic
-          assistant entry and rendered through OpenChamberChatMessage (same
+          assistant entry and rendered through ChatMessage (same
           renderer as the main timeline), report riding as the answer part.
           Auto-follows while the dispatch runs; the floating button returns to
           the live tail after scrolling up. */}
       <div className="relative flex-1 min-h-0 min-w-0">
       <div ref={bodyRef} className="absolute inset-0 scroll overflow-y-auto px-6 py-3">
         {resolved && entry ? (
-          <OpenChamberChatMessage
+          <ChatMessage
             entry={entry}
             isStreamingRow={running}
             sessionId={sessionId}

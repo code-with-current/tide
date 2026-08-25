@@ -6,9 +6,9 @@ import {
   buildChatMessageEntries,
   projectTideTurns,
   toChatMessageEntry,
-} from '../../../src/components/chat/timeline/openchamber/lib/tide-adapter';
-import { projectTurnRecords } from '../../../src/components/chat/timeline/openchamber/lib/turns/project-turn-records';
-import type { OcPart, OcReasoningPart, OcTextPart, OcToolPart } from '../../../src/components/chat/timeline/openchamber/types/opencode-parts';
+} from '../../../src/components/chat/timeline/lib/tide-adapter';
+import { projectTurnRecords } from '../../../src/components/chat/timeline/lib/turns/project-turn-records';
+import type { OcPart, OcReasoningPart, OcTextPart, OcToolPart } from '../../../src/components/chat/timeline/types/opencode-parts';
 
 const seq = { createdAtSeq: 1, modifiedAtSeq: 2 };
 

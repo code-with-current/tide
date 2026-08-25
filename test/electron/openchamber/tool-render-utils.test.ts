@@ -7,7 +7,7 @@ import {
     isExpandableTool,
     isFinalizedToolStatus,
     isStaticTool,
-} from '../../../src/components/chat/timeline/openchamber/message/tool-render-utils';
+} from '../../../src/components/chat/timeline/message/tool-render-utils';
 
 describe('Tide tool-status classification', () => {
     test('finalized statuses cover the Tide vocabulary without state.time', () => {

@@ -12,7 +12,7 @@ import { describe, expect, test } from 'vitest';
 import {
   isOlderHistoryPrependCommit,
   shouldAutoLoadEarlierForUnderfilledPinnedViewport,
-} from '@/components/chat/timeline/openchamber/hooks/use-chat-timeline-controller';
+} from '@/components/chat/timeline/hooks/use-chat-timeline-controller';
 
 const baseInput = {
   sessionId: 'ses_1',

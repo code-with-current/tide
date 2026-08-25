@@ -8,7 +8,7 @@ import { FileText, X, Loader2, GitCompareArrows, Copy, Check } from 'lucide-reac
 import { useUi, type OpenFile } from '@/lib/stores/ui';
 import * as api from '@/lib/api/client';
 import { DiffView, DiffModeTabs } from '@/components/chat/blocks/diff-view';
-import { getLanguageFromExtension } from '@/components/chat/timeline/openchamber/lib/tool-helpers';
+import { getLanguageFromExtension } from '@/components/chat/timeline/lib/tool-helpers';
 import { mapHunksToPierreMetadata } from '@/lib/diff/pierre-mapper';
 import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/scroll-tabs';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';

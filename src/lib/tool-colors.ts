@@ -1,5 +1,5 @@
 /** Shared tool → Tailwind text-color map, single source of truth for the old
- *  chat chips (tool-chips.tsx) and the openchamber timeline's tool-tint rows.
+ *  chat chips (tool-chips.tsx) and the timeline's tool-tint rows.
  *  Colors are keyed by Tide tool name; renderer-style aliases (task, todowrite,
  *  webfetch…) resolve to the same color so both UIs tint identically. */
 
@@ -28,7 +28,7 @@ export const TOOL_TEXT_COLOR: Record<string, string> = {
   mcp: 'text-indigo-400',
 };
 
-// openchamber renderer keys (tool-renderers.tsx TIDE_TOOL_ALIASES + edit family)
+// timeline renderer keys (tool-renderers.tsx TIDE_TOOL_ALIASES + edit family)
 const RENDERER_ALIASES: Record<string, string> = {
   task: 'dispatch_agent',
   todowrite: 'todo_write',

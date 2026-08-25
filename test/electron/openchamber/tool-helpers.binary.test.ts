@@ -9,7 +9,7 @@ import {
   isPdfFile,
   isSvgFile,
   looksLikeBinaryText,
-} from '../../../src/components/chat/timeline/openchamber/lib/tool-helpers';
+} from '../../../src/components/chat/timeline/lib/tool-helpers';
 
 describe('binary file helpers', () => {
   test('classifies common binary extensions', () => {

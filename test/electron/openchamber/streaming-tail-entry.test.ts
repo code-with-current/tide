@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildLiveStreamingEntry, type StreamingTailEntry } from '../../../src/components/chat/timeline/openchamber/lib/turns/streaming-tail-entry';
-import type { ChatMessageEntry, TurnRecord } from '../../../src/components/chat/timeline/openchamber/lib/turns/types';
-import type { OcMessage, OcPart } from '../../../src/components/chat/timeline/openchamber/types/opencode-parts';
+import { buildLiveStreamingEntry, type StreamingTailEntry } from '../../../src/components/chat/timeline/lib/turns/streaming-tail-entry';
+import type { ChatMessageEntry, TurnRecord } from '../../../src/components/chat/timeline/lib/turns/types';
+import type { OcMessage, OcPart } from '../../../src/components/chat/timeline/types/opencode-parts';
 
 /** Ported from openchamber/openchamber (MIT): packages/ui/src/components/chat/lib/turns/streamingTailEntry.test.ts. Dropped: the synthetic-part display-filtering case — it depends on getNormalizedMessageForDisplay's real (unported) synthetic filtering; the ported seam is an identity stub. */
 

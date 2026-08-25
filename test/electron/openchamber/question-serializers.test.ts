@@ -7,7 +7,7 @@ import {
   serializeQuestionAsJson,
   serializeQuestionAsMarkdown,
   type FollowupQuestionPayload,
-} from '../../../src/components/chat/timeline/openchamber/question-serializers';
+} from '../../../src/components/chat/timeline/question-serializers';
 
 function makePayload(overrides: Partial<FollowupQuestionPayload> & { question: string }): FollowupQuestionPayload {
   return {

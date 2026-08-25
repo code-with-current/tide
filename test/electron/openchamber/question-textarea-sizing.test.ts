@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT,
   getQuestionCustomTextareaHeight,
-} from '../../../src/components/chat/timeline/openchamber/question-textarea-sizing';
+} from '../../../src/components/chat/timeline/question-textarea-sizing';
 
 describe('getQuestionCustomTextareaHeight', () => {
   test('exports the initial textarea height', () => {

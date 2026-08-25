@@ -1,6 +1,6 @@
 /** Cycles "Label." → "Label.." → "Label..." every 500ms — the streaming
  *  reasoning-header animation (Tide-native, user request). Shared by the
- *  openchamber ReasoningPart, the legacy ThinkingBlock, and the Agents
+ *  timeline ReasoningPart, the legacy ThinkingBlock, and the Agents
  *  panel's stream view so the animation language matches everywhere. */
 
 import { useEffect, useState, type CSSProperties } from 'react';
