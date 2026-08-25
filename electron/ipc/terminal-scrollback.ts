@@ -1,4 +1,4 @@
-/** Bounded per-terminal scrollback held in the MAIN process (OpenChamber
+/** Bounded per-terminal scrollback held in the MAIN process
  *  model): the renderer is a disposable projection that can re-attach with a
  *  snapshot after a reload while the PTY keeps running. Chunks keep their
  *  node-pty boundaries — trimming whole chunks is inherently UTF-8-safe. */

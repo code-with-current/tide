@@ -7,7 +7,7 @@ import {
   selectionNodesToMarkdown,
   trimSelectionValue,
   wrapMarkdownSelectionForChat,
-} from '../../../src/components/chat/timeline/openchamber/message/selection-markdown';
+} from '../../../src/components/chat/timeline/message/selection-markdown';
 
 type TestNode =
   | { type: 'text'; value: string }

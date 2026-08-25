@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { projectTurnRecords } from '../../../src/components/chat/timeline/openchamber/lib/turns/project-turn-records';
-import type { ChatMessageEntry } from '../../../src/components/chat/timeline/openchamber/lib/turns/types';
-import type { OcMessage, OcPart } from '../../../src/components/chat/timeline/openchamber/types/opencode-parts';
+import { projectTurnRecords } from '../../../src/components/chat/timeline/lib/turns/project-turn-records';
+import type { ChatMessageEntry } from '../../../src/components/chat/timeline/lib/turns/types';
+import type { OcMessage, OcPart } from '../../../src/components/chat/timeline/types/opencode-parts';
 
 /** Ported from openchamber/openchamber (MIT): packages/ui/src/components/chat/lib/turns/projectTurnRecords.test.ts. Dropped: the three mergeHiddenUserTurns merging cases — Tide's isHiddenUserMessage is a constant-false stub (adapter never emits hidden user messages), so hidden-turn merging is untestable here. */
 

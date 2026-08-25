@@ -1,4 +1,4 @@
-/** Provisional terminal sizing before ghostty mounts (OpenChamber technique):
+/** Provisional terminal sizing before ghostty mounts (bounded technique):
  *  measure the cell box with canvas text metrics and derive cols/rows from the
  *  container, so the PTY spawns at the right dimensions while the WASM emulator
  *  is still loading — no 80x24 flash with re-wrapped shell output. Returns

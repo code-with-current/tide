@@ -129,7 +129,7 @@ export function CommitDetailsPanel({ commit }: { commit: CommitDetail }) {
   return (
     <div className="flex flex-col h-full min-h-0 bg-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-input flex-shrink-0">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-input bg-card flex-shrink-0">
         <GitCommitHorizontal className="size-3.5 text-muted-foreground/60 flex-shrink-0" />
         <ShaChip sha={commit.sha} />
         {(commit.tags?.length ?? 0) > 0 && (

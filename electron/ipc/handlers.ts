@@ -1607,8 +1607,9 @@ function readDirTree(basePath: string, relativePath: string, maxDepth: number): 
 
   const nodes: FileNode[] = [];
   for (const entry of entries) {
-    // Skip hidden dirs, node_modules, .git, etc.
-    if (entry.name.startsWith('.') && entry.name !== '.agent') continue;
+    // Skip only VCS/metadata noise — other dotfiles (.env, .github, …) stay
+    // visible in the explorer.
+    if (entry.name === '.git' || entry.name === '.DS_Store') continue;
     if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'release') continue;
 
     const entryRelative = relativePath ? path.join(relativePath, entry.name) : entry.name;

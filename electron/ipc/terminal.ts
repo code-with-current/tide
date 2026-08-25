@@ -289,7 +289,7 @@ export function startTerminal(
   const { cmd, args } = getShell();
   const env = sanitizePtyEnv(process.env);
   // Provisional size from the renderer's font metrics (avoids the 80x24
-  // spawn flash); bounded like OpenChamber: 2–1000 cols, 1–500 rows.
+  // spawn flash); bounded: 2–1000 cols, 1–500 rows.
   const cols = Math.min(1000, Math.max(2, Math.floor(size?.cols ?? 80)));
   const rows = Math.min(500, Math.max(1, Math.floor(size?.rows ?? 24)));
 

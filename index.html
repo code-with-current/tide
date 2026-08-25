@@ -5,9 +5,12 @@
     <!-- CSP: restrict to self + localhost (for MCP HTTP servers + Vite HMR in dev).
          Google Fonts allowed via style-src/font-src for now (self-host later for offline).
          'wasm-unsafe-eval' + data: in connect-src let ghostty-web load/compile its
-         embedded WASM terminal emulator (data:application/wasm;base64 fetch + compile). -->
+         embedded WASM terminal emulator (data:application/wasm;base64 fetch + compile).
+         worker-src blob:+data: — Vite inlines web workers as data/blob URLs in prod
+         builds (@pierre/diffs tokenizer pool); without this they are blocked by the
+         script-src fallback and diff/code highlighting never completes. -->
     <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none';" />
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none';" />
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/sumo-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

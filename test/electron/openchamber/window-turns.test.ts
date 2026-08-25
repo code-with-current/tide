@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildTurnWindowModel, updateTurnWindowModelIncremental } from '../../../src/components/chat/timeline/openchamber/lib/turns/window-turns';
-import type { ChatMessageEntry } from '../../../src/components/chat/timeline/openchamber/lib/turns/types';
-import type { OcMessage, OcPart } from '../../../src/components/chat/timeline/openchamber/types/opencode-parts';
+import { buildTurnWindowModel, updateTurnWindowModelIncremental } from '../../../src/components/chat/timeline/lib/turns/window-turns';
+import type { ChatMessageEntry } from '../../../src/components/chat/timeline/lib/turns/types';
+import type { OcMessage, OcPart } from '../../../src/components/chat/timeline/types/opencode-parts';
 
 /** Ported from openchamber/openchamber (MIT): packages/ui/src/components/chat/lib/turns/windowTurns.test.ts. No adaptations. */
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveTurnExpanded } from '../../../src/components/chat/timeline/openchamber/lib/turns/effective-turn-expansion.js';
+import { effectiveTurnExpanded } from '../../../src/components/chat/timeline/lib/turns/effective-turn-expansion.js';
 
 describe('effectiveTurnExpanded', () => {
   const ui = (expanded?: boolean) => ({ isExpanded: expanded });

@@ -10,7 +10,7 @@ import { EmptyChatState } from "@/components/chat/empty-chat-state";
 import { TimelineSkeleton } from "@/components/chat/turn/turn-skeleton";
 import { NoWorkspaceState } from "@/components/chat/no-workspace-state";
 import { MissingWorkspaceScreen } from "./missing-workspace-screen";
-import { OpenChamberTimeline as ChatTimeline } from "@/components/chat/timeline/openchamber/openchamber-timeline";
+import { ChatTimeline } from "@/components/chat/timeline/chat-timeline";
 import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";

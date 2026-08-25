@@ -10,7 +10,7 @@ import {
     getPrimaryDiffFromMetadata,
     getPrimaryToolPath,
     getRenderablePatchInfo,
-} from '../../../src/components/chat/timeline/openchamber/message/tool-diff-utils';
+} from '../../../src/components/chat/timeline/message/tool-diff-utils';
 
 const identity = (path: string) => path;
 

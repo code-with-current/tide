@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import { VirtualizedFile, VirtualizedFileDiff, areOptionsEqual, parseDiffFromFile } from '@pierre/diffs';
 import type { FileDiffMetadata, FileDiffOptions, FileContents, FileOptions } from '@pierre/diffs';
 import { useUi } from '@/lib/stores/ui';
@@ -28,6 +29,15 @@ export interface PierreDiffProps {
 
 type PierreFileDiff = VirtualizedFileDiff<unknown>;
 
+/** Pierre's shadow stylesheet defaults to a hardcoded 13px/20px; these
+ *  inherited custom properties retie it to Tide's base font scale. */
+function pierreFontStyle(fontScale: number): CSSProperties {
+  return {
+    '--diffs-font-size': `${fontScale-2}px`,
+    '--diffs-line-height': `${Math.round((fontScale-3) * 1.5)}px`,
+  } as CSSProperties;
+}
+
 /**
  * Imperative Pierre diff host. Trimmed of comments/annotations/selection.
  * Loaded lazily by the file viewer (and future diff surfaces) so the large
@@ -37,7 +47,13 @@ export function PierreDiff({ original, modified, fileDiff, language, sideBySide,
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<PierreFileDiff | null>(null);
+  // Last inputs pushed to the imperative instance. The update effect below
+  // runs on EVERY render (streaming parents re-render at high frequency);
+  // calling instance.render() again would cancel in-flight worker
+  // tokenization and restart it, so it must be skipped when nothing changed.
+  const lastPushed = useRef<{ input: unknown; options: FileDiffOptions<unknown> } | null>(null);
   const appTheme = useUi((s) => s.appTheme);
+  const fontScale = useUi((s) => s.fontScale);
 
   const parsedDiff = useMemo<FileDiffMetadata>(() => {
     if (fileDiff != null) return fileDiff;
@@ -99,17 +115,35 @@ export function PierreDiff({ original, modified, fileDiff, language, sideBySide,
     const instance = instanceRef.current;
     if (instance == null) return;
     const options = buildOptions();
-    const forceRender = !areOptionsEqual(instance.options, options);
+    const prev = lastPushed.current;
+    if (prev != null && prev.input === parsedDiff && areOptionsEqual(prev.options, options)) return;
+    lastPushed.current = { input: parsedDiff, options };
     instance.setOptions(options);
-    instance.render({ fileDiff: parsedDiff, forceRender });
+    instance.render({ fileDiff: parsedDiff, forceRender: prev == null || !areOptionsEqual(prev.options, options) });
   });
 
   useEffect(() => {
     instanceRef.current?.setThemeType(getPierreThemeType());
   }, [appTheme]);
 
+  // Rows are measured with getBoundingClientRect at render time and cached,
+  // so a base-font change must force a full re-render + virtualizer wake or
+  // the cached heights go stale.
+  const appliedScale = useRef(fontScale);
+  useEffect(() => {
+    const instance = instanceRef.current;
+    const root = rootRef.current;
+    if (appliedScale.current === fontScale || instance == null || root == null) return;
+    appliedScale.current = fontScale;
+    instance.render({ fileDiff: parsedDiff, forceRender: true });
+    wakeVirtualizer(root);
+    // Intentionally keyed on fontScale only — parsedDiff changes flow through
+    // the dedupe effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontScale]);
+
   return (
-    <div ref={rootRef} className="size-full min-h-0" style={{ overflow: 'auto' }}>
+    <div ref={rootRef} className="size-full min-h-0" style={{ overflow: 'auto', ...pierreFontStyle(fontScale) }}>
       <div ref={containerRef} className="size-full" />
     </div>
   );
@@ -131,7 +165,10 @@ export function PierreFile({ content, name, language, wrap = true }: PierreFileP
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<VirtualizedFile<unknown> | null>(null);
+  // See PierreDiff — dedupe imperative pushes under high-frequency re-renders.
+  const lastPushed = useRef<{ input: unknown; options: FileOptions<unknown> } | null>(null);
   const appTheme = useUi((s) => s.appTheme);
+  const fontScale = useUi((s) => s.fontScale);
 
   const file = useMemo<FileContents>(() => ({
     name,
@@ -180,17 +217,31 @@ export function PierreFile({ content, name, language, wrap = true }: PierreFileP
     const instance = instanceRef.current;
     if (instance == null) return;
     const options = buildOptions();
-    const forceRender = !areOptionsEqual(instance.options, options);
+    const prev = lastPushed.current;
+    if (prev != null && prev.input === file && areOptionsEqual(prev.options, options)) return;
+    lastPushed.current = { input: file, options };
     instance.setOptions(options);
-    instance.render({ file, forceRender });
+    instance.render({ file, forceRender: prev == null || !areOptionsEqual(prev.options, options) });
   });
 
   useEffect(() => {
     instanceRef.current?.setThemeType(getPierreThemeType());
   }, [appTheme]);
 
+  // See PierreDiff — cached row heights must be re-measured after a resize.
+  const appliedScale = useRef(fontScale);
+  useEffect(() => {
+    const instance = instanceRef.current;
+    const root = rootRef.current;
+    if (appliedScale.current === fontScale || instance == null || root == null) return;
+    appliedScale.current = fontScale;
+    instance.render({ file, forceRender: true });
+    wakeVirtualizer(root);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontScale]);
+
   return (
-    <div ref={rootRef} className="size-full min-h-0" style={{ overflow: 'auto' }}>
+    <div ref={rootRef} className="size-full min-h-0" style={{ overflow: 'auto', ...pierreFontStyle(fontScale) }}>
       <div ref={containerRef} className="size-full" />
     </div>
   );

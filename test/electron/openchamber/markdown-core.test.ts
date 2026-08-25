@@ -45,7 +45,7 @@ vi.mock('dompurify', () => ({
   },
 }));
 
-vi.mock('../../../src/components/chat/timeline/openchamber/markdown/markdown-worker', () => ({
+vi.mock('../../../src/components/chat/timeline/markdown/markdown-worker', () => ({
   highlightCodeInWorker: async () => null,
 }));
 
@@ -58,9 +58,9 @@ import {
   __markdownImageCandidateCacheForTests,
   extractMarkdownImageCandidates,
   renderMarkdownSync,
-} from '../../../src/components/chat/timeline/openchamber/markdown/markdown-core';
-import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from '../../../src/components/chat/timeline/openchamber/markdown/markdown-security';
-import { resolveMarkdownImageSource } from '../../../src/components/chat/timeline/openchamber/markdown/markdown-image-assets';
+} from '../../../src/components/chat/timeline/markdown/markdown-core';
+import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from '../../../src/components/chat/timeline/markdown/markdown-security';
+import { resolveMarkdownImageSource } from '../../../src/components/chat/timeline/markdown/markdown-image-assets';
 
 describe('markdown sanitization', () => {
   test('turns raw assistant HTML into inert visible text', () => {
@@ -105,7 +105,7 @@ describe('Markdown images', () => {
       '![image syntax](packages/vscode/extension.jpg)',
     ].join('\n\n'), 'label');
 
-    expect(html).toContain('data-openchamber-markdown-image-label="true"');
+    expect(html).toContain('data-tide-markdown-image-label="true"');
     expect(html).toContain('extension.jpg');
     expect(html).not.toContain('image syntax');
     expect(html).not.toContain('<img');
@@ -120,7 +120,7 @@ describe('Markdown images', () => {
 
     expect(html).toContain('<a href="https://example.test/image.png"');
     expect(html).toContain('<img src="https://example.test/image.png" alt="remote image">');
-    expect(html).not.toContain('data-openchamber-markdown-image-label');
+    expect(html).not.toContain('data-tide-markdown-image-label');
   });
 
   test('collects image syntax across mixed Markdown and ignores links and code', () => {
