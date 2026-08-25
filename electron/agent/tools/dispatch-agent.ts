@@ -154,7 +154,7 @@ export const dispatchAgentTool: ToolRegistration = {
             'Run the sub-agent in the background and continue your turn. You will be notified when it completes. DO NOT sleep, poll, or check its progress — work on non-overlapping tasks or end your response.',
         },
       },
-      required: ['name', 'title', 'task'],
+      required: ['name', 'task'],
     },
   },
   // Single-shot LLM call — no file mutations. The agent only reads + writes
@@ -199,7 +199,10 @@ export function createDispatchAgentTool(ctx: ToolContext) {
       'The result includes a dispatchId; pass it as resumeFrom to continue that sub-agent with a follow-up task (it keeps its prior context — keep follow-up instructions brief; brief is intentional, not ambiguous). Every dispatch without resumeFrom starts completely fresh.',
     inputSchema: z.object({
       name: z.enum(availableNames).describe('The agent to dispatch.'),
-      title: z.string().describe(
+      // Optional — some models omit it on follow-up/resume dispatches; a hard
+      // required field makes the SDK reject the whole tool call
+      // (AI_InvalidToolInputError). Downstream defaults to the agent name.
+      title: z.string().optional().describe(
         'Short human-readable label for this dispatch (3-6 words). Shown in the UI row so parallel dispatches are distinguishable. Example: "Map auth flow", "Find all SQL sinks".',
       ),
       task: z.string().describe(
