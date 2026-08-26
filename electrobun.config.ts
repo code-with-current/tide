@@ -47,7 +47,7 @@ export default {
   app: {
     name: "Tide",
     identifier: "com.tide.code",
-    version: "0.3.0-beta.1",
+    version: "0.3.1-beta",
   },
   build: {
     mainProcess: "bun",
