@@ -6,23 +6,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Platform detection for the renderer (mac/win/linux). Source: navigator.platform/userAgent. */
-/** Platform truth comes from the Electrobun preload's
- *  window.__electrobunPlatform ("macos" | "windows" | "linux"), injected
- *  before page scripts run — no user-agent sniffing. Plain-browser dev
- *  (no preload) falls back to the navigator string. */
-const _injected =
-  typeof window !== 'undefined' ? (window as { __electrobunPlatform?: string }).__electrobunPlatform : undefined;
+/** Platform detection for the renderer (mac/win/linux). Source:
+ *  navigator.platform/userAgent. */
 const _platform: 'macos' | 'windows' | 'linux' =
-  _injected === 'macos' || _injected === 'windows' || _injected === 'linux'
-    ? _injected
-    : typeof navigator !== 'undefined'
-      ? /Mac/i.test(navigator.platform || navigator.userAgent)
-        ? 'macos'
-        : /Win/i.test(navigator.platform || navigator.userAgent)
-          ? 'windows'
-          : 'linux'
-      : 'macos';
+  typeof navigator !== 'undefined'
+    ? /Mac/i.test(navigator.platform || navigator.userAgent)
+      ? 'macos'
+      : /Win/i.test(navigator.platform || navigator.userAgent)
+        ? 'windows'
+        : 'linux'
+    : 'macos';
 
 /** True on macOS. */
 export const isMac = _platform === 'macos';

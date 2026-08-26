@@ -1,9 +1,37 @@
-import type { RPCSchema } from 'electrobun/view';
-import type { ShortcutOverrides } from '../app/core/settingsStore';
-import type { FlushBatch } from '../app/core/agent/event-types';
 import type { AgentEvent } from '../src/lib/agent/events';
 
-export type { FlushBatch };
+// ── Inlined schema plumbing (was electrobun/view) ──────────────────
+// RPCSchema<S> resolves to the plain { requests, messages } pair the
+// Electrobun SDK produced when both keys are present (they always are in
+// TideRPC below), so the wire schema is unchanged without the SDK.
+
+type RPCSchema<S extends { requests?: unknown; messages?: unknown }> = {
+  requests: S extends { requests: infer R } ? R : Record<string, never>;
+  messages: S extends { messages: infer M } ? M : Record<string, never>;
+};
+
+/** User-customized keyboard shortcuts: action id → key chord (was
+ *  app/core/settingsStore — verbatim). */
+type ShortcutOverrides = Record<string, string[]>;
+
+/** One flushed partition of events, delivered per session (was
+ *  app/core/agent/event-types — verbatim). Event `seq` is present iff the
+ * transaction committed (persisted rowid, ascending within the batch);
+ * absent ⇒ degraded push-only delivery with firstSeq/lastSeq 0. */
+interface SinkEvent {
+  type: 'part.delta' | 'part.commit' | 'message.end' | 'turn.end';
+  sessionId: string;
+  messageId?: string;
+  partId?: string;
+  data?: Record<string, unknown>;
+  seq?: number;
+}
+
+export interface FlushBatch {
+  events: SinkEvent[];
+  firstSeq: number;
+  lastSeq: number;
+}
 
 // ── Sessions wire types ─────────────────────────────────────────────
 // Leaf-safe mirrors of the core session shapes (core/ipc-adjacent/
@@ -239,13 +267,76 @@ export type TerminalScrollbackResult =
   | { alive: false };
 
 // ── MCP wire types ─────────────────────────────────────────────────
-// Type-only imports from the core mcp modules: types.ts is a pure leaf
-// (zero imports) and scanner's graph is no heavier than settingsStore's
-// (node builtins + logger), which the schema already references. Both are
-// erased at emit, so nothing runtime rides into the renderer bundle.
+// Verbatim copies of the shapes that lived in app/core/agent/mcp/{types,
+// scanner}.ts — the config shape matches what users paste from MCP server
+// docs: a flat map of server name → config object (the file IS the map, no
+// mcpServers wrapper).
 
-import type { McpScope, McpServerConfig, McpServerStatus } from '../app/core/agent/mcp/types';
-import type { ScanResult as McpScanResult } from '../app/core/agent/mcp/scanner';
+/** Transport type discriminator. Always present in config. */
+export type McpTransportType = 'stdio' | 'sse' | 'http';
+
+/** A single server's configuration (one entry in the config map). */
+export interface McpServerConfig {
+  type: McpTransportType;
+
+  // ── stdio fields (type === 'stdio') ──
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+
+  // ── remote fields (type === 'sse' | 'http') ──
+  url?: string;
+  /** Custom HTTP headers sent on every request to the MCP server.
+   *  Used for bearer tokens, API keys, etc. e.g. { "Authorization": "Bearer xxx" } */
+  headers?: Record<string, string>;
+
+  // ── auth ──
+  /** Set to 'oauth' for OAuth-protected remote servers. */
+  auth?: 'oauth';
+}
+
+/** Where a server config lives — determines connection lifecycle. */
+export type McpScope = 'user' | 'project' | 'builtin';
+
+/** Connection state for a single server. */
+export type McpConnectionStatus =
+  | 'connecting'
+  | 'connected'
+  | 'error'
+  | 'disconnected'
+  | 'needs_approval'
+  | 'needs_credentials'
+  | 'needs_oauth';
+
+/** Status row for the management UI. */
+export interface McpServerStatus {
+  name: string;
+  scope: McpScope;
+  config: McpServerConfig;
+  status: McpConnectionStatus;
+  toolCount: number;
+  /** Names of the tools the server exposes — drives the clickable tool list
+   *  in the settings UI. Only populated when connected (empty otherwise). */
+  toolNames: string[];
+  error?: string;
+  transport: McpTransportType;
+  /** Whether the user has enabled this server (toggled on). */
+  enabled: boolean;
+}
+
+/** A server detected in another tool's config file (mcp import scanner). */
+export interface DetectedServer {
+  name: string;
+  config: McpServerConfig;
+  source: string; // display label: "Claude Code", "Codex", etc.
+  sourceFile: string; // the file path it came from
+}
+
+export interface McpScanResult {
+  servers: DetectedServer[];
+  /** Names already present in Tide's config (so the UI can pre-uncheck them). */
+  alreadyImported: string[];
+}
 
 // ── RAG + knowledge-sources wire types ─────────────────────────────
 // src/types is the renderer's own type leaf; knowledge/types.ts is a pure
@@ -258,6 +349,7 @@ import type {
   ExternalApp,
   ExternalAppTarget,
   FileNode,
+  KnowledgeSource,
   Provider,
   ProviderModelMeta,
   RagStatus,
@@ -265,15 +357,12 @@ import type {
   RagInitResult,
   RagInitProgressEvent,
   RagDownloadProgressEvent,
+  SourceKind,
+  SourceProgressEvent,
   Workspace,
   WorkspaceProgressEvent,
   WorkspaceScript,
 } from '../src/types';
-import type {
-  KnowledgeSource,
-  SourceKind,
-  SourceProgressEvent,
-} from '../app/core/knowledge/types';
 
 export type { KnowledgeSource, SourceKind, SourceProgressEvent };
 
@@ -708,9 +797,6 @@ export interface SkillExtensionEntry {
   absPath: string;
   enabled: boolean;
 }
-
-export type { McpScope, McpServerConfig, McpServerStatus };
-export type { McpScanResult };
 
 /** Standard mutation reply for config/pool operations. */
 export interface McpOpResult {

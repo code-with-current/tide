@@ -5,16 +5,13 @@ import path from 'node:path'
 
 // https://vite.dev/config/
 export default defineConfig({
-  // Relative base so production assets load correctly via file:// in Electron.
+  // Relative base so production assets load correctly inside the app shell.
   base: './',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@shared': path.resolve(__dirname, './shared'),
-      // Exact-or-subpath match only (vite: `pattern` or `pattern + '/'`) — the
-      // bare `electrobun` / `electrobun/main` specifiers stay untouched.
-      'electrobun/view': path.resolve(__dirname, './.hutch/devkit/api/browser/index.ts'),
     },
   },
   server: {

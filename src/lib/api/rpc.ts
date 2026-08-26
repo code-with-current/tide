@@ -1,5 +1,9 @@
-/** Electrobun RPC bridge for the renderer. The Electroview client only exists inside a real Electrobun webview — plain-browser vite dev must keep the mock fallback, so construction is gated on the preload's `window.__electrobun` bridge (the exact global `new Electroview()` dereferences; absent in browsers and in the frozen Electron shell). */
-import { Electroview } from 'electrobun/view';
+/** RPC bridge seam for the renderer. The Electrobun view client is gone with
+ *  the backend (Tauri rewrite): outside a Tauri webview `rpc` is null and
+ *  every data call in client.ts takes its existing mock-store fallback
+ *  (plain-browser dev). Inside a Tauri webview — once the shell actually
+ *  ships — the stub fails loudly on first real use until the invoke/Channel
+ *  bridge lands (Tauri rewrite M1). */
 import type {
   FlushBatch,
   McpEvent,
@@ -18,7 +22,7 @@ import type { AgentEvent } from '@/lib/agent/events';
 
 export const hasRpc =
   typeof window !== 'undefined' &&
-  typeof window.__electrobun?.receiveMessageFromHost === 'function';
+  window.__TAURI_INTERNALS__ !== undefined;
 
 type OrchestratorEventsCallback = (batch: FlushBatch) => void;
 type AgentEventsCallback = (event: AgentEvent) => void;
@@ -40,7 +44,8 @@ type ScriptPortsCallback = (event: ScriptPortsEvent) => void;
 type UpdateStatusCallback = (status: UpdateStatusWire) => void;
 
 // Single-slot registries (replace-on-set): the active consumer owns the
-// callback, and re-subscribing on session switch swaps it in.
+// callback, and re-subscribing on session switch swaps it in. The M1 bridge
+// will fan incoming Tauri Channel messages out through these same slots.
 let orchestratorEventsCallback: OrchestratorEventsCallback | null = null;
 let agentEventsCallback: AgentEventsCallback | null = null;
 let terminalOutputCallback: TerminalOutputCallback | null = null;
@@ -58,7 +63,7 @@ let scriptPortsCallback: ScriptPortsCallback | null = null;
 let updateStatusCallback: UpdateStatusCallback | null = null;
 
 /** Register the live orchestrator-events consumer. No-op outside a real
- *  webview — batches only ever arrive via the RPC message handler below.
+ *  webview — batches only ever arrive via the bridge once it exists.
  *  Returns an unregister that clears the slot (guarded so a stale cleanup
  *  from a previous subscription can't drop a newer consumer's callback). */
 export function onOrchestratorEvents(cb: OrchestratorEventsCallback): () => void {
@@ -68,7 +73,7 @@ export function onOrchestratorEvents(cb: OrchestratorEventsCallback): () => void
   };
 }
 
-/** Register the live agent-event consumer (the AGENT_EVENT_CHANNEL forward:
+/** Register the live agent-event consumer (the agent-event channel forward:
  *  permission_required, retry, compacting, turn_end, …). Same single-slot
  *  shape as onOrchestratorEvents. */
 export function onAgentEvent(cb: AgentEventsCallback): () => void {
@@ -99,8 +104,8 @@ export function onMcpEvent(cb: McpEventsCallback): () => void {
   };
 }
 
-/** Register the live rag-progress consumer. One message carries both Electron
- *  progress channels — consumers filter on msg.kind ('init' | 'download'). */
+/** Register the live rag-progress consumer. One message carries both progress
+ *  channels — consumers filter on msg.kind ('init' | 'download'). */
 export function onRagProgress(cb: RagProgressCallback): () => void {
   ragProgressCallback = cb;
   return () => {
@@ -152,6 +157,35 @@ export function setScriptPortsCallback(cb: ScriptPortsCallback | null): void {
   scriptPortsCallback = cb;
 }
 
+// Push-channel fan-out for the setter-registered slots (the on*-registered
+// ones are consumed via their own closures). These replace the Electrobun
+// message handlers as the slots' read side — the M1 bridge forwards incoming
+// Tauri Channel messages through them.
+
+export function emitTerminalOutput(event: TerminalOutputEvent): void {
+  terminalOutputCallback?.(event);
+}
+
+export function emitTerminalExit(event: TerminalExitEvent): void {
+  terminalExitCallback?.(event);
+}
+
+export function emitTerminalPorts(event: TerminalPortsEvent): void {
+  terminalPortsCallback?.(event);
+}
+
+export function emitScriptOutput(event: ScriptOutputEvent): void {
+  scriptOutputCallback?.(event);
+}
+
+export function emitScriptExit(event: ScriptExitEvent): void {
+  scriptExitCallback?.(event);
+}
+
+export function emitScriptPorts(event: ScriptPortsEvent): void {
+  scriptPortsCallback?.(event);
+}
+
 /** Register the update-status consumer (the updater store). Same single-slot
  *  shape as the other push channels. */
 export function onUpdateStatus(cb: UpdateStatusCallback): () => void {
@@ -161,58 +195,24 @@ export function onUpdateStatus(cb: UpdateStatusCallback): () => void {
   };
 }
 
-export const rpc = hasRpc
-  ? Electroview.defineRPC<TideRPC>({
-      handlers: {
-        messages: {
-          orchestratorEvents: ({ params }) => {
-            orchestratorEventsCallback?.(params);
-          },
-          agentEvents: ({ params }) => {
-            agentEventsCallback?.(params);
-          },
-          terminalOutput: ({ params }) => {
-            terminalOutputCallback?.(params);
-          },
-          terminalExit: ({ params }) => {
-            terminalExitCallback?.(params);
-          },
-          terminalPorts: ({ params }) => {
-            terminalPortsCallback?.(params);
-          },
-          mcpEvents: ({ params }) => {
-            mcpEventsCallback?.(params);
-          },
-          ragProgress: ({ params }) => {
-            ragProgressCallback?.(params);
-          },
-          sourcesProgress: ({ params }) => {
-            sourcesProgressCallback?.(params);
-          },
-          workspaceProgress: ({ params }) => {
-            workspaceProgressCallback?.(params);
-          },
-          gitChanged: ({ params }) => {
-            gitChangedCallback?.(params);
-          },
-          todosUpdated: ({ params }) => {
-            todosUpdatedCallback?.(params);
-          },
-          scriptOutput: ({ params }) => {
-            scriptOutputCallback?.(params);
-          },
-          scriptExit: ({ params }) => {
-            scriptExitCallback?.(params);
-          },
-          scriptPorts: ({ params }) => {
-            scriptPortsCallback?.(params);
-          },
-          updateStatus: ({ params }) => {
-            updateStatusCallback?.(params);
-          },
-        },
-      },
-    })
-  : null;
+/** Request surface derived from the wire schema: one async fn per bun-side
+ *  request — `(params) => Promise<response>`, the shape client.ts consumes. */
+export type TideRpcClient = {
+  request: {
+    [M in keyof TideRPC['bun']['requests']]: (
+      params: TideRPC['bun']['requests'][M]['params'],
+    ) => Promise<TideRPC['bun']['requests'][M]['response']>;
+  };
+};
 
-if (hasRpc && rpc) new Electroview({ rpc });
+function bridgeNotPorted(): never {
+  throw new Error('[tide] RPC bridge not yet ported (Tauri rewrite M1)');
+}
+
+/** The bridge client. Null outside a Tauri webview (client.ts falls back to
+ *  the mock store); inside one, a stub that throws on first property access
+ *  so genuinely bridge-demanding UI paths fail loudly instead of silently
+ *  rendering mock data. */
+export const rpc: TideRpcClient | null = hasRpc
+  ? new Proxy({} as TideRpcClient, { get: bridgeNotPorted })
+  : null;

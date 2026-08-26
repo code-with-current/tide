@@ -19,8 +19,7 @@
     /* Path aliases */
     "paths": {
       "@/*": ["./src/*"],
-      "@shared/*": ["./shared/*"],
-      "electrobun/view": ["./.hutch/devkit/api/browser/index.ts"]
+      "@shared/*": ["./shared/*"]
     },
 
     /* Linting */

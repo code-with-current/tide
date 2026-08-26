@@ -727,11 +727,34 @@ export {
 } from './block';
 
 // ─── Knowledge sources ──────────────────────────────────────────────────
-// Re-exported so the renderer can import them from '@/types'. The definitions
-// live in app/core/knowledge/types.ts (single source of truth shared with the
-// main process).
-export type {
-  KnowledgeSource,
-  SourceKind,
-  SourceProgressEvent,
-} from '../../app/core/knowledge/types';
+// Shared types for the knowledge-sources feature: registry rows and ingestion
+// progress events (single source of truth — shared/rpc.ts re-exports these
+// onto the wire schema).
+
+export type SourceKind = 'url' | 'docs' | 'crawl' | 'repo';
+
+export interface KnowledgeSource {
+  id: string; // crypto.randomUUID()
+  name: string;
+  kind: SourceKind;
+  /** url / dir or file path / root url / repo url */
+  location: string;
+  createdAt: number;
+  lastIndexedAt: number | null;
+  status: 'idle' | 'queued' | 'indexing' | 'error';
+  error: string | null;
+  chunkCount: number;
+  embedderId: string | null;
+  /** ['*'] = all workspaces */
+  enabledWorkspaceIds: string[];
+}
+
+export interface SourceProgressEvent {
+  sourceId: string;
+  phase: 'fetching' | 'chunking' | 'embedding' | 'done' | 'failed';
+  pagesSeen?: number;
+  chunksTotal?: number;
+  chunksEmbedded?: number;
+  current?: string;
+  error?: string;
+}

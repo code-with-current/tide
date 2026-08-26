@@ -21,10 +21,6 @@ yarn.lock
 # NOTE: `build/` is intentionally NOT ignored — it holds the icon files
 # and helper scripts that the packaging pipeline depends on.
 
-# Regeneratable by build/copy-tree-sitter-grammars.mjs (postinstall).
-# Vendored at runtime from the tree-sitter-wasms npm dependency.
-app/core/rag/chunker/grammars/*.wasm
-
 # Environment variables (credentials — never commit)
 .env
 .env.*
@@ -74,13 +70,9 @@ packaging/out/
 .worktrees/
 
 # Test fixtures must be committed despite global ignore patterns
-!test/core/knowledge/fixtures/**/*.md
-!test/core/knowledge/fixtures/**/*.log
+!test/**/fixtures/**/*.md
+!test/**/fixtures/**/*.log
 
-# Electrobun/Hutch migration (feat/electrobun-shell): vendored devkit,
-# build temp, Hutch output subtree, and generated artifacts. build/ stays tracked.
-.hutch/
-.cottontail-tmp/
-build/electrobun/
-artifacts/
+# Rust / Tauri build artifacts
+src-tauri/target/
 *.tsbuildinfo
