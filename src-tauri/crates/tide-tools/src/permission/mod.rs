@@ -115,12 +115,35 @@ pub enum Decision {
 pub fn risk_tier_for(tool_name: &str) -> RiskTier {
     match tool_name {
         "read_file" | "grep" | "glob" | "list_dir" | "directory_tree" | "read_media_file"
-        | "bash_output" => RiskTier::ReadOnly,
+        | "bash_output" | "git_repo" => RiskTier::ReadOnly,
         "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell" => {
             RiskTier::Write
         }
+        // The git tool executes a whole subcommand per call; the static
+        // sidecar tier is destructive (TS toolMeta). [`risk_tier_for_call`]
+        // refines it per subcommand at gate time.
+        "git" => RiskTier::Destructive,
         _ => RiskTier::Destructive,
     }
+}
+
+/// Args-aware tier for one concrete call. The `git` tool's tier follows
+/// its first `args` element: reads (status/diff/log/show/branch) are
+/// read_only, index/commit mutations (add/commit/restore/reset) are
+/// write, anything else keeps the destructive default. All other tools
+/// are name-keyed like the TS sidecar.
+pub fn risk_tier_for_call(tool_name: &str, args: &Value) -> RiskTier {
+    if tool_name == "git" {
+        if let Some(sub) = args
+            .get("args")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str())
+        {
+            return crate::tools::git::subcommand_tier(sub);
+        }
+    }
+    risk_tier_for(tool_name)
 }
 
 /// The synchronous permission gate. Holds the merged rule set (session
@@ -169,7 +192,7 @@ impl PermissionGate {
             };
         }
 
-        let tier = risk_tier_for(tool_name);
+        let tier = risk_tier_for_call(tool_name, args);
         let allow_by_rule = evaluate_rules(&self.rules, tool_name, args) == Some(RuleOutcome::Allow);
         match check_permission(tier, mode) {
             GateDecision::Auto => Decision::Allow,
@@ -371,6 +394,83 @@ mod tests {
             g.check(AutonomyMode::Ask, "some_mcp_tool", &json!({})),
             Decision::Ask { .. }
         ));
+    }
+
+    #[test]
+    fn git_tier_refines_per_subcommand() {
+        use RiskTier::*;
+        // Reads auto-approve even in plan mode.
+        for sub in ["status", "diff", "log", "show", "branch"] {
+            let args = json!({"args": [sub]});
+            assert_eq!(risk_tier_for_call("git", &args), ReadOnly, "{sub}");
+        }
+        // Index/commit mutations are write tier.
+        for sub in ["add", "commit", "restore", "reset"] {
+            assert_eq!(risk_tier_for_call("git", &args_for(sub)), Write, "{sub}");
+        }
+        // Everything else keeps the destructive default.
+        assert_eq!(risk_tier_for_call("git", &json!({"args": ["push"]})), Destructive);
+        assert_eq!(risk_tier_for_call("git", &json!({"args": []})), Destructive);
+        assert_eq!(risk_tier_for_call("git", &json!({})), Destructive);
+        // Static sidecar tier stays destructive (matches TS toolMeta).
+        assert_eq!(risk_tier_for("git"), Destructive);
+
+        let g = gate(RuleSet::default());
+        assert_eq!(
+            g.check(AutonomyMode::Plan, "git", &json!({"args": ["status", "--short"]})),
+            Decision::Allow
+        );
+        assert!(matches!(
+            g.check(AutonomyMode::Plan, "git", &json!({"args": ["add", "a.ts"]})),
+            Decision::Ask { .. }
+        ));
+        assert!(matches!(
+            g.check(AutonomyMode::Edit, "git", &json!({"args": ["commit", "-m", "x"]})),
+            Decision::Allow
+        ));
+        assert!(matches!(
+            g.check(AutonomyMode::Edit, "git", &json!({"args": ["push"]})),
+            Decision::Ask { .. }
+        ));
+        // git_repo is read-only everywhere (TS toolMeta).
+        assert_eq!(risk_tier_for("git_repo"), RiskTier::ReadOnly);
+        assert_eq!(
+            g.check(AutonomyMode::Plan, "git_repo", &json!({"op": "info", "repo": "https://github.com/o/r"})),
+            Decision::Allow
+        );
+    }
+
+    fn args_for(sub: &str) -> Value {
+        json!({"args": [sub]})
+    }
+
+    #[test]
+    fn git_and_git_repo_rules_match_on_primary_arg() {
+        let rules = RuleSet {
+            allow: vec![parse_rule("git(status)").unwrap()],
+            deny: vec![parse_rule("git_repo(https://github.com/evil/*)").unwrap()],
+        };
+        let g = gate(rules);
+        assert_eq!(
+            g.check(AutonomyMode::Ask, "git", &json!({"args": ["status", "--short"]})),
+            Decision::Allow
+        );
+        assert!(matches!(
+            g.check(
+                AutonomyMode::FullAccess,
+                "git_repo",
+                &json!({"op": "read", "repo": "https://github.com/evil/r", "file": "x"})
+            ),
+            Decision::Deny { .. }
+        ));
+        assert_eq!(
+            g.check(
+                AutonomyMode::FullAccess,
+                "git_repo",
+                &json!({"op": "read", "repo": "https://github.com/fine/r"})
+            ),
+            Decision::Allow
+        );
     }
 
     #[test]

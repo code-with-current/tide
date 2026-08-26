@@ -15,6 +15,7 @@
 //! (`{toolName, input, output, status, durationMs}`) and emit
 //! `tool_result` AgentEvents carrying `display`/`meta` without adaptation.
 
+pub mod http;
 pub mod path_safety;
 pub mod permission;
 pub mod shell_registry;
@@ -28,9 +29,9 @@ use serde::{Deserialize, Serialize};
 
 pub use permission::{AutonomyMode, Decision, PermissionGate, RiskTier};
 pub use tools::{
-    core_tools, BashOutputTool, BashTool, DirectoryTreeTool, EditFileTool, GlobTool, GrepTool,
-    KillShellTool, ListDirTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool,
-    WriteFileTool,
+    core_tools, BashOutputTool, BashTool, DirectoryTreeTool, EditFileTool, GitRepoTool, GitTool,
+    GlobTool, GrepTool, KillShellTool, ListDirTool, MultiEditTool, NotebookEditTool, ReadFileTool,
+    ReadMediaFileTool, WriteFileTool,
 };
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`
@@ -292,6 +293,8 @@ mod tests {
                 "bash",
                 "bash_output",
                 "kill_shell",
+                "git",
+                "git_repo",
             ]
         );
         for t in &tools {
@@ -309,6 +312,8 @@ mod tests {
         assert_eq!(tools[10].risk_tier(), RiskTier::Destructive);
         assert_eq!(tools[11].risk_tier(), RiskTier::ReadOnly);
         assert_eq!(tools[12].risk_tier(), RiskTier::Write);
+        assert_eq!(tools[13].risk_tier(), RiskTier::Destructive);
+        assert_eq!(tools[14].risk_tier(), RiskTier::ReadOnly);
     }
 
     /// Guard drift against the frozen tool schemas the TS stack shipped

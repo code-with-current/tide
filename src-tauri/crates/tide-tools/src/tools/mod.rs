@@ -6,6 +6,8 @@ pub mod background_shell;
 pub mod bash;
 pub mod directory_tree;
 pub mod edit_file;
+pub mod git;
+pub mod git_repo;
 pub mod glob;
 pub mod grep;
 pub mod list_dir;
@@ -22,6 +24,8 @@ pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
 pub use directory_tree::DirectoryTreeTool;
 pub use edit_file::EditFileTool;
+pub use git::GitTool;
+pub use git_repo::GitRepoTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use list_dir::ListDirTool;
@@ -48,6 +52,8 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(BashTool),
         Box::new(BashOutputTool),
         Box::new(KillShellTool),
+        Box::new(GitTool),
+        Box::new(GitRepoTool),
     ]
 }
 
