@@ -561,13 +561,18 @@ export function MainScreen() {
         // Persist basic shape (sessions.ts handles the StoredMessage projection).
         // Pass attachments + mentions so chips survive reload — without these
         // the viewer can't reopen attached files (no absPath/isImage to match).
-        await api.addMessage(sessionId, "user", text, {
-          attachments: attachments.length > 0 ? attachments : undefined,
-          mentions:
-            payload.mentions && payload.mentions.length > 0
-              ? (payload.mentions as Message["mentions"])
-              : undefined,
-        });
+        // Non-fatal: the Tauri orchestrator persists the user message from the
+        // chat_run_turn args, so an unported sessionAddMessage must not abort
+        // the send before start().
+        await api
+          .addMessage(sessionId, "user", text, {
+            attachments: attachments.length > 0 ? attachments : undefined,
+            mentions:
+              payload.mentions && payload.mentions.length > 0
+                ? (payload.mentions as Message["mentions"])
+                : undefined,
+          })
+          .catch(() => {});
         // addMessage bumps the session's updatedAt — invalidate so the sidebar
         // re-sorts (latest activity on top) and the title updates if it was
         // auto-derived from the first user message.
@@ -582,6 +587,7 @@ export function MainScreen() {
           addTitleGenerating(sessionId);
           void api
             .generateSessionTitle(sessionId)
+            .catch(() => null)
             .then((generated) => {
               if (generated && activeWorkspaceId) {
                 qc.invalidateQueries({ queryKey: ["sessions", activeWorkspaceId] });

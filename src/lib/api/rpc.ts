@@ -200,6 +200,21 @@ export function emitScriptPorts(event: ScriptPortsEvent): void {
   scriptPortsCallback?.(event);
 }
 
+// The two chat push channels ride the on*-registered slots above — these
+// emitters are their read side, fed by the M2 Tauri bridge's single
+// chat_attach_channel Channel (ChatPush tagged `agentEvents`/`orchestratorEvents`).
+
+/** Deliver one AgentEvent to the onAgentEvent consumer (ChatPush `agentEvents`). */
+export function emitAgentEvent(event: AgentEvent): void {
+  agentEventsCallback?.(event);
+}
+
+/** Deliver one event batch to the onOrchestratorEvents consumer (ChatPush
+ *  `orchestratorEvents`). */
+export function emitOrchestratorEvents(batch: FlushBatch): void {
+  orchestratorEventsCallback?.(batch);
+}
+
 /** Register the update-status consumer (the updater store). Same single-slot
  *  shape as the other push channels. */
 export function onUpdateStatus(cb: UpdateStatusCallback): () => void {
