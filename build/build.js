@@ -76,6 +76,14 @@ function patchVersion(version) {
   if (patched === source && !source.includes(`version: "${version}"`)) {
     die('could not patch app.version in electrobun.config.ts');
   }
+  // Keep package.json in sync so the README badge and npm tooling see the
+  // same version the bundle was built with.
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  if (pkg.version !== version) {
+    pkg.version = version;
+    fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+    console.log(`build: package.json version -> ${version}`);
+  }
   writeConfig(patched);
   console.log(`build: electrobun.config.ts app.version -> ${version}`);
 }
