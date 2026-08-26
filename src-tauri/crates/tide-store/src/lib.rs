@@ -3,6 +3,7 @@
 pub mod config;
 pub mod paths;
 pub mod secrets;
+pub mod sessions_v2;
 
 #[cfg(test)]
 mod tests {

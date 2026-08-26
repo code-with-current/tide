@@ -10,3 +10,4 @@ serde_json.workspace = true
 dirs = "6"
 base64 = "0.22"
 sha2 = "0.10"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
