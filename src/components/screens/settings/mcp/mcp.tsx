@@ -18,13 +18,28 @@ import {
 } from './server-dialog';
 import { McpImportDialog } from './import-dialog';
 import { useWorkspaces } from '@/lib/queries';
+import {
+  mcpAdd,
+  mcpApprove,
+  mcpAuthenticate,
+  mcpImport,
+  mcpList,
+  mcpReauthorize,
+  mcpReinitialize,
+  mcpRemove,
+  mcpRetry,
+  mcpScan,
+  mcpSetEnabled,
+  mcpUpdate,
+  subscribeMcpStatus,
+} from '@/lib/api/client';
 import { useUi } from '@/lib/stores/ui';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
-/** Settings → Extensions → MCP: lists servers across global/workspace scopes with live status from the agent pool (refreshed via onMcpStatusChanged IPC event). */
+/** Settings → Extensions → MCP: lists servers across global/workspace scopes with live status from the agent pool (refreshed via the MCP status push). */
 
-/** Shape of one row returned by window.tideIpc.mcpList(). */
+/** Shape of one row returned by mcpList(). */
 interface McpStatus {
   name: string;
   scope: McpScope;
@@ -59,7 +74,7 @@ export function McpSection() {
 
   // Scan for importable servers on mount + workspace change
   useEffect(() => {
-    window.tideIpc?.mcpScan().then((result) => {
+    mcpScan().then((result) => {
       setImportBadge(result.servers.filter((s) => !result.alreadyImported.includes(s.name)).length);
     }).catch(() => setImportBadge(0));
   }, []);
@@ -68,10 +83,10 @@ export function McpSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
+      const result = await mcpList(activeWorkspaceId ?? undefined);
       // Don't replace the list with empty during a reinitialize — keep
       // showing the existing servers so the UI doesn't flash/disappear.
-      if (result && (result.length > 0 || servers.length === 0 || !reinitializing)) {
+      if (result.length > 0 || servers.length === 0 || !reinitializing) {
         setServers(result);
       }
     } catch { /* best-effort */ }
@@ -83,10 +98,10 @@ export function McpSection() {
   const reinitialize = useCallback(async () => {
     setReinitializing(true);
     try {
-      await window.tideIpc?.mcpReinitialize();
+      await mcpReinitialize();
       // Force a fresh pull after reinitialize completes.
-      const result = await window.tideIpc?.mcpList(activeWorkspaceId ?? undefined);
-      if (result) setServers(result);
+      const result = await mcpList(activeWorkspaceId ?? undefined);
+      setServers(result);
       toast.success('MCP servers reloaded');
     } catch (e) {
       toast.error('Reload failed', { description: e instanceof Error ? e.message : undefined });
@@ -97,13 +112,9 @@ export function McpSection() {
 
   useEffect(() => {
     refresh();
-    const cb = () => {
+    return subscribeMcpStatus(() => {
       void refresh();
-    };
-    window.tideIpc?.onMcpStatusChanged(cb);
-    return () => {
-      window.tideIpc?.removeAllMcpListeners();
-    };
+    });
   }, [refresh]);
 
   // Re-fetch when the active workspace changes (the project-scoped list shifts).
@@ -128,20 +139,18 @@ export function McpSection() {
   };
 
   const handleSave = async (scope: McpScope, name: string, config: McpConfig) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
     try {
       if (editingServer) {
         // Editing an existing server. If the user renamed it, remove the old
         // entry first (the bridge keys servers by name).
         const isRename = editingServer.name !== name;
         if (isRename) {
-          await ipc.mcpRemove(editingServer.name, editingServer.scope);
+          await mcpRemove(editingServer.name, editingServer.scope);
         }
-        await ipc.mcpUpdate(name, config, scope);
+        await mcpUpdate(name, config, scope);
         toast.success('Server updated');
       } else {
-        await ipc.mcpAdd(name, config, scope);
+        await mcpAdd(name, config, scope);
         toast.success('Server added');
       }
       setDialogOpen(false);
@@ -157,53 +166,39 @@ export function McpSection() {
   };
 
   const handleRemove = async (s: McpStatus) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
-    await ipc.mcpRemove(s.name, s.scope);
+    await mcpRemove(s.name, s.scope);
     await refresh();
   };
 
   const handleApprove = async (s: McpStatus) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
-    await ipc.mcpApprove(s.name);
+    await mcpApprove(s.name);
     await refresh();
   };
 
   const handleRetry = async (s: McpStatus) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
-    await ipc.mcpRetry(s.name, s.scope, activeWorkspaceId ?? undefined);
+    await mcpRetry(s.name, s.scope, activeWorkspaceId ?? undefined);
     await refresh();
   };
 
   const handleReauthorize = async (s: McpStatus) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
-    await ipc.mcpReauthorize(s.name, s.scope, activeWorkspaceId ?? undefined);
+    await mcpReauthorize(s.name, s.scope, activeWorkspaceId ?? undefined);
     await refresh();
   };
 
   // User-initiated OAuth sign-in: opens the browser, then re-runs connect.
   const handleAuthenticate = async (s: McpStatus) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
-    await ipc.mcpAuthenticate(s.name, s.scope, activeWorkspaceId ?? undefined);
+    await mcpAuthenticate(s.name, s.scope, activeWorkspaceId ?? undefined);
     await refresh();
   };
 
   const handleToggleEnabled = async (s: McpStatus, enabled: boolean) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
-    await ipc.mcpSetEnabled(s.name, enabled, s.scope);
+    await mcpSetEnabled(s.name, enabled, s.scope);
     await refresh();
   };
 
   const handleImport = async (toImport: Array<{ name: string; config: unknown }>, importScope: McpScope) => {
-    const ipc = window.tideIpc;
-    if (!ipc) return;
     try {
-      await ipc.mcpImport(toImport, importScope);
+      await mcpImport(toImport as Array<{ name: string; config: McpConfig }>, importScope);
       setImportBadge(0);
       await refresh();
       toast.success(`Imported ${toImport.length} server${toImport.length === 1 ? '' : 's'}`);

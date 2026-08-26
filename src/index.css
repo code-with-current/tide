@@ -1389,3 +1389,54 @@ body {
         opacity: 0.5;
     }
 }
+
+/* ============================================================
+   Update-flow changelog typography (dialog + settings notice).
+   Scoped here because the update surfaces live outside .tide-chat,
+   where the compact markdown-tool sizing does not apply — this
+   restores the app's base UI scale instead of chat/browser sizes.
+   ============================================================ */
+.changelog-md .markdown-content {
+  font-size: 0.7857rem;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+.changelog-md .markdown-content h1,
+.changelog-md .markdown-content h2,
+.changelog-md .markdown-content h3,
+.changelog-md .markdown-content h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0.9em 0 0.35em;
+  color: var(--foreground);
+}
+.changelog-md .markdown-content h1:first-child,
+.changelog-md .markdown-content h2:first-child {
+  margin-top: 0.2em;
+}
+.changelog-md .markdown-content p {
+  margin: 0.35em 0;
+}
+.changelog-md .markdown-content ul,
+.changelog-md .markdown-content ol {
+  margin: 0.35em 0;
+  padding-left: 1.2em;
+}
+.changelog-md .markdown-content li {
+  margin: 0.15em 0;
+}
+.changelog-md .markdown-content pre,
+.changelog-md .markdown-content code {
+  font-size: 0.75rem;
+}
+.changelog-md .markdown-content table {
+  font-size: 0.75rem;
+}
+.changelog-md .markdown-content a {
+  color: var(--primary);
+}
+.changelog-md .markdown-content blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--border);
+}

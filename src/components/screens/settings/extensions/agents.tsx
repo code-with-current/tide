@@ -1,3 +1,4 @@
+import * as api from '@/lib/api/client';
 import { useState, useMemo, useEffect } from 'react';
 import { Search } from 'lucide-react';
 import { toast } from '@/lib/toast';
@@ -23,10 +24,10 @@ export function AgentsSection() {
   const workspaceRoot = ws?.path ?? '';
 
   async function refresh() {
-    if (!window.tideIpc || !workspaceRoot) return;
+    if (!workspaceRoot) return;
     setLoading(true);
     try {
-      const result = await window.tideIpc.listExtensionAgents(workspaceRoot);
+      const result = await api.listExtensionAgents(workspaceRoot);
       setAgents(result);
     } finally {
       setLoading(false);
@@ -40,7 +41,7 @@ export function AgentsSection() {
   async function handleToggle(name: string, enabled: boolean) {
     setAgents((prev) => prev.map((a) => (a.name === name ? { ...a, enabled } : a)));
     try {
-      await window.tideIpc?.setExtensionEnabled('agents', name, enabled);
+      await api.setExtensionEnabled('agents', name, enabled);
     } catch (e) {
       setAgents((prev) => prev.map((a) => (a.name === name ? { ...a, enabled: !enabled } : a)));
       toast.error("Couldn't update — reverted", { description: e instanceof Error ? e.message : undefined });
@@ -111,7 +112,7 @@ export function AgentsSection() {
         <ExtensionList
           groups={groups}
           onToggle={handleToggle}
-          onReveal={(path) => window.tideIpc?.showItemInFolder(path)}
+          onReveal={(path) => api.showItemInFolder(path)}
           resetKey={`${query}|${status}`}
         />
       )}

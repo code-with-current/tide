@@ -52,7 +52,7 @@ export function useWorkspaces() {
 export function useAgentSettings() {
   return useQuery({
     queryKey: qk.agentSettings,
-    queryFn: () => window.tideIpc?.getAgentSettings() ?? null,
+    queryFn: () => api.getAgentSettings(),
   });
 }
 
@@ -62,8 +62,7 @@ export function useUpdateAgentSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
-      window.tideIpc?.updateAgentSettings(patch) ??
-        Promise.reject(new Error('IPC not available')),
+      api.updateAgentSettings(patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.agentSettings }),
   });
 }
@@ -138,11 +137,11 @@ export function useProviderUsage(providerId: string | null | undefined) {
   const anyStreaming = useUi((s) => Object.values(s.streams).some((x) => x.isStreaming));
   return useQuery({
     queryKey: qk.providerUsage(providerId ?? ''),
-    queryFn: () => {
-      if (!providerId || !window.tideIpc?.providerUsageWindows) {
+    queryFn: async () => {
+      if (!providerId) {
         return { fiveHour: { tokens: 0, oldestAt: 0, newestAt: 0 }, weekly: { tokens: 0, oldestAt: 0, newestAt: 0 } };
       }
-      return window.tideIpc.providerUsageWindows(providerId);
+      return (await api.providerUsageWindows(providerId)) ?? { fiveHour: { tokens: 0, oldestAt: 0, newestAt: 0 }, weekly: { tokens: 0, oldestAt: 0, newestAt: 0 } };
     },
     enabled: !!providerId,
     refetchInterval: anyStreaming ? 15_000 : 5 * 60_000,
@@ -168,7 +167,7 @@ export interface ProviderUsageReport {
 export function useProviderUsageReport(providerId: string | null | undefined) {
   return useQuery({
     queryKey: ['providerUsageReport', providerId ?? ''] as const,
-    queryFn: () => window.tideIpc?.providerUsageReport(providerId!) ?? null,
+    queryFn: () => api.providerUsageReport(providerId!),
     enabled: !!providerId,
     refetchInterval: 60_000,
     staleTime: 30_000,
@@ -471,7 +470,7 @@ export function useGitStatus(workspaceId: string | null, sessionId?: string | nu
         qc.invalidateQueries({ queryKey: ['gitConflictFiles', workspaceId] });
       }
     };
-    const off = window.tideIpc?.onGitChanged?.(onGitChanged);
+    const off = api.subscribeGitChanged(onGitChanged);
     return () => { off?.(); };
   }, [workspaceId, qc]);
   return useQuery({

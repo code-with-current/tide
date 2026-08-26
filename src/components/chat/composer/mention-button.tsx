@@ -56,7 +56,7 @@ export function useMentionCatalog(activeWorkspaceId: string | null): Mention[] {
   // in Settings are picked up without a full re-mount.
   const [disabledConfig, setDisabledConfig] = useState<{ agents: string[]; skills: string[] } | null>(null);
   useEffect(() => {
-    const fetchDisabled = () => window.tideIpc?.listExtensions().then(setDisabledConfig).catch(() => {});
+    const fetchDisabled = () => api.listExtensions().then(setDisabledConfig).catch(() => {});
     fetchDisabled();
     const onFocus = () => fetchDisabled();
     window.addEventListener('focus', onFocus);

@@ -18,7 +18,7 @@ export function SplashScreen() {
   // via the diagnostics IPC so it stays in sync with package.json (the single
   // source of truth) rather than drifting as a hardcoded constant.
   useEffect(() => {
-    window.tideIpc?.getDiagnostics().then((d) => setVersion(d.appVersion)).catch(() => {});
+    api.getDiagnostics().then((d) => setVersion(d?.appVersion ?? '')).catch(() => {});
   }, []);
 
   // Pull a fresh models.dev catalog in the background while splash shows —

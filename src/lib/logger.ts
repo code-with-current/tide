@@ -2,7 +2,7 @@
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
-const ipc = typeof window !== 'undefined' ? (window as unknown as { tideIpc?: { log?: { send: (level: string, tag: string, msg: string, args?: unknown[]) => void } } }).tideIpc : undefined;
+import { sendLog } from './api/client';
 
 export interface RendererLogger {
   error(msg: string, ...args: unknown[]): void;
@@ -15,12 +15,10 @@ export interface RendererLogger {
 export function createLogger(tag: string): RendererLogger {
   const send = (level: LogLevel) => (msg: string, ...args: unknown[]) => {
     // Forward to main (fire-and-forget — logging must never block the renderer).
-    if (ipc?.log) {
-      try {
-        ipc.log.send(level, tag, msg, args.length > 0 ? args : undefined);
-      } catch {
-        /* IPC not ready — fall through to console */
-      }
+    try {
+      sendLog(level, tag, msg, args.length > 0 ? args : undefined);
+    } catch {
+      /* IPC not ready — fall through to console */
     }
     // Mirror to devtools console so renderer output is visible during dev.
     const line = `[${tag}] ${msg}`;

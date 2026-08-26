@@ -2,6 +2,18 @@ import { useRef, useEffect, useMemo, memo, useState } from 'react';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
 import type { Terminal as GhosttyTerminal, ILink } from 'ghostty-web';
 import { useUi, terminalScopeKey } from '@/lib/stores/ui';
+import {
+  hasTerminalBackend,
+  subscribeTerminalEvents,
+  openExternal,
+  showItemInFolder,
+  terminalInput,
+  terminalKill,
+  terminalResize,
+  terminalSnapshot,
+  terminalStart,
+  type TerminalSnapshot,
+} from '@/lib/api/client';
 import { getTerminalTheme } from '@/components/screens/settings/appearance';
 import { measureTerminalContainer } from '@/lib/terminal-size';
 import { Button } from '@/components/ui/button';
@@ -9,8 +21,6 @@ import { ScrollTabs, ScrollTabsList, ScrollTabsTrigger } from '@/components/ui/s
 import { Tip } from '@/components/ui/quick-tooltip';
 import { cn, isMac } from '@/lib/utils';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
-
-const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
 
 // ── Lazy ghostty-web ────────────────────────────────────────────
 // 638 KB of JS + the WASM VT would sit in the startup bundle for a panel the
@@ -105,18 +115,19 @@ function fitTerminal(term: GhosttyTerminal, wrapper: HTMLDivElement): { cols: nu
   return { cols, rows };
 }
 
-// ── IPC listeners (registered at module scope) ──────────────────
+// ── Push-event listeners (registered at module scope) ────────────
 // Each terminal's output/exit/ports events are routed by terminalId — the
-// handlers look up the xterm instance in the module-level `registry` at
+// handlers look up the terminal instance in the module-level `registry` at
 // event time (avoiding the per-terminal listener leak). Module scope, NOT
 // component lifecycle: the panel fully unmounts whenever the right panel
 // switches tabs, closes, or crosses the inline↔Sheet breakpoint.
 // Component-scoped listeners would drop every PTY byte emitted while the
 // panel was unmounted; the registry terms keep accepting writes (their
 // scrollback lives in ghostty-web's WASM buffer, repainted on re-attach).
-if (ipc) {
-  ipc.removeAllTerminalListeners();
-  ipc.onTerminalOutput(({ terminalId, data, seq }: { terminalId: string; data: string; seq?: number }) => {
+// Transport-agnostic: the Electrobun RPC bridge or the frozen Electron
+// preload, whichever is present (client.ts picks).
+subscribeTerminalEvents({
+  onOutput: ({ terminalId, data, seq }: { terminalId: string; data: string; seq?: number }) => {
     // Snapshot in flight — park; the attach path replays newer chunks after
     // the snapshot lands.
     if (snapshotPending.has(terminalId)) {
@@ -133,18 +144,18 @@ if (ipc) {
       lastSeq.set(terminalId, seq);
     }
     // Batched flush (rAF) — see queueOutput. Keeps the UI responsive under
-    // high-throughput PTY output instead of writing per-IPC-event.
+    // high-throughput PTY output instead of writing per-event.
     queueOutput(terminalId, data);
-  });
-  ipc.onTerminalExit(({ terminalId, code }: { terminalId: string; code: number | null }) => {
+  },
+  onExit: ({ terminalId, code }: { terminalId: string; code: number | null }) => {
     // Route through the same buffer so the exit line stays ordered after
     // any pending output (a direct write could land before buffered chunks).
     queueOutput(terminalId, `\r\n\x1b[31m[Process exited with code ${code}]\x1b[0m\r\n`);
-  });
-  ipc.onTerminalPorts(({ terminalId, ports }: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => {
+  },
+  onPorts: ({ terminalId, ports }: { terminalId: string; ports: { port: number; url: string; label: string }[] }) => {
     useUi.getState().setTerminalPorts(terminalId, ports);
-  });
-}
+  },
+});
 
 // ── File-path link provider ──────────────────────────────────────
 // Detects absolute paths (and path:line / path:line:col) in terminal output and reveals them in the OS file manager on click. xterm calls provideLinks per visible line as the user hovers; we scan that line for path matches and return ILink objects with the buffer range + activate handler. Path pattern: an absolute POSIX path (starts with /) OR a Windows path (drive letter:\), optionally suffixed with :line and :col. We deliberately require a leading slash / drive to avoid matching arbitrary "foo:bar" text.
@@ -180,7 +191,7 @@ class FilePathLinkProvider {
           // VS Code-style: only open on modifier+click (Cmd on macOS, Ctrl
           // elsewhere) — a plain click just positions the cursor.
           const mod = isMac ? event.metaKey : event.ctrlKey;
-          if (mod) window.tideIpc?.showItemInFolder(path);
+          if (mod) showItemInFolder(path);
         },
       });
     }
@@ -221,7 +232,7 @@ class UrlLinkProvider {
           const mod = isMac ? event.metaKey : event.ctrlKey;
           if (mod) {
             const href = url.startsWith('http') ? url : `https://${url}`;
-            window.tideIpc?.openExternal(href);
+            openExternal(href);
           }
         },
       });
@@ -315,7 +326,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
   // updates existing terminals in place via term.options — see below.)
   useEffect(() => {
     const mount = mountRef.current;
-    if (!mount || !ipc || !ghosttyReady || !ghosttyModule) return;
+    if (!mount || !hasTerminalBackend() || !ghosttyReady || !ghosttyModule) return;
 
     let createdActive = false;
 
@@ -381,7 +392,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
         const inst = state.terminals[sid]?.find((t) => t.id === tid);
         const cmd = inst?.pendingCommand;
         if (cmd) {
-          ipc?.terminalInput(tid, cmd + '\r');
+          terminalInput(tid, cmd + '\r');
           // Clear it so the command doesn't re-fire if the terminal is
           // somehow re-spawned later (e.g., after dispose + recreate).
           useUi.setState((s) => ({
@@ -396,9 +407,9 @@ export const TerminalPanel = memo(function TerminalPanel() {
       };
       const attach = async () => {
         snapshotPending.add(tid);
-        let snap: Awaited<ReturnType<typeof ipc.terminalSnapshot>> | undefined;
+        let snap: TerminalSnapshot | undefined;
         try {
-          snap = await ipc.terminalSnapshot(tid);
+          snap = await terminalSnapshot(tid);
         } catch { /* fall through to spawn */ }
         if (snap && snap.alive) {
           try { term.write(snap.data); } catch { /* disposed mid-attach */ }
@@ -413,25 +424,26 @@ export const TerminalPanel = memo(function TerminalPanel() {
           }
           // The reloaded view may size differently than the pre-reload
           // renderer — bring the PTY to the current dimensions.
-          try { ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
+          try { terminalResize(tid, term.cols, term.rows); } catch { /* */ }
           flushPending();
           return;
         }
         snapshotPending.delete(tid);
         parkedOutput.delete(tid);
-        await ipc.terminalStart(tid, sid, provisional ?? undefined);
+        await terminalStart(tid, sid, provisional ?? undefined);
         flushPending();
       };
       void attach();
 
-      // PTY → terminal: IPC listeners are registered ONCE (see useEffect below)
-      // — they look up the terminal by id at event time. Previously each
-      // terminal creation added new listeners, causing a MaxListenersExceeded
-      // leak after ~11 terminals.
+      // PTY → terminal: push-event handlers are registered ONCE at module
+      // scope (see subscribeTerminalEvents above) — they look up the
+      // terminal by id at event time. Previously each terminal creation
+      // added new listeners, causing a MaxListenersExceeded leak after
+      // ~11 terminals.
 
       // terminal → PTY
       const inputDisposable = term.onData((data: string) => {
-        ipc.terminalInput(tid, data);
+        terminalInput(tid, data);
       });
 
       // Resize
@@ -440,7 +452,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
         // during an unmount window) — fitting there clears the canvas
         // bitmap for nothing; the re-attach/forceRedraw path repaints.
         if (wrapper.clientWidth === 0 || wrapper.clientHeight === 0) return;
-        try { fitTerminal(term, wrapper); ipc.terminalResize(tid, term.cols, term.rows); } catch { /* */ }
+        try { fitTerminal(term, wrapper); terminalResize(tid, term.cols, term.rows); } catch { /* */ }
       });
       resizeObserver.observe(wrapper);
 
@@ -458,7 +470,7 @@ export const TerminalPanel = memo(function TerminalPanel() {
       flushTerminal(tid);
       live.inputDisposable.dispose();
       live.resizeObserver.disconnect();
-      ipc.terminalKill(tid);
+      terminalKill(tid);
       snapshotPending.delete(tid);
       parkedOutput.delete(tid);
       lastSeq.delete(tid);

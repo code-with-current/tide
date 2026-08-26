@@ -2,11 +2,14 @@
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
+    { "path": "./tsconfig.node.json" },
+    { "path": "./app/tsconfig.json" },
+    { "path": "./app/core/tsconfig.json" }
   ],
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "electrobun": ["./.hutch/devkit/api/sdks/main/index.ts"]
     }
   }
 }

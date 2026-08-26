@@ -118,7 +118,7 @@ export function MainScreen() {
   // don't override a mode the user escalated to mid-session (e.g. 'edit' via
   // the permission card).
   useEffect(() => {
-    window.tideIpc?.getAgentSettings().then((s) => {
+    api.getAgentSettings().then((s) => {
       const current = useUi.getState().autonomyMode;
       // Only apply the default on first-ever launch (current is still 'ask'
       // AND the user hasn't explicitly set a mode in the UI).
@@ -213,7 +213,7 @@ export function MainScreen() {
   useEffect(() => {
     if (!activeWorkspace) { setWorkspaceMissing(false); return; }
     let cancelled = false;
-    window.tideIpc?.workspacesExist([activeWorkspace.path]).then((map) => {
+    api.workspacesExist([activeWorkspace.path]).then((map) => {
       if (!cancelled) setWorkspaceMissing(map?.[activeWorkspace.path] === false);
     }).catch(() => { if (!cancelled) setWorkspaceMissing(false); });
     return () => { cancelled = true; };
@@ -870,12 +870,12 @@ export function MainScreen() {
     api.setLastSession(activeSessionId, activeWorkspaceId);
   }, [activeSessionId, activeWorkspaceId]);
 
-  // Notify the main process when the active workspace changes so the MCP pool can connect project-scoped servers (.mcp.json at the workspace root) and MCP IPC handlers know which config file to mutate for project-scoped add/update/remove. The main side keeps `activeWorkspace` fresh (see `tide:mcp:workspaceActivated` in main.ts). Fires once `workspaces` has loaded and the active entry resolves to a path; re-fires only when either changes. Fire-and-forget — the IPC is best-effort and a missed signal just means project servers stay down until the next change (user-scoped servers are unaffected).
+  // Notify the main process when the active workspace changes so the MCP pool can connect project-scoped servers (.mcp.json at the workspace root) and MCP handlers know which config file to mutate for project-scoped add/update/remove. The main side keeps its active-workspace tracker fresh (see mcpWorkspaceActivated). Fires once `workspaces` has loaded and the active entry resolves to a path; re-fires only when either changes. Fire-and-forget — the call is best-effort and a missed signal just means project servers stay down until the next change (user-scoped servers are unaffected).
   useEffect(() => {
     if (!activeWorkspaceId) return;
     const ws = workspaces?.find((w) => w.id === activeWorkspaceId);
     if (!ws?.path) return;
-    window.tideIpc?.mcpWorkspaceActivated?.(activeWorkspaceId, ws.path);
+    void api.mcpWorkspaceActivated(activeWorkspaceId, ws.path);
   }, [activeWorkspaceId, workspaces]);
 
   // NOTE: The legacy ```options-block text parsing that used to trigger the

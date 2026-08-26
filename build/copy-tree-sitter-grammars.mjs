@@ -1,15 +1,9 @@
 // Postinstall: vendor the TS/TSX/JS tree-sitter grammars from the
-// tree-sitter-wasms package into electron/rag/chunker/grammars/ so
+// tree-sitter-wasms package into app/core/rag/chunker/grammars/ so
 // they ship with the source tree. The chunker loads them by relative
 // path; without this, packaged builds have no grammars to load.
 //
-// Also stages them into dist-electron/grammars/ when invoked with
-// `--dist` — needed because vite.electron.config.ts bundles the
-// chunker into main.mjs (so __dirname becomes dist-electron/, not
-// the source tree). Run via `electron:dev`/`electron:build` after
-// the vite build step.
-//
-// Idempotent: skips files that already match the source sha.
+// Idempotent: skips files that already match the source size.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 const SRC_DIR = path.join(ROOT, 'node_modules', 'tree-sitter-wasms', 'out');
-const DEST_DIR = path.join(ROOT, 'electron', 'rag', 'chunker', 'grammars');
-const DIST_DIR = path.join(ROOT, 'dist-electron', 'grammars');
+const DEST_DIR = path.join(ROOT, 'app', 'core', 'rag', 'chunker', 'grammars');
 const GRAMMARS = [
   'tree-sitter-typescript.wasm', 'tree-sitter-tsx.wasm', 'tree-sitter-javascript.wasm',
   'tree-sitter-python.wasm', 'tree-sitter-go.wasm', 'tree-sitter-rust.wasm',
@@ -65,18 +58,7 @@ function stage(targetDir, label) {
   console.log(`[grammars] ${label}: ${copied} copied, ${skipped} up-to-date.`);
 }
 
-// 1. Source-tree vendor (postinstall hook).
+// Source-tree vendor (postinstall hook).
 fs.mkdirSync(DEST_DIR, { recursive: true });
 stage(DEST_DIR, 'src');
-
-// 2. dist-electron staging (when run with --dist after the vite build).
-if (process.argv.includes('--dist')) {
-  fs.mkdirSync(DIST_DIR, { recursive: true });
-  stage(DIST_DIR, 'dist');
-
-  // NOTE: The ONNX model is no longer staged here for production builds.
-  // It is lazy-downloaded from HuggingFace on first RAG enable (see
-  // electron/rag/model-downloader.ts). Dev builds stage it separately via
-  // smart-dev.mjs so dev never needs a download.
-}
 

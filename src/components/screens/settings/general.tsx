@@ -1,5 +1,6 @@
 /** GeneralSection: startup, notifications, git attribution, and background
  *  task model. */
+import * as api from '@/lib/api/client';
 import { useEffect, useState } from 'react';
 import { Check, ChevronRight, User } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -28,8 +29,8 @@ export function GeneralSection() {
   const [gitExpanded, setGitExpanded] = useState(false);
 
   useEffect(() => {
-    window.tideIpc?.getGeneralSettings().then((s) => {
-      const raw = s as Record<string, unknown>;
+    api.getGeneralSettings().then((s) => {
+      const raw = (s ?? {}) as unknown as Record<string, unknown>;
       setSettings({
         startAtLogin: (raw.startAtLogin as boolean) ?? false,
         notifications: (raw.notifications as boolean) ?? true,
@@ -47,7 +48,7 @@ export function GeneralSection() {
     if (!settings) return;
     setSettings({ ...settings, [key]: value });
     setSavingKey(key);
-    window.tideIpc?.updateGeneralSettings({ [key]: value }).then(() => {
+    api.updateGeneralSettings({ [key]: value } as Partial<api.GeneralSettings>).then(() => {
       setTimeout(() => setSavingKey(null), 900);
     });
   };

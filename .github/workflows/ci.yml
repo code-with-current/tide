@@ -1,15 +1,22 @@
 # CI — runs on every push to master and every PR.
 #
 # Why this exists: green main is a P0. Before this workflow the only CI was
-# release.yml, which fires on v* tags — so a broken main could sit for days
-# and only surface at release time. This gates the default branch on the
-# cheap, fast checks (lint, typecheck+build, unit tests) so a red main is
+# release.yml, which fires on tide/v* tags — so a broken main could sit for
+# days and only surface at release time. This gates the default branch on the
+# cheap, fast checks (lint, typecheck, unit tests) so a red main is
 # visible immediately, not at the next release.
 #
-# Toolchain intentionally mirrors release.yml (pnpm 10, Node 22,
-# --frozen-lockfile) so a push build and a release build can never disagree
-# about the environment. Native modules (node-pty, sharp) rebuild in
-# postinstall exactly as they do on the release linux leg.
+# Toolchain intentionally mirrors release.yml (bun + Hutch) so a push build
+# and a release build can never disagree about the environment. Gates invoke
+# the local node_modules/.bin entries directly (same binaries build/build.js
+# drives) rather than package.json scripts. setup-bun caches ~/.bun keyed on
+# bun.lock automatically.
+#
+# `hutch electrobun sync` is not optional: app/tsconfig.json extends
+# .hutch/devkit/tsconfig.json, which is gitignored and only exists after
+# sync — without it `tsc -b` can't even load the app project. bun install
+# also runs the root postinstall (build/copy-tree-sitter-grammars.mjs),
+# which vendors the tree-sitter grammars the rag chunker tests load.
 name: CI
 
 on:
@@ -26,34 +33,42 @@ concurrency:
 
 jobs:
   verify:
-    name: lint · build · test
+    name: lint · typecheck · test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm version comes from `packageManager` in package.json (corepack);
-      # don't set `version` here or action-setup errors on the mismatch.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+      - name: Setup Hutch
+        shell: bash
+        run: |
+          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | bash -s -- --channel production --no-modify-path
+          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: bun install
+
+      # Generates .hutch/devkit (gitignored) — extended by app/tsconfig.json
+      # and the target of the electrobun/electrobun-main/electrobun-view
+      # path mappings the typecheck below resolves against.
+      - name: Sync Electrobun devkit
+        run: hutch electrobun sync
+
+      # Generates src/lib/prompts/_*-bundle.ts from the markdown sources —
+      # these are gitignored and only exist after this step, but tsc -b
+      # resolves them (and app/core/agent imports their types).
+      - name: Generate prompt bundles
+        run: node build/promptMarkdownUtils.mjs
 
       - name: Lint
-        run: pnpm lint
+        run: ./node_modules/.bin/oxlint
 
-      # build = `tsc -b && vite build`: typechecks the whole project
-      # (renderer + main via tsconfig references) then builds the renderer.
-      # This is the type gate — a red build here means main doesn't compile.
-      - name: Build (typecheck + renderer)
-        run: pnpm build
+      # Type gate: tsc -b covers the renderer + app projects via tsconfig
+      # references. A red build here means main doesn't compile.
+      - name: Typecheck
+        run: ./node_modules/.bin/tsc -b
 
       - name: Test
-        run: pnpm test
+        run: ./node_modules/.bin/vitest run

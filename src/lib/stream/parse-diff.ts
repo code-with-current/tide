@@ -1,4 +1,4 @@
-import type { DiffHunk, DiffLine } from '@/types';
+import type { DiffHunk, DiffLine } from '../../types';
 
 /** Parse unified diff output (from `git diff`) into DiffHunk[]: skip the preamble (diff --git, index, ---/+++) and process @@ hunk headers + bodies, ignoring the `\ No newline at end of file` marker. */
 export function parseUnifiedDiff(raw: string): DiffHunk[] {

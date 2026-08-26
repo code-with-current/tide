@@ -10,8 +10,8 @@ export interface TodoItem {
 }
 
 /** Subscribe to a session's todo list: fetch on mount/sessionId change, then
- *  live-update via the `todos:updated` event. The list is flat (single source
- *  of truth for the floating panel); the model replaces it in full on every
+ *  live-update via the todosUpdated push. The list is flat (single source of
+ *  truth for the floating panel); the model replaces it in full on every
  *  todo_write call. */
 export function useSessionTodos(sessionId: string | null | undefined): TodoItem[] {
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -29,14 +29,10 @@ export function useSessionTodos(sessionId: string | null | undefined): TodoItem[
   }, [sessionId]);
 
   useEffect(() => {
-    api.subscribeTodos().catch(() => {});
-    api.onTodosUpdated(({ sessionId: eventSessionId, todos: list }: any) => {
+    return api.onTodosUpdated(({ sessionId: eventSessionId, todos: list }: any) => {
       if (eventSessionId !== sessionId) return;
       setTodos((list ?? []) as TodoItem[]);
     });
-    return () => {
-      api.removeTodosListener();
-    };
   }, [sessionId]);
 
   return todos;

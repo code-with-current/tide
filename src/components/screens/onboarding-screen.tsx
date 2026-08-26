@@ -33,7 +33,7 @@ export function OnboardingScreen() {
   const [step, setStep] = useState<Step>('provider');
   const [version, setVersion] = useState('—');
   useEffect(() => {
-    window.tideIpc?.getDiagnostics().then((d) => setVersion(d.appVersion)).catch(() => {});
+    api.getDiagnostics().then((d) => setVersion(d?.appVersion ?? '')).catch(() => {});
   }, []);
 
   // Route to main, unless macOS permissions need consent first (cheap native

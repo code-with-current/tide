@@ -6,6 +6,14 @@ import type { SessionStream } from '@/types';
 import { useUi, freshStream } from '@/lib/stores/ui';
 import { reduceStream } from '@/lib/stream/stream-reducer';
 import { notifyPermissionRequired, notifyTurnEnd } from '@/lib/sounds';
+import { hasRpc, onAgentEvent } from '@/lib/api/rpc';
+import {
+  chatAbort,
+  chatApproveTools,
+  chatRejectTools,
+  chatSend,
+  chatSubmitFollowup,
+} from '@/lib/api/client';
 
 export interface ChatStreamStartArgs {
   sessionId: string;
@@ -51,19 +59,20 @@ export function useChatStream(): {
   rejectToolCalls: (sessionId: string, toolCallIds: string[], reason?: string) => void;
   submitFollowup: (sessionId: string, toolCallId: string, answer: string) => Promise<boolean>;
 } {
-  const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
-
   const start = useCallback(
     async (args: ChatStreamStartArgs) => {
-      if (!ipc) return;
       // Reset this session's stream entry to a fresh state. Other sessions'
       // entries are untouched — they keep streaming if they were.
       useUi.getState().resetStream(args.sessionId);
       useUi.getState().patchStream(args.sessionId, { isStreaming: true });
       useUi.getState().setSessionRunning(args.sessionId, true);
 
-      try {
-        await ipc.runTurn({
+      if (hasRpc) {
+        // Job pattern: the request resolves on acceptance; every outcome
+        // after that (deltas, errors, turn_end) arrives as an agent event,
+        // which alone may clear isStreaming. A pre-flight rejection is the
+        // only synchronous failure.
+        const res = await chatSend({
           sessionId: args.sessionId,
           messages: args.messages,
           modelId: args.modelId,
@@ -71,32 +80,30 @@ export function useChatStream(): {
           autonomyMode: args.autonomyMode,
           thinkingLevel: args.thinkingLevel,
         });
-      } catch (err: any) {
-        useUi.getState().patchStream(args.sessionId, {
-          error: err?.message || 'Failed to start turn',
-          isStreaming: false,
-        });
-      } finally {
-        // Always clear the running indicator when the IPC call returns — covers no-result turns that the freeze effect never fires on.
-        useUi.getState().setSessionRunning(args.sessionId, false);
-        // Also ensure isStreaming clears if no turn_end event arrived.
-        if (useUi.getState().streams[args.sessionId]?.isStreaming) {
-          useUi.getState().patchStream(args.sessionId, { isStreaming: false, retry: null });
+        if (!res.accepted) {
+          useUi.getState().patchStream(args.sessionId, {
+            error: res.error,
+            isStreaming: false,
+          });
+          useUi.getState().setSessionRunning(args.sessionId, false);
         }
+        return;
       }
+
+      // Browser dev (no backend): nothing streams — leave the mock UI as is.
     },
-    [ipc],
+    [],
   );
 
   const abort = useCallback(
     (sessionId: string) => {
-      if (!ipc) return;
+      if (!hasRpc) return;
       // Don't clear local state here — the orchestrator emits a turn_end with partial work that drives cleanup so the freeze effect can persist it.
-      ipc.abortTurn(sessionId);
+      chatAbort(sessionId);
       // Just dismiss any pending permission prompt for this session.
       useUi.getState().patchStream(sessionId, { permissionRequest: null });
     },
-    [ipc],
+    [],
   );
 
   const approveToolCalls = useCallback(
@@ -106,8 +113,8 @@ export function useChatStream(): {
       newMode?: 'plan' | 'ask' | 'edit' | 'full',
       remember?: boolean,
     ) => {
-      if (!ipc) return;
-      ipc.approveToolCalls(sessionId, toolCallIds, newMode, remember);
+      if (!hasRpc) return;
+      chatApproveTools(sessionId, toolCallIds, newMode, remember);
       markApprovedToolCallsRunning(sessionId, toolCallIds);
       // Mode escalation auto-approves every other pending ask main-side —
       // dismiss their cards in the same pass so no dead cards linger.
@@ -121,26 +128,26 @@ export function useChatStream(): {
       // permission rule, not a mode change, so it doesn't move the selector.)
       if (newMode) useUi.getState().setAutonomyMode(newMode);
     },
-    [ipc],
+    [],
   );
 
   const rejectToolCalls = useCallback(
     (sessionId: string, toolCallIds: string[], reason?: string) => {
-      if (!ipc) return;
-      ipc.rejectToolCalls(sessionId, toolCallIds, reason);
+      if (!hasRpc) return;
+      chatRejectTools(sessionId, toolCallIds, reason);
       removePendingPermissionCards(sessionId, toolCallIds);
     },
-    [ipc],
+    [],
   );
 
   const submitFollowup = useCallback(
     async (sessionId: string, toolCallId: string, answer: string): Promise<boolean> => {
-      if (!ipc) return false;
+      if (!hasRpc) return false;
       try {
         // True = the paused turn's awaiting tool resolved. False = no pending
         // ask (turn already ended) — the caller decides how to deliver the
         // answer; dismissing the popup below happens either way.
-        const resolved = await ipc.submitFollowup(sessionId, toolCallId, answer);
+        const resolved = await chatSubmitFollowup(sessionId, toolCallId, answer);
         return resolved === true;
       } catch {
         return false;
@@ -151,13 +158,13 @@ export function useChatStream(): {
         useUi.getState().dismissOptionsPopup(sessionId);
       }
     },
-    [ipc],
+    [],
   );
 
-  // ─── Single mount-once IPC listener ──────────────────────────────────────
+  // ─── Single mount-once event listener ──────────────────────────────────────
   // Registered once for the hook's lifetime; routes every event by event.sessionId so concurrent sessions update independently. Maintains the new `blocks` view plus legacy fields (in sync until Tasks 12-14 land).
   useEffect(() => {
-    if (!ipc) return;
+    if (!hasRpc) return;
 
     // Per-session event queue coalescing events into one reducer pass + commit per 50ms. Urgent events (turn_end/error/permission_required/followup_required) flush immediately. Fixes an out-of-order bug where tool events applied synchronously rendered before preceding text deltas.
     const FLUSH_MS = 50;
@@ -185,7 +192,7 @@ export function useChatStream(): {
       });
     };
 
-    ipc.onAgentEvent((event: AgentEvent) => {
+    const onEvent = (event: AgentEvent) => {
       const sid = event.sessionId;
       if (event.type === 'turn_end') {
         notifyTurnEnd(sid, event.stopReason);
@@ -207,15 +214,18 @@ export function useChatStream(): {
         timers.delete(sid);
         flushNow(sid);
       }, FLUSH_MS));
-    });
+    };
+
+    // Electrobun webview: the agentEvents RPC message.
+    const unregister = onAgentEvent(onEvent);
 
     return () => {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
       queues.clear();
-      if (ipc) ipc.removeAllAgentListeners();
+      unregister();
     };
-  }, [ipc]);
+  }, []);
 
   return { start, abort, approveToolCalls, rejectToolCalls, submitFollowup };
 }

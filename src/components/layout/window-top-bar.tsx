@@ -10,8 +10,8 @@ import {
   FolderTree,
   GitPullRequestArrow,
   Globe,
+  Minus, Square, X,
 } from "lucide-react";
-// Square removed — replaced by animate-pulse span for the stop button.
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -34,6 +34,32 @@ const CAPTION_PAD = isMac ? 0 : 140;
 
 function stripTermSuffix(name: string): string {
   return name.replace(/ \(\d+\)$/, '');
+}
+
+/** App-drawn window controls — Windows/Linux only (mac keeps its native
+ *  traffic lights embedded at the top-left of this bar). Windows-style
+ *  trio at the far right; every button is a no-drag island inside the
+ *  drag region. */
+function WindowControls() {
+  const base = "flex w-[46px] items-center justify-center text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground";
+  return (
+    <div className="no-drag ml-1 flex self-stretch">
+      <button type="button" aria-label="Minimize" title="Minimize" className={base} onClick={() => api.minimizeWindow()}>
+        <Minus className="size-3.5" />
+      </button>
+      <button type="button" aria-label="Maximize" title="Maximize / Restore" className={base} onClick={() => api.toggleMaximizeWindow()}>
+        <Square className="size-3" />
+      </button>
+      <button
+        type="button"
+        aria-label="Close" title="Close"
+        className="flex w-[46px] items-center justify-center text-muted-foreground/70 transition-colors hover:bg-[#e81123] hover:text-white"
+        onClick={() => api.closeWindow()}
+      >
+        <X className="size-4" />
+      </button>
+    </div>
+  );
 }
 
 export function WindowTopBar() {
@@ -127,12 +153,11 @@ export function WindowTopBar() {
     const tid = runTerminal?.id;
     if (!tid) return;
     let cancelled = false;
-    const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
     const poll = async () => {
-      if (cancelled || !ipc) return;
-      const pid = await ipc.terminalGetPid(tid);
+      if (cancelled) return;
+      const pid = await api.terminalGetPid(tid);
       if (cancelled || !pid) return;
-      const alive = await ipc.processIsAlive(pid);
+      const alive = await api.processIsAlive(pid);
       if (cancelled) return;
       if (!alive) useUi.getState().markTerminalStopped(tid);
     };
@@ -161,21 +186,23 @@ export function WindowTopBar() {
 
   const stopRunTerminal = useCallback(() => {
     if (!runTerminal) return;
-    window.tideIpc?.terminalStop(runTerminal.id);
+    void api.terminalStop(runTerminal.id);
     useUi.getState().markTerminalStopped(runTerminal.id);
   }, [runTerminal]);
 
   const [runningCommands, setRunningCommands] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!activeWorkspaceId) return;
-    const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
-    if (!ipc) return;
-    ipc.onScriptExit((data) => {
-      if (data.workspaceId === activeWorkspaceId) {
-        setRunningCommands((prev) => { const n = new Set(prev); n.delete(data.command); return n; });
-      }
+    api.subscribeScriptEvents({
+      onOutput: () => {},
+      onPorts: () => {},
+      onExit: (data) => {
+        if (data.workspaceId === activeWorkspaceId) {
+          setRunningCommands((prev) => { const n = new Set(prev); n.delete(data.command); return n; });
+        }
+      },
     });
-    return () => ipc.removeAllScriptListeners();
+    return () => api.removeScriptListeners();
   }, [activeWorkspaceId]);
 
   const isRunning = useCallback((cmd: string) => runningCommands.has(cmd), [runningCommands]);
@@ -214,7 +241,10 @@ export function WindowTopBar() {
   return (
     <div
       ref={barRef}
-      className="drag-region flex items-center gap-2 border-b border-border flex-shrink-0 overflow-hidden"
+      className={cn(
+        'drag-region flex items-center gap-2 border-b border-border flex-shrink-0 overflow-hidden',
+        isMac && 'pl-[84px]',
+      )}
       style={{ height: 40 }}
     >
       {/* ══ Far left: sessions toggle + breadcrumb ══ */}
@@ -462,6 +492,8 @@ export function WindowTopBar() {
           </Button>
         </Tip>
       </div>
+
+      {!isMac && <WindowControls />}
     </div>
   );
 }

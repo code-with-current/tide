@@ -164,7 +164,7 @@ export interface Workspace {
   scripts: WorkspaceScript[];
   /** Per-workspace RAG config. Hydrated at read time so workspaces persisted
    *  before this feature existed get sensible defaults. See hydrateRagConfig
-   *  in electron/configStore.ts. */
+   *  in app/core/configStore.ts. */
   ragConfig?: RagConfig;
   /** Per-workspace MCP OAuth credentials (tokens/clients/verifiers) for
    *  project-scoped OAuth servers. Stored in config.json, not .mcp.json, so
@@ -728,10 +728,10 @@ export {
 
 // ─── Knowledge sources ──────────────────────────────────────────────────
 // Re-exported so the renderer can import them from '@/types'. The definitions
-// live in electron/knowledge/types.ts (single source of truth shared with the
+// live in app/core/knowledge/types.ts (single source of truth shared with the
 // main process).
 export type {
   KnowledgeSource,
   SourceKind,
   SourceProgressEvent,
-} from '../../electron/knowledge/types';
+} from '../../app/core/knowledge/types';

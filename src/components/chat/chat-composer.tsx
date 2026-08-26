@@ -415,36 +415,30 @@ export function ChatComposer({
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
-      const tide = (window as any).tideIpc as
-        | { getPathForFile?: (f: File) => string; saveClipboardFile?: (name: string, bytes: ArrayBuffer) => Promise<string> }
-        | undefined;
+      // Pasted files carry bytes only (no on-disk path is exposed to the
+      // webview) — they go through saveClipboardFile's base64 RPC to get a
+      // real on-disk path.
       for (const f of Array.from(files)) {
         const name = f.name || 'pasted-file';
-        let realPath = '';
-        try { realPath = tide?.getPathForFile?.(f) ?? ''; } catch { realPath = ''; }
         const kind = kindForPath(name);
         if (kind === 'image') {
           // Clipboard screenshots have no backing file — persist the bytes so
           // the attachment (and the agent's read_media_file) gets a real path.
-          if (realPath) {
-            addAttachment({ path: shortName(realPath), kind, absPath: realPath });
-          } else {
-            bumpPendingReads(1);
-            f.arrayBuffer()
-              .then((buf) => (buf.byteLength > 0 && tide?.saveClipboardFile ? tide.saveClipboardFile(name, buf) : Promise.resolve('')))
-              .then((saved) => {
-                if (saved) {
-                  addAttachment({ path: shortName(saved), kind, absPath: saved, bytes: f.size });
-                } else {
-                  addAttachment({ path: shortName(name), kind, bytes: f.size });
-                }
-              })
-              .catch(() => addAttachment({ path: shortName(name), kind }))
-              .finally(() => bumpPendingReads(-1));
-          }
+          bumpPendingReads(1);
+          f.arrayBuffer()
+            .then((buf) => (buf.byteLength > 0 ? api.saveClipboardFile(name, buf) : Promise.resolve('')))
+            .then((saved) => {
+              if (saved) {
+                addAttachment({ path: shortName(saved), kind, absPath: saved, bytes: f.size });
+              } else {
+                addAttachment({ path: shortName(name), kind, bytes: f.size });
+              }
+            })
+            .catch(() => addAttachment({ path: shortName(name), kind }))
+            .finally(() => bumpPendingReads(-1));
           continue;
         }
-        const displayPath = shortName(realPath || name);
+        const displayPath = shortName(name);
         bumpPendingReads(1);
         f.text().then((content) => {
           const MAX = 200_000;
@@ -455,10 +449,9 @@ export function ChatComposer({
             content: truncated ? content.slice(0, MAX) : content,
             bytes: f.size,
             truncated,
-            absPath: realPath || undefined,
           });
         }).catch(() => {
-          addAttachment({ path: displayPath, kind: 'text', content: '[read failed]', absPath: realPath || undefined });
+          addAttachment({ path: displayPath, kind: 'text', content: '[read failed]' });
         }).finally(() => bumpPendingReads(-1));
       }
       return;

@@ -1,4 +1,5 @@
 /** MissingWorkspaceScreen: shown when the active workspace's folder is gone. Offers Delete or "I've restored it" (re-probe, no silent mkdir). */
+import * as api from '@/lib/api/client';
 import { useState } from 'react';
 import { FolderX, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -41,7 +42,7 @@ export function MissingWorkspaceScreen({
   const handleRecheck = async () => {
     setChecking(true);
     try {
-      const map = await window.tideIpc?.workspacesExist([workspace.path]);
+      const map = await api.workspacesExist([workspace.path]);
       if (map?.[workspace.path]) {
         toast.success('Workspace folder found');
         onRestored();

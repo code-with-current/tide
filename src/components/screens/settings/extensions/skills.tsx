@@ -1,3 +1,4 @@
+import * as api from '@/lib/api/client';
 import { useState, useMemo, useEffect } from 'react';
 import { Search } from 'lucide-react';
 import { toast } from '@/lib/toast';
@@ -23,10 +24,10 @@ export function SkillsSection() {
   const workspaceRoot = ws?.path ?? '';
 
   async function refresh() {
-    if (!window.tideIpc || !workspaceRoot) return;
+    if (!workspaceRoot) return;
     setLoading(true);
     try {
-      const result = await window.tideIpc.listExtensionSkills(workspaceRoot);
+      const result = await api.listExtensionSkills(workspaceRoot);
       setSkills(result);
     } finally {
       setLoading(false);
@@ -40,7 +41,7 @@ export function SkillsSection() {
   async function handleToggle(name: string, enabled: boolean) {
     setSkills((prev) => prev.map((s) => (s.name === name ? { ...s, enabled } : s)));
     try {
-      await window.tideIpc?.setExtensionEnabled('skills', name, enabled);
+      await api.setExtensionEnabled('skills', name, enabled);
     } catch (e) {
       setSkills((prev) => prev.map((s) => (s.name === name ? { ...s, enabled: !enabled } : s)));
       toast.error("Couldn't update — reverted", { description: e instanceof Error ? e.message : undefined });
@@ -118,7 +119,7 @@ export function SkillsSection() {
         <ExtensionList
           groups={groups}
           onToggle={handleToggle}
-          onReveal={(path) => window.tideIpc?.showItemInFolder(path)}
+          onReveal={(path) => api.showItemInFolder(path)}
           renderBadges={(item) =>
             shadowedUserNames.has(item.name) ? (
               <span

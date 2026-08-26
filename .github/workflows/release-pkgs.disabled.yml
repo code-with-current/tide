@@ -1,0 +1,232 @@
+# DORMANT — electron-era packaging pipeline, disabled during the Electrobun
+# migration. Do not dispatch; the job bodies below are kept verbatim as the
+# template for a future Electrobun-native packaging flow.
+#
+# Why it was disabled — every load-bearing assumption is gone:
+#   - Trigger: it woke on the old electron "Release" workflow's `v*` tags.
+#     Electrobun releases are tagged `tide/v*` (release.yml), which the
+#     version resolution below can't parse — and its `workflow_run` trigger
+#     would have run (and failed loudly) right after the first Electrobun
+#     Release, since that workflow is also named "Release".
+#   - Assets: packaging/render.mjs hashes electron-builder artifact names
+#     (Tide-v<version>-x64-Setup.exe, Tide-<version>-{arm64,x64}.dmg,
+#     Tide-<version>_amd64.deb). Electrobun builds emit *.tar.zst update
+#     envelopes, *-update.json, and differently-named per-target installers.
+#   - Platforms: the mac-x64 and Snap Store legs have no Electrobun
+#     equivalent at all.
+#
+# What a revival needs:
+#   1. Re-derive the artifact inventory from build/build.js
+#      (validateArtifacts) + release.yml's build matrix.
+#   2. Update packaging/render.mjs URL/hash builders and the winget/homebrew
+#      templates for the new installer names; drop or replace snap.
+#   3. Re-point the trigger at tide/v* releases (workflow_run on "Release"
+#      or release event), then rename this file back to release-pkgs.yml.
+#
+# NOTE: renaming alone does not disable a workflow — GitHub Actions picks up
+# every *.yml under .github/workflows/, which is why the trigger below is
+# workflow_dispatch-only with no inputs. A manual dispatch fails fast at
+# render.mjs (empty version) and touches no secrets.
+#
+# One-time setup for whenever this is revived (see packaging/README.md):
+#   winget   — set WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
+#   homebrew — set HOMEBREW_GITHUB_API_TOKEN.
+#   snap     — set SNAPCRAFT_STORE_CREDENTIALS (snapcraft export-login).
+name: Publish package manifests (dormant)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pkg-manifests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    # Only act when the Release workflow that woke us up actually succeeded
+    # (skipped for manual workflow_dispatch runs).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    name: render · manifests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      winget_version: ${{ steps.meta.outputs.winget_version }}
+      release_url: ${{ steps.meta.outputs.release_url }}
+      exe_url: ${{ steps.meta.outputs.exe_url }}
+      exe_sha: ${{ steps.meta.outputs.exe_sha }}
+      deb_url: ${{ steps.meta.outputs.deb_url }}
+      deb_sha: ${{ steps.meta.outputs.deb_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve version from release tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            REF="${{ github.event.workflow_run.head_branch }}"
+            TAG="${REF#refs/tags/}"
+          fi
+          TAG="${TAG#v}"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Render manifests
+        run: |
+          node packaging/render.mjs \
+            --version "${{ steps.ver.outputs.version }}" \
+            --repo "${{ github.repository }}"
+
+      - name: Expose manifest values to downstream jobs
+        id: meta
+        run: |
+          M=packaging/out/meta.json
+          echo "version=$(jq -r .version "$M")" >> "$GITHUB_OUTPUT"
+          echo "winget_version=$(jq -r .wingetVersion "$M")" >> "$GITHUB_OUTPUT"
+          echo "release_url=https://github.com/${{ github.repository }}/releases/tag/v${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "exe_url=$(jq -r .assets.exe.url "$M")" >> "$GITHUB_OUTPUT"
+          echo "exe_sha=$(jq -r .assets.exe.sha256 "$M")" >> "$GITHUB_OUTPUT"
+          echo "deb_url=$(jq -r .assets.deb.url "$M")" >> "$GITHUB_OUTPUT"
+          echo "deb_sha=$(jq -r .assets.deb.sha256 "$M")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifests
+          path: packaging/out/
+          retention-days: 7
+
+  winget:
+    # Pushes rendered manifests to code-with-current/winget-pkgs (org fork)
+    # and opens a PR to microsoft/winget-pkgs. Requires WINGET_GITHUB_TOKEN.
+    name: publish · winget
+    needs: render
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+    steps:
+      - name: Skip — no WINGET_GITHUB_TOKEN configured
+        if: ${{ env.WINGET_TOKEN == '' }}
+        run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (PAT scopes public_repo + workflow) to enable winget submission."
+
+      - name: Download rendered manifests
+        if: ${{ env.WINGET_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+
+      - name: Push manifests and open PR
+        if: ${{ env.WINGET_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.render.outputs.winget_version }}"
+          PKG_ID="Tide.Tide"
+          # winget-pkgs stores manifests at manifests/<first-letter>/<Publisher>/<Product>/<Version>/
+          MANIFEST_DIR="manifests/t/Tide/Tide/${VERSION}"
+          BRANCH="${PKG_ID}.${VERSION}"
+          FORK="code-with-current/winget-pkgs"
+          UPSTREAM="microsoft/winget-pkgs"
+
+          # Sparse-clone the fork — only the Tide subtree to keep it fast.
+          git clone --depth=1 --filter=blob:none --sparse \
+            "https://x-access-token:${WINGET_TOKEN}@github.com/${FORK}" winget
+          cd winget
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git sparse-checkout set manifests/t/Tide
+          git checkout -b "$BRANCH"
+
+          # Copy rendered manifests into the version directory.
+          mkdir -p "$MANIFEST_DIR"
+          cp ../manifests/winget/*.yaml "$MANIFEST_DIR/"
+
+          git add -A
+          git commit -m "Add ${PKG_ID} version ${VERSION}" || true
+          git push -u origin "$BRANCH" --force
+
+          # Open PR to microsoft/winget-pkgs from the org fork.
+          gh pr create \
+            --repo "$UPSTREAM" \
+            --head "code-with-current:${BRANCH}" \
+            --base master \
+            --title "${PKG_ID} version ${VERSION}" \
+            --body "Adds ${PKG_ID} version ${VERSION}." || \
+          echo "::notice::PR may already exist for this version."
+
+  homebrew:
+    # Pushes the rendered cask directly to code-with-current/homebrew-tap.
+    # No fork, no PR, no notability requirements — it's our own tap.
+    # Users install via: brew install --cask code-with-current/tap/tide
+    name: publish · homebrew
+    needs: render
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+    steps:
+      - name: Skip — no HOMEBREW_GITHUB_API_TOKEN configured
+        if: ${{ env.GH_TOKEN == '' }}
+        run: echo "::notice::Set the HOMEBREW_GITHUB_API_TOKEN secret (scopes public_repo + workflow) to enable homebrew tap publishing."
+      - name: Download rendered manifests
+        if: ${{ env.GH_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+      - name: Push cask to code-with-current/homebrew-tap
+        if: ${{ env.GH_TOKEN != '' }}
+        run: |
+          VERSION="${{ needs.render.outputs.version }}"
+          TAP="code-with-current/homebrew-tap"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP}" tap
+          cd tap
+          mkdir -p Casks
+          cp ../manifests/homebrew/tide.rb Casks/tide.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "tide ${VERSION}" || true
+          git push
+          echo "::notice::Updated Casks/tide.rb in ${TAP} to ${VERSION}"
+
+  snap:
+    # Downloads the .snap from the GitHub Release and uploads it to the
+    # Snap Store. Requires SNAPCRAFT_STORE_CREDENTIALS.
+    name: publish · snap store
+    needs: render
+    runs-on: ubuntu-latest
+    env:
+      CREDS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+    steps:
+      - name: Skip — no SNAPCRAFT_STORE_CREDENTIALS configured
+        if: ${{ env.CREDS == '' }}
+        run: echo "::notice::Set SNAPCRAFT_STORE_CREDENTIALS (snapcraft export-login) to enable Snap Store publishing."
+
+      - name: Download .snap from release
+        if: ${{ env.CREDS != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p snap
+          gh release download "v${{ needs.render.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.snap" \
+            --dir snap/
+
+      - name: Upload to Snap Store
+        if: ${{ env.CREDS != '' }}
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft upload snap/*.snap || {
+            echo "::notice::Snap already uploaded — this is expected for re-runs."
+            exit 0
+          }

@@ -6,70 +6,78 @@ Thanks for your interest in contributing! Tide is a local-first agentic coding c
 
 | Requirement | Version |
 |---|---|
-| [Node.js](https://nodejs.org) | 22+ (CI runs on 22) |
-| [pnpm](https://pnpm.io) | 10.27.0 (pinned via `packageManager` — corepack handles it) |
+| [Bun](https://bun.sh) | 1.4.0+ (pinned via `packageManager` in package.json) |
+| [Hutch](https://framework.blackboard.sh/electrobun/guides/hutch/) | latest production channel |
 | [Git](https://git-scm.com) | 2.20+ |
 
-Enable corepack once after installing Node:
+Install Hutch:
 
 ```sh
-corepack enable
+curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | bash -s -- --channel production --no-modify-path
 ```
 
-pnpm will then resolve to the pinned version automatically — don't pass `--version` flags.
+Node.js 22+ is also handy for editor tooling (TypeScript server), but Bun owns the actual build and test pipeline.
 
 ## Getting started
 
 ```sh
 git clone https://github.com/code-with-current/tide.git
 cd tide
-pnpm install
+bun install
 ```
 
 ### Run the dev build
 
-The renderer (Vite) and the Electron main process run as separate processes:
-
 ```sh
-pnpm electron:dev
+bun run app:dev
 ```
 
-This boots Vite on `http://localhost:5173`, waits for it, then launches Electron pointed at it. Hot reload works for both renderer and main-process changes.
-
-For renderer-only iteration (no Electron shell):
+This syncs the Electrobun devkit, then launches the app with `--watch` — main-process edits (`app/**`) rebuild and relaunch automatically. Renderer edits (`src/**`) need a rebuild + sync first:
 
 ```sh
-pnpm dev
+bun run build && hutch electrobun sync
+```
+
+For renderer-only iteration in a plain browser (mock data, no bridge):
+
+```sh
+bun run dev
 ```
 
 ## Common commands
 
 | Command | What it does |
 |---|---|
-| `pnpm electron:dev` | Full dev — Vite + Electron |
-| `pnpm dev` | Renderer-only dev (no Electron) |
-| `pnpm build` | Typecheck (`tsc -b`) + Vite production build |
-| `pnpm lint` | Run oxlint |
-| `pnpm test` | Run the vitest suite once |
-| `pnpm test:watch` | Run vitest in watch mode |
-| `pnpm electron:build` | Build desktop installers via electron-builder |
+| `bun run app:dev` | Full dev — sync + launch with `--watch` |
+| `bun run dev` | Renderer-only dev (plain browser, mock data) |
+| `bun run build` | Typecheck (`tsc -b`) + Vite production build |
+| `bun run app:build` | Full release build (renderer + Electrobun bundle) |
+| `bun run lint` | Run oxlint |
+| `bun run test` | Run the vitest suite once |
+| `bun run test:watch` | Run vitest in watch mode |
+| `bun run test:updater` | Local end-to-end update-flow scenario |
 
 ### Before opening a PR
 
 1. **Typecheck** — `tsc -b` (incremental, fast). Always use this, never `tsc --noEmit`.
-2. **Lint** — `pnpm lint` should pass clean.
-3. **Tests** — `pnpm test` should pass. If you add a feature, add a test.
+2. **Lint** — `bun run lint` should pass clean.
+3. **Tests** — `bun run test` should pass. If you add a feature, add a test.
 
 ## Project structure
 
-Tide is a dual-process Electron app. Read [`AGENTS.md`](./AGENTS.md) for the full architecture deep-dive — the short version:
+Tide is an Electrobun app with a Bun main process and a React renderer. Read [`AGENTS.md`](./AGENTS.md) for the full architecture deep-dive — the short version:
 
 ```
-electron/          Main process — orchestrator, tools, RAG, MCP, IPC handlers
+app/               Main process (Bun runtime)
+  core/            Agent runtime — orchestrator, tools, RAG, MCP, stores
+  rpc/             Typed RPC handlers, one module per domain
+  platform/        OS seams — sqlite, secrets, pty, paths, updater
+shared/            RPC schema (types-only, imported by both processes)
 src/               Renderer — React SPA (components, stores, queries)
   components/      UI (chat, sidebar, panels)
   lib/             Stores, API client, stream logic, prompts
-build/             electron-builder config + build scripts
+build/             Build pipeline scripts + vendored native deps
+test/              Centralized test suite (test/app/ + test/core/)
 ```
 
 ### File naming
@@ -79,18 +87,19 @@ build/             electron-builder config + build scripts
 | `src/components/` and below | kebab-case (`chat-composer.tsx`) |
 | `src/lib/`, `src/hooks/` | kebab-case (`use-chat-stream.ts`) |
 | shadcn/ui primitives | single-word lowercase (`button.tsx`) |
-| `electron/agent/tools/` | kebab-case, one file per tool |
+| `app/core/agent/tools/` | kebab-case, one file per tool |
 | System prompt fragments | numbered prefix (`01-identity.md`) |
 
 New files default to **kebab-case**. Match the directory you're in.
 
 ### Key conventions
 
-- **Renderer never touches the filesystem, shell, or network directly** — all privileged ops go through `window.tide.*` IPC to the main process.
+- **Renderer never touches the filesystem, shell, or network directly** — all privileged ops go through the typed RPC bridge to the main process.
 - **One Zustand store** (`src/lib/stores/ui.ts`) for UI state. Don't create parallel stores.
-- **Path alias**: use `@/*` (maps to `./src/*`) for renderer imports.
+- **Path aliases**: `@/*` for renderer imports, `@shared/*` for the RPC schema.
+- **`shared/rpc.ts` stays types-only** — importing runtime modules from `app/core` into the schema drags the main-process graph into the renderer typecheck. Extract leaf types if you need them.
 - **No comments by default** — only document the *why* when non-obvious.
-- **pnpm-lock.yaml must be committed** — CI installs with `--frozen-lockfile`.
+- **`bun.lock` must be committed** — CI installs with it.
 
 ## Branches & commits
 
@@ -101,7 +110,7 @@ Use a descriptive prefix:
 ```
 feat/session-fork-ui
 fix/scroll-lock-on-tool-call
-chore/upgrade-electron
+chore/upgrade-bun
 ```
 
 ### Commit messages
@@ -112,14 +121,14 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 feat(chat): stream tool output incrementally
 fix(orchestrator): handle aborted turns without orphaned state
 docs: add contribution guide
-chore(deps): bump electron to 33
+chore(deps): bump bun to 1.4.1
 ```
 
 Keep the subject line under 72 characters, imperative mood.
 
 ## Pull requests
 
-1. Fork the repo and create a branch from `master`.
+1. Fork the repo and create a branch from `dev`.
 2. Make your changes. Keep PRs focused — one feature or fix per PR.
 3. Ensure typecheck, lint, and tests pass (see above).
 4. If your change touches the UI, include screenshots or screen recordings in the PR description.
@@ -135,7 +144,7 @@ Keep the subject line under 72 characters, imperative mood.
 
 Open a [GitHub Issue](https://github.com/code-with-current/tide/issues) with:
 
-- Tide version (from Settings → About)
+- Tide version (from the splash screen or Settings → About)
 - OS and architecture (macOS arm64, Windows x64, etc.)
 - Steps to reproduce
 - Expected vs. actual behavior

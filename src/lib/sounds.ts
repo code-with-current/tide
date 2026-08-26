@@ -1,5 +1,6 @@
 /** Renderer-side notification sounds for turn completion and permission prompts. Gated by the `notificationSound` general setting, checked per event (rare — at most a couple per turn). */
 
+import { getGeneralSettings } from '@/lib/api/client';
 import doneUrl from '@/assets/sounds/done.mp3';
 import attentionUrl from '@/assets/sounds/attention.mp3';
 import errorUrl from '@/assets/sounds/error.mp3';
@@ -36,7 +37,7 @@ const seenPermissionIds = new Map<string, Set<string>>();
 
 async function playIfEnabled(kind: SoundKind): Promise<void> {
   try {
-    const settings = await window.tideIpc?.getGeneralSettings();
+    const settings = await getGeneralSettings();
     if (settings?.notificationSound === false) return;
     // Fresh element per play so overlapping events don't cut each other off.
     await new Audio(assets[kind]).play();

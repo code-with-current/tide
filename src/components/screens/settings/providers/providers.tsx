@@ -9,6 +9,8 @@ import {
   Search,
   RefreshCw,
   BrainCircuit,
+  KeyRound,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
@@ -78,6 +80,42 @@ export function ProvidersSection() {
   const [query, setQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  // Key-migration banner: while the shell reports provider keys still locked
+  // in the old Electron encryption, decryption is refused on purpose, so
+  // providers surface as "No key set". Polls so the banner clears itself
+  // (and refreshes the provider list) once the boot-time migration lands.
+  const qc = useQueryClient();
+  const [keysNeedMigration, setKeysNeedMigration] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const wasFlagged = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    const check = () => {
+      api
+        .getEnvInfo()
+        .then((env) => {
+          if (!alive) return;
+          if (env?.keysNeedMigration) {
+            wasFlagged.current = true;
+            setKeysNeedMigration(true);
+          } else {
+            if (wasFlagged.current) {
+              void qc.invalidateQueries({ queryKey: ["providers"] });
+            }
+            wasFlagged.current = false;
+            setKeysNeedMigration(false);
+          }
+        })
+        .catch(() => {});
+    };
+    check();
+    const t = setInterval(check, 5000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [qc]);
+
   const selected = providers?.find((p) => p.id === selectedId);
   const q = query.trim().toLowerCase();
   const filtered =
@@ -103,6 +141,29 @@ export function ProvidersSection() {
           </Button>
         }
       />
+
+      {keysNeedMigration && !bannerDismissed && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5">
+          <KeyRound className="size-4 text-destructive shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0 text-[0.7857rem] leading-relaxed">
+            <span className="font-medium">Saved API keys need to be re-entered.</span>{" "}
+            <span className="text-muted-foreground">
+              Tide now uses a new encryption scheme and couldn't read keys saved
+              by the previous version (the macOS keychain prompt was declined
+              or unavailable). Select each provider showing{" "}
+              <span className="font-medium">No key set</span> and paste its API
+              key — it's stored once and carries over from here on.
+            </span>
+          </div>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            className="text-muted-foreground/60 hover:text-foreground transition-colors shrink-0 mt-0.5"
+            title="Dismiss"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 flex-1 min-h-0">
         {/* Sidebar: search → add → list (no auto-select; starts empty). */}

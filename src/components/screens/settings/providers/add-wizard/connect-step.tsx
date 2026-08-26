@@ -1,3 +1,4 @@
+import * as api from '@/lib/api/client';
 import { useEffect, useState, type Dispatch, type ReactNode } from 'react';
 import {
   Check,
@@ -174,7 +175,7 @@ function CustomConnectStep({
     setDetectError(null);
     setDetected(false);
     try {
-      const result = await window.tideIpc?.detectProviderProtocol({
+      const result = await api.detectProviderProtocol({
         baseUrl: state.baseUrl.trim(),
         apiKey: state.apiKey.trim(),
       });
