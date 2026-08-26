@@ -110,12 +110,15 @@ pub enum Decision {
 }
 
 /// Risk tier per tool name — port of the TS `toolMeta` sidecar entries for
-/// the core five. Unknown tools are treated as destructive (the
+/// the built-in tools. Unknown tools are treated as destructive (the
 /// conservative tier: asks in everything but full mode).
 pub fn risk_tier_for(tool_name: &str) -> RiskTier {
     match tool_name {
-        "read_file" | "grep" | "glob" => RiskTier::ReadOnly,
-        "write_file" | "edit_file" => RiskTier::Write,
+        "read_file" | "grep" | "glob" | "list_dir" | "directory_tree" | "read_media_file"
+        | "bash_output" => RiskTier::ReadOnly,
+        "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell" => {
+            RiskTier::Write
+        }
         _ => RiskTier::Destructive,
     }
 }

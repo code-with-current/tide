@@ -5,7 +5,7 @@
 //! BEFORE calling [`Tool::execute`].
 //!
 //! Ports of the TS stack at `91ec558`:
-//! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob}.ts`
+//! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob,list-dir,directory-tree,read-media-file,multi-edit,notebook-edit,background-shell}.ts`
 //! - path sandboxing: `app/core/agent/path-safety.ts` → [`path_safety`]
 //! - permission gate: `app/core/agent/permission.ts` + `permissions/rules.ts`
 //!   + `permission-wrapper.ts` → [`permission`]
@@ -17,6 +17,7 @@
 
 pub mod path_safety;
 pub mod permission;
+pub mod shell_registry;
 pub mod tools;
 
 use std::path::PathBuf;
@@ -27,7 +28,9 @@ use serde::{Deserialize, Serialize};
 
 pub use permission::{AutonomyMode, Decision, PermissionGate, RiskTier};
 pub use tools::{
-    core_tools, BashTool, EditFileTool, GlobTool, GrepTool, ReadFileTool, WriteFileTool,
+    core_tools, BashOutputTool, BashTool, DirectoryTreeTool, EditFileTool, GlobTool, GrepTool,
+    KillShellTool, ListDirTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool,
+    WriteFileTool,
 };
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`
@@ -136,7 +139,7 @@ pub struct DiffHunk {
 
 /// Richer UI-facing payload for the renderer's tool chips — field-compatible
 /// with the `ToolDisplay` union in `src/types/index.ts` (tagged `kind`,
-/// camelCase fields), restricted to the kinds the five core tools emit.
+/// camelCase fields), restricted to the kinds the built-in tools emit.
 /// Rides the live `tool_result` AgentEvent; it is NOT part of the persisted
 /// v2 tool part data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -156,6 +159,10 @@ pub enum ToolDisplay {
     },
     Text {
         text: String,
+    },
+    Media {
+        data_url: String,
+        mime_type: String,
     },
 }
 
@@ -266,12 +273,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn core_registry_has_the_five_tools_with_meta() {
+    fn core_registry_has_the_core_tools_with_meta() {
         let tools = core_tools();
         let names: Vec<String> = tools.iter().map(|t| t.spec().name).collect();
         assert_eq!(
             names,
-            vec!["read_file", "write_file", "edit_file", "bash", "grep", "glob"]
+            vec![
+                "read_file",
+                "list_dir",
+                "directory_tree",
+                "read_media_file",
+                "glob",
+                "grep",
+                "edit_file",
+                "multi_edit",
+                "write_file",
+                "notebook_edit",
+                "bash",
+                "bash_output",
+                "kill_shell",
+            ]
         );
         for t in &tools {
             let spec = t.spec();
@@ -280,10 +301,14 @@ mod tests {
             assert!(spec.parameters["required"].is_array() || spec.parameters.get("required").is_none());
             assert_eq!(t.risk_tier(), permission::risk_tier_for(&spec.name));
         }
+        // Spot-check the tiers the TS tool-meta sidecar assigned.
         assert_eq!(tools[0].risk_tier(), RiskTier::ReadOnly);
-        assert_eq!(tools[1].risk_tier(), RiskTier::Write);
-        assert_eq!(tools[2].risk_tier(), RiskTier::Write);
-        assert_eq!(tools[3].risk_tier(), RiskTier::Destructive);
+        assert_eq!(tools[3].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[7].risk_tier(), RiskTier::Write);
+        assert_eq!(tools[9].risk_tier(), RiskTier::Write);
+        assert_eq!(tools[10].risk_tier(), RiskTier::Destructive);
+        assert_eq!(tools[11].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[12].risk_tier(), RiskTier::Write);
     }
 
     /// Guard drift against the frozen tool schemas the TS stack shipped
@@ -459,5 +484,14 @@ mod tests {
         let v = serde_json::to_value(&cmd).unwrap();
         assert_eq!(v["kind"], "file_list");
         assert_eq!(v["paths"][0], "a/b.ts");
+
+        let media = ToolDisplay::Media {
+            data_url: "data:image/png;base64,AAA".into(),
+            mime_type: "image/png".into(),
+        };
+        let v = serde_json::to_value(&media).unwrap();
+        assert_eq!(v["kind"], "media");
+        assert_eq!(v["dataUrl"], "data:image/png;base64,AAA");
+        assert_eq!(v["mimeType"], "image/png");
     }
 }

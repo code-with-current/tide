@@ -2,8 +2,11 @@
 //! in the workspace root via `/bin/sh -c` (cmd.exe on Windows), bounded by
 //! a hard blocklist for catastrophic patterns, output caps (50 KB per
 //! stream / 1000 lines), a wall-clock timeout with an early-kill heuristic
-//! for silent commands, and turn-abort support. The permission gate
-//! (destructive tier) runs BEFORE execute in the orchestrator.
+//! for silent commands, and turn-abort support. `background:true` spawns
+//! through the [`ShellRegistry`](crate::shell_registry) instead — the call
+//! returns a shell id immediately and the model polls via bash_output /
+//! kill_shell. The permission gate (destructive tier) runs BEFORE execute
+//! in the orchestrator.
 
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -101,14 +104,35 @@ pub(crate) fn run_bash(
     }
 
     if background {
-        // The TS delegated to a shared background-shell registry polled via
-        // bash_output/kill_shell; those companion tools aren't part of the
-        // core five yet, so refuse rather than leak an unkillable process.
-        return ToolOutcome::failed(
-            "Background shells are not supported in this build yet — run the command in the foreground.",
-        );
+        // Background mode: spawn into the shell registry, return immediately
+        // with the shell id (TS `spawnBackground`). The model polls output
+        // via bash_output and stops it via kill_shell.
+        match super::background_shell::spawn_backgrounded(
+            crate::shell_registry::global_shell_registry(),
+            trimmed,
+            workspace_root,
+            abort,
+        ) {
+            Ok(id) => ToolOutcome::executed(format!(
+                "Backgrounded as {id}. Use bash_output({{ shell_id: \"{id}\" }}) to read new output, kill_shell({{ shell_id: \"{id}\" }}) to stop it."
+            ))
+            .with_meta("backgrounded")
+            .with_display(ToolDisplay::Command {
+                command: trimmed.to_string(),
+            }),
+            Err(e) => ToolOutcome::failed(format!("Spawn error: {e}")),
+        }
+    } else {
+        run_foreground(trimmed, workspace_root, timeout_ms, abort)
     }
+}
 
+fn run_foreground(
+    trimmed: &str,
+    workspace_root: &std::path::Path,
+    timeout_ms: u64,
+    abort: &crate::AbortFlag,
+) -> ToolOutcome {
     let start = Instant::now();
     let mut cmd = Command::new(shell_binary());
     cmd.arg(if cfg!(windows) { "/c" } else { "-c" })
@@ -412,11 +436,39 @@ mod tests {
     }
 
     #[test]
-    fn background_not_yet_supported() {
+    fn background_returns_shell_id_immediately() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_bash("sleep 5", tmp.path(), 1000, true, &no_abort());
-        assert_eq!(out.status, crate::OutcomeStatus::Failed);
-        assert!(out.output.contains("Background shells"));
+        let out = run_bash("echo bg-echo; sleep 10", tmp.path(), 30_000, true, &no_abort());
+        assert_eq!(out.status, crate::OutcomeStatus::Executed);
+        assert!(out.output.starts_with("Backgrounded as sh_"));
+        assert!(out.output.contains("bash_output({ shell_id:"));
+        assert_eq!(out.meta.as_deref(), Some("backgrounded"));
+        assert!(matches!(out.display, Some(ToolDisplay::Command { .. })));
+        // Returns immediately (no durationMs — the process keeps running).
+        assert_eq!(out.duration_ms, None);
+
+        // The shell really runs in the registry: poll output, then kill.
+        let id = out.output.split_whitespace().nth(2).unwrap().trim_end_matches('.');
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some((chunk, _)) =
+                crate::shell_registry::global_shell_registry().read_new(id)
+            {
+                if chunk.contains("bg-echo") {
+                    break;
+                }
+            }
+            assert!(std::time::Instant::now() < deadline, "background echo never arrived");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(crate::shell_registry::global_shell_registry().kill(id));
+    }
+
+    #[test]
+    fn background_blocked_command_still_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = run_bash("sudo rm -rf /", tmp.path(), 1000, true, &no_abort());
+        assert_eq!(out.status, crate::OutcomeStatus::Rejected);
     }
 
     #[test]
