@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderTodoPlanLines, type TodoItem } from '../../../electron/agent/tools/todo-write';
+import { renderTodoPlanLines, type TodoItem } from '../../../app/core/agent/tools/todo-write';
 
 function item(content: string, status: TodoItem['status']): TodoItem {
   return { content, status };

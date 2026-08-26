@@ -4,19 +4,21 @@
  *  tool call, stacked bottom-up so the first ask sits nearest the composer. */
 
 import { ShieldAlert } from 'lucide-react';
+import { chatApproveTools, chatRejectTools } from '@/lib/api/client';
+import { hasRpc } from '@/lib/api/rpc';
 import { useUi } from '@/lib/stores/ui';
 import { PermissionCard } from './permission-card';
 import type { AutonomyMode } from '@/types';
 
-/** IPC approve — mirrors useChatStream's approveToolCalls. */
-function ipcApprove(
+/** Approve — mirrors useChatStream's approveToolCalls. */
+function approve(
   sessionId: string,
   ids: string[],
   newMode?: AutonomyMode,
   remember?: boolean,
 ) {
-  if (!sessionId || !window.tideIpc) return;
-  window.tideIpc.approveToolCalls(sessionId, ids, newMode, remember);
+  if (!sessionId || !hasRpc) return;
+  chatApproveTools(sessionId, ids, newMode, remember);
   // Mode escalation auto-approves every other pending ask main-side —
   // dismiss their cards too.
   const dismissIds = newMode
@@ -26,9 +28,9 @@ function ipcApprove(
   if (newMode) useUi.getState().setAutonomyMode(newMode);
 }
 
-function ipcReject(sessionId: string, ids: string[], reason?: string) {
-  if (!sessionId || !window.tideIpc) return;
-  window.tideIpc.rejectToolCalls(sessionId, ids, reason);
+function reject(sessionId: string, ids: string[], reason?: string) {
+  if (!sessionId || !hasRpc) return;
+  chatRejectTools(sessionId, ids, reason);
   useUi.getState().removePermissionCards(sessionId, ids);
 }
 
@@ -53,12 +55,12 @@ export function FloatingPermissionCard({ sessionId }: { sessionId: string | null
               timeoutAt={permissionRequest?.timeoutAt}
               onApprove={
                 sessionId
-                  ? (newMode, remember) => ipcApprove(sessionId, [tc.id], newMode, remember)
+                  ? (newMode, remember) => approve(sessionId, [tc.id], newMode, remember)
                   : undefined
               }
               onReject={
                 sessionId
-                  ? (reason) => ipcReject(sessionId, [tc.id], reason)
+                  ? (reason) => reject(sessionId, [tc.id], reason)
                   : undefined
               }
             />

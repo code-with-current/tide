@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveModel } from '../../electron/agent/provider-factory.js';
+import { resolveModel } from '../../app/core/agent/provider-factory.js';
 import type { Provider, Model } from '../../src/types';
 
 function makeProvider(overrides: Partial<Provider> = {}): Provider {

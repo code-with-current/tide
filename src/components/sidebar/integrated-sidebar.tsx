@@ -26,7 +26,6 @@ import {
 } from '@/lib/queries';
 import { useExternalApps } from '@/lib/use-external-apps';
 import * as api from '@/lib/api/client';
-import { cn } from '@/lib/utils';
 import { PixelLoader } from '@/components/ui/pixel-loader';
 import { Tip } from '@/components/ui/quick-tooltip';
 import { Button } from '@/components/ui/button';
@@ -39,6 +38,7 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
+import { cn, isMac } from "@/lib/utils";
 
 interface SessionLite { id: string; title: string; updatedAt: string; createdAt: string; }
 
@@ -123,7 +123,6 @@ function IntegratedSidebarImpl() {
     return map;
   }, [allTerminals, terminalPorts]);
   const openDialog = useUi((s) => s.openDialog);
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
 
   const { data: workspaces } = useWorkspaces();
   const active = useMemo(() => workspaces?.filter((w) => !w.archivedAt) ?? [], [workspaces]);

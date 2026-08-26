@@ -2,10 +2,9 @@
   "name": "tide",
   "private": true,
   "version": "0.2.0-beta.2",
-  "packageManager": "pnpm@10.27.0",
-  "description": "Tide — Code with the current.",
+  "packageManager": "bun@1.4.0",
+  "description": "Tide \u2014 Code with the current.",
   "type": "module",
-  "main": "dist-electron/main.mjs",
   "scripts": {
     "postinstall": "node build/copy-tree-sitter-grammars.mjs",
     "dev": "vite",
@@ -13,80 +12,11 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:updater": "node scripts/updater-scenario.mjs",
     "update:model-prices": "node scripts/update-model-prices.mjs",
     "preview": "vite preview",
-    "electron:dev": "node build/smart-dev.mjs && concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_ENABLE_LOGGING=true ELECTRON_DISABLE_SECURITY_WARNINGS=true electron .\"",
-    "electron:build": "vite build && vite build --config vite.electron.config.ts && electron-builder",
-    "electron:build:dir": "vite build && vite build --config vite.electron.config.ts && electron-builder --dir",
-    "publish": "node build/build.js target=dir publish=always",
-    "publish:win:setup:x64": "node build/build.js target=win arch=x64 type=setup publish=always",
-    "publish:win:setup:x86": "node build/build.js target=win arch=x86 type=setup publish=always",
-    "publish:win:setup:arm64": "node build/build.js target=win arch=arm64 type=setup publish=always",
-    "publish:win:setup:x86_64": "node build/build.js target=win arch=x86_64 type=setup publish=always",
-    "publish:win:portable": "npm run publish:win:portable:x86_64 && npm run publish:win:portable:x64 && npm run publish:win:portable:x86",
-    "publish:win:portable:x86_64": "node build/build.js target=win arch=x86_64 type=portable publish=always",
-    "publish:win:portable:x64": "node build/build.js target=win arch=x64 type=portable publish=always",
-    "publish:win:portable:x86": "node build/build.js target=win arch=x86 type=portable publish=always",
-    "publish:win:7z:x64": "node build/build.js target=win arch=x64 type=green publish=always",
-    "publish:win:7z:arm64": "node build/build.js target=win arch=arm64 type=green publish=always",
-    "publish:win7:setup:x64": "node build/build.js target=win arch=x64 type=win7_setup publish=always",
-    "publish:win7:7z:x64": "node build/build.js target=win arch=x64 type=win7_green publish=always",
-    "publish:win7:7z:x86": "node build/build.js target=win arch=x86 type=win7_green publish=always",
-    "publish:mac:dmg": "node build/build.js target=mac arch=x64 type=dmg publish=always",
-    "publish:mac:dmg:arm64": "node build/build.js target=mac arch=arm64 type=dmg publish=always",
-    "publish:linux:deb:amd64": "node build/build.js target=linux arch=x64 type=deb publish=always",
-    "publish:linux:deb:arm64": "node build/build.js target=linux arch=arm64 type=deb publish=always",
-    "publish:linux:deb:armv7l": "node build/build.js target=linux arch=armv7l type=deb publish=always",
-    "publish:linux:appImage": "node build/build.js target=linux arch=x64 type=appImage publish=always",
-    "publish:linux:rpm": "node build/build.js target=linux arch=x64 type=rpm publish=always",
-    "publish:linux:pacman": "node build/build.js target=linux arch=x64 type=pacman publish=always"
-  },
-  "build": {
-    "appId": "com.tide.code",
-    "productName": "Tide",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "!**/node_modules/onnxruntime-web/**/*.wasm",
-      "!**/node_modules/onnxruntime-web/dist/ort-wasm*.jsep.mjs",
-      "!**/node_modules/@xenova/transformers/dist/*.wasm",
-      "!**/*.map",
-      "!**/*.d.ts"
-    ],
-    "asarUnpack": [
-      "node_modules/better-sqlite3/**",
-      "node_modules/node-pty/**",
-      "node_modules/onnxruntime-node/**",
-      "node_modules/sqlite-vec*/**",
-      "node_modules/node-mac-permissions/**"
-    ],
-    "protocols": [
-      {
-        "name": "Tide OAuth callback",
-        "schemes": [
-          "tide"
-        ],
-        "role": "Viewer"
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "target": "dmg",
-      "icon": "build/icon.icns",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "build/icon.ico"
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "build/icon.png"
-    }
+    "app:dev": "hutch electrobun sync && hutch electrobun dev --watch",
+    "app:build": "bun run build && hutch electrobun build --env=stable"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -95,7 +25,6 @@
     "beautiful-mermaid": "^1.1.3",
     "better-sqlite3": "^13.0.1",
     "dompurify": "^3.4.13",
-    "electron-updater": "^6.8.9",
     "html-to-text": "^10.0.1",
     "katex": "^0.16.47",
     "marked": "^16.4.2",
@@ -104,6 +33,7 @@
     "onnxruntime-common": "1.14.0",
     "onnxruntime-node": "1.14.0",
     "remend": "^1.3.0",
+    "sharp": "file:./build/sharp-stub",
     "shiki": "^3.23.0",
     "sqlite-vec": "^0.1.9",
     "thinking-orbs": "^0.3.1",
@@ -120,8 +50,9 @@
     "@radix-ui/react-slot": "1.3.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.2",
-    "@tanstack/react-virtual": "^3.14.9",
+    "@tanstack/react-virtual": "3.14.9",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "^1.4.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -131,10 +62,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "concurrently": "^10.0.3",
-    "cross-env": "^10.1.0",
-    "electron": "^43.1.1",
-    "electron-builder": "^26.15.3",
     "ghostty-web": "^0.4.0",
     "lucide-react": "^1.25.0",
     "mermaid": "^11.16.0",
@@ -158,19 +85,16 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10",
-    "wait-on": "^9.0.10",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },
   "optionalDependencies": {
     "node-mac-permissions": "^2.5.0"
   },
-  "pnpm": {
-    "overrides": {
-      "sharp": "file:./build/sharp-stub"
-    },
-    "patchedDependencies": {
-      "@tanstack/virtual-core@3.17.7": "patches/@tanstack__virtual-core@3.17.7.patch"
-    }
+  "overrides": {
+    "sharp": "file:./build/sharp-stub"
+  },
+  "patchedDependencies": {
+    "@tanstack/virtual-core@3.17.7": "patches/@tanstack__virtual-core@3.17.7.patch"
   }
 }

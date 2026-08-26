@@ -1,39 +1,41 @@
 /** UpdatePill — compact animated banner shown at the top of the sidebar when
- *  an update is available, downloading, or ready to install. Clicking it opens
- *  Settings → Updates. When the update is downloaded, a inline Restart button
- *  is offered so the user never has to leave the main screen. */
+ *  an update is available, downloading, or ready to install. Clicking it
+ *  opens the update flow's dialogs (never Settings directly): available →
+ *  the release-details dialog; downloading → the progress dialog; ready →
+ *  the progress dialog parked on its final step (Later / Restart Now).
+ *  Nothing downloads or applies without those explicit consent actions. */
 
 import { useEffect } from 'react';
-import { ArrowUpToLine, Loader2, Sparkles } from 'lucide-react';
+import { ArrowUpToLine, Download, Loader2 } from 'lucide-react';
 import { useUpdateStore, hasUpdate } from '@/lib/stores/update-store';
-import { useUi } from '@/lib/stores/ui';
 import { cn } from '@/lib/utils';
-
-const SETTINGS_SECTION_KEY = 'tide-settings-section';
-
-function openUpdatesSettings() {
-  try { localStorage.setItem(SETTINGS_SECTION_KEY, 'updates'); } catch { /* */ }
-  useUi.getState().setScreen('settings');
-}
 
 export function UpdatePill() {
   const init = useUpdateStore((s) => s.init);
   const status = useUpdateStore((s) => s.status);
+  const openReleaseDialog = useUpdateStore((s) => s.openReleaseDialog);
+  const openProgressDialog = useUpdateStore((s) => s.openProgressDialog);
 
   useEffect(() => { init(); }, [init]);
 
   if (!hasUpdate(status)) return null;
 
-  const { state, version, percent } = status!;
-  const isDownloading = state === 'downloading';
-  const isReady = state === 'downloaded';
-  const isManual = state === 'manual';
+  const { phase, version, percent } = status!;
+  const isAvailable = phase === 'available';
+  const isDownloading = phase === 'downloading';
+  const isReady = phase === 'downloaded';
+  const isApplying = phase === 'applying';
+
+  const onClick = () => {
+    if (isAvailable) openReleaseDialog();
+    else openProgressDialog();
+  };
 
   return (
     <div className="px-2 pt-1 pb-0.5 flex-shrink-0">
       <div
         role="button"
-        onClick={!isReady ? openUpdatesSettings : undefined}
+        onClick={onClick}
         className={cn(
           'group relative w-full flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-all',
           'bg-primary/10 hover:bg-primary/15 border border-primary/25',
@@ -44,12 +46,12 @@ export function UpdatePill() {
 
         {/* Icon */}
         <div className="relative flex-shrink-0 w-7 h-7 rounded-md bg-primary/15 border border-primary/30 flex items-center justify-center">
-          {isDownloading ? (
+          {isDownloading || isApplying ? (
             <Loader2 className="size-3.5 text-primary animate-spin" />
           ) : isReady ? (
             <ArrowUpToLine className="size-3.5 text-primary" />
           ) : (
-            <Sparkles className="size-3.5 text-primary" />
+            <Download className="size-3.5 text-primary" />
           )}
         </div>
 
@@ -70,35 +72,20 @@ export function UpdatePill() {
           ) : (
             <>
               <div className="text-[0.78rem] font-semibold text-primary leading-tight">
-                {isReady ? 'Ready to restart' : 'New version available'}
+                {isReady ? 'Restart to update' : isApplying ? 'Restarting…' : 'Update available'}
               </div>
               <div className="text-[0.68rem] text-primary/60 leading-tight mt-px">
                 {isReady
-                  ? `v${version} — restart to apply`
-                  : isManual
-                    ? `v${version} — download from GitHub`
+                  ? `v${version} — ready to install`
+                  : isApplying
+                    ? `v${version} — applying update`
                     : version
-                      ? `v${version} — tap to update`
+                      ? `v${version} — tap to view`
                       : 'Tap to view'}
               </div>
             </>
           )}
         </div>
-
-        {/* Quick restart when downloaded */}
-        {isReady && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.tideIpc?.updater.installUpdate();
-            }}
-            className="relative flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.68rem] font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <ArrowUpToLine className="size-3" />
-            Restart
-          </button>
-        )}
       </div>
     </div>
   );

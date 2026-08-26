@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_SKILLS, getBuiltinSkillBody, builtinSkillSummaries, mergeBuiltinSkills, SKILLS_BOOTSTRAP,
-} from '../../../../electron/agent/skills/builtin';
-import type { SkillSummary } from '../../../../electron/agent/tools/tool-context';
+} from '../../../../app/core/agent/skills/builtin';
+import type { SkillSummary } from '../../../../app/core/agent/tools/tool-context';
 
 describe('builtin skills registry', () => {
   it('exposes all 13 skills with virtual builtin: paths', () => {

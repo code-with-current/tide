@@ -23,15 +23,11 @@ const userDataDir = vi.hoisted(() => ({ current: '' as string }));
 const workspaceDir = vi.hoisted(() => ({ current: '' as string }));
 const workspaceId = vi.hoisted(() => ({ current: '' as string }));
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => userDataDir.current) },
-}));
-
-vi.mock('../../../electron/store.js', () => ({
+vi.mock('../../../app/core/store.js', () => ({
   listWorkspaces: () => [{ id: workspaceId.current, path: workspaceDir.current }],
 }));
 
-vi.mock('../../../electron/agent/system-model.js', () => ({
+vi.mock('../../../app/core/agent/system-model.js', () => ({
   isRagCloudConfigured: () => false,
 }));
 
@@ -41,9 +37,9 @@ vi.mock('../../../electron/agent/system-model.js', () => ({
 // just without the IPC hop. localModelExists is forced true because the
 // model path it would check (under the mocked app.getPath) doesn't exist
 // in the temp userData — the real path was set via TIDE_MODELS_DIR above.
-vi.mock('../../../electron/rag/local-onnx-embedder.js', async (importOriginal) => {
-  const actual = (await importOriginal()) as typeof import('../../../electron/rag/local-onnx-embedder.js');
-  const mod = await import('../../../electron/rag/embedder-process.js');
+vi.mock('../../../app/core/rag/local-onnx-embedder.js', async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof import('../../../app/core/rag/local-onnx-embedder.js');
+  const mod = await import('../../../app/core/rag/embedder-process.js');
   return {
     ...actual,
     LocalOnnxEmbedder: vi.fn(function () {
@@ -63,8 +59,8 @@ vi.mock('../../../electron/rag/local-onnx-embedder.js', async (importOriginal) =
   };
 });
 
-import { ingestWorkspace } from '../../../electron/rag/ingest.js';
-import { openRagStore } from '../../../electron/rag/store.js';
+import { ingestWorkspace } from '../../../app/core/rag/ingest.js';
+import { openRagStore } from '../../../app/core/rag/store.js';
 
 const describeLive = describe.skipIf(!process.env.TIDE_LIVE);
 
@@ -160,7 +156,7 @@ describeLive('ingestWorkspace (live)', () => {
       // Vector: a code-shaped query about "user email" lands closest to
       // the user.ts / auth.ts chunks, not math.ts. Both query and target
       // are L2-normalized so dot product = cosine.
-      const { embedder } = await import('../../../electron/rag/resolve.js').then((m) =>
+      const { embedder } = await import('../../../app/core/rag/resolve.js').then((m) =>
         m.resolveForQuery({
           config: { embedderId: 'local-code-512', dim: 384, cloudAllowed: false, chunkTokens: 384 },
           localAvailable: true,

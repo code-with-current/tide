@@ -1,3 +1,4 @@
+import * as api from '@/lib/api/client';
 import { useEffect, useReducer, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, KeyRound, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -51,7 +52,7 @@ export function AddProviderWizard({
         ? `${message} — is the local server running?`
         : message;
     try {
-      const result = await window.tideIpc?.detectProviderProtocol({
+      const result = await api.detectProviderProtocol({
         baseUrl: state.baseUrl.trim(),
         apiKey: state.apiKey.trim(),
       });

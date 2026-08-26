@@ -12,8 +12,10 @@ import * as path from 'node:path';
 
 const userDataDir = vi.hoisted(() => ({ current: '' as string }));
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => userDataDir.current) },
+// Core resolves data paths via platform/paths (not electron) since the
+// app/core relocation — mock it or tests write to the real ~/.tide-dev.
+vi.mock('../../../app/platform/paths.js', () => ({
+  appDataDir: () => userDataDir.current,
 }));
 
 const { embedMock, LocalOnnxMock, localModelExistsMock } = vi.hoisted(() => {
@@ -33,7 +35,7 @@ const { embedMock, LocalOnnxMock, localModelExistsMock } = vi.hoisted(() => {
   return { embedMock, LocalOnnxMock, localModelExistsMock };
 });
 
-vi.mock('../../../electron/rag/local-onnx-embedder.js', () => ({
+vi.mock('../../../app/core/rag/local-onnx-embedder.js', () => ({
   LocalOnnxEmbedder: LocalOnnxMock,
   localModelExists: localModelExistsMock,
   __esModule: true,
@@ -44,8 +46,8 @@ const { listWorkspacesMock, isRagCloudConfiguredMock } = vi.hoisted(() => ({
   isRagCloudConfiguredMock: vi.fn(() => false),
 }));
 
-vi.mock('../../../electron/store.js', () => ({ listWorkspaces: listWorkspacesMock }));
-vi.mock('../../../electron/agent/system-model.js', () => ({
+vi.mock('../../../app/core/store.js', () => ({ listWorkspaces: listWorkspacesMock }));
+vi.mock('../../../app/core/agent/system-model.js', () => ({
   isRagCloudConfigured: isRagCloudConfiguredMock,
 }));
 
@@ -108,8 +110,8 @@ describe('ingestWorkspace', () => {
   });
 
   it('chunks both files, embeds all chunks, and writes them to the store', async () => {
-    const { ingestWorkspace } = await import('../../../electron/rag/ingest.js');
-    const { openRagStore } = await import('../../../electron/rag/store.js');
+    const { ingestWorkspace } = await import('../../../app/core/rag/ingest.js');
+    const { openRagStore } = await import('../../../app/core/rag/store.js');
 
     const result = await ingestWorkspace(workspaceId);
     expect(result.filesSeen).toBe(2); // a.ts + b.ts (README + node_modules skipped)
@@ -136,7 +138,7 @@ describe('ingestWorkspace', () => {
   }, 30_000);
 
   it('re-ingest skips chunks whose contentHash is unchanged (no re-embed)', async () => {
-    const { ingestWorkspace } = await import('../../../electron/rag/ingest.js');
+    const { ingestWorkspace } = await import('../../../app/core/rag/ingest.js');
 
     const first = await ingestWorkspace(workspaceId);
     const firstEmbedCount = embedMock.mock.calls.length;
@@ -150,7 +152,7 @@ describe('ingestWorkspace', () => {
   }, 30_000);
 
   it('emits progress events for each phase + per batch', async () => {
-    const { ingestWorkspace } = await import('../../../electron/rag/ingest.js');
+    const { ingestWorkspace } = await import('../../../app/core/rag/ingest.js');
     const events: { phase: string; chunksEmbedded: number }[] = [];
     await ingestWorkspace(workspaceId, {
       onProgress: (e) => events.push({ phase: e.phase, chunksEmbedded: e.chunksEmbedded }),
@@ -163,7 +165,7 @@ describe('ingestWorkspace', () => {
   }, 30_000);
 
   it('throws when the workspace is unknown', async () => {
-    const { ingestWorkspace } = await import('../../../electron/rag/ingest.js');
+    const { ingestWorkspace } = await import('../../../app/core/rag/ingest.js');
     await expect(ingestWorkspace('nonexistent-ws')).rejects.toThrow(/not found/);
   });
 });

@@ -3,11 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-vi.mock('../../../electron/appPaths.js', () => ({
+vi.mock('../../../app/platform/paths.js', () => ({
   appDataDir: () => '/tmp/tide-mock-appdata',
 }));
 
-import { readMcpConfig, writeMcpConfig, mergeConfigs, validateServerConfig } from '../../../electron/agent/mcp/config';
+import { readMcpConfig, writeMcpConfig, mergeConfigs, validateServerConfig } from '../../../app/core/agent/mcp/config';
 
 let tmpDir: string;
 

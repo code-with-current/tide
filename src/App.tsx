@@ -1,3 +1,4 @@
+import { isFullScreen } from '@/lib/api/client';
 import { useEffect } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -11,6 +12,8 @@ import { ConsentScreen } from '@/components/screens/consent-screen';
 import { MainScreen } from '@/components/screens/main-screen';
 import { SettingsScreen } from '@/components/screens/settings-screen';
 import { AddWorkspaceDialog } from '@/components/modals/add-workspace-dialog';
+import { UpdateAvailableDialog } from '@/components/updates/update-available-dialog';
+import { UpdateProgressDialog } from '@/components/updates/update-progress-dialog';
 import { Toaster } from '@/components/ui/sonner';
 
 function App() {
@@ -35,26 +38,14 @@ function App() {
     useUi.getState().loadShortcuts();
   }, []);
 
-  // Notification click → switch to the session that completed. The main
-  // process fires `tide:navigateToSession` when the user clicks an OS
-  // notification. We route to that session + ensure we're on the main screen.
-  useEffect(() => {
-    window.tideIpc?.onNavigateToSession((sessionId) => {
-      useUi.getState().setActiveSession(sessionId);
-      useUi.getState().setScreen('main');
-    });
-  }, []);
-
   // Native fullscreen state — collapses the macOS traffic-light spacer in the
   // sidebars/settings. Invoke covers the initial state (relaunch-while-
-  // fullscreen, where no transition event fires); events cover transitions.
+  // fullscreen, where no transition event fires). The devkit has no
+  // fullscreen-change push, so the queried value stands until a re-query.
   useEffect(() => {
-    window.tideIpc?.isFullScreen()
-      ?.then((v) => useUi.setState({ isFullScreen: v }))
+    isFullScreen()
+      .then((v) => useUi.setState({ isFullScreen: v }))
       .catch(() => { /* bridge unavailable (plain browser dev) */ });
-    return window.tideIpc?.onFullscreenChanged((v) =>
-      useUi.setState({ isFullScreen: v }),
-    );
   }, []);
 
   // Global keyboard shortcuts: on match (user override → platform default → hardcoded fallback), dispatch the action. Reads overrides fresh per-event; field-typed inputs are skipped (Esc/⌘-combos still get through).
@@ -106,6 +97,10 @@ function App() {
 
           {/* Global dialogs (rendered above whatever screen is active). */}
           <AddWorkspaceDialog />
+          {/* Update flow: release details + progress dialogs (drive
+              themselves off the update-store; render nothing when idle). */}
+          <UpdateAvailableDialog />
+          <UpdateProgressDialog />
           {/* Global toast surface. bottom-right clears the macOS traffic
               lights + top bar. The primitive is theme-aware (themed
               success/info/warning/error/loading icons + CSS-var colors). */}

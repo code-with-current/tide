@@ -1,22 +1,27 @@
-/** UpdatesSection — in-app auto-updater backed by electron-updater (GitHub releases).
- *  Shares status with the sidebar UpdatePill via the singleton update-store. */
+/** UpdatesSection — in-app updater UI backed by the Electrobun Updater
+ *  (patch-chain updates from the release bucket; GitHub Releases stays the
+ *  manual-download page). Consent-driven: checks run automatically, the
+ *  Release notice's Download button stages the bundle (progress dialog),
+ *  and Restart Now applies + relaunches. "Later" collapses the notice —
+ *  the prepared update stays on disk and the pill re-prompts. Shares
+ *  status with the sidebar UpdatePill and the update dialogs via the
+ *  singleton update-store. */
+import * as api from '@/lib/api/client';
 import { useEffect, useState, useCallback } from 'react';
 import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
   Download,
-  ArrowUpToLine,
   ExternalLink,
   Loader2,
   ShieldCheck,
-  Sparkles,
-  ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
-import { useUpdateStore, type UpdateStatus } from '@/lib/stores/update-store';
+import { ReleaseNotice } from '@/components/updates/release-notice';
+import { useUpdateStore, type UpdateStatusWire } from '@/lib/stores/update-store';
 
 const GITHUB_RELEASES = 'https://github.com/code-with-current/tide/releases';
 
@@ -36,42 +41,44 @@ export function UpdatesSection() {
   const status = useUpdateStore((s) => s.status);
   const [autoCheck, setAutoCheck] = useState(true);
   const [checking, setChecking] = useState(false);
+  /** Version the user dismissed with "Later" — the notice stays collapsed
+   *  for it while the bundle sits ready (a different version re-shows). */
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
 
   useEffect(() => {
     init();
-    window.tideIpc
-      ?.getGeneralSettings()
-      .then((s) => setAutoCheck(s.autoUpdateCheck))
+    api
+      .getGeneralSettings()
+      .then((s) => setAutoCheck(s?.autoUpdateCheck ?? true))
       .catch(() => {});
   }, [init]);
 
   const handleCheck = useCallback(async () => {
     setChecking(true);
-    await window.tideIpc?.updater.checkForUpdates();
+    await api.checkForUpdates().catch(() => {});
     setTimeout(() => setChecking(false), 800);
-  }, []);
-
-  const handleInstall = useCallback(() => {
-    window.tideIpc?.updater.installUpdate();
   }, []);
 
   const handleToggleAutoCheck = useCallback((v: boolean) => {
     setAutoCheck(v);
-    window.tideIpc?.updateGeneralSettings({ autoUpdateCheck: v });
+    void api.updateGeneralSettings({ autoUpdateCheck: v });
   }, []);
 
   const openExternal = (url: string) => window.open(url, '_blank', 'noopener');
 
-  const state = status?.state ?? 'idle';
-  const isBusy = checking || state === 'checking' || state === 'downloading';
-  const version = status?.version;
+  const phase = status?.phase ?? 'idle';
+  const isBusy = checking || phase === 'checking' || phase === 'downloading' || phase === 'applying';
   const currentVersion = status?.currentVersion ?? '—';
+
+  const noticeWaiting =
+    !!status && (phase === 'available' || phase === 'downloaded' || (phase === 'error' && !!status.version));
+  const noticeDismissed = phase === 'downloaded' && !!status?.version && status.version === dismissedVersion;
 
   return (
     <>
       <SettingsHeader
         title="Updates"
-        description="Tide checks GitHub releases for new versions. Updates are downloaded in the background and verified before installing."
+        description="Tide checks for updates automatically and notifies you when one is available. Nothing downloads until you approve it — updates arrive as small, verified patches."
         action={
           <Button
             variant="default"
@@ -80,7 +87,7 @@ export function UpdatesSection() {
             onClick={handleCheck}
             disabled={isBusy}
           >
-            {checking || state === 'checking' ? (
+            {checking || phase === 'checking' ? (
               <Loader2 className="size-3 animate-spin" />
             ) : (
               <RefreshCw className="size-3" />
@@ -90,23 +97,31 @@ export function UpdatesSection() {
         }
       />
 
-      {/* ── Status hero ── */}
-      <StatusHero
-        status={status}
-        checking={checking}
-        onInstall={handleInstall}
-        onDownloadManual={() => openExternal(status?.releaseUrl ?? GITHUB_RELEASES)}
-      />
-
-      {/* ── Release notes ── */}
-      {version && status?.releaseNotes && (
-        <SettingsGroup title={`Release notes — v${version}`}>
-          <Card>
-            <div className="px-4 py-3 max-h-64 overflow-y-auto scroll text-[0.9286rem] leading-relaxed whitespace-pre-wrap text-muted-foreground">
-              {status.releaseNotes}
-            </div>
+      {/* ── Release notice — details + changelog + consent actions ── */}
+      {noticeWaiting && !noticeDismissed && (
+        <SettingsGroup title="Release notice">
+          <Card className="px-5 py-4">
+            <ReleaseNotice
+              status={status}
+              onLater={() => { if (status?.version) setDismissedVersion(status.version); }}
+            />
           </Card>
         </SettingsGroup>
+      )}
+
+      {/* ── Status hero (download/apply progress, check failures, idle) ── */}
+      {noticeWaiting && !noticeDismissed ? null : noticeDismissed ? (
+        <SettingsGroup title="Release notice">
+          <Card className="px-5 py-4">
+            <DismissedReadyNotice
+              version={status?.version ?? ''}
+              onShow={() => setDismissedVersion(null)}
+              onDownloadManual={() => openExternal(GITHUB_RELEASES)}
+            />
+          </Card>
+        </SettingsGroup>
+      ) : (
+        <StatusHero status={status} checking={checking} onDownloadManual={() => openExternal(GITHUB_RELEASES)} />
       )}
 
       {/* ── Preferences ── */}
@@ -114,7 +129,7 @@ export function UpdatesSection() {
         <Card>
           <SettingsRow
             title="Check for updates automatically"
-            description="Check GitHub releases on app launch and notify when an update is available."
+            description="Check for updates on app launch and periodically, then notify when one is available."
             last
           >
             <Switch checked={autoCheck} onCheckedChange={handleToggleAutoCheck} />
@@ -158,26 +173,58 @@ export function UpdatesSection() {
   );
 }
 
-/** The hero status card. Adapts layout, color, and actions to the current state. */
+/** Collapsed ready state after "Later": the update stays on disk, so keep
+ *  a quiet affordance to bring the notice back (or grab it from the pill). */
+function DismissedReadyNotice({
+  version,
+  onShow,
+  onDownloadManual,
+}: {
+  version: string;
+  onShow: () => void;
+  onDownloadManual: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center flex-shrink-0">
+        <ShieldCheck className="size-5 text-primary" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold">v{version || '—'} is ready whenever you are</div>
+        <div className="text-[0.7857rem] text-muted-foreground/60">
+          The update is kept on disk — install it from here or the sidebar pill.
+        </div>
+      </div>
+      <Button variant="secondary" size="sm" className="text-xs h-7" onClick={onShow}>
+        View details
+      </Button>
+      <Button variant="secondary" size="sm" className="text-xs h-7 gap-1.5" onClick={onDownloadManual}>
+        <ExternalLink className="size-3" /> Download
+      </Button>
+    </div>
+  );
+}
+
+/** The hero status card for phases the release notice doesn't own:
+ *  downloading, applying, check errors, checking, idle. */
 function StatusHero({
   status,
   checking,
-  onInstall,
   onDownloadManual,
 }: {
-  status: UpdateStatus | null;
+  status: UpdateStatusWire | null;
   checking: boolean;
-  onInstall: () => void;
   onDownloadManual: () => void;
 }) {
-  const state = status?.state ?? 'idle';
+  const phase = status?.phase ?? 'idle';
   const version = status?.version;
   const currentVersion = status?.currentVersion ?? '—';
-  const percent = status?.percent;
   const error = status?.error;
+  const message = status?.message;
 
   // ── Downloading — progress bar hero ──
-  if (state === 'downloading') {
+  if (phase === 'downloading') {
+    const percent = status?.percent;
     const pct = Math.max(0, Math.min(100, percent ?? 0));
     return (
       <Card className="mb-5 overflow-hidden">
@@ -190,10 +237,10 @@ function StatusHero({
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">
-                Downloading v{version}
+                Downloading{version ? ` v${version}` : '' }
               </div>
-              <div className="text-[0.7857rem] text-muted-foreground/60">
-                {pct}% · installs automatically on quit
+              <div className="text-[0.7857rem] text-muted-foreground/60 truncate">
+                {message || 'Fetching update bundle…'}
               </div>
             </div>
             <div className="text-2xl font-bold tabular-nums text-primary">
@@ -212,35 +259,32 @@ function StatusHero({
     );
   }
 
-  // ── Downloaded — ready to install ──
-  if (state === 'downloaded') {
+  // ── Applying — the update is being swapped in / relaunched ──
+  if (phase === 'applying') {
     return (
       <Card className="mb-5 border-primary/30 overflow-hidden">
         <div className="relative px-5 py-4">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent pointer-events-none" />
           <div className="relative flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center flex-shrink-0">
-              <ArrowUpToLine className="size-5 text-primary" />
+              <Loader2 className="size-5 text-primary animate-spin" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-primary">
-                Update ready — v{version}
+                Applying update{version ? ` — v${version}` : ''}…
               </div>
-              <div className="text-[0.7857rem] text-muted-foreground/60">
-                Restart Tide to apply the update.
+              <div className="text-[0.7857rem] text-muted-foreground/60 truncate">
+                {message || 'Tide will restart when the new version is in place.'}
               </div>
             </div>
-            <Button variant="default" size="sm" className="text-xs h-7" onClick={onInstall}>
-              <ArrowUpToLine className="size-3" /> Restart
-            </Button>
           </div>
         </div>
       </Card>
     );
   }
 
-  // ── Error ──
-  if (state === 'error') {
+  // ── Error (check failures — consent failures render in the notice) ──
+  if (phase === 'error') {
     return (
       <Card className="mb-5 border-destructive/30 overflow-hidden">
         <div className="relative px-5 py-4">
@@ -252,7 +296,7 @@ function StatusHero({
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">Update check failed</div>
               <div className="text-[0.7857rem] text-muted-foreground/60 truncate">
-                {error || 'An error occurred. You can download manually.'}
+                {error || message || 'An error occurred. You can download manually.'}
               </div>
             </div>
             <Button
@@ -270,7 +314,7 @@ function StatusHero({
   }
 
   // ── Checking — spinner ──
-  if (state === 'checking' || checking) {
+  if (phase === 'checking' || checking) {
     return (
       <Card className="mb-5">
         <div className="px-5 py-4 flex items-center gap-3">
@@ -279,65 +323,7 @@ function StatusHero({
           </div>
           <div className="flex-1">
             <div className="text-sm font-medium">Checking for updates…</div>
-            <div className="text-[0.7857rem] text-muted-foreground/60">Contacting GitHub releases</div>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  // ── Manual download — ad-hoc mac build can't self-update ──
-  if (state === 'manual') {
-    return (
-      <Card className="mb-5 overflow-hidden">
-        <div className="relative px-5 py-4">
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/8 to-transparent pointer-events-none" />
-          <div className="relative flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="size-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold flex items-center gap-2">
-                v{version} is available
-                <ArrowRight className="size-3 text-muted-foreground/40" />
-                <code className="font-mono text-[0.7857rem] text-muted-foreground/60">v{currentVersion}</code>
-              </div>
-              <div className="text-[0.7857rem] text-muted-foreground/60">
-                This build is ad-hoc signed and can't self-update — download the new version from GitHub.
-              </div>
-            </div>
-            <Button
-              variant="default"
-              size="sm"
-              className="text-xs h-7 gap-1.5"
-              onClick={onDownloadManual}
-            >
-              <ExternalLink className="size-3" /> Download
-            </Button>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  // ── Available (download hasn't started — brief transitional state) ──
-  if (state === 'available') {
-    return (
-      <Card className="mb-5 overflow-hidden">
-        <div className="relative px-5 py-4">
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/8 to-transparent pointer-events-none" />
-          <div className="relative flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="size-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold flex items-center gap-2">
-                v{version} is available
-                <ArrowRight className="size-3 text-muted-foreground/40" />
-                <code className="font-mono text-[0.7857rem] text-muted-foreground/60">v{currentVersion}</code>
-              </div>
-              <div className="text-[0.7857rem] text-muted-foreground/60">Starting download…</div>
-            </div>
+            <div className="text-[0.7857rem] text-muted-foreground/60">Contacting the update server</div>
           </div>
         </div>
       </Card>
@@ -355,7 +341,7 @@ function StatusHero({
           </div>
           <div className="flex-1">
             <div className="text-sm font-semibold flex items-center gap-1.5">
-              {state === 'not-available' ? "You're up to date" : 'Tide is ready'}
+              {phase === 'not-available' ? "You're up to date" : 'Tide is ready'}
               <code className="font-mono text-[0.7857rem] text-muted-foreground">v{currentVersion}</code>
             </div>
             <div className="text-[0.7857rem] text-muted-foreground/60 flex items-center gap-1 mt-0.5">

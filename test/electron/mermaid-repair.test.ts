@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractMermaidFromReply } from '../../electron/agent/mermaid-repair';
+import { extractMermaidFromReply } from '../../app/core/agent/mermaid-repair';
 
 describe('extractMermaidFromReply', () => {
   it('extracts a fenced mermaid block', () => {

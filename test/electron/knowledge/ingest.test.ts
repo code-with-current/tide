@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openKnowledgeStore } from '../../../electron/knowledge/store.js';
-import { openRagStoreAt } from '../../../electron/rag/store.js';
-import { ingestDocuments } from '../../../electron/knowledge/ingest.js';
-import type { SourceDocument, SourceProgressEvent } from '../../../electron/knowledge/types.js';
-import type { Embedder } from '../../../electron/rag/embedder.js';
+import { openKnowledgeStore } from '../../../app/core/knowledge/store.js';
+import { openRagStoreAt } from '../../../app/core/rag/store.js';
+import { ingestDocuments } from '../../../app/core/knowledge/ingest.js';
+import type { SourceDocument, SourceProgressEvent } from '../../../app/core/knowledge/types.js';
+import type { Embedder } from '../../../app/core/rag/embedder.js';
 
 function hashEmbedder(id: Embedder['id'] = 'local-code-512'): Embedder {
   return {

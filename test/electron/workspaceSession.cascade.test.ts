@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createConfigStore } from '../../electron/configStore.js';
-import { createSessionStore } from '../../electron/ipc/sessionStore.js';
+import { createConfigStore } from '../../app/core/configStore.js';
+import { createSessionStore } from '../../app/core/ipc-adjacent/sessionStore.js';
 import type { Workspace } from '../../src/types';
 
 const identityCrypto = { encrypt: (s: string) => s, decrypt: (s: string) => s };

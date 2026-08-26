@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveReasoning, budgetToEffort } from '../../electron/agent/protocols/reasoning.js';
+import { resolveReasoning, budgetToEffort } from '../../app/core/agent/protocols/reasoning.js';
 import type { ReasoningOption } from '../../src/types/index.js';
 
 describe('resolveReasoning', () => {

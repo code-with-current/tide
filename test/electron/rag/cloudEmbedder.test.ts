@@ -6,11 +6,11 @@ const { runSystemEmbeddingMock } = vi.hoisted(() => ({
   runSystemEmbeddingMock: vi.fn(),
 }));
 
-vi.mock('../../../electron/agent/system-model.js', () => ({
+vi.mock('../../../app/core/agent/system-model.js', () => ({
   runSystemEmbedding: runSystemEmbeddingMock,
 }));
 
-import { CloudEmbedder } from '../../../electron/rag/cloud-embedder.js';
+import { CloudEmbedder } from '../../../app/core/rag/cloud-embedder.js';
 
 describe('CloudEmbedder', () => {
   it('reports the right static shape', () => {

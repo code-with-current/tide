@@ -3,14 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// Mock electron (app.getPath) and the workspace/config stores so the
-// test can run fully in isolation — no real userData, no real workspace.
+// Mock the workspace/config stores so the test can run fully in
+// isolation — no real userData, no real workspace.
 const userDataDir = vi.hoisted(() => ({ current: '' as string }));
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => userDataDir.current) },
-}));
 
-vi.mock('../../../electron/appPaths.js', () => ({
+vi.mock('../../../app/platform/paths.js', () => ({
   appDataDir: () => userDataDir.current,
 }));
 
@@ -18,7 +15,7 @@ const { listWorkspacesMock, listRagEnabledWorkspacesMock } = vi.hoisted(() => ({
   listWorkspacesMock: vi.fn(() => [] as Array<{ id: string; ragConfig?: unknown }>),
   listRagEnabledWorkspacesMock: vi.fn((): string[] => []),
 }));
-vi.mock('../../../electron/store.js', () => ({
+vi.mock('../../../app/core/store.js', () => ({
   listWorkspaces: listWorkspacesMock,
   listRagEnabledWorkspaces: listRagEnabledWorkspacesMock,
 }));
@@ -26,7 +23,7 @@ vi.mock('../../../electron/store.js', () => ({
 const { isRagCloudConfiguredMock } = vi.hoisted(() => ({
   isRagCloudConfiguredMock: vi.fn(() => false),
 }));
-vi.mock('../../../electron/agent/system-model.js', () => ({
+vi.mock('../../../app/core/agent/system-model.js', () => ({
   isRagCloudConfigured: isRagCloudConfiguredMock,
 }));
 
@@ -38,7 +35,7 @@ const { embedMock } = vi.hoisted(() => ({
     texts.map(() => new Array(384).fill(0)),
   ),
 }));
-vi.mock('../../../electron/rag/local-onnx-embedder.js', () => ({
+vi.mock('../../../app/core/rag/local-onnx-embedder.js', () => ({
   LocalOnnxEmbedder: vi.fn(function () {
     return { id: 'local-code-512', dim: 384, maxTokens: 512, embed: embedMock, isAvailable: () => true };
   }),
@@ -48,8 +45,8 @@ vi.mock('../../../electron/rag/local-onnx-embedder.js', () => ({
 // DON'T mock the store — we want a real SQLite + sqlite-vec index.
 // The test writes real chunks + vectors, then queries them.
 
-import { runMemory } from '../../../electron/agent/tools/memory.js';
-import { openRagStore, type ChunkRow } from '../../../electron/rag/store.js';
+import { runMemory } from '../../../app/core/agent/tools/memory.js';
+import { openRagStore, type ChunkRow } from '../../../app/core/rag/store.js';
 
 const WORKSPACE_ID = 'ws-memory-test';
 

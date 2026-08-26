@@ -11,6 +11,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@shared': path.resolve(__dirname, './shared'),
+      // Exact-or-subpath match only (vite: `pattern` or `pattern + '/'`) — the
+      // bare `electrobun` / `electrobun/main` specifiers stay untouched.
+      'electrobun/view': path.resolve(__dirname, './.hutch/devkit/api/browser/index.ts'),
     },
   },
   server: {

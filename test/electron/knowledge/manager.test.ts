@@ -2,17 +2,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openKnowledgeStore } from '../../../electron/knowledge/store.js';
-import { createKnowledgeManager } from '../../../electron/knowledge/manager.js';
+import { openKnowledgeStore } from '../../../app/core/knowledge/store.js';
+import { createKnowledgeManager } from '../../../app/core/knowledge/manager.js';
 import type {
   KnowledgeManager,
   SourceFetcher,
-} from '../../../electron/knowledge/manager.js';
+} from '../../../app/core/knowledge/manager.js';
 import type {
   SourceDocument,
   SourceProgressEvent,
-} from '../../../electron/knowledge/types.js';
-import type { Embedder } from '../../../electron/rag/embedder.js';
+} from '../../../app/core/knowledge/types.js';
+import type { Embedder } from '../../../app/core/rag/embedder.js';
 
 function hashEmbedder(id: Embedder['id'] = 'local-code-512'): Embedder {
   return {

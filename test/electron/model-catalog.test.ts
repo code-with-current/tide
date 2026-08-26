@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { matchModelToCatalog, resolveModelMeta, formatPriceRate } from '../../electron/agent/model-catalog.js';
-import type { CatalogEntry } from '../../electron/agent/model-prices.js';
+import { matchModelToCatalog, resolveModelMeta, formatPriceRate } from '../../app/core/agent/model-catalog.js';
+import type { CatalogEntry } from '../../app/core/agent/model-prices.js';
 
 function entry(id: string, over: Partial<CatalogEntry> = {}): CatalogEntry {
   return {

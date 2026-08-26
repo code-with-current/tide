@@ -90,7 +90,7 @@ export function WorkspacesPanel() {
       return;
     }
     let cancelled = false;
-    window.tideIpc?.workspacesExist(workspaces.map((w) => w.path)).then((map) => {
+    api.workspacesExist(workspaces.map((w) => w.path)).then((map) => {
       if (cancelled) return;
       const missing = new Set<string>();
       for (const w of workspaces) {

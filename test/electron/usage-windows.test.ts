@@ -9,7 +9,7 @@ import {
   windowTokens,
   FIVE_HOUR_MS,
   WEEK_MS,
-} from '../../electron/agent/usage-windows';
+} from '../../app/core/agent/usage-windows';
 import type { Usage } from '../../src/types';
 
 const u = (over: Partial<Usage>): Usage => ({

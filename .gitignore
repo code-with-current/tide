@@ -10,7 +10,6 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-dist-electron
 release
 *.local
 
@@ -19,13 +18,12 @@ release
 package-lock.json
 yarn.lock
 
-# NOTE: `build/` is intentionally NOT ignored — it holds build/build.js,
-# the electron-builder config, and the icon files that the packaging
-# pipeline (electron-builder) depends on.
+# NOTE: `build/` is intentionally NOT ignored — it holds the icon files
+# and helper scripts that the packaging pipeline depends on.
 
 # Regeneratable by build/copy-tree-sitter-grammars.mjs (postinstall).
 # Vendored at runtime from the tree-sitter-wasms npm dependency.
-electron/rag/chunker/grammars/*.wasm
+app/core/rag/chunker/grammars/*.wasm
 
 # Environment variables (credentials — never commit)
 .env
@@ -78,3 +76,11 @@ packaging/out/
 # Test fixtures must be committed despite global ignore patterns
 !test/electron/knowledge/fixtures/**/*.md
 !test/electron/knowledge/fixtures/**/*.log
+
+# Electrobun/Hutch migration (feat/electrobun-shell): vendored devkit,
+# build temp, Hutch output subtree, and generated artifacts. build/ stays tracked.
+.hutch/
+.cottontail-tmp/
+build/electrobun/
+artifacts/
+*.tsbuildinfo

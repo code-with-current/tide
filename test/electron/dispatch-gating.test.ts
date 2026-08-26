@@ -4,8 +4,8 @@ import {
   agentRiskTier,
   canDispatchTo,
   effectiveChildTools,
-} from '../../electron/agent/agents/registry.js';
-import { primaryArg, parseRule, evaluateRules } from '../../electron/agent/permissions/rules.js';
+} from '../../app/core/agent/agents/registry.js';
+import { primaryArg, parseRule, evaluateRules } from '../../app/core/agent/permissions/rules.js';
 
 describe('agent dispatch gating', () => {
   it('agentRiskTier returns the max risk tier of an agent\'s allowedTools', () => {

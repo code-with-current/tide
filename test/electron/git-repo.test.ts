@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { primaryArg, parseRule, evaluateRules } from '../../electron/agent/permissions/rules.js';
-import { createGitRepoTool } from '../../electron/agent/tools/git-repo.js';
-import type { ToolContext } from '../../electron/agent/tools/tool-context.js';
+import { primaryArg, parseRule, evaluateRules } from '../../app/core/agent/permissions/rules.js';
+import { createGitRepoTool } from '../../app/core/agent/tools/git-repo.js';
+import type { ToolContext } from '../../app/core/agent/tools/tool-context.js';
 
 describe('git_repo permission rules', () => {
   it('primaryArg uses the repo url/path', () => {

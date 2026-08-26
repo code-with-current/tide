@@ -1,7 +1,7 @@
-// TODO(task 4.2): dedup with electron/agent/model-catalog.ts into a shared module.
-/** Renderer-side copy of the model catalog resolver (renderer can't import the electron main module). resolveModelMeta() does deterministic lookup: exact catalogId → suffix/normalized auto-match → conservative fallback. Pure: takes the catalog map as a parameter. */
+// TODO(task 4.2): dedup with app/core/agent/model-catalog.ts into a shared module.
+/** Renderer-side copy of the model catalog resolver (renderer can't import the main-process module). resolveModelMeta() does deterministic lookup: exact catalogId → suffix/normalized auto-match → conservative fallback. Pure: takes the catalog map as a parameter. */
 
-/** Normalized catalog entry (Tier-1 fields only). Inlined from electron/agent/model-prices.ts. */
+/** Normalized catalog entry (Tier-1 fields only). Inlined from app/core/agent/model-prices.ts. */
 export interface CatalogEntry {
   catalogId: string; // the canonical key, e.g. 'anthropic/claude-opus-4-7'
   mode: string;

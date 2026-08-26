@@ -1,4 +1,5 @@
 /** useExternalApps: shared hook detecting installed external apps and opening a session's folder in one. Default target is persisted in localStorage and shared across callers. */
+import * as api from '@/lib/api/client';
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   FolderOpen,
@@ -75,7 +76,7 @@ export function useExternalApps(): UseExternalAppsResult {
       if (apps || loading) return;
       setLoading(true);
       try {
-        const list = await window.tideIpc?.detectExternalApps();
+        const list = await api.detectExternalApps();
         if (!cancelled) setApps(list ?? []);
       } catch {
         if (!cancelled) setApps([]);
@@ -108,7 +109,7 @@ export function useExternalApps(): UseExternalAppsResult {
   const openIn = async (target: ExternalAppTarget, sessionId: string) => {
     if (!sessionId) return;
     try {
-      const result = await window.tideIpc?.openInApp(target, sessionId);
+      const result = await api.openInApp(target, sessionId);
       if (result && !result.ok) {
         log.warn("openInApp failed", target, result.error);
         // Surface the failure — a silent spawn fail otherwise looks like

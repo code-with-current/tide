@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openKnowledgeStore } from '../../../electron/knowledge/store.js';
-import { openRagStoreAt } from '../../../electron/rag/store.js';
+import { openKnowledgeStore } from '../../../app/core/knowledge/store.js';
+import { openRagStoreAt } from '../../../app/core/rag/store.js';
 
 let tmp: string;
 

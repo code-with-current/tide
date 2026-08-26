@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTitleSubject } from '../../electron/agent/title';
+import { buildTitleSubject } from '../../app/core/agent/title';
 
 describe('buildTitleSubject', () => {
   it('passes ordinary text through', () => {

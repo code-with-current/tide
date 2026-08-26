@@ -18,10 +18,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { eventsSubscribe, listSessionMessagesV2, subscribeEvents } from '@/lib/api/client';
+import { eventsSubscribe, eventsUnsubscribe, listSessionMessagesV2, subscribeEvents } from '@/lib/api/client';
+import { onOrchestratorEvents } from '@/lib/api/rpc';
 import { evictSessionMessagesV2, qk } from '@/lib/queries';
 import { streamStore } from '@/lib/stores/stream-store';
-import type { MessageWithPartsV2, PartV2 } from '@/types/session-v2';
+import type { FlushBatchV2, MessageWithPartsV2, PartV2 } from '@/types/session-v2';
 
 type MessagePage = { messages: MessageWithPartsV2[] };
 
@@ -107,27 +108,41 @@ export function useSessionMessagesV2(sessionId: string | null) {
     if (!sessionId) return;
     partOwners.current = new Map();
 
-    // Push channel FIRST, then the replay invoke: eventsSubscribe delivers
-    // its synchronous replay on the same 'tide:events' channel before live
-    // registration, so a listener attached after the invoke would silently
-    // drop the replayed prefix; conversely, a live batch landing between the
-    // two arrives on push and the store's seq watermark dedupes the overlap
-    // with replay. Either ordering of arrival is safe; missing the listener
-    // is not.
-    const unsubscribe = subscribeEvents((batch) => {
+    const apply = (batch: FlushBatchV2) => {
       const mine = batch.events.filter((e) => e.sessionId === sessionId);
       if (mine.length === 0) return;
       for (const e of mine) {
         if (e.messageId && e.partId) partOwners.current.set(e.partId, e.messageId);
       }
       streamStore.applyBatch(mine);
-    });
-    eventsSubscribe(sessionId, streamStore.lastSeq(sessionId)).catch((err) => {
-      console.warn('eventsSubscribe failed', err);
-    });
+    };
+
+    // Push channels FIRST, then the replay invoke: eventsSubscribe delivers
+    // its synchronous replay before live registration (as the invoke response
+    // under the Electrobun RPC bridge, on the same 'tide:events' channel under
+    // Electron), so a listener attached after the invoke would silently drop
+    // the replayed prefix; conversely, a live batch landing between the two
+    // arrives on push and the store's seq watermark dedupes the overlap with
+    // replay. Either ordering of arrival is safe; missing the listener is not.
+    const unsubscribe = subscribeEvents(apply);
+    const unregisterOrchestrator = onOrchestratorEvents(apply);
+
+    let cancelled = false;
+    eventsSubscribe(sessionId, streamStore.lastSeq(sessionId))
+      .then((batches) => {
+        // Guard the async response: a late reply after a session switch would
+        // repopulate store state that the cleanup below already cleared.
+        if (!cancelled) for (const b of batches) apply(b);
+      })
+      .catch((err) => {
+        console.warn('eventsSubscribe failed', err);
+      });
 
     return () => {
+      cancelled = true;
       unsubscribe();
+      unregisterOrchestrator();
+      eventsUnsubscribe(sessionId).catch(() => {});
       // The next mount for this session replays from 0 and refetches the
       // window (evicted below), so dropping the live state loses nothing
       // persisted and keeps sessions from accumulating store memory.

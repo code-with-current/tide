@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createSessionStoreV2 } from '../../electron/ipc/session-store-v2.js';
-import { createEventSink, type FlushBatch, type SinkEvent } from '../../electron/agent/event-sink.js';
+import { createSessionStoreV2 } from '../../app/core/ipc-adjacent/session-store-v2.js';
+import { createEventSink, type FlushBatch, type SinkEvent } from '../../app/core/agent/event-sink.js';
 
 let dir: string;
 let store: ReturnType<typeof createSessionStoreV2>;

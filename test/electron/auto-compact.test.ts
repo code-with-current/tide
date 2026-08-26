@@ -7,7 +7,7 @@ import {
   isContextOverflow,
   DEFAULT_AUTO_COMPACT_CONFIG,
   type AutoCompactConfig,
-} from '../../electron/agent/context/auto-compact.js';
+} from '../../app/core/agent/context/auto-compact.js';
 import type { ModelMessage } from 'ai';
 
 // ── Helpers ─────────────────────────────────────────────────────────────

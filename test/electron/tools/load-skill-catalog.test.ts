@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSkillCatalogMd } from '../../../electron/agent/tools/load-skill';
+import { buildSkillCatalogMd } from '../../../app/core/agent/tools/load-skill';
 
 const skill = (name: string, description = '', absPath = `/skills/${name}/SKILL.md`) => ({
   name,

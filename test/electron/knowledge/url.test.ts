@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { fetchUrl, originOf } from '../../../electron/knowledge/fetchers/url.js';
+import { fetchUrl, originOf } from '../../../app/core/knowledge/fetchers/url.js';
 
 function htmlResponse(body: string, contentType = 'text/html; charset=utf-8'): Response {
   return new Response(body, {

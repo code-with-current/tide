@@ -7,17 +7,29 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /** Platform detection for the renderer (mac/win/linux). Source: navigator.platform/userAgent. */
-const _ua =
-  typeof navigator !== 'undefined'
-    ? navigator.platform || navigator.userAgent
-    : '';
+/** Platform truth comes from the Electrobun preload's
+ *  window.__electrobunPlatform ("macos" | "windows" | "linux"), injected
+ *  before page scripts run — no user-agent sniffing. Plain-browser dev
+ *  (no preload) falls back to the navigator string. */
+const _injected =
+  typeof window !== 'undefined' ? (window as { __electrobunPlatform?: string }).__electrobunPlatform : undefined;
+const _platform: 'macos' | 'windows' | 'linux' =
+  _injected === 'macos' || _injected === 'windows' || _injected === 'linux'
+    ? _injected
+    : typeof navigator !== 'undefined'
+      ? /Mac/i.test(navigator.platform || navigator.userAgent)
+        ? 'macos'
+        : /Win/i.test(navigator.platform || navigator.userAgent)
+          ? 'windows'
+          : 'linux'
+      : 'macos';
 
 /** True on macOS. */
-export const isMac = /Mac/i.test(_ua);
+export const isMac = _platform === 'macos';
 /** True on Windows. */
-export const isWindows = /Win/i.test(_ua);
+export const isWindows = _platform === 'windows';
 /** True on Linux (and other Unix that aren't Mac). */
-export const isLinux = !isMac && /Linux|X11/i.test(_ua);
+export const isLinux = _platform === 'linux';
 
 /** Format USD cost: 0.0431 → "$0.04". Never throws on undefined/null. */
 export function formatCost(usd: number | null | undefined): string {

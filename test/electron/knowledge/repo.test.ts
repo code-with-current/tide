@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { fetchRepo, type RepoCloner } from '../../../electron/knowledge/fetchers/repo.js';
+import { fetchRepo, type RepoCloner } from '../../../app/core/knowledge/fetchers/repo.js';
 
 const FIXTURES = path.join(__dirname, 'fixtures', 'docs');
 

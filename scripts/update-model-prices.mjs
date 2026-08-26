@@ -2,16 +2,15 @@
 // Fetches the models.dev catalog (https://models.dev/api.json), flattens it to
 // the slim { catalogId: { reasoning, tool_call, attachment, limit, cost } }
 // shape the loader consumes, and writes a single wrapper file
-// ({ fetchedAt, source, count, models }) into electron/data/. Run manually via
-// `npm run update:model-prices` to refresh the vendored snapshot that is inlined
-// into main.mjs at build time.
+// ({ fetchedAt, source, count, models }) into app/core/data/. Run manually via
+// `npm run update:model-prices` to refresh the vendored snapshot.
 import { writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const URL_ = 'https://models.dev/api.json';
-const OUT_DIR = resolve(__dirname, '..', 'electron', 'data');
+const OUT_DIR = resolve(__dirname, '..', 'app', 'core', 'data');
 
 const res = await fetch(URL_, { redirect: 'follow' });
 if (!res.ok) {
@@ -22,7 +21,7 @@ const json = await res.json();
 
 // Flatten the nested { provider: { models: { id: {...} } } } into a flat
 // { catalogId: slimModel } map, keeping only the fields the loader reads.
-// Mirrors flattenModelsDevApi() in electron/agent/model-prices.ts.
+// Mirrors flattenModelsDevApi() in app/core/agent/model-prices.ts.
 const models = {};
 let providerCount = 0;
 for (const provider of Object.values(json)) {

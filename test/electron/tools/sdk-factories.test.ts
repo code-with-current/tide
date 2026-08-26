@@ -12,33 +12,33 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { z } from 'zod';
-import { toolMeta } from '../../../electron/agent/tools/tool-meta.js';
-import type { ToolContext } from '../../../electron/agent/tools/tool-context.js';
+import { toolMeta } from '../../../app/core/agent/tools/tool-meta.js';
+import type { ToolContext } from '../../../app/core/agent/tools/tool-context.js';
 
-import { createBashTool } from '../../../electron/agent/tools/bash.js';
-import { createReadFileTool } from '../../../electron/agent/tools/read-file.js';
-import { createReadMediaFileTool } from '../../../electron/agent/tools/read-media-file.js';
-import { createListDirTool } from '../../../electron/agent/tools/list-dir.js';
-import { createWriteFileTool } from '../../../electron/agent/tools/write-file.js';
-import { createEditFileTool } from '../../../electron/agent/tools/edit-file.js';
-import { createGlobTool } from '../../../electron/agent/tools/glob.js';
-import { createGrepTool } from '../../../electron/agent/tools/grep.js';
-import { createWebFetchTool } from '../../../electron/agent/tools/web-fetch.js';
-import { createWebSearchTool } from '../../../electron/agent/tools/web-search.js';
-import { createMultiEditTool } from '../../../electron/agent/tools/multi-edit.js';
-import { createNotebookEditTool } from '../../../electron/agent/tools/notebook-edit.js';
-import { createGitTool } from '../../../electron/agent/tools/git.js';
-import { createGitRepoTool } from '../../../electron/agent/tools/git-repo.js';
-import { createBashOutputTool, createKillShellTool } from '../../../electron/agent/tools/background-shell.js';
-import { createTodoWriteTool } from '../../../electron/agent/tools/todo-write.js';
-import { createExitPlanModeTool } from '../../../electron/agent/tools/exit-plan-mode.js';
-import { createSlashCommandTool } from '../../../electron/agent/tools/slash-command.js';
-import { createDispatchAgentTool } from '../../../electron/agent/tools/dispatch-agent.js';
-import { createAskFollowupTool } from '../../../electron/agent/tools/ask-followup.js';
-import { createCompactTool } from '../../../electron/agent/tools/compact.js';
-import { createDirectoryTreeTool } from '../../../electron/agent/tools/directory-tree.js';
-import { createLoadSkillTool } from '../../../electron/agent/tools/load-skill.js';
-import { createInitTool } from '../../../electron/agent/tools/init.js';
+import { createBashTool } from '../../../app/core/agent/tools/bash.js';
+import { createReadFileTool } from '../../../app/core/agent/tools/read-file.js';
+import { createReadMediaFileTool } from '../../../app/core/agent/tools/read-media-file.js';
+import { createListDirTool } from '../../../app/core/agent/tools/list-dir.js';
+import { createWriteFileTool } from '../../../app/core/agent/tools/write-file.js';
+import { createEditFileTool } from '../../../app/core/agent/tools/edit-file.js';
+import { createGlobTool } from '../../../app/core/agent/tools/glob.js';
+import { createGrepTool } from '../../../app/core/agent/tools/grep.js';
+import { createWebFetchTool } from '../../../app/core/agent/tools/web-fetch.js';
+import { createWebSearchTool } from '../../../app/core/agent/tools/web-search.js';
+import { createMultiEditTool } from '../../../app/core/agent/tools/multi-edit.js';
+import { createNotebookEditTool } from '../../../app/core/agent/tools/notebook-edit.js';
+import { createGitTool } from '../../../app/core/agent/tools/git.js';
+import { createGitRepoTool } from '../../../app/core/agent/tools/git-repo.js';
+import { createBashOutputTool, createKillShellTool } from '../../../app/core/agent/tools/background-shell.js';
+import { createTodoWriteTool } from '../../../app/core/agent/tools/todo-write.js';
+import { createExitPlanModeTool } from '../../../app/core/agent/tools/exit-plan-mode.js';
+import { createSlashCommandTool } from '../../../app/core/agent/tools/slash-command.js';
+import { createDispatchAgentTool } from '../../../app/core/agent/tools/dispatch-agent.js';
+import { createAskFollowupTool } from '../../../app/core/agent/tools/ask-followup.js';
+import { createCompactTool } from '../../../app/core/agent/tools/compact.js';
+import { createDirectoryTreeTool } from '../../../app/core/agent/tools/directory-tree.js';
+import { createLoadSkillTool } from '../../../app/core/agent/tools/load-skill.js';
+import { createInitTool } from '../../../app/core/agent/tools/init.js';
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {

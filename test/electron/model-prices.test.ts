@@ -42,7 +42,7 @@ describe('model-prices loader', () => {
   });
 
   it('loads the bundled catalog', async () => {
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
     expect(catalog.entries.has('anthropic/claude-opus-4-7')).toBe(true);
@@ -50,7 +50,7 @@ describe('model-prices loader', () => {
   });
 
   it('normalizes raw models.dev entries into CatalogEntry shape (per-Mtok → per-token)', async () => {
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
     const e = catalog.entries.get('anthropic/claude-opus-4-7')!;
@@ -72,7 +72,7 @@ describe('model-prices loader', () => {
   });
 
   it('preserves the separate context/input ceilings when limit.input is present', async () => {
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
     const e = catalog.entries.get('openai/gpt-5.5')!;
@@ -93,7 +93,7 @@ describe('model-prices loader', () => {
         },
       }),
     );
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
     expect(catalog.entries.has('anthropic/claude-opus-4-7')).toBe(false);
@@ -110,21 +110,21 @@ describe('model-prices loader', () => {
         models: { 'stale-only': { limit: { context: 1000 } } },
       }),
     );
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     const catalog = await loader.load();
     expect(catalog.entries.has('anthropic/claude-opus-4-7')).toBe(true);
   });
 
   it('returns an empty catalog when both sources are missing', async () => {
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: null, cacheDir: tmpDir });
     const catalog = await loader.load();
     expect(catalog.entries.size).toBe(0);
   });
 
   it('isStale is true for a bundled baseline older than the refresh interval', async () => {
-    const { createModelPricesLoader } = await import('../../electron/agent/model-prices.js');
+    const { createModelPricesLoader } = await import('../../app/core/agent/model-prices.js');
     const loader = createModelPricesLoader({ bundled: BUNDLED, cacheDir: tmpDir });
     await loader.load();
     // BUNDLED.fetchedAt is 2026-01-01 — well over 7 days ago relative to now.

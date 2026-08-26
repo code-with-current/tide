@@ -100,7 +100,7 @@ describe('finalizeAssistantMessage stopReason persistence (store)', () => {
     const path = await import('node:path');
     const fs = await import('node:fs');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tide-finalize-'));
-    const { createSessionStore } = await import('../../electron/ipc/sessionStore');
+    const { createSessionStore } = await import('../../app/core/ipc-adjacent/sessionStore');
     const store = createSessionStore(dir);
     store.createSession('ws1', 'test', 'm_test');
     const sid = store.listSessions('ws1')[0].id;

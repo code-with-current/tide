@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import { openRagStoreAt } from '../../../electron/rag/store.js';
+import { openDatabase } from '../../../app/platform/sqlite.js';
+import { openRagStoreAt } from '../../../app/core/rag/store.js';
 
 let tmp: string;
 
@@ -41,7 +41,7 @@ describe('schema v2', () => {
 
   it('migrates an existing v1 workspace store without data loss', () => {
     const dbPath = path.join(tmp, 'index.db');
-    const legacy = new Database(dbPath);
+    const legacy = openDatabase(dbPath);
     legacy.exec(`
       CREATE TABLE meta (
         key   TEXT PRIMARY KEY,
@@ -82,7 +82,7 @@ describe('schema v2', () => {
     // Simulates a pre-transactional crash: version still '1' but ALTER TABLE
     // already applied. migrate() must not re-run ADD COLUMN and must not throw.
     const dbPath = path.join(tmp, 'index.db');
-    const crashed = new Database(dbPath);
+    const crashed = openDatabase(dbPath);
     crashed.exec(`
       CREATE TABLE meta (
         key   TEXT PRIMARY KEY,

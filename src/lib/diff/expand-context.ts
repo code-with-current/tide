@@ -1,6 +1,6 @@
 /** Expandable diff context — pure helpers shared by the renderer (separator
  *  affordances) and the main process (contextLines clamping). */
-import type { DiffHunk } from '@/types';
+import type { DiffHunk } from '../../types';
 
 /** Expand ladder: each click widens context to the next rung, capped here. */
 export const MAX_EXPAND_CONTEXT = 200;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { chunkFile, _resetParsersForTests } from '../../../electron/rag/chunker/index.js';
+import { chunkFile, _resetParsersForTests } from '../../../app/core/rag/chunker/index.js';
 
 const FIXTURES = path.join(__dirname, 'chunker-fixtures');
 

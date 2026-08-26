@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toolMeta, getToolMeta } from '../../electron/agent/tools/tool-meta.js';
+import { toolMeta, getToolMeta } from '../../app/core/agent/tools/tool-meta.js';
 
 describe('toolMeta sidecar', () => {
   it('has an entry for every currently-registered tool plus the new memory tool', () => {

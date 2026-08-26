@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createV2TurnTracker } from '../../electron/agent/v2-turn-tracker.js';
-import type { SinkEvent } from '../../electron/agent/event-sink.js';
+import { createV2TurnTracker } from '../../app/core/agent/v2-turn-tracker.js';
+import type { SinkEvent } from '../../app/core/agent/event-sink.js';
 
 const usage = { inputTokens: 1, outputTokens: 2, costUsd: 0.1 };
 const mk = () => createV2TurnTracker({ sessionId: 's1', messageId: 'm1' });

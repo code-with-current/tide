@@ -4,7 +4,7 @@ import {
   pendingAskIds,
   resolvePermission,
   waitForPermissionResolve,
-} from '../../electron/agent/permission-resolver';
+} from '../../app/core/agent/permission-resolver';
 
 function flushMicrotasks() {
   return new Promise((r) => setTimeout(r, 0));

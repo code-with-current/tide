@@ -3,14 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// Mirrors memory.test.ts isolation idioms: mocked electron/appPaths,
+// Mirrors memory.test.ts isolation idioms: mocked platform/paths,
 // workspace + config stores, embedder; real SQLite + sqlite-vec stores.
 const userDataDir = vi.hoisted(() => ({ current: '' as string }));
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => userDataDir.current) },
-}));
 
-vi.mock('../../../electron/appPaths.js', () => ({
+vi.mock('../../../app/platform/paths.js', () => ({
   appDataDir: () => userDataDir.current,
 }));
 
@@ -18,7 +15,7 @@ const { listWorkspacesMock, listRagEnabledWorkspacesMock } = vi.hoisted(() => ({
   listWorkspacesMock: vi.fn(() => [] as Array<{ id: string; ragConfig?: unknown }>),
   listRagEnabledWorkspacesMock: vi.fn((): string[] => []),
 }));
-vi.mock('../../../electron/store.js', () => ({
+vi.mock('../../../app/core/store.js', () => ({
   listWorkspaces: listWorkspacesMock,
   listRagEnabledWorkspaces: listRagEnabledWorkspacesMock,
 }));
@@ -26,7 +23,7 @@ vi.mock('../../../electron/store.js', () => ({
 const { isRagCloudConfiguredMock } = vi.hoisted(() => ({
   isRagCloudConfiguredMock: vi.fn(() => false),
 }));
-vi.mock('../../../electron/agent/system-model.js', () => ({
+vi.mock('../../../app/core/agent/system-model.js', () => ({
   isRagCloudConfigured: isRagCloudConfiguredMock,
 }));
 
@@ -36,16 +33,16 @@ const { embedMock, localExistsMock } = vi.hoisted(() => ({
   ),
   localExistsMock: vi.fn((): boolean => true),
 }));
-vi.mock('../../../electron/rag/local-onnx-embedder.js', () => ({
+vi.mock('../../../app/core/rag/local-onnx-embedder.js', () => ({
   LocalOnnxEmbedder: vi.fn(function () {
     return { id: 'local-code-512', dim: 384, maxTokens: 512, embed: embedMock, isAvailable: () => true };
   }),
   localModelExists: localExistsMock,
 }));
 
-import { runMemory } from '../../../electron/agent/tools/memory.js';
-import { openRagStore, type ChunkRow } from '../../../electron/rag/store.js';
-import { openKnowledgeStore } from '../../../electron/knowledge/store.js';
+import { runMemory } from '../../../app/core/agent/tools/memory.js';
+import { openRagStore, type ChunkRow } from '../../../app/core/rag/store.js';
+import { openKnowledgeStore } from '../../../app/core/knowledge/store.js';
 
 const WS = 'ws-memory-sources';
 const RAG_CONFIG = {

@@ -9,9 +9,9 @@ import {
   resolveMaxOutputTokens,
   clampOutputForContext,
   enrichModelFromCatalog,
-} from '../../electron/agent/model-capabilities.js';
-import type { CatalogMap } from '../../electron/agent/model-catalog.js';
-import type { CatalogEntry } from '../../electron/agent/model-prices.js';
+} from '../../app/core/agent/model-capabilities.js';
+import type { CatalogMap } from '../../app/core/agent/model-catalog.js';
+import type { CatalogEntry } from '../../app/core/agent/model-prices.js';
 import type { Model } from '../../src/types/index.js';
 
 function entry(id: string, over: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -171,7 +171,7 @@ describe('refreshModelCatalog', () => {
   });
 
   it('no-ops before init, then fetches, injects, caches, and runs once per session', async () => {
-    const { initModelCatalog, refreshModelCatalog } = await import('../../electron/agent/model-capabilities.js');
+    const { initModelCatalog, refreshModelCatalog } = await import('../../app/core/agent/model-capabilities.js');
 
     // Before initModelCatalog the loader is null — refresh must resolve false,
     // not throw, and must not consume the once-per-session guard.

@@ -17,6 +17,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api/client';
+import { chatSend } from '@/lib/api/client';
+import { hasRpc } from '@/lib/api/rpc';
 import { useUi } from '@/lib/stores/ui';
 import type { SessionStream, ToolCall } from '@/types';
 
@@ -79,7 +81,7 @@ async function ensureUtilitySession(workspaceId: string): Promise<string> {
     let modelId = '';
     let providerId: string | undefined;
     try {
-      const s = await window.tideIpc?.getGeneralSettings();
+      const s = await api.getGeneralSettings();
       const utility = (s as { commitMessageModel?: { providerId: string; modelId: string } | null } | undefined)
         ?.commitMessageModel;
       if (utility?.providerId && utility.modelId) {
@@ -118,7 +120,6 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
   state: GitAgentActionState;
   reset: () => void;
 } {
-  const ipc = typeof window !== 'undefined' ? window.tideIpc : undefined;
   const [state, setState] = useState<GitAgentActionState>(IDLE);
   // Store unsubscribe for the in-flight dispatch watch (also the unmount handle).
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -174,7 +175,7 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
   // Adopt a dispatch that outlived a previous mount of this consumer (e.g.
   // the commit-writer still running after a screen switch back).
   useEffect(() => {
-    if (!homeWorkspaceId || !ipc) return;
+    if (!homeWorkspaceId || !hasRpc) return;
     const active = activeDispatch.get(homeWorkspaceId);
     if (!active) return;
     const stream = useUi.getState().streams[active.sid];
@@ -189,10 +190,10 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
     setState({ status: 'running', report, error: null });
     watch(active.sid, active.agent);
     return () => cleanup();
-  }, [homeWorkspaceId, ipc, cleanup, watch]);
+  }, [homeWorkspaceId, cleanup, watch]);
 
   const run = useCallback((args: GitAgentDispatchArgs): GitAgentRunResult => {
-    if (!ipc) {
+    if (!hasRpc) {
       console.warn('useGitAgentAction: IPC unavailable (browser dev mode)');
       return { status: 'error' };
     }
@@ -234,7 +235,7 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
         activeDispatch.set(args.workspaceId, { workspaceId: args.workspaceId, sid, agent: args.agent });
         watch(sid, args.agent);
 
-        await ipc.runTurn({
+        const res = await chatSend({
           sessionId: sid,
           messages: [
             { role: 'system', content: 'You are Tide, an agentic coding assistant. Carry out the user\'s request using your tools.' },
@@ -246,10 +247,14 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
           autonomyMode: 'full',
           thinkingLevel: 'low',
         });
+        if (!res.accepted) throw new Error(res.error);
 
-        // runTurn resolved but no turn_end landed (empty turn) — settle with
-        // whatever report arrived, mirroring useChatStream's finally guard.
-        if (activeSidRef.current === sid) {
+        // Browser dev (no backend): chatSend resolves immediately without a
+        // turn ever running, so a still-streaming store means no turn_end will
+        // ever land — settle with whatever report arrived. Under the Electrobun
+        // job pattern the request resolves on acceptance and the watch
+        // subscription alone settles completion.
+        if (!hasRpc && activeSidRef.current === sid) {
           const stream = useUi.getState().streams[sid];
           if (stream?.isStreaming) {
             useUi.getState().patchStream(sid, { isStreaming: false });
@@ -277,7 +282,7 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
     })();
 
     return { status: 'running' };
-  }, [cleanup, watch, ipc]);
+  }, [cleanup, watch]);
 
   const reset = useCallback(() => {
     cleanup();

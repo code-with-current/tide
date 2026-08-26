@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runLoadSkill } from '../../../../electron/agent/tools/load-skill';
+import { runLoadSkill } from '../../../../app/core/agent/tools/load-skill';
 
 describe('runLoadSkill builtin: ids', () => {
   it('resolves builtin ids in memory without touching disk', async () => {

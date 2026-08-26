@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sessionSignal, abortSession, releaseSession } from '../../electron/agent/session-abort.js';
+import { sessionSignal, abortSession, releaseSession } from '../../app/core/agent/session-abort.js';
 
 describe('session-abort registry', () => {
   it('returns the same signal per session until released', () => {

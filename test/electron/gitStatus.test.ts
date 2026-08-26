@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execSync } from 'child_process';
-import { getGitStatus, gitStage, gitCommit } from '../../electron/ipc/git';
+import { getGitStatus, gitStage, gitCommit } from '../../app/core/ipc-adjacent/git';
 
 function initRepo(dir: string) {
   execSync('git init', { cwd: dir });

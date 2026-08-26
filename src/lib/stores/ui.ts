@@ -1,10 +1,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AutonomyMode, ThinkingLevel, SessionStream, ToolCall, DiffHunk } from '@/types';
-import { updateSessionSettings } from '@/lib/api/client';
+import {
+  getSettings,
+  resetShortcuts as persistResetShortcuts,
+  setShortcut as persistSetShortcut,
+  terminalKill,
+  updateSessionSettings,
+} from '@/lib/api/client';
 import { setPlatformDefaults } from '@/lib/shortcuts';
 import { createLogger } from '@/lib/logger';
 import { useTabs } from './tabs';
+import { chatUpdateMode } from '@/lib/api/client';
 
 const log = createLogger('ui');
 
@@ -807,7 +814,7 @@ export const useUi = create<UiState>()(
       if (now - lastActive > IDLE_THRESHOLD) {
         const terms = state.terminals[prevSessionId] ?? [];
         for (const t of terms) {
-          try { window.tideIpc?.terminalKill(t.id); } catch { /* dead */ }
+          try { terminalKill(t.id); } catch { /* dead */ }
         }
       }
     }
@@ -849,7 +856,7 @@ export const useUi = create<UiState>()(
     // Kill all PTYs for this session.
     const terms = state.terminals[sessionId] ?? [];
     for (const t of terms) {
-      try { window.tideIpc?.terminalKill(t.id); } catch { /* dead */ }
+      try { terminalKill(t.id); } catch { /* dead */ }
     }
     // Purge session-specific data from the UI store.
     const { [sessionId]: _t, ...restTerminals } = state.terminals;
@@ -911,7 +918,7 @@ export const useUi = create<UiState>()(
       void persistSessionSettings(sid, { autonomyMode });
       // Push the change to the running turn so subsequent tool calls in the
       // SAME stream use the new mode (without waiting for the next turn).
-      window.tideIpc?.updateMode(sid, autonomyMode);
+      chatUpdateMode(sid, autonomyMode);
     }
   },
   setThinkingLevel: (thinkingLevel) => {
@@ -1200,7 +1207,7 @@ export const useUi = create<UiState>()(
     if (list.length === 0) return;
     const killedIds = new Set(list.map((t) => t.id));
     for (const t of list) {
-      try { window.tideIpc?.terminalKill(t.id); } catch { /* dead */ }
+      try { terminalKill(t.id); } catch { /* dead */ }
     }
     set((s) => {
       const { [key]: _dropped, ...restTerminals } = s.terminals;
@@ -1316,7 +1323,7 @@ export const useUi = create<UiState>()(
   shortcutOverrides: {},
   loadShortcuts: async () => {
     try {
-      const result = await window.tideIpc?.getSettings();
+      const result = await getSettings();
       if (!result) return;
       // Seed the registry's platform-default map so the renderer (which can't
       // detect the OS) renders Ctrl on Windows/Linux instead of the macOS ⌘
@@ -1338,13 +1345,13 @@ export const useUi = create<UiState>()(
     // Persist to settings.json. The IPC returns the full post-write override
     // set; set again to converge (and to pick up any normalization the
     // backend might do in future).
-    window.tideIpc?.setShortcut(id, keys).then((overrides) => {
+    persistSetShortcut(id, keys).then((overrides) => {
       if (overrides) set({ shortcutOverrides: overrides });
     }).catch((e) => log.warn('setShortcut IPC failed', e));
   },
   resetShortcuts: () => {
     set({ shortcutOverrides: {} });
-    window.tideIpc?.resetShortcuts().then((overrides) => {
+    persistResetShortcuts().then((overrides) => {
       if (overrides) set({ shortcutOverrides: overrides });
     }).catch((e) => log.warn('resetShortcuts IPC failed', e));
   },

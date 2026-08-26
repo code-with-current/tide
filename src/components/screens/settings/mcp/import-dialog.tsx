@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { SectionLabel } from '../providers/provider-fields';
 import { ScopeCard } from './server-dialog';
+import { mcpScan } from '@/lib/api/client';
 
 interface DetectedServer {
   name: string;
@@ -40,7 +41,7 @@ export function McpImportDialog({
     // Default to NONE selected — the user opts into each server explicitly
     // rather than silently importing everything the scanner found.
     setChecked(new Set());
-    window.tideIpc?.mcpScan().then((result) => {
+    mcpScan().then((result) => {
       setServers(result.servers);
       setAlreadyImported(new Set(result.alreadyImported));
       setScanning(false);

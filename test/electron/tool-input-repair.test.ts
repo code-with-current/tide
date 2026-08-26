@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { repairJsonToolInput } from '../../electron/agent/tool-input-repair';
+import { repairJsonToolInput } from '../../app/core/agent/tool-input-repair';
 
 const GLM_GARBAGE =
   '{"question": "It seems like you\'re testing functionality. How can I assist you today? Please provide specific details about what you\'re trying to test., "options": []{}"label": ""Web navigation testing}, {"label": ""API testing}, {"label": ""Codebase functionality testing}, {"label": ""Performance testing", "options": [{"label": "Web navigation testing"}, {"label": "API testing"}, {"label": "Codebase functionality testing"}, {"label": "Performance testing"}]}{"question": "It seems like you\'re testing functionality. How can I assist you today? Please provide specific details about what you\'re trying to test.", "options": [{"label": "Web navigation testing"}, {"label": "API testing"}, {"label": "Codebase functionality testing"}, {"label": "Performance testing"}]}';

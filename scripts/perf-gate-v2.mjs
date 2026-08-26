@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Perf gate for the v2 session store (electron/ipc/session-store-v2.ts).
+// Perf gate for the v2 session store (app/core/ipc-adjacent/session-store-v2.ts).
 // Builds a throwaway SQLite db with the same schema, seeds a 500-message
 // session (2 parts per message) plus 199 sibling sessions in the same
 // workspace (200 total), and gates the two hot read paths from the design
@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STORE_TS = resolve(__dirname, '..', 'electron', 'ipc', 'session-store-v2.ts');
+const STORE_TS = resolve(__dirname, '..', 'app', 'core', 'ipc-adjacent', 'session-store-v2.ts');
 
 // Must stay byte-identical to the SCHEMA literal in session-store-v2.ts —
 // verified by the drift check below. Never edit one without the other.
@@ -90,7 +90,7 @@ function assertSchemaInSync() {
   }
   if (m[1].trim() !== SCHEMA.trim()) {
     console.error(
-      'DRIFT: SCHEMA in scripts/perf-gate-v2.mjs no longer matches electron/ipc/session-store-v2.ts.\n' +
+      'DRIFT: SCHEMA in scripts/perf-gate-v2.mjs no longer matches app/core/ipc-adjacent/session-store-v2.ts.\n' +
         'Copy the updated SCHEMA literal into this script so the gate keeps testing the real schema.',
     );
     process.exit(1);

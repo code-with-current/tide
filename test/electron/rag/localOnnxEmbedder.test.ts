@@ -2,14 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // The parent imports LOCAL_META from embedder-process.js — mock that module
 // so the test doesn't transitively pull @xenova/transformers / sharp.
-vi.mock('../../../electron/rag/embedder-process.js', () => ({
+vi.mock('../../../app/core/rag/embedder-process.js', () => ({
   LOCAL_META: { id: 'local-code-512', dim: 384, maxTokens: 512 },
 }));
 
-// Mock electron's utilityProcess. fork() returns an EventEmitter-ish object
-// whose `on('message', handler)` captures the parent's response dispatcher
-// and whose `postMessage` spy records the request. The test drives the
-// "child → parent" leg by invoking the captured handler directly.
+// The parent gets its child process through the injectable factory seam
+// (setEmbedderProcessFactory). The mock fork() returns an EventEmitter-ish
+// object whose `on('message', handler)` captures the parent's response
+// dispatcher and whose `postMessage` spy records the request. The test
+// drives the "child → parent" leg by invoking the captured handler directly.
 const { forkMock, postMessageSpy, onSpy } = vi.hoisted(() => {
   const postMessageSpy = vi.fn();
   const handlers: Record<string, ((msg: unknown) => void) | undefined> = {};
@@ -25,12 +26,9 @@ const { forkMock, postMessageSpy, onSpy } = vi.hoisted(() => {
   return { forkMock, postMessageSpy, onSpy };
 });
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/fake/userData') },
-  utilityProcess: { fork: forkMock },
-}));
+import { LocalOnnxEmbedder, setEmbedderProcessFactory } from '../../../app/core/rag/local-onnx-embedder.js';
 
-import { LocalOnnxEmbedder } from '../../../electron/rag/local-onnx-embedder.js';
+setEmbedderProcessFactory(forkMock as unknown as Parameters<typeof setEmbedderProcessFactory>[0]);
 
 describe('LocalOnnxEmbedder', () => {
   beforeEach(() => {

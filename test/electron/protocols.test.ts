@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { anthropicCallOptions } from '../../electron/agent/protocols/anthropic.js';
-import { openaiCallOptions } from '../../electron/agent/protocols/openai.js';
-import type { ReasoningInstruction } from '../../electron/agent/protocols/reasoning.js';
+import { anthropicCallOptions } from '../../app/core/agent/protocols/anthropic.js';
+import { openaiCallOptions } from '../../app/core/agent/protocols/openai.js';
+import type { ReasoningInstruction } from '../../app/core/agent/protocols/reasoning.js';
 
 const budget = (tokens: number): ReasoningInstruction =>
   ({ contract: 'budget_tokens', budgetTokens: tokens, label: `budget=${tokens}` });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createSessionStore } from '../../electron/ipc/sessionStore.js';
+import { createSessionStore } from '../../app/core/ipc-adjacent/sessionStore.js';
 
 describe('sessionStore.renameSession', () => {
   let dir: string;

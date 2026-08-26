@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createExtensionsStore } from '../../electron/extensionsStore';
+import { createExtensionsStore } from '../../app/core/extensionsStore';
 
 const { getExtensionsMock, setExtensionsMock } = vi.hoisted(() => ({
   getExtensionsMock: vi.fn(),
   setExtensionsMock: vi.fn(),
 }));
 
-vi.mock('../../electron/store.js', () => ({
+vi.mock('../../app/core/store.js', () => ({
   getExtensions: getExtensionsMock,
   setExtensions: setExtensionsMock,
 }));

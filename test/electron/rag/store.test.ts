@@ -3,25 +3,17 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// store.ts imports `app` from electron for getPath('userData'). Mock it
-// per-test so each test gets a fresh temp dir — store tests must not
-// share state, and they must not touch the real userData.
+// store tests get a fresh temp dir per test — they must not share state,
+// and they must not touch the real userData.
 const userDataDir = vi.hoisted(() => ({
   current: '' as string,
 }));
 
-vi.mock('electron', () => ({
-  app: {
-    getPath: vi.fn(() => userDataDir.current),
-    isPackaged: false,
-  },
-}));
-
-vi.mock('../../../electron/appPaths.js', () => ({
+vi.mock('../../../app/platform/paths.js', () => ({
   appDataDir: () => userDataDir.current,
 }));
 
-import { openRagStore, type ChunkRow } from '../../../electron/rag/store.js';
+import { openRagStore, type ChunkRow } from '../../../app/core/rag/store.js';
 
 function mkChunk(overrides: Partial<ChunkRow> = {}): ChunkRow {
   return {

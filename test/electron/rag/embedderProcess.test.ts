@@ -12,7 +12,7 @@ const { fakeExtractor, pipelineMock } = vi.hoisted(() => ({
 const { envMock } = vi.hoisted(() => ({ envMock: { cacheDir: '' } }));
 vi.mock('@xenova/transformers', () => ({ pipeline: pipelineMock, env: envMock }));
 
-import { handleMessage, _resetPipelineForTests } from '../../../electron/rag/embedder-process.js';
+import { handleMessage, _resetPipelineForTests } from '../../../app/core/rag/embedder-process.js';
 
 describe('embedder-process handleMessage', () => {
   beforeEach(() => {

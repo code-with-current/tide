@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { useUi } from '@/lib/stores/ui';
 import * as api from '@/lib/api/client';
 import type { PermissionStatus, PermissionType } from '@/lib/api/client';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 import { Logo, LogoText } from '../primitives';
 
 /** macOS Permissions consent screen. Shown when Accessibility / Full Disk Access isn't granted; not a hard gate — opens System Settings and re-checks on focus. */
@@ -52,9 +52,6 @@ export function ConsentScreen() {
     }
   };
 
-  // Non-mac should never reach here (routing gates on shouldShowConsent), but
-  // guard anyway — if status is 'other', just continue.
-  const isMac = status?.platform === 'mac';
   const accessibilityOk = status?.accessibility === 'authorized';
   const fullDiskOk = status?.fullDiskAccess === 'authorized';
 

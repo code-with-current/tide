@@ -1,5 +1,15 @@
 # Packaging manifests (winget · homebrew · snap)
 
+> **Dormant — pending Electrobun-native packaging.** This pipeline is
+> electron-era and disabled: `.github/workflows/release-pkgs.yml` was renamed
+> to `release-pkgs.disabled.yml` (manual dispatch only) because it renders
+> electron-builder artifact names (`*-Setup.exe`, `*-x64.dmg`, `*_amd64.deb`)
+> for `v*`-tagged releases — none of which the Electrobun `tide/v*` release
+> flow produces (it emits `*.tar.zst` update envelopes, `*-update.json`, and
+> differently-named per-target installers; see `build/build.js`). Everything
+> below is retained as the starting point for a future Electrobun-native
+> packaging flow; the workflow file's header lists what a revival requires.
+
 Distributes Tide's existing GitHub Release installers to the three OS package
 managers so users can install with:
 

@@ -5,6 +5,7 @@ import { useTabs } from '@/lib/stores/tabs';
 import { toggleTerminalTab } from '@/lib/terminal-tab';
 import { queryClient } from '@/lib/queries';
 import { createLogger } from '@/lib/logger';
+import { chatAbort, chatApproveTools, chatRejectTools, renameSession as apiRenameSession, archiveSession as apiArchiveSession, deleteSession as apiDeleteSession, createWorktree as apiCreateWorktree } from '@/lib/api/client';
 
 const log = createLogger('shortcut');
 
@@ -83,8 +84,8 @@ const toggleRightPanel: Action = () => {
 const abortTurn: Action = () => {
   const sid = useUi.getState().activeSessionId;
   if (!sid) return false;
-  // Direct IPC abort; clears permission prompt too.
-  window.tideIpc?.abortTurn(sid);
+  // Direct abort; clears permission prompt too.
+  chatAbort(sid);
   useUi.getState().patchStream(sid, { permissionRequest: null });
   return true;
 };
@@ -145,7 +146,7 @@ const renameSession: Action = () => {
   const current = sessions.find((s) => s.id === sid);
   const next = window.prompt('Rename session', current?.title ?? '');
   if (!next || !next.trim() || next === current?.title) return false;
-  window.tideIpc?.renameSession(sid, next.trim());
+  void apiRenameSession(sid, next.trim());
   const wsId = useUi.getState().activeWorkspaceId;
   if (wsId) queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
   return true;
@@ -160,8 +161,8 @@ const deleteSession: Action = () => {
   const ui = useUi.getState();
   const wsId = ui.activeWorkspaceId;
   // Best-effort: skip archive on failure, go straight to delete.
-  window.tideIpc?.archiveSession(sid).catch(() => {}).finally(() => {
-    window.tideIpc?.deleteSession(sid).then(() => {
+  apiArchiveSession(sid).catch(() => {}).finally(() => {
+    apiDeleteSession(sid).then(() => {
       useUi.getState().clearSessionData(sid);
       useTabs.getState().clearSessionTabs(sid);
       if (wsId) queryClient.invalidateQueries({ queryKey: ['sessions', wsId] });
@@ -181,7 +182,7 @@ const approvePermission: Action = () => {
   const sid = useUi.getState().activeSessionId;
   const ids = pendingToolCallIds(sid);
   if (ids.length === 0) return false;
-  window.tideIpc?.approveToolCalls(sid!, ids);
+  chatApproveTools(sid!, ids);
   useUi.getState().removePermissionCards(sid!, ids);
   return true;
 };
@@ -190,7 +191,7 @@ const rejectPermission: Action = () => {
   const sid = useUi.getState().activeSessionId;
   const ids = pendingToolCallIds(sid);
   if (ids.length === 0) return false;
-  window.tideIpc?.rejectToolCalls(sid!, ids);
+  chatRejectTools(sid!, ids);
   useUi.getState().removePermissionCards(sid!, ids);
   return true;
 };
@@ -221,7 +222,7 @@ const branchFromWorktree: Action = () => {
   const branch = window.prompt('New branch name');
   if (!branch?.trim()) return false;
   const base = window.prompt('Base branch', 'main') ?? 'main';
-  window.tideIpc?.createWorktree(sid, { branchName: branch.trim(), baseBranch: base }).then(() => {
+  apiCreateWorktree(sid, { branchName: branch.trim(), baseBranch: base }).then(() => {
     queryClient.invalidateQueries({ queryKey: ['sessions', 'detail', sid] });
   }).catch((e) => log.warn('createWorktree failed', e));
   return true;

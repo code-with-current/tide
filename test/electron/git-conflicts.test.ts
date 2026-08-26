@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseConflictEntries } from '../../electron/ipc/git-conflicts';
+import { parseConflictEntries } from '../../app/core/ipc-adjacent/git-conflicts';
 
 /** The caller runs `git status --porcelain -z`: records are NUL-delimited
  *  and paths are emitted raw (no C-style quoting), so spaces/unicode in

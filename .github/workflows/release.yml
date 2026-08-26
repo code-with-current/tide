@@ -1,32 +1,30 @@
-# Release — cuts desktop installers and a GitHub Release when a v* tag is pushed.
+# Release — cuts Electrobun installers and a GitHub Release when a tide/v* tag
+# is pushed.
 #
 # How to cut a release:
-#   1. Bump `version` in package.json (semver, e.g. 0.0.1-pre).
-#   2. git tag v0.0.1-pre && git push origin v0.0.1-pre
+#   1. Bump `app.version` in electrobun.config.ts (semver, e.g. 0.3.0-beta.1).
+#   2. git tag tide/v0.3.0-beta.1 && git push origin tide/v0.3.0-beta.1
+#   (CI re-applies the tag's version to electrobun.config.ts via
+#   build/build.js --version, so the tag is the authority.)
 #
-# Architecture (avoids the parallel-publish draft race):
-#   - Each `desktop` matrix leg builds ONE artifact with publish=never
-#     (electron-builder writes to release/) and uploads it as a workflow
-#     artifact.
-#   - A single `release` job, gated on every leg succeeding, downloads
-#     them all and creates + publishes the GitHub Release in one shot.
-#     This is the only step that talks to the Releases API.
+# Architecture (follows the Electrobun updates guide,
+# framework.blackboard.sh/electrobun/guides/updates/):
+#   - Each `build` matrix leg builds ONE target with build/build.js
+#     (renderer → hutch electrobun build --env=stable → artifact validation)
+#     and uploads artifacts/ as a workflow artifact.
+#   - A single `release` job, gated on every leg succeeding, downloads them
+#     all and creates the GitHub Release in one shot. This is the only step
+#     that talks to the Releases API.
 #
-# mac builds are ad-hoc signed (no Apple Developer cert) via an afterPack
-# hook in build/build.js — the .app and every nested binary (node-pty,
-# better-sqlite3, sharp, sqlite-vec) is signed with codesign --sign -.
-# This satisfies the Apple Silicon "all executables must be signed" rule so
-# the app launches on M-series Macs; it does NOT silence Gatekeeper for
-# other users (they still see "unidentified developer" on first launch).
-# Win/linux are unsigned. To upgrade mac to a real Developer ID +
-# notarization later: add Apple secrets, set mac.identity in build.js to
-# the cert name, and drop CSC_IDENTITY_AUTO_DISCOVERY on the mac legs.
+# mac builds are unsigned (Hutch ad-hoc signs launcher binaries as required by
+# Apple Silicon; no Developer ID / notarization yet — add ELECTROBUN_DEVELOPER_ID
+# etc. and mac.codesign/notarize in electrobun.config.ts when that changes).
 name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'tide/v*'
 
 concurrency:
   group: release-${{ github.ref }}
@@ -36,184 +34,108 @@ permissions:
   contents: write   # the release job creates the GitHub Release.
 
 jobs:
-  desktop:
-    name: build · ${{ matrix.label }}
+  build:
+    name: build · ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ── macOS: dmg for Apple Silicon + Intel ──
-          - label: mac · dmg · arm64
-            runner: macos-latest
-            arch: arm64
-            cmd: node build/build.js target=mac arch=arm64 type=dmg publish=never
-          - label: mac · dmg · x64
-            runner: macos-latest
-            arch: x64
-            cmd: node build/build.js target=mac arch=x64 type=dmg publish=never
-          # ── Windows: nsis installer, 64-bit ──
-          - label: win · nsis · x64
-            runner: windows-latest
-            arch: x64
-            cmd: node build/build.js target=win arch=x64 type=setup publish=never
-          # ── Linux: AppImage + deb, 64-bit ──
-          - label: linux · AppImage · x64
-            runner: ubuntu-latest
-            arch: x64
-            cmd: EXTRACT_ASAR=1 node build/build.js target=linux arch=x64 type=appImage publish=never
-          - label: linux · deb · amd64
-            runner: ubuntu-latest
-            arch: x64
-            cmd: node build/build.js target=linux arch=x64 type=deb publish=never
-          # ── Linux: snap for Snap Store ──
-          - label: linux · snap · x64
-            runner: ubuntu-latest
-            arch: x64
-            cmd: node build/build.js target=linux arch=x64 type=snap publish=never
+          - target: macos-arm64
+            runner: macos-14
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: win-x64
+            runner: windows-2025
+
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm version comes from `packageManager` in package.json (corepack);
-      # don't set `version` here or action-setup errors on the mismatch.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      # Snap builds need snapcraft (shelled out by electron-builder) and
-      # LXD (used by snapcraft to build in a clean container). Both are
-      # snap packages on ubuntu-latest; LXD just needs init.
-      - name: Setup snap build environment
-        if: contains(matrix.label, 'snap')
-        run: |
-          sudo snap install lxd 2>/dev/null || true
-          sudo lxd init --auto
-          sudo snap install snapcraft --classic
-
-      # build/build.js runs: renderer build → electron entry build →
-      # grammar staging, then electron-builder. The mac config sets
-      # identity:null and an afterPack hook ad-hoc signs the finished
-      # .app (codesign --deep --force --sign -), so no Apple Developer
-      # cert is needed. Win/linux legs stay unsigned.
-      - name: Build installer
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: ${{ matrix.cmd }}
-
-      # Stage electron-updater feed files. electron-builder emits
-      # latest-mac.yml / latest.yml / latest-linux.yml alongside the
-      # installers — electron-updater needs these to discover updates.
-      # Both mac legs produce latest-mac.yml, so rename per-arch to
-      # avoid collision when artifacts are merged in the release job.
-      - name: Stage update metadata
+      - name: Setup Hutch (macOS/Linux)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          if [ -f release/latest-mac.yml ]; then
-            cp release/latest-mac.yml "release/latest-mac-${{ matrix.arch }}.yml"
+          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | bash -s -- --channel production --no-modify-path
+          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Hutch (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://hutch.blackboard.sh/hutch/install.ps1 -OutFile install-hutch.ps1
+          ./install-hutch.ps1 -Channel production
+          "$HOME\.hutch\bin" >> $env:GITHUB_PATH
+
+      - name: Install dependencies
+        run: bun install
+
+      # Generates .hutch/devkit (gitignored) — build/build.js typechecks via
+      # tsc -b first, which hard-fails without the devkit's tsconfig/paths.
+      - name: Sync Electrobun devkit
+        run: hutch electrobun sync
+
+      - name: Derive version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#tide/v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[\w.-]+)?$'; then
+            echo "tag $GITHUB_REF_NAME does not carry a semver (expected tide/vX.Y.Z)"; exit 1
           fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      # build/build.js runs: renderer build (prompt bundle → tsc -b → vite) →
+      # hutch electrobun build --env=stable → artifact validation. --version
+      # patches electrobun.config.ts in place for the build.
+      - name: Build
+        shell: bash
+        run: node build/build.js --version "$VERSION"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.label }}
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/*.exe
-            release/*.AppImage
-            release/*.deb
-            release/*.snap
-            release/*.asar
-            release/*.sha256
-            release/latest-mac-*.yml
-            release/latest.yml
-            release/latest-linux.yml
+          name: release-${{ matrix.target }}
+          path: artifacts/*
           if-no-files-found: error
           retention-days: 1
 
   # ───────────────────────────── Publish ───────────────────────────
-  # Runs only after every build leg succeeds. Creates the release as
-  # prerelease when the tag contains a semver pre-release identifier
-  # (e.g. v0.0.1-pre, v1.0.0-rc.1).
+  # Runs only after every build leg succeeds. Attaches the installers
+  # (*.dmg / *.exe / *.AppImage / *.deb depending on target) plus each
+      # target's full-tar update envelope (*.tar.zst) and update metadata
+      # (*-update.json) to one GitHub Release. Published as a prerelease when the
+      # tag carries a semver pre-release segment (any '-' after the patch
+      # version, e.g. tide/v0.3.0-beta.1).
   release:
     name: publish · GitHub Release
-    needs: desktop
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: assets
           merge-multiple: true
 
-      - name: Collect installers
-        id: files
-        run: |
-          mkdir -p dist
-          # Flatten everything into dist/ — download-artifact may create
-          # per-leg subdirs; glob them out.
-          find assets -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.snap' -o -name '*.asar' -o -name '*.sha256' -o -name 'latest.yml' -o -name 'latest-linux.yml' -o -name 'latest-mac-*.yml' \) -exec cp {} dist/ \;
-          echo "## Installers" > dist/notes.md
-          echo "" >> dist/notes.md
-          for f in dist/*; do
-            [ -f "$f" ] || continue
-            case "$f" in *.md) continue;; esac
-            name="$(basename "$f")"
-            size="$(du -h "$f" | cut -f1)"
-            echo "- ${name} (${size})" >> dist/notes.md
-          done
-          cat dist/notes.md
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: assets/*
 
-      - name: Merge multi-arch mac update metadata
-        run: |
-          node build/merge-update-yml.mjs assets dist
-          # Remove per-arch intermediates — only the merged latest-mac.yml
-          # should ship to the release.
-          rm -f dist/latest-mac-arm64.yml dist/latest-mac-x64.yml
-
-      - name: Create or update release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          # Prerelease if the version (tag minus leading 'v') parses as a
-          # semver pre-release: contains '-' after the patch number.
-          if printf '%s' "${TAG#v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-'; then
-            PRE="--prerelease"
-          else
-            PRE=""
-          fi
-          # Idempotent: if the release already exists (e.g. created manually
-          # or by a partial previous run), edit its notes and clobber assets
-          # instead of failing.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" \
-              --notes-file dist/notes.md \
-              $PRE
-          else
-            gh release create "$TAG" \
-              --title "$TAG" \
-              --generate-notes \
-              --notes-file dist/notes.md \
-              $PRE
-          fi
-          # Upload installers + all update-metadata yml files that exist.
-          # Use globs so a missing platform feed (e.g. a platform leg was
-          # removed from the matrix) doesn't fail the whole upload.
-          gh release upload "$TAG" \
-            dist/*.dmg dist/*.zip dist/*.exe dist/*.AppImage dist/*.deb dist/*.snap dist/*.asar dist/*.sha256 \
-            dist/latest*.yml \
-            --clobber
-
+      # TODO(update-host): release.baseUrl is intentionally unset while the
+      # update host is undecided — full-tar updates work without it, and
+      # *-update.json above is already release-attached. Once a host is
+      # chosen: pass `--base-url <host>` to build/build.js on the build legs
+      # and add a step here (or on the build legs) uploading artifacts/ to
+      # that host (e.g. R2) WITHOUT renaming — clients resolve
+      # <channel>-<os>-<arch>-update.json under the baseUrl.

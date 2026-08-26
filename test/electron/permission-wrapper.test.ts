@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { withPermission } from '../../electron/agent/permission-wrapper.js';
+import { withPermission } from '../../app/core/agent/permission-wrapper.js';
 import {
   resolvePermission,
   clearSession,
-} from '../../electron/agent/permission-resolver.js';
+} from '../../app/core/agent/permission-resolver.js';
 import {
   addSessionRule,
   addPermissionRule,
@@ -16,8 +16,8 @@ import {
   getSessionRules,
   loadPermissionRules,
   parseRule,
-} from '../../electron/agent/permissions/rules.js';
-import type { ToolContext } from '../../electron/agent/tools/tool-context.js';
+} from '../../app/core/agent/permissions/rules.js';
+import type { ToolContext } from '../../app/core/agent/tools/tool-context.js';
 
 const SID = 's_perm_test';
 

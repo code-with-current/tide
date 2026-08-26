@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hydrateRagConfig, DEFAULT_RAG_CONFIG } from '../../electron/configStore.js';
+import { hydrateRagConfig, DEFAULT_RAG_CONFIG } from '../../app/core/configStore.js';
 
 describe('hydrateRagConfig', () => {
   it('returns defaults when input is undefined', () => {

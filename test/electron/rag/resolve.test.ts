@@ -1,9 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // resolve.ts constructs LocalOnnxEmbedder + CloudEmbedder at module load.
-// Mock both so (a) the test doesn't pull electron into vitest via the
-// parent client's `import { utilityProcess } from 'electron'`, and
-// (b) the returned embedder objects have stable identities we can assert on.
+// Mock both so the returned embedder objects have stable identities we can
+// assert on.
 const { localStub, cloudStub, LocalMock, CloudMock } = vi.hoisted(() => {
   const localStub = { id: 'local-code-512', dim: 384, maxTokens: 512, embed: vi.fn() };
   const cloudStub = { id: 'cloud-base', dim: 384, maxTokens: 256, embed: vi.fn() };
@@ -14,11 +13,11 @@ const { localStub, cloudStub, LocalMock, CloudMock } = vi.hoisted(() => {
   return { localStub, cloudStub, LocalMock, CloudMock };
 });
 
-vi.mock('../../../electron/rag/local-onnx-embedder.js', () => ({ LocalOnnxEmbedder: LocalMock }));
-vi.mock('../../../electron/rag/cloud-embedder.js', () => ({ CloudEmbedder: CloudMock }));
+vi.mock('../../../app/core/rag/local-onnx-embedder.js', () => ({ LocalOnnxEmbedder: LocalMock }));
+vi.mock('../../../app/core/rag/cloud-embedder.js', () => ({ CloudEmbedder: CloudMock }));
 
-import { resolveForBuild, resolveForQuery, ResolveError } from '../../../electron/rag/resolve.js';
-import type { RagConfig } from '../../../electron/src/types';
+import { resolveForBuild, resolveForQuery, ResolveError } from '../../../app/core/rag/resolve.js';
+import type { RagConfig } from '@/types';
 
 const localOn: RagConfig = { embedderId: 'local-code-512', dim: 384, cloudAllowed: false, chunkTokens: 384 };
 

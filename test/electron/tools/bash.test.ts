@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { z } from 'zod';
-import { createBashTool, runBash } from '../../../electron/agent/tools/bash.js';
-import { toolMeta } from '../../../electron/agent/tools/tool-meta.js';
-import { resolvePermission, clearSession } from '../../../electron/agent/permission-resolver.js';
-import type { ToolContext } from '../../../electron/agent/tools/tool-context.js';
+import { createBashTool, runBash } from '../../../app/core/agent/tools/bash.js';
+import { toolMeta } from '../../../app/core/agent/tools/tool-meta.js';
+import { resolvePermission, clearSession } from '../../../app/core/agent/permission-resolver.js';
+import type { ToolContext } from '../../../app/core/agent/tools/tool-context.js';
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {

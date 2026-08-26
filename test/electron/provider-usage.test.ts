@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseZaiQuota, parseOpenRouterKey, parseDeepSeekBalance, parseFireworksSummary } from '../../electron/agent/provider-usage';
+import { parseZaiQuota, parseOpenRouterKey, parseDeepSeekBalance, parseFireworksSummary } from '../../app/core/agent/provider-usage';
 
 const zaiPayload = (limits: unknown[], planName = 'GLM Coding Plan') => ({
   success: true,

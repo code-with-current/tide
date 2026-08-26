@@ -3,12 +3,13 @@ import { Copy, Check, Heart, Code2, Globe, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TideBrandMark } from '@/components/primitives/tide-brand-mark';
 import { Card, SettingsGroup, SettingsHeader, SettingsRow } from './shared';
+import * as api from '@/lib/api/client';
 
 interface Diagnostics {
   appVersion: string;
-  electron: string;
+  runtime: string;
+  runtimeVersion: string;
   chrome: string;
-  node: string;
   platform: string;
   userDataPath: string;
 }
@@ -22,16 +23,15 @@ export function AboutSection() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    window.tideIpc?.getDiagnostics().then(setDiag).catch(() => {});
+    api.getDiagnostics().then((d) => { if (d) setDiag(d); }).catch(() => {});
   }, []);
 
   const handleCopy = () => {
     if (!diag) return;
     const text = [
       `Tide v${diag.appVersion}`,
-      `Electron ${diag.electron}`,
+      `${diag.runtime === 'bun' ? 'Bun' : 'Electron'} ${diag.runtimeVersion}`,
       `Chromium ${diag.chrome}`,
-      `Node ${diag.node}`,
       `Platform ${diag.platform}`,
       `Data ${diag.userDataPath}`,
     ].join('\n');
@@ -98,19 +98,14 @@ export function AboutSection() {
               {diag?.appVersion ?? '—'}
             </code>
           </SettingsRow>
-          <SettingsRow title="Electron">
+          <SettingsRow title={diag?.runtime === 'bun' ? 'Bun' : 'Electron'}>
             <code className="font-mono text-[0.7857rem] text-muted-foreground">
-              {diag?.electron ?? '—'}
+              {diag?.runtimeVersion ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Chromium">
             <code className="font-mono text-[0.7857rem] text-muted-foreground">
               {diag?.chrome ?? '—'}
-            </code>
-          </SettingsRow>
-          <SettingsRow title="Node">
-            <code className="font-mono text-[0.7857rem] text-muted-foreground">
-              {diag?.node ?? '—'}
             </code>
           </SettingsRow>
           <SettingsRow title="Platform">

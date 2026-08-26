@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { handleMessage, _resetPipelineForTests } from '../../../electron/rag/embedder-process.js';
+import { handleMessage, _resetPipelineForTests } from '../../../app/core/rag/embedder-process.js';
 
 // Mirror what local-onnx-embedder.ts sets when spawning the child.
 // Use the real userData path so the model lands where the app will look

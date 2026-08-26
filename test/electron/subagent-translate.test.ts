@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   translateSubagentPart,
   type SubagentBlockIds,
-} from '../../electron/agent/agents/runtime.js';
-import type { EmitToolEvent } from '../../electron/agent/tools/tool-context.js';
+} from '../../app/core/agent/agents/runtime.js';
+import type { EmitToolEvent } from '../../app/core/agent/tools/tool-context.js';
 
 type Emitted = Parameters<EmitToolEvent>[0];
 

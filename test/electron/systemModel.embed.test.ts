@@ -40,7 +40,7 @@ import {
   runSystemEmbedding,
   isRagCloudConfigured,
   _resetSystemEmbedderForTests,
-} from '../../electron/agent/system-model.js';
+} from '../../app/core/agent/system-model.js';
 
 describe('isRagCloudConfigured', () => {
   it('true iff TIDE_SYSTEM_API_KEY is set', () => {

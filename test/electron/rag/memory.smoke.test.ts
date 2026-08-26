@@ -7,21 +7,17 @@ const REAL_USERDATA = path.join(os.homedir(), 'Library', 'Application Support', 
 const REAL_WS = 'ws_2wiklbx3';
 process.env.TIDE_MODELS_DIR = path.join(REAL_USERDATA, 'models');
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => REAL_USERDATA) },
-}));
-
 // Mock workspace/config — point at the real workspace.
-vi.mock('../../../electron/store.js', () => ({
+vi.mock('../../../app/core/store.js', () => ({
   listWorkspaces: () => [{ id: REAL_WS, ragConfig: { embedderId: 'local-code-512', dim: 384, cloudAllowed: false, chunkTokens: 384 } }],
   listRagEnabledWorkspaces: () => [REAL_WS],
 }));
-vi.mock('../../../electron/agent/system-model.js', () => ({ isRagCloudConfigured: () => false }));
+vi.mock('../../../app/core/agent/system-model.js', () => ({ isRagCloudConfigured: () => false }));
 
 // Real embedder (handleMessage → real ONNX).
-vi.mock('../../../electron/rag/local-onnx-embedder.js', async (importOriginal) => {
+vi.mock('../../../app/core/rag/local-onnx-embedder.js', async (importOriginal) => {
   const actual = await importOriginal();
-  const mod = await import('../../../electron/rag/embedder-process.js');
+  const mod = await import('../../../app/core/rag/embedder-process.js');
   return {
     ...actual,
     LocalOnnxEmbedder: vi.fn(function () {
@@ -39,7 +35,7 @@ vi.mock('../../../electron/rag/local-onnx-embedder.js', async (importOriginal) =
   };
 });
 
-import { runMemory } from '../../../electron/agent/tools/memory.js';
+import { runMemory } from '../../../app/core/agent/tools/memory.js';
 
 describe.skipIf(!process.env.TIDE_LIVE)('memory tool (live smoke)', () => {
   it('retrieves chunks about admin auth from the real index', async () => {

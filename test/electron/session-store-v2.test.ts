@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createSessionStoreV2 } from '../../electron/ipc/session-store-v2.js';
+import { createSessionStoreV2 } from '../../app/core/ipc-adjacent/session-store-v2.js';
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tide-v2-')); });

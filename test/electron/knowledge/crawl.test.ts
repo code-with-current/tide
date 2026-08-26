@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { fetchCrawl } from '../../../electron/knowledge/fetchers/crawl.js';
+import { fetchCrawl } from '../../../app/core/knowledge/fetchers/crawl.js';
 
 function page(links: string[], body = 'text'): string {
   const anchors = links.map((href) => `<a href="${href}">link</a>`).join('');

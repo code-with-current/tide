@@ -1,3 +1,4 @@
+import * as api from '@/lib/api/client';
 import { useEffect, useState } from 'react';
 import {
   Map,
@@ -85,8 +86,8 @@ export function AutonomyCapsSection() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   useEffect(() => {
-    window.tideIpc?.getAgentSettings().then((s) => {
-      const raw = s as Record<string, unknown>;
+    api.getAgentSettings().then((s) => {
+      const raw = (s ?? {}) as unknown as Record<string, unknown>;
       // Normalize: old config files won't have the compaction fields.
       // Without this, Switch/Slider get undefined → uncontrolled→controlled
       // warning and NaN for value attribute.
@@ -111,7 +112,7 @@ export function AutonomyCapsSection() {
     const next = { ...settings, [key]: value };
     setSettings(next);
     setSavingKey(key);
-    window.tideIpc?.updateAgentSettings({ [key]: value }).then(() => {
+    api.updateAgentSettings({ [key]: value } as Partial<api.AgentSettings>).then(() => {
       setTimeout(() => setSavingKey(null), 900);
     });
   };

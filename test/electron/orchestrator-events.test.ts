@@ -4,7 +4,7 @@ import {
   newV2PartId,
   orchestratorEventToSink,
   type OrchestratorStreamEvent,
-} from '../../electron/agent/orchestrator-events.js';
+} from '../../app/core/agent/orchestrator-events.js';
 
 describe('orchestrator event translation', () => {
   it('maps a text delta to part.delta', () => {
