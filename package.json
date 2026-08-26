@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.3.1-beta",
   "packageManager": "bun@1.4.0",
-  "description": "Tide \u2014 Code with the current.",
+  "description": "Tide — Code with the current.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,10 +13,12 @@
     "test:watch": "vitest",
     "preview": "vite preview",
     "app:dev": "tauri dev",
+    "preapp:build": "node build/sync-version.mjs",
     "app:build": "tauri build"
   },
   "dependencies": {
     "@pierre/diffs": "^1.3.5",
+    "@tauri-apps/api": "^2.11.1",
     "beautiful-mermaid": "^1.1.3",
     "dompurify": "^3.4.13",
     "katex": "^0.16.47",
@@ -33,6 +35,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-virtual": "3.14.9",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/bun": "^1.4.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
