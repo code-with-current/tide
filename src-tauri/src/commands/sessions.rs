@@ -87,6 +87,13 @@ pub fn session_list(
 }
 
 fn list_headers(state: &AppState, workspace_id: &str) -> Result<Vec<SessionHeaderWire>, CommandError> {
+    let headers = inner_list_headers(state, workspace_id)?;
+    #[cfg(debug_assertions)]
+    eprintln!("[tide] session_list workspace={workspace_id} -> {} sessions", headers.len());
+    Ok(headers)
+}
+
+fn inner_list_headers(state: &AppState, workspace_id: &str) -> Result<Vec<SessionHeaderWire>, CommandError> {
     let Some(workspace_path) = workspace_path_of(state, workspace_id)? else {
         return Ok(Vec::new());
     };

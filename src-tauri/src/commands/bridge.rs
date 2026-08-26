@@ -32,6 +32,8 @@ pub struct BridgeVersion {
 
 #[tauri::command]
 pub fn bridge_version() -> BridgeVersion {
+    #[cfg(debug_assertions)]
+    eprintln!("[tide] bridge handshake ok (protocol {BRIDGE_PROTOCOL})");
     BridgeVersion {
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol: BRIDGE_PROTOCOL,
