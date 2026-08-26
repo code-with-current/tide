@@ -1,5 +1,9 @@
 //! rusqlite sessions-v2/config/RAG index (in-place ~/.tide).
 
+pub mod config;
+pub mod paths;
+pub mod secrets;
+
 #[cfg(test)]
 mod tests {
     #[test]

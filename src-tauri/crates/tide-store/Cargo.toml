@@ -5,3 +5,8 @@ edition.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
+# home-dir resolution; already a transitive dep via tauri, so no new code
+dirs = "6"
+base64 = "0.22"
+sha2 = "0.10"

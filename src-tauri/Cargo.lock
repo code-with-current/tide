@@ -3336,7 +3336,11 @@ dependencies = [
 name = "tide-store"
 version = "0.4.0"
 dependencies = [
+ "base64 0.22.1",
+ "dirs",
  "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
