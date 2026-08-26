@@ -403,4 +403,21 @@ describe("chat request routing", () => {
     await bridge.request.eventsUnsubscribe({ sessionId: "s_1" });
     expect(invoke).toHaveBeenLastCalledWith("events_unsubscribe", { sessionId: "s_1" });
   });
+
+  it("routes the splash boot gates: consentShouldShow + lastSession get/set", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ shouldShow: false });
+    expect(await bridge.request.consentShouldShow({})).toEqual({ shouldShow: false });
+    expect(invoke).toHaveBeenLastCalledWith("consent_should_show", {});
+
+    invoke.mockResolvedValueOnce({ sessionId: "s_1", workspaceId: "ws_1" });
+    expect(await bridge.request.lastSessionGet({})).toEqual({ sessionId: "s_1", workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("last_session_get", {});
+
+    invoke.mockResolvedValueOnce(undefined);
+    await bridge.request.lastSessionSet({ sessionId: null, workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("last_session_set", { sessionId: null, workspaceId: "ws_1" });
+  });
 });

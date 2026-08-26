@@ -12,6 +12,9 @@ pub fn run() {
         .manage(app_state)
         .manage(hub_cell)
         .invoke_handler(tauri::generate_handler![
+            commands::boot::consent_should_show,
+            commands::boot::last_session_get,
+            commands::boot::last_session_set,
             commands::bridge::tide_ping,
             commands::bridge::bridge_version,
             commands::workspaces::workspace_list,

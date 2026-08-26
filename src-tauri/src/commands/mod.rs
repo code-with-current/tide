@@ -8,6 +8,7 @@
 // generate_handler! — the macro it expands to looks up each command's hidden
 // __cmd__*/__tauri_command_name_* items next to the fn. `mod commands` is
 // crate-private, so nothing leaks outside the crate.
+pub mod boot;
 pub mod bridge;
 pub mod chat;
 pub mod providers;

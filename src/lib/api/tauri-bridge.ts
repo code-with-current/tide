@@ -66,6 +66,9 @@ type BridgeMethods = Pick<
   | 'chatRejectTools'
   | 'eventsSubscribe'
   | 'eventsUnsubscribe'
+  | 'lastSessionGet'
+  | 'lastSessionSet'
+  | 'consentShouldShow'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
@@ -122,6 +125,9 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
       }),
     eventsSubscribe: (params) => invoke<{ batches: FlushBatch[] }>('events_subscribe', params),
     eventsUnsubscribe: (params) => invoke('events_unsubscribe', params),
+    lastSessionGet: (params) => invoke<{ sessionId: string | null; workspaceId: string | null }>('last_session_get', params),
+    lastSessionSet: (params) => invoke('last_session_set', params),
+    consentShouldShow: (params) => invoke<{ shouldShow: boolean }>('consent_should_show', params),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {
