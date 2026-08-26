@@ -25,3 +25,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
+tide-store = { path = "crates/tide-store" }
+
+[dev-dependencies]
+rusqlite = { version = "0.40.2", features = ["bundled"] }

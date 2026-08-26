@@ -128,7 +128,8 @@ pub struct AgentSettings {
 /// AgentSettings with the TS DEFAULT_AGENT_SETTINGS layered over absent
 /// fields (the TS merged defaults at every read; doing it here keeps the
 /// stored model lossless).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EffectiveAgentSettings {
     pub default_autonomy: String,
     pub max_steps: u64,
@@ -213,7 +214,8 @@ pub struct GeneralSettings {
 
 /// GeneralSettings with the TS DEFAULT_GENERAL_SETTINGS layered over absent
 /// fields.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EffectiveGeneralSettings {
     pub start_at_login: bool,
     pub notifications: bool,

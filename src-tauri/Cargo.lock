@@ -3386,10 +3386,12 @@ dependencies = [
 name = "tide"
 version = "0.4.0"
 dependencies = [
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tide-store",
 ]
 
 [[package]]
