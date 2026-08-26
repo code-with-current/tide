@@ -1,9 +1,8 @@
 /** RPC bridge seam for the renderer. The Electrobun view client is gone with
- *  the backend (Tauri rewrite): outside a Tauri webview `rpc` is null and
- *  every data call in client.ts takes its existing mock-store fallback
- *  (plain-browser dev). Inside a Tauri webview — once the shell actually
- *  ships — the stub fails loudly on first real use until the invoke/Channel
- *  bridge lands (Tauri rewrite M1). */
+ *  the backend (Tauri rewrite): `rpc` is null everywhere — including inside a
+ *  Tauri webview — until the M1+ bridge module installs `window.__TIDE_BRIDGE__`
+ *  over a real invoke channel, so every data call in client.ts takes its
+ *  existing mock-store fallback until then. */
 import type {
   FlushBatch,
   McpEvent,
@@ -20,9 +19,22 @@ import type {
 } from '@shared/rpc';
 import type { AgentEvent } from '@/lib/agent/events';
 
+/** Bridge activation is NOT bare `__TAURI_INTERNALS__` presence: that would
+ *  make every client.ts data call take the RPC path inside an unwired Tauri
+ *  webview, and the first synchronous throw (splash's refreshModelCatalog,
+ *  non-async) escapes React commit with no ErrorBoundary → white screen.
+ *  The M1+ bridge module installs `window.__TIDE_BRIDGE__` itself once a real
+ *  invoke channel exists; until then the app runs on the mock store even
+ *  inside the webview. */
+declare global {
+  interface Window {
+    __TIDE_BRIDGE__?: unknown;
+  }
+}
+
 export const hasRpc =
   typeof window !== 'undefined' &&
-  window.__TAURI_INTERNALS__ !== undefined;
+  window.__TIDE_BRIDGE__ !== undefined;
 
 type OrchestratorEventsCallback = (batch: FlushBatch) => void;
 type AgentEventsCallback = (event: AgentEvent) => void;
@@ -209,10 +221,11 @@ function bridgeNotPorted(): never {
   throw new Error('[tide] RPC bridge not yet ported (Tauri rewrite M1)');
 }
 
-/** The bridge client. Null outside a Tauri webview (client.ts falls back to
- *  the mock store); inside one, a stub that throws on first property access
- *  so genuinely bridge-demanding UI paths fail loudly instead of silently
- *  rendering mock data. */
+/** The bridge client. Null until the real bridge installs itself (client.ts
+ *  falls back to the mock store — including inside an unwired Tauri webview);
+ *  after that, a stub that throws on first property access so any UI path the
+ *  bridge doesn't implement yet fails loudly instead of silently rendering
+ *  mock data. */
 export const rpc: TideRpcClient | null = hasRpc
   ? new Proxy({} as TideRpcClient, { get: bridgeNotPorted })
   : null;
