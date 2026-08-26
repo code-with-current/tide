@@ -6,8 +6,8 @@
 // Usage:
 //   node packaging/render.mjs --version 0.3.0-beta.1 [--repo code-with-current/tide] [--out out/]
 //
-// Release tags carry the tide/v prefix; the artifact names below match what
-// release.yml actually publishes (see the live tide/v0.3.0-beta.1 release):
+// Release tags carry the v prefix; the artifact names below match what
+// release.yml actually publishes (see the live release):
 //   mac arm64: Tide-<version>-arm64.dmg
 //   win x64  : win-x64-Tide-Setup.zip   (zip wrapping a Tide-Setup.exe bootstrapper)
 //   linux    : linux-{x64,arm64}-Tide-Setup.tar.gz  (no manifest consumer yet)
@@ -52,11 +52,11 @@ const version = args.version
 const repo = args.repo ?? 'code-with-current/tide'
 // Optional: point at a mirror or local release cache instead of github.com.
 // Default BASE is the canonical GitHub Release download URL for this version
-// (tags are tide/v-prefixed).
+// (tags are v-prefixed).
 const outDir = path.resolve(args.out ?? path.join(PKG, 'packaging', 'out'))
 
 if (!version) {
-  console.error('Missing --version (e.g. 0.3.0-beta.1, matching the tide/v tag without the prefix)')
+  console.error('Missing --version (e.g. 0.3.0-beta.1, matching the tag without the v prefix)')
   process.exit(1)
 }
 
@@ -66,7 +66,7 @@ const wingetParts = version.replace(/-[A-Za-z0-9.]+$/, '').split('.').map(Number
 while (wingetParts.length < 4) wingetParts.push(0)
 const WINGET_VERSION = wingetParts.slice(0, 4).join('.')
 
-const BASE = args.base ?? `https://github.com/${repo}/releases/download/tide/v${version}`
+const BASE = args.base ?? `https://github.com/${repo}/releases/download/v${version}`
 const ASSETS = {
   DMG_ARM64: `${BASE}/Tide-${version}-arm64.dmg`,
   WIN_ZIP: `${BASE}/win-x64-Tide-Setup.zip`,
@@ -114,7 +114,7 @@ function writeOut(relPath, content) {
 
 const readTpl = (p) => fs.readFileSync(path.join(PKG, 'packaging', p), 'utf8')
 
-console.error(`Rendering manifests for Tide tide/v${version} (${repo})`)
+console.error(`Rendering manifests for Tide v${version} (${repo})`)
 console.error('Hashing release assets (this downloads each installer)…')
 
 const SHAS = {
@@ -133,7 +133,7 @@ const platforms = {
 // jobs which manifest sets were actually rendered.
 const meta = {
   version,
-  tag: `tide/v${version}`,
+  tag: `v${version}`,
   wingetVersion: WINGET_VERSION,
   platforms,
   assets: {},

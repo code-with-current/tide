@@ -1,7 +1,7 @@
 # CI — runs on every push to master and every PR.
 #
 # Why this exists: green main is a P0. Before this workflow the only CI was
-# release.yml, which fires on tide/v* tags — so a broken main could sit for
+# release.yml, which fires on v* tags — so a broken main could sit for
 # days and only surface at release time. This gates the default branch on the
 # cheap, fast checks (lint, typecheck, unit tests) so a red main is
 # visible immediately, not at the next release.

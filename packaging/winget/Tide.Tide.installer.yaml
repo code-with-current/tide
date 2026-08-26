@@ -19,7 +19,7 @@ Installers:
     NestedInstallerFiles:
       - RelativeFilePath: Tide-Setup.exe
     Scope: user
-    InstallerUrl: https://github.com/code-with-current/tide/releases/download/tide/v@@VERSION@@/win-x64-Tide-Setup.zip
+    InstallerUrl: https://github.com/code-with-current/tide/releases/download/v@@VERSION@@/win-x64-Tide-Setup.zip
     InstallerSha256: @@SHA256_WINZIP@@
     InstallerSwitches:
       Silent: --quiet

@@ -1468,7 +1468,7 @@ export async function checkForUpdates(): Promise<{ ok: boolean; error?: string }
 }
 
 /** Changelog markdown for a version (the GitHub Release body for
- *  tide/v<version>); null when unavailable — callers render the
+ *  v<version>); null when unavailable — callers render the
  *  "details unavailable" fallback. */
 export async function getReleaseNotes(version: string): Promise<string | null> {
   if (rpc) return (await rpc.request.updaterReleaseNotes({ version })).markdown;

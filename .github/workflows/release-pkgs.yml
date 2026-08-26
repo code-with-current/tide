@@ -1,6 +1,6 @@
 # Publishes package-manager manifests (winget, homebrew tap) after each
 # Release workflow succeeds. Wakes via workflow_run on the "Release"
-# workflow (name: Release in release.yml), which fires on tide/v* tags.
+# workflow (name: Release in release.yml), which fires on v* tags.
 #
 # Flow: parse the version from the workflow_run tag → render.mjs hashes the
 # release assets and fills the packaging/ templates → platform jobs submit.
@@ -30,9 +30,9 @@ concurrency:
 jobs:
   render:
     # Only act when the Release workflow that woke us up actually succeeded
-    # and was cutting a release (its only trigger is tide/v* tags, but guard
+    # and was cutting a release (its only trigger is v* tags, but guard
     # anyway in case Release ever grows other triggers).
-    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'tide/v') }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     name: render · manifests
     runs-on: ubuntu-latest
     outputs:
@@ -49,14 +49,14 @@ jobs:
           node-version: 22
 
       # For tag pushes, workflow_run.head_branch is the tag name
-      # (e.g. "tide/v0.3.0-beta.1") — strip the tide/v prefix.
+      # (e.g. "v0.3.0-beta.1") — strip the v prefix.
       - name: Resolve version from release tag
         id: ver
         run: |
           TAG="${{ github.event.workflow_run.head_branch }}"
-          VERSION="${TAG#tide/v}"
+          VERSION="${TAG#v}"
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$'; then
-            echo "tag $TAG does not carry a semver (expected tide/vX.Y.Z)"; exit 1
+            echo "tag $TAG does not carry a semver (expected vX.Y.Z)"; exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -72,7 +72,7 @@ jobs:
           M=packaging/out/meta.json
           echo "version=$(jq -r .version "$M")" >> "$GITHUB_OUTPUT"
           echo "winget_version=$(jq -r .wingetVersion "$M")" >> "$GITHUB_OUTPUT"
-          echo "release_url=https://github.com/${{ github.repository }}/releases/tag/tide/v${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "release_url=https://github.com/${{ github.repository }}/releases/tag/v${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
           echo "homebrew=$(jq -r .platforms.homebrew "$M")" >> "$GITHUB_OUTPUT"
           echo "winget=$(jq -r .platforms.winget "$M")" >> "$GITHUB_OUTPUT"
 

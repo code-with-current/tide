@@ -14,7 +14,7 @@ cask "tide" do
 
   sha256 "@@SHA256_ARM64@@"
 
-  url "https://github.com/code-with-current/tide/releases/download/tide/v#{version}/Tide-#{version}-arm64.dmg"
+  url "https://github.com/code-with-current/tide/releases/download/v#{version}/Tide-#{version}-arm64.dmg"
   name "Tide"
   desc "Local-first agentic coding companion"
   homepage "https://tide.codes/"

@@ -74,7 +74,7 @@ export interface UpdaterOpts {
 }
 
 /** GitHub repo backing the updater's release channel — release notes are the
- *  matching GitHub Release body for tag tide/v<version>. */
+ *  matching GitHub Release body for tag v<version>. */
 const GITHUB_REPO = 'code-with-current/tide';
 
 /** Per-version in-memory cache of release-note lookups (successful ones and
@@ -82,7 +82,7 @@ const GITHUB_REPO = 'code-with-current/tide';
  *  after coming online can succeed). */
 const releaseNotesCache = new Map<string, string | null>();
 
-/** Fetch the markdown body of the GitHub Release tagged tide/v<version>.
+/** Fetch the markdown body of the GitHub Release tagged v<version>.
  *  Graceful null on any failure (offline, rate limit, missing release) —
  *  the UI falls back to an intentional "details unavailable" note while
  *  keeping the version + Download affordance. */
@@ -95,7 +95,7 @@ async function fetchReleaseNotes(
   if (releaseNotesCache.has(version)) return releaseNotesCache.get(version)!;
   try {
     const res = await fetchImpl(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/tide/v${version}`,
+      `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/v${version}`,
       { headers: { Accept: 'application/vnd.github+json' } },
     );
     if (res.ok) {
@@ -323,7 +323,7 @@ export function registerUpdaterRpc(deps: UpdaterDeps, opts: UpdaterOpts = {}) {
         }
       },
       /** Changelog for a version: the GitHub Release body for tag
-       *  tide/v<version>. Graceful null — offline/missing releases render
+       *  v<version>. Graceful null — offline/missing releases render
        *  the dialog's "details unavailable" fallback. */
       updaterReleaseNotes: async ({ version }: { version: string }) => {
         let markdown = await fetchReleaseNotes(version, fetchImpl);

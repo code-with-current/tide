@@ -1,9 +1,9 @@
-# Release — cuts Electrobun installers and a GitHub Release when a tide/v* tag
+# Release — cuts Electrobun installers and a GitHub Release when a v* tag
 # is pushed.
 #
 # How to cut a release:
 #   1. Bump `app.version` in electrobun.config.ts (semver, e.g. 0.3.0-beta.1).
-#   2. git tag tide/v0.3.0-beta.1 && git push origin tide/v0.3.0-beta.1
+#   2. git tag v0.3.0 && git push origin v0.3.0
 #   (CI re-applies the tag's version to electrobun.config.ts via
 #   build/build.js --version, so the tag is the authority.)
 #
@@ -24,7 +24,7 @@ name: Release
 on:
   push:
     tags:
-      - 'tide/v*'
+      - 'v*'
 
 concurrency:
   group: release-${{ github.ref }}
@@ -106,9 +106,9 @@ jobs:
       - name: Derive version from tag
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#tide/v}"
+          VERSION="${GITHUB_REF_NAME#v}"
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$'; then
-            echo "tag $GITHUB_REF_NAME does not carry a semver (expected tide/vX.Y.Z)"; exit 1
+            echo "tag $GITHUB_REF_NAME does not carry a semver (expected vX.Y.Z)"; exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
@@ -117,7 +117,7 @@ jobs:
       # patches electrobun.config.ts in place for the build.
       - name: Build
         shell: bash
-        run: node build/build.js --version "$VERSION"
+        run: node build/build.js --version "$VERSION" --base-url "https://github.com/code-with-current/tide/releases/latest/download/"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -133,7 +133,7 @@ jobs:
       # target's full-tar update envelope (*.tar.zst) and update metadata
       # (*-update.json) to one GitHub Release. Published as a prerelease when the
       # tag carries a semver pre-release segment (any '-' after the patch
-      # version, e.g. tide/v0.3.0-beta.1).
+      # version, e.g. v0.3.0-beta.1).
   release:
     name: publish · GitHub Release
     needs: build
@@ -153,7 +153,6 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: assets/*
 
-      # TODO(update-host): release.baseUrl is intentionally unset while the
       # update host is undecided — full-tar updates work without it, and
       # *-update.json above is already release-attached. Once a host is
       # chosen: pass `--base-url <host>` to build/build.js on the build legs

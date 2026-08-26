@@ -9,7 +9,7 @@ brew install --cask code-with-current/tap/tide  # macOS (arm64)
 ```
 
 winget and homebrew use small manifest files pointing at the installers the
-`tide/v*` release flow already publishes (see `.github/workflows/release.yml`).
+`v*` release flow already publishes (see `.github/workflows/release.yml`).
 The manifests are kept in sync with each release by
 `.github/workflows/release-pkgs.yml`, which wakes via `workflow_run` when the
 "Release" workflow succeeds.
@@ -43,7 +43,7 @@ node packaging/render.mjs --version 0.3.0-beta.1 --repo code-with-current/tide
 ## Artifact inventory
 
 `render.mjs` hashes exactly what the live release publishes (per the
-`tide/v0.3.0-beta.1` release; Linux tars have no manifest consumer yet):
+the release; Linux tars have no manifest consumer yet):
 
 | Asset | Platform | Consumer |
 |---|---|---|
@@ -58,17 +58,17 @@ submission job). If nothing can be hashed, `render.mjs` exits 1.
 
 ## How a release flows
 
-1. You tag `tide/vX.Y.Z` and push it. `release.yml` builds the installers
+1. You tag `vX.Y.Z` and push it. `release.yml` builds the installers
    per target and attaches them to one GitHub Release.
 2. When that workflow finishes, `release-pkgs.yml` wakes up via
-   `workflow_run`, parses the version out of the `tide/v*` tag, runs
+   `workflow_run`, parses the version out of the `v*` tag, runs
    `render.mjs` once, then submits the winget and homebrew manifests.
 3. Each manifest submission is **gated on a secret** — until you add the
    secret, that platform is skipped with a notice.
 
 ```mermaid
 flowchart LR
-  Tag["git tag tide/vX.Y.Z"] --> Rel["release.yml<br/>build + GitHub Release"]
+  Tag["git tag vX.Y.Z"] --> Rel["release.yml<br/>build + GitHub Release"]
   Rel --> Run["release-pkgs.yml<br/>workflow_run"]
   Run --> Rnd["render.mjs<br/>hash + fill manifests"]
   Rnd --> W["winget-pkgs PR<br/>WINGET_GITHUB_TOKEN"]

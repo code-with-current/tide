@@ -21,6 +21,6 @@ Tags:
   - agent
   - coding
   - electron
-ReleaseNotesUrl: https://github.com/code-with-current/tide/releases/tag/tide/v@@VERSION@@
+ReleaseNotesUrl: https://github.com/code-with-current/tide/releases/tag/v@@VERSION@@
 ManifestType: defaultLocale
 ManifestVersion: 1.10.0
