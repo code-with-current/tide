@@ -9,6 +9,7 @@
 // __cmd__*/__tauri_command_name_* items next to the fn. `mod commands` is
 // crate-private, so nothing leaks outside the crate.
 pub mod bridge;
+pub mod chat;
 pub mod providers;
 pub mod sessions;
 pub mod settings;

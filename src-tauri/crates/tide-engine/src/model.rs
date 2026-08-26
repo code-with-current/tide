@@ -46,13 +46,17 @@ pub struct EngineModelConfig {
 /// same request/response types, so [`crate::stream_step`] treats them
 /// uniformly. `provider_base_url` is the LOGICAL config URL — quirk
 /// decisions (thinking-host allowlist) read it even when transport was
-/// rerouted (tests, future proxies).
+/// rerouted (tests, future proxies). Clone: both rig model handles are cheap
+/// clones (Arc'd HTTP client), and the orchestrator drives one owned model
+/// per step.
+#[derive(Clone)]
 pub struct EngineModel {
     provider_base_url: String,
     model_id: String,
     inner: EngineModelInner,
 }
 
+#[derive(Clone)]
 enum EngineModelInner {
     Anthropic(rig_core::providers::anthropic::completion::CompletionModel),
     OpenAiCompatible(rig_core::providers::openai::CompletionModel),

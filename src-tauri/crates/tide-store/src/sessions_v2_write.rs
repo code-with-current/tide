@@ -373,6 +373,19 @@ impl SessionsV2Writer {
         &self.path
     }
 
+    /// The session's `workspace_path` — None when no such session row exists.
+    /// The T4 command layer uses this as both the existence check and the
+    /// turn's workspace root source.
+    pub fn session_workspace_path(&self, id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT workspace_path FROM session WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
     /// `createSession`: one session row; `time_created` == `time_updated`.
     pub fn create_session(&self, o: CreateSessionInput<'_>, now_ms: i64) -> Result<()> {
         self.conn

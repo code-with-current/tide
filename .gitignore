@@ -56,6 +56,9 @@ GEMINI.md
 !THIRD_PARTY_NOTICES.md
 # Prompt sources — app source code, not docs.
 !src/lib/prompts/**/*.md
+# Generated prompt twin the Rust orchestrator include_str!s (committed — cargo
+# has no ../../src generation step; rebuild via build/promptMarkdownUtils.mjs).
+!src-tauri/system-prompt.md
 docs/plans/
 # Auto-generated prompt bundle (from build/promptMarkdownUtils.mjs)
 src/lib/prompts/_system-prompt-bundle.ts
