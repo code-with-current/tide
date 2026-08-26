@@ -92,6 +92,22 @@ jobs:
       - name: Sync Electrobun devkit
         run: hutch electrobun sync
 
+      # Windows ships BSD tar which treats D:\ paths as remote hosts
+      # (tar's host:path syntax). Git's GNU tar handles drive letters
+      # correctly — put it first in PATH.
+      - name: Prefer GNU tar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $gitTar = (Get-Command tar -All | Where-Object { $_.Source -like "*Git*" } | Select-Object -First 1).Source
+          if ($gitTar) {
+            $gitBin = Split-Path $gitTar
+            Add-Content $env:GITHUB_PATH $gitBin
+            Write-Host "GNU tar preferred: $gitTar"
+          } else {
+            Write-Host "WARNING: no Git tar found; BSD tar may fail on drive letters"
+          }
+
       - name: Derive version from tag
         shell: bash
         run: |
