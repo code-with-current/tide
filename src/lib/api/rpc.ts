@@ -23,16 +23,18 @@ import type { AgentEvent } from '@/lib/agent/events';
  *  make every client.ts data call take the RPC path inside an unwired Tauri
  *  webview, and the first synchronous throw (splash's refreshModelCatalog,
  *  non-async) escapes React commit with no ErrorBoundary → white screen.
- *  The M1+ bridge module installs `window.__TIDE_BRIDGE__` itself once a real
- *  invoke channel exists; until then the app runs on the mock store even
- *  inside the webview. */
+ *  The M1+ bridge module (tauri-bridge.ts) activates the real client itself
+ *  via activateRpcClient once the bridge_version handshake validates; until
+ *  then the app runs on the mock store even inside the webview. */
 declare global {
   interface Window {
     __TIDE_BRIDGE__?: unknown;
   }
 }
 
-export const hasRpc =
+/** Live binding, flipped by activateRpcClient when the validated bridge
+ *  installs. Must stay `let` (see `rpc` below). */
+export let hasRpc =
   typeof window !== 'undefined' &&
   window.__TIDE_BRIDGE__ !== undefined;
 
@@ -221,14 +223,29 @@ function bridgeNotPorted(): never {
   throw new Error('[tide] RPC bridge not yet ported (Tauri rewrite M1)');
 }
 
-/** The bridge client. Null until the real bridge installs itself (client.ts
- *  falls back to the mock store — including inside an unwired Tauri webview);
- *  after that, a stub that throws on first property access so any UI path the
- *  bridge doesn't implement yet fails loudly instead of silently rendering
- *  mock data. */
-export const rpc: TideRpcClient | null = hasRpc
+/** The bridge client — a LIVE binding, not an import-time snapshot. This
+ *  module evaluates as part of the app's static import graph, long before
+ *  main.tsx's bootstrap await can run the handshake, so a `const` here would
+ *  freeze the pre-install value (null) forever. As `let`, ESM live bindings
+ *  make every `if (rpc)` / `Boolean(rpc)` read in client.ts re-resolve to the
+ *  current value: null (client.ts falls back to the mock store, including
+ *  inside an unwired Tauri webview) until the validated installer calls
+ *  activateRpcClient. A `__TIDE_BRIDGE__` that predates this module's
+ *  evaluation (foreign or half-installed) still gets the loud throwing stub
+ *  instead of silently rendering mock data. */
+export let rpc: TideRpcClient | null = hasRpc
   ? new Proxy({} as TideRpcClient, { get: bridgeNotPorted })
   : null;
+
+/** The ONLY activation path for the real client — tauri-bridge.ts calls this
+ *  once the bridge_version handshake has validated the protocol. Reassigning
+ *  here re-binds `rpc`/`hasRpc` for every importing module (live bindings) and
+ *  records the client on the window global for observability/HMR re-eval. */
+export function activateRpcClient(client: TideRpcClient): void {
+  window.__TIDE_BRIDGE__ = client;
+  rpc = client;
+  hasRpc = true;
+}
 
 export type RuntimeInfo = { version: string; os: string; arch: string };
 
