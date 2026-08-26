@@ -1,0 +1,257 @@
+{
+  "scenario": "anthropic-non-native-thinking-strip",
+  "summary": "Anthropic protocol on a non-allowlisted host (OpenRouter-style aggregator): reasoning instruction resolved but the thinking block is STRIPPED from the request.",
+  "recordedAt": "2026-08-26T17:54:15.386Z",
+  "provenance": {
+    "server": "synthetic local mock SSE server (127.0.0.1) — no external network, no API keys",
+    "adapterCode": "real TS adapter stack (app/core/agent/protocols + provider-factory + ai SDK streamText)",
+    "liveRecording": "deferred to tide-engine record mode (M2) per docs/plans/2026-08-27-tauri-rewrite-design.md",
+    "sdkVersions": {
+      "ai": "7.0.79",
+      "@ai-sdk/anthropic": "4.0.42",
+      "@ai-sdk/openai-compatible": "3.0.37",
+      "zod": "4.4.3"
+    }
+  },
+  "input": {
+    "provider": {
+      "apiStyle": "anthropic",
+      "baseUrl": "http://openrouter.local:56382/anthropic-non-native-thinking-strip",
+      "modelId": "anthropic/claude-sonnet-4.5"
+    },
+    "system": "You are Tide, a local-first coding assistant.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Why does test/time-format.test.ts flake near midnight?"
+      }
+    ],
+    "tools": [
+      "read_file (zod: { path: string })"
+    ],
+    "thinkingLevel": "high",
+    "reasoningContracts": [
+      {
+        "type": "budget_tokens"
+      }
+    ],
+    "modelMaxOutputTokens": 8192
+  },
+  "resolution": {
+    "reasoningInstruction": {
+      "contract": "budget_tokens",
+      "budgetTokens": 6553,
+      "label": "thinking.budget_tokens=6553"
+    },
+    "baseProtocol": {
+      "maxOutputTokens": 16384,
+      "label": "thinking.budget_tokens=6553 (non-native, thinking stripped)"
+    },
+    "perStepCall": {
+      "maxOutputTokens": 16384,
+      "label": "thinking.budget_tokens=6553 (non-native, thinking stripped)"
+    }
+  },
+  "request": {
+    "url": "http://openrouter.local:56382/anthropic-non-native-thinking-strip/v1/messages",
+    "method": "POST",
+    "headers": {
+      "anthropic-beta": "structured-outputs-2025-11-13",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "user-agent": "ai-sdk/anthropic/4.0.42 ai-sdk/provider-utils/5.0.30 runtime/bun/1.4.0",
+      "x-api-key": "test-key-local-mock"
+    },
+    "body": {
+      "model": "anthropic/claude-sonnet-4.5",
+      "max_tokens": 16384,
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Tide, a local-first coding assistant."
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Why does test/time-format.test.ts flake near midnight?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read a file from the local filesystem.",
+          "input_schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute file path"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          "eager_input_streaming": true
+        }
+      ],
+      "tool_choice": {
+        "type": "auto"
+      },
+      "stream": true
+    }
+  },
+  "sse": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_mock_anthropic_plain\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":42,\"output_tokens\":1}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"The file has 42 lines \"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"and one TODO \"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"on line 17.\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":18}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+  "events": [
+    {
+      "type": "start"
+    },
+    {
+      "type": "start-step",
+      "request": {},
+      "warnings": []
+    },
+    {
+      "type": "text-start",
+      "id": "0"
+    },
+    {
+      "type": "text-delta",
+      "id": "0",
+      "text": "The file has 42 lines "
+    },
+    {
+      "type": "text-delta",
+      "id": "0",
+      "text": "and one TODO "
+    },
+    {
+      "type": "text-delta",
+      "id": "0",
+      "text": "on line 17."
+    },
+    {
+      "type": "text-end",
+      "id": "0"
+    },
+    {
+      "type": "finish-step",
+      "finishReason": "stop",
+      "rawFinishReason": "end_turn",
+      "usage": {
+        "inputTokens": 42,
+        "inputTokenDetails": {
+          "noCacheTokens": 42,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "outputTokens": 18,
+        "outputTokenDetails": {},
+        "totalTokens": 60,
+        "raw": {
+          "input_tokens": 42,
+          "output_tokens": 18
+        }
+      },
+      "performance": {
+        "stepTimeMs": 0,
+        "toolExecutionMs": {},
+        "responseTimeMs": 0,
+        "effectiveOutputTokensPerSecond": 0,
+        "outputTokensPerSecond": 0,
+        "inputTokensPerSecond": 0,
+        "effectiveTotalTokensPerSecond": 0,
+        "timeToFirstOutputMs": 0,
+        "timeBetweenOutputChunksMs": {
+          "min": 0,
+          "p10": 0,
+          "median": 0,
+          "avg": 0,
+          "p90": 0,
+          "max": 0
+        }
+      },
+      "providerMetadata": {
+        "anthropic": {
+          "usage": {
+            "input_tokens": 42,
+            "output_tokens": 18
+          },
+          "stopSequence": null,
+          "iterations": null,
+          "container": null,
+          "contextManagement": null
+        }
+      },
+      "response": {
+        "id": "msg_mock_anthropic_plain",
+        "timestamp": "2026-08-26T17:54:15.385Z",
+        "modelId": "claude-sonnet-4-5",
+        "headers": {
+          "cache-control": "no-cache",
+          "connection": "keep-alive",
+          "content-type": "text/event-stream; charset=utf-8",
+          "date": "Wed, 26 Aug 2026 17:54:15 GMT",
+          "keep-alive": "timeout=5",
+          "transfer-encoding": "chunked"
+        }
+      }
+    },
+    {
+      "type": "finish",
+      "finishReason": "stop",
+      "rawFinishReason": "end_turn",
+      "totalUsage": {
+        "inputTokens": 42,
+        "inputTokenDetails": {
+          "noCacheTokens": 42,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "outputTokens": 18,
+        "outputTokenDetails": {},
+        "totalTokens": 60
+      }
+    }
+  ],
+  "tideEvents": [
+    {
+      "type": "delta",
+      "text": "The file has 42 lines "
+    },
+    {
+      "type": "delta",
+      "text": "and one TODO "
+    },
+    {
+      "type": "delta",
+      "text": "on line 17."
+    },
+    {
+      "type": "usage",
+      "tokens": {
+        "inputTokens": 42,
+        "inputTokenDetails": {
+          "noCacheTokens": 42,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "outputTokens": 18,
+        "outputTokenDetails": {},
+        "totalTokens": 60,
+        "raw": {
+          "input_tokens": 42,
+          "output_tokens": 18
+        }
+      }
+    }
+  ]
+}
