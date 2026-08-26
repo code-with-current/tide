@@ -3,6 +3,7 @@ import { LogoText } from '@/components/primitives';
 import { useUi } from '@/lib/stores/ui';
 import { useProviders, useWorkspaces } from '@/lib/queries';
 import * as api from '@/lib/api/client';
+import { getRuntimeInfo, type RuntimeInfo } from '@/lib/api/rpc';
 import { Spinner } from '../ui/spinner';
 import tideLogoUrl from '@/assets/tide-logo.png';
 import { Badge } from '../ui/badge';
@@ -19,6 +20,19 @@ export function SplashScreen() {
   // source of truth) rather than drifting as a hardcoded constant.
   useEffect(() => {
     api.getDiagnostics().then((d) => setVersion(d?.appVersion ?? '')).catch(() => {});
+  }, []);
+
+  // tide_ping roundtrip through the Rust shell. Null outside the Tauri webview
+  // (plain browser dev) — no badge there. Logged once for log-based boot checks.
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
+  useEffect(() => {
+    getRuntimeInfo()
+      .then((info) => {
+        if (!info) return;
+        console.info('[tide] runtime:', info);
+        setRuntime(info);
+      })
+      .catch(() => {});
   }, []);
 
   // Pull a fresh models.dev catalog in the background while splash shows —
@@ -130,6 +144,12 @@ export function SplashScreen() {
       <Badge variant="outline" className="absolute bottom-8">
         <span>v{version}</span>
       </Badge>
+
+      {runtime && (
+        <div className="absolute bottom-3 text-[10px] font-mono text-muted-foreground/50">
+          tide-core {runtime.version} · rust · {runtime.os}/{runtime.arch}
+        </div>
+      )}
     </div>
   );
 }

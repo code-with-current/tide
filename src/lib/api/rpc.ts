@@ -229,3 +229,19 @@ function bridgeNotPorted(): never {
 export const rpc: TideRpcClient | null = hasRpc
   ? new Proxy({} as TideRpcClient, { get: bridgeNotPorted })
   : null;
+
+export type RuntimeInfo = { version: string; os: string; arch: string };
+
+let runtimeInfoCache: RuntimeInfo | null = null;
+
+/** Direct-to-invoke probe — deliberately independent of the rpc/__TIDE_BRIDGE__
+ *  mechanism: works from the first M0 boot inside the Tauri webview while all
+ *  data calls still run on the mock store. */
+export async function getRuntimeInfo(): Promise<RuntimeInfo | null> {
+  if (typeof globalThis.__TAURI_INTERNALS__ === 'undefined') return null;
+  if (!runtimeInfoCache) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    runtimeInfoCache = await invoke<RuntimeInfo>('tide_ping');
+  }
+  return runtimeInfoCache;
+}
