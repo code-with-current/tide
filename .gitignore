@@ -74,8 +74,8 @@ packaging/out/
 .worktrees/
 
 # Test fixtures must be committed despite global ignore patterns
-!test/electron/knowledge/fixtures/**/*.md
-!test/electron/knowledge/fixtures/**/*.log
+!test/core/knowledge/fixtures/**/*.md
+!test/core/knowledge/fixtures/**/*.log
 
 # Electrobun/Hutch migration (feat/electrobun-shell): vendored devkit,
 # build temp, Hutch output subtree, and generated artifacts. build/ stays tracked.

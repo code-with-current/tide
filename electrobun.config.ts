@@ -60,6 +60,7 @@ export default {
     copy,
     mac: {
       bundleCEF: false,
+      icons: "build/icon.iconset",
     },
     linux: {
       bundleCEF: false,
