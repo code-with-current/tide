@@ -96,5 +96,6 @@
   },
   "patchedDependencies": {
     "@tanstack/virtual-core@3.17.7": "patches/@tanstack__virtual-core@3.17.7.patch"
-  }
+  },
+  "electrobun": "2.0.1"
 }

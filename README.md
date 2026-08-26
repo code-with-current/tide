@@ -5,11 +5,11 @@
 <p align="center">
   <a href="https://github.com/code-with-current/tide/releases/latest"><img src="https://img.shields.io/github/package-json/v/code-with-current/tide?style=flat-square&logo=github&label=Release&color=blue" alt="Release" /></a>
   <a href="https://github.com/code-with-current/tide/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/code-with-current/tide/ci.yml?style=flat-square&logo=githubactions&label=Build" alt="Build" /></a>
-  <a href="https://www.electronjs.org"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.devDependencies.electron&style=flat-square&logo=electron&logoColor=white&label=Electron&color=blue" alt="Electron" /></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.packageManager&style=flat-square&logo=bun&logoColor=white&label=Bun&color=blue" alt="Bun" /></a>
+  <a href="https://framework.blackboard.sh/electrobun/"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.electrobun&style=flat-square&label=Electrobun&color=blue" alt="Electrobun" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.devDependencies.react&style=flat-square&logo=react&logoColor=white&label=React&color=blue" alt="React" /></a>
 </p>
 
-<h1>Tide</h1>
 <p>
   <strong>Code with the current.</strong> → <a href="https://tide.codes">tide.codes</a>
 </p>
@@ -38,7 +38,9 @@ winget install Tide.Tide
 snap install tide-codes
 ```
 
-Prefer a direct download? Grab the latest installer from the [releases page](https://github.com/code-with-current/tide/releases) — `.dmg` (mac), `.exe` (Windows), or `.deb` / `.AppImage` / `.snap` (Linux).
+Or grab the latest installer directly from the [releases page](https://github.com/code-with-current/tide/releases) — `.dmg` (macOS arm64), `.exe` (Windows x64), or `.deb` / `.AppImage` (Linux x64 + arm64).
+
+The app updates itself in place — you'll get a notice when a new version is available, and nothing downloads until you say so.
 
 ---
 
@@ -52,6 +54,7 @@ Prefer a direct download? Grab the latest installer from the [releases page](htt
 - **Worktree isolation** — Each session can branch into its own git worktree. Experiment freely — your main branch stays untouched.
 - **Project templates** — Scaffold new projects with Next.js, Vite, TanStack Start, T3 Stack, Nuxt, and more.
 - **Keyboard-first** — Every action has a rebindable shortcut. Full keyboard navigation with persistent custom bindings.
+- **Consent-driven updates** — Tide checks in the background but never downloads or installs without your say-so. Restart when you're ready.
 
 ## Links
 
