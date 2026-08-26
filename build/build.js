@@ -140,6 +140,9 @@ function renameInstallers(version) {
     // linux: linux-x64-Tide[-canary].deb -> Tide-<version>-amd64.deb
     [new RegExp(`^linux-x64-\\w+(?:-canary)?\\.deb$`), `Tide-${version}-amd64.deb`],
     [new RegExp(`^linux-x64-\\w+(?:-canary)?\\.AppImage$`), `Tide-${version}-amd64.AppImage`],
+    // linux arm64: linux-arm64-Tide[-canary].deb -> Tide-<version>-arm64.deb
+    [new RegExp(`^linux-arm64-\\w+(?:-canary)?\\.deb$`), `Tide-${version}-arm64.deb`],
+    [new RegExp(`^linux-arm64-\\w+(?:-canary)?\\.AppImage$`), `Tide-${version}-arm64.AppImage`],
   ];
   const files = fs.readdirSync(ARTIFACTS_DIR);
   for (const file of files) {
