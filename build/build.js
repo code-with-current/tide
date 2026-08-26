@@ -64,6 +64,12 @@ function writeConfig(source) {
   fs.writeFileSync(CONFIG_PATH, source);
 }
 
+function readVersion() {
+  const m = fs.readFileSync(CONFIG_PATH, 'utf8').match(/\bversion:\s*"([^"]+)"/);
+  if (!m) die('could not read app.version from electrobun.config.ts');
+  return m[1];
+}
+
 function patchVersion(version) {
   const source = readConfig();
   const patched = source.replace(/(\bversion:\s*)"[^"]*"/, `$1"${version}"`);
@@ -121,6 +127,31 @@ function buildApp(channel) {
   run('electrobun build', hutch, ['electrobun', 'build', `--env=${channel}`]);
 }
 
+// Rename human-facing installers to the electron-builder-era convention the
+// winget/homebrew packaging manifests hash (Tide-<version>-<arch>.dmg etc).
+// Updater-protocol artifacts (-update.json, .tar.zst, .patch) keep their
+// fixed names — the updater requests them by exact name from the host.
+function renameInstallers(version) {
+  const renames = [
+    // mac: macos-arm64-Tide[-canary].dmg -> Tide-<version>-arm64.dmg
+    [new RegExp(`^macos-arm64-\\w+(?:-canary)?\\.dmg$`), `Tide-${version}-arm64.dmg`],
+    // win: windows-x64-Tide[-canary]-setup.exe -> Tide-<version>-x64-Setup.exe
+    [new RegExp(`^windows-x64-\\w+(?:-canary)?-setup\\.exe$`, 'i'), `Tide-${version}-x64-Setup.exe`],
+    // linux: linux-x64-Tide[-canary].deb -> Tide-<version>-amd64.deb
+    [new RegExp(`^linux-x64-\\w+(?:-canary)?\\.deb$`), `Tide-${version}-amd64.deb`],
+    [new RegExp(`^linux-x64-\\w+(?:-canary)?\\.AppImage$`), `Tide-${version}-amd64.AppImage`],
+  ];
+  const files = fs.readdirSync(ARTIFACTS_DIR);
+  for (const file of files) {
+    for (const [pattern, replacement] of renames) {
+      if (pattern.test(file) && file !== replacement) {
+        fs.renameSync(path.join(ARTIFACTS_DIR, file), path.join(ARTIFACTS_DIR, replacement));
+        console.log(`build: renamed ${file} -> ${replacement}`);
+      }
+    }
+  }
+}
+
 function validateArtifacts() {
   if (!fs.existsSync(ARTIFACTS_DIR)) die('artifacts/ does not exist — hutch produced no output');
   const files = fs.readdirSync(ARTIFACTS_DIR).filter((f) => !f.startsWith('.'));
@@ -155,6 +186,7 @@ if (args.baseUrl) {
 try {
   buildRenderer();
   buildApp(args.channel);
+  renameInstallers(args.version ?? readVersion());
   validateArtifacts();
 } finally {
   if (configSnapshot !== null) {
