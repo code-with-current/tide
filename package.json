@@ -12,8 +12,8 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:updater": "node scripts/updater-scenario.mjs",
-    "update:model-prices": "node scripts/update-model-prices.mjs",
+    "test:updater": "node build/updater-scenario.mjs",
+    "update:model-prices": "node build/update-model-prices.mjs",
     "preview": "vite preview",
     "app:dev": "hutch electrobun sync && hutch electrobun dev --watch",
     "app:build": "bun run build && hutch electrobun build --env=stable"

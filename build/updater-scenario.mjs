@@ -5,7 +5,7 @@
 // update itself against a 127.0.0.1 host.
 //
 //   bun run test:updater
-//   node scripts/updater-scenario.mjs [options]
+//   node build/updater-scenario.mjs [options]
 //
 //   --mode auto|serve-only       auto: fully automated; serve-only: build + host
 //                                the update and print manual instructions (default auto)
@@ -47,7 +47,7 @@ function say(msg) { console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)}s] $
 
 function usage(message) {
   if (message) console.error(`updater-scenario: ${message}`);
-  console.error('usage: node scripts/updater-scenario.mjs [--mode auto|serve-only] [--path-strategy patch|full]');
+  console.error('usage: node build/updater-scenario.mjs [--mode auto|serve-only] [--path-strategy patch|full]');
   console.error('                                         [--from <ver>] [--to <ver>] [--channel canary] [--port <n>] [--keep]');
   process.exit(2);
 }
