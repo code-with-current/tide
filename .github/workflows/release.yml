@@ -92,21 +92,16 @@ jobs:
       - name: Sync Electrobun devkit
         run: hutch electrobun sync
 
-      # Windows ships BSD tar which treats D:\ paths as remote hosts
-      # (tar's host:path syntax). Git's GNU tar handles drive letters
-      # correctly — put it first in PATH.
-      - name: Prefer GNU tar (Windows)
+      # GNU tar (Git for Windows) interprets D:\a\... as tar's host:path
+      # remote syntax — "Cannot connect to D: resolve failed". TAR_OPTIONS
+      # is a GNU tar env var that injects --force-local into every
+      # invocation, telling it to treat drive-letter colons literally.
+      # (Windows' System32 bsdtar handles this natively but loses to
+      # Git's tar in PATH on GitHub runners.)
+      - name: Fix tar for Windows drive letters
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $gitTar = (Get-Command tar -All | Where-Object { $_.Source -like "*Git*" } | Select-Object -First 1).Source
-          if ($gitTar) {
-            $gitBin = Split-Path $gitTar
-            Add-Content $env:GITHUB_PATH $gitBin
-            Write-Host "GNU tar preferred: $gitTar"
-          } else {
-            Write-Host "WARNING: no Git tar found; BSD tar may fail on drive letters"
-          }
+        shell: bash
+        run: echo "TAR_OPTIONS=--force-local" >> "$GITHUB_ENV"
 
       - name: Derive version from tag
         shell: bash
