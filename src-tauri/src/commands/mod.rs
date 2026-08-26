@@ -53,6 +53,8 @@ impl From<SessionsV2Error> for CommandError {
             SessionsV2Error::UnsupportedSchema { .. } => "DB_SCHEMA",
             SessionsV2Error::Db(_) => "DB",
             SessionsV2Error::InvalidPartData { .. } => "DB_PART_DATA",
+            SessionsV2Error::MalformedEvent { .. } => "DB_EVENT_SHAPE",
+            SessionsV2Error::InvalidEventData { .. } => "DB_EVENT_DATA",
         };
         CommandError::with_code(e.to_string(), code)
     }

@@ -47,6 +47,12 @@ pub enum SessionsV2Error {
         message_id: String,
         source: serde_json::Error,
     },
+    /// An event body failed to parse or shape-check on the write path
+    /// (`part.commit` without a `kind`, `message.end` with a malformed usage,
+    /// replay of an event row with non-JSON `data`).
+    MalformedEvent { detail: String },
+    /// An `event.data` column is not valid JSON.
+    InvalidEventData { seq: i64, source: serde_json::Error },
 }
 
 impl fmt::Display for SessionsV2Error {
@@ -62,6 +68,8 @@ impl fmt::Display for SessionsV2Error {
             Self::InvalidPartData {
                 part_id, message_id, ..
             } => write!(f, "part {part_id} of message {message_id} has non-JSON data"),
+            Self::MalformedEvent { detail } => write!(f, "malformed event: {detail}"),
+            Self::InvalidEventData { seq, .. } => write!(f, "event seq {seq} has non-JSON data"),
         }
     }
 }
@@ -71,6 +79,7 @@ impl StdError for SessionsV2Error {
         match self {
             Self::Db(e) => Some(e),
             Self::InvalidPartData { source, .. } => Some(source),
+            Self::InvalidEventData { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -517,50 +526,9 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions_v2_write::SCHEMA as V2_SCHEMA;
     use serde_json::json;
     use std::fs;
-
-    /// The SCHEMA string from session-store-v2.ts, verbatim (bar formatting).
-    const V2_SCHEMA: &str = "
-        CREATE TABLE IF NOT EXISTS session (
-          id TEXT PRIMARY KEY,
-          workspace_path TEXT NOT NULL,
-          parent_id TEXT,
-          title TEXT NOT NULL,
-          model_id TEXT, provider_id TEXT,
-          tokens_input INTEGER DEFAULT 0, tokens_output INTEGER DEFAULT 0,
-          tokens_reasoning INTEGER DEFAULT 0, tokens_cache_read INTEGER DEFAULT 0,
-          cost REAL DEFAULT 0,
-          summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER,
-          archived_at INTEGER,
-          time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS session_list ON session(workspace_path, archived_at, time_updated DESC);
-        CREATE TABLE IF NOT EXISTS message (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-          role TEXT NOT NULL, model TEXT,
-          time_created INTEGER NOT NULL, time_completed INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS message_session ON message(session_id, id);
-        CREATE TABLE IF NOT EXISTS part (
-          id TEXT PRIMARY KEY,
-          message_id TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE,
-          session_id TEXT NOT NULL,
-          seq INTEGER NOT NULL,
-          kind TEXT NOT NULL,
-          data TEXT NOT NULL,
-          time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS part_window ON part(session_id, id);
-        CREATE INDEX IF NOT EXISTS part_message ON part(message_id, seq);
-        CREATE TABLE IF NOT EXISTS event (
-          seq INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL, message_id TEXT, part_id TEXT,
-          type TEXT NOT NULL,
-          data TEXT NOT NULL, time_created INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS event_replay ON event(session_id, seq);";
 
     struct Db {
         dir: PathBuf,
