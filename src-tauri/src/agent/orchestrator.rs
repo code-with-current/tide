@@ -41,7 +41,7 @@ use tide_store::sessions_v2::{
     SessionWindowOptsV2, SessionsV2,
 };
 use tide_store::sessions_v2_write::{
-    new_message_id, new_part_id, InsertMessageInput, SessionsV2Writer, SinkEventWire, SinkEventType,
+    new_part_id, InsertMessageInput, SessionsV2Writer, SinkEventWire, SinkEventType,
     SinkUsage,
 };
 use tide_tools::permission::{parse_rule, Decision, PermissionGate};
@@ -164,7 +164,10 @@ pub fn persist_user_message(
     session_id: &str,
     message: &IncomingUserMessage,
 ) -> Result<(), String> {
-    let message_id = new_message_id();
+    let (message_id, message_ms) = writer
+        .lock()
+        .expect("sink writer poisoned")
+        .next_message_slot();
     writer
         .lock()
         .expect("sink writer poisoned")
@@ -175,7 +178,7 @@ pub fn persist_user_message(
                 role: "user",
                 model: None,
             },
-            unix_ms_now(),
+            message_ms,
         )
         .map_err(|e| e.to_string())?;
     let part_id = new_part_id();
@@ -420,7 +423,10 @@ pub async fn execute_turn(
     // v2 message row lands at turn start (parts reference it; message.end
     // completes it). A failed insert = no v2 session row → v2 emission off,
     // streaming continues push-only (TS initV2Turn semantics).
-    let message_id = new_message_id();
+    let (message_id, message_ms) = {
+        let writer = hub.writer().lock().expect("sink writer poisoned");
+        writer.next_message_slot()
+    };
     let v2 = {
         let writer = hub.writer().lock().expect("sink writer poisoned");
         writer
@@ -431,7 +437,7 @@ pub async fn execute_turn(
                     role: "assistant",
                     model: Some(&spec.model_id),
                 },
-                unix_ms_now(),
+                message_ms,
             )
             .is_ok()
     };

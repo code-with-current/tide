@@ -324,6 +324,11 @@ pub struct SessionsV2Writer {
     conn: Connection,
     path: PathBuf,
     live_seq: HashMap<String, i64>,
+    /// Message rows sort chronologically by their time-prefixed id
+    /// (`ORDER BY id`), so two messages stamped the same millisecond can
+    /// invert order on the random suffix. `insert_message` bumps its
+    /// `now_ms` past the last one it wrote.
+    last_message_ms: std::cell::Cell<i64>,
 }
 
 impl SessionsV2Writer {
@@ -366,6 +371,7 @@ impl SessionsV2Writer {
             conn,
             path,
             live_seq: HashMap::new(),
+            last_message_ms: std::cell::Cell::new(i64::MIN),
         })
     }
 
@@ -468,7 +474,23 @@ impl SessionsV2Writer {
     /// `insertMessage`: the assistant (or twin user) message row at turn
     /// start. A missing session row fails here via the FK — the caller treats
     /// that as "v2 emission off" for the turn.
+    /// Reserves a message slot: a strictly-monotonic timestamp plus the
+    /// message id minted from it. Events streamed before the insert carry
+    /// this id unchanged — minting from the same clock as the row's
+    /// `time_created` is what keeps `ORDER BY id` chronological.
+    pub fn next_message_slot(&self) -> (String, i64) {
+        let mut ms = unix_ms_now() as i64;
+        let last = self.last_message_ms.get();
+        if ms <= last {
+            ms = last + 1;
+        }
+        self.last_message_ms.set(ms);
+        (message_id_at(ms as u64), ms)
+    }
+
     pub fn insert_message(&self, o: InsertMessageInput<'_>, now_ms: i64) -> Result<()> {
+        let now_ms = now_ms.max(self.last_message_ms.get() + 1);
+        self.last_message_ms.set(now_ms);
         self.conn
             .execute(
                 "INSERT INTO message (id, session_id, role, model, time_created) \
