@@ -1,0 +1,1199 @@
+[
+  {
+    "name": "read_file",
+    "description": "Read a file from the workspace. Returns its contents as text. Paths are relative to the workspace root. Files outside the root, Large files are capped at 2000 lines.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "maxLines": {
+          "type": "number",
+          "description": "Maximum number of lines to return. Default 2000."
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "maxLines": {
+          "description": "Maximum number of lines to return. Default 2000.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_dir",
+    "description": "List the entries in a directory (non-recursive). Use this to discover the structure of a folder before reading specific files. Returns names and kinds (file/dir). Hidden entries (starting with .) are included.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Directory path relative to workspace root. Defaults to root."
+        }
+      },
+      "required": []
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Directory path relative to workspace root. Defaults to root.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "directory_tree",
+    "description": "Get a recursive tree view of files and directories as JSON. Use for understanding project structure at a glance. Respects workspace boundaries. Max depth 10, max 2000 entries.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Directory path relative to workspace root. Defaults to root."
+        }
+      },
+      "required": []
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Directory path relative to workspace root. Defaults to root.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "read_media_file",
+    "description": "Read a binary/media file (image, audio, video, PDF) as a base64 data URL. Use for viewing images, diagrams, or other non-text files. Supports: png, jpg, gif, webp, avif, svg, bmp, ico, mp3, wav, flac, mp4, webm, mov, pdf. Max 10MB.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path relative to workspace root."
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path relative to workspace root."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "glob",
+    "description": "Find files matching a glob pattern. Supports * (single segment), ** (any depth), ? (single char), and [abc] (char class). Returns up to 200 paths relative to the workspace root. Ignores node_modules/.git/dist by default. Faster than list_dir when you know the extension or naming pattern.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern, e.g. \"src/**/*.tsx\", \"**/*.test.ts\", \"lib/*.md\"."
+        },
+        "path": {
+          "type": "string",
+          "description": "Subdirectory to search in (relative to workspace root). Defaults to workspace root."
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern, e.g. \"src/**/*.tsx\", \"**/*.test.ts\", \"lib/*.md\"."
+        },
+        "path": {
+          "description": "Subdirectory to search in (relative to workspace root). Defaults to workspace root.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "grep",
+    "description": "Search file contents with a regular expression. Uses ripgrep if installed for speed; falls back to a Node implementation. Returns matching lines with file:line prefixes. Defaults to searching the whole workspace; pass `path` to scope to a subdirectory. Use `glob` to filter file patterns (e.g. \"*.ts\").",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression to search for."
+        },
+        "path": {
+          "type": "string",
+          "description": "Directory or file to search. Defaults to workspace root."
+        },
+        "glob": {
+          "type": "string",
+          "description": "File glob filter, e.g. \"*.ts\" or \"**/*.test.ts\"."
+        },
+        "maxResults": {
+          "type": "number",
+          "description": "Max matching lines to return. Default 100."
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression to search for."
+        },
+        "path": {
+          "description": "Directory or file to search. Defaults to workspace root.",
+          "type": "string"
+        },
+        "glob": {
+          "description": "File glob filter, e.g. \"*.ts\" or \"**/*.test.ts\".",
+          "type": "string"
+        },
+        "maxResults": {
+          "description": "Max matching lines to return. Default 100.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "edit_file",
+    "description": "Edit a file by replacing a unique exact string match. If old_string appears more than once, the call fails with the line numbers of all matches — provide more context in old_string to disambiguate. The file must already exist; use write_file for new files.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Exact text to find (must be unique)."
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Text to replace it with."
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Exact text to find (must be unique)."
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Text to replace it with."
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "multi_edit",
+    "description": "Apply multiple string-replacement edits to a single file in one atomic call. Each edit must have a unique old_string (same rule as edit_file). If any edit fails, the file is left unchanged and the call returns the failing edit index. Edits apply in order: earlier edits can change text that later edits match. Use this instead of N separate edit_file calls for multi-spot refactors.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "edits": {
+          "type": "array",
+          "description": "Ordered list of edits to apply.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "old_string": {
+                "type": "string",
+                "description": "Exact text to find (must be unique at apply time)."
+              },
+              "new_string": {
+                "type": "string",
+                "description": "Replacement text."
+              }
+            },
+            "required": [
+              "old_string",
+              "new_string"
+            ]
+          }
+        }
+      },
+      "required": [
+        "path",
+        "edits"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "old_string": {
+                "type": "string"
+              },
+              "new_string": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "old_string",
+              "new_string"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Ordered list of edits to apply."
+        }
+      },
+      "required": [
+        "path",
+        "edits"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "write_file",
+    "description": "Create a new file or fully replace an existing file's contents. For targeted changes to an existing file, prefer edit_file. The parent directory is created if it doesn't exist.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "content": {
+          "type": "string",
+          "description": "Full file contents to write."
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path relative to workspace root."
+        },
+        "content": {
+          "type": "string",
+          "description": "Full file contents to write."
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "notebook_edit",
+    "description": "Edit a Jupyter notebook (.ipynb) cell by index. Handles the JSON shape so the source can be provided as a plain string. Modes: replace (overwrite cell), insert (add before index), delete (remove cell), append (add at end). New cells default to code type unless cell_type is specified.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the .ipynb file, relative to workspace root."
+        },
+        "cell_index": {
+          "type": "number",
+          "description": "0-based cell index. Required for replace/insert/delete; ignored for append."
+        },
+        "cell_type": {
+          "type": "string",
+          "enum": [
+            "code",
+            "markdown",
+            "raw"
+          ],
+          "description": "Type for new/inserted cells. Defaults to code."
+        },
+        "edit_mode": {
+          "type": "string",
+          "enum": [
+            "replace",
+            "insert",
+            "delete",
+            "append"
+          ],
+          "description": "How to apply the edit. Defaults to replace."
+        },
+        "source": {
+          "type": "string",
+          "description": "New cell source as a string. Required for replace/insert/append."
+        }
+      },
+      "required": [
+        "path",
+        "edit_mode"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the .ipynb file, relative to workspace root."
+        },
+        "cell_index": {
+          "description": "0-based cell index. Required for replace/insert/delete; ignored for append.",
+          "type": "number"
+        },
+        "cell_type": {
+          "description": "Type for new/inserted cells. Defaults to code.",
+          "type": "string",
+          "enum": [
+            "code",
+            "markdown",
+            "raw"
+          ]
+        },
+        "edit_mode": {
+          "type": "string",
+          "enum": [
+            "replace",
+            "insert",
+            "delete",
+            "append"
+          ],
+          "description": "How to apply the edit."
+        },
+        "source": {
+          "description": "New cell source as a string. Required for replace/insert/append.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "edit_mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "bash",
+    "description": "Run a shell command in the workspace root. Supports the full shell: pipes (|), redirects (> >> 2>&1), chaining (&& ||), and any binary on PATH. Use for builds, tests, linters, installs, git operations, and ad-hoc inspection. Output is capped at 50KB / 1000 lines. Avoid destructive system commands — they are blocked. Prefer the dedicated tools (read_file, grep, glob) when they fit; use bash when they do not. For long-running commands (dev servers, watchers), set background:true to spawn in the background — the command returns immediately with a shell_id; poll output via bash_output, stop via kill_shell.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command to run."
+        },
+        "background": {
+          "type": "boolean",
+          "description": "If true, spawn in the background and return a shell_id immediately. Use bash_output to poll and kill_shell to stop.",
+          "default": false
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command to run."
+        },
+        "background": {
+          "description": "If true, spawn in the background and return a shell_id immediately. Use bash_output to poll and kill_shell to stop.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "bash_output",
+    "description": "Read new output from a backgrounded bash shell since the last read. Use after starting a long-running command (e.g. a dev server) via bash with background:true. Returns the incremental stdout+stderr. The shell keeps running; call kill_shell to stop it.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "shell_id": {
+          "type": "string",
+          "description": "The background shell id returned by bash."
+        }
+      },
+      "required": [
+        "shell_id"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "shell_id": {
+          "type": "string",
+          "description": "The background shell id returned by bash."
+        }
+      },
+      "required": [
+        "shell_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "kill_shell",
+    "description": "Kill a backgrounded bash shell by id. Use when a long-running command (dev server, watcher, etc.) is no longer needed. Sends SIGTERM.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "shell_id": {
+          "type": "string",
+          "description": "The background shell id to kill."
+        }
+      },
+      "required": [
+        "shell_id"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "shell_id": {
+          "type": "string",
+          "description": "The background shell id to kill."
+        }
+      },
+      "required": [
+        "shell_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "git",
+    "description": "Run any git subcommand in the workspace. Pass args as an array of strings.\nGit safety protocol:\n- Never amend after a failed pre-commit hook — the commit did not happen, so amend would modify the PREVIOUS commit. Fix the issue, re-stage, create a NEW commit.\n- Stage specific files by name; never `git add -A` / `git add .` (risks secrets and large binaries).\n- Never skip hooks (`--no-verify`), never force-push (especially main/master), never update git config, unless the user explicitly asks.\n- Never use `-i` flags (interactive) — they hang.\n- Never push unless the user explicitly asks. Do not commit files that look like secrets (.env, credentials) — warn instead.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Subcommand + flags, e.g. [\"status\", \"--short\"] or [\"log\", \"-n\", \"5\"]."
+        }
+      },
+      "required": [
+        "args"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Subcommand + flags, e.g. [\"status\", \"--short\"] or [\"log\", \"-n\", \"5\"]."
+        }
+      },
+      "required": [
+        "args"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "git_repo",
+    "description": "Read a git repository — remote URL (https://, git@, ssh://) or local path — without cloning into the workspace. Read-only. One op per call:\n- info: default branch, HEAD commit\n- branches: local/remote branches and tags\n- files: recursive file listing at a ref (optionally scoped to a path prefix)\n- read: single file contents at a ref\n- log: commit history (optionally path-scoped)\n- show: a commit's patch, or diff a base..head range\n- blame: per-line authorship of a file\n- search: literal or regex content search across the repo at a ref\nPrefer this over cloning via bash.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "info",
+            "branches",
+            "files",
+            "read",
+            "log",
+            "show",
+            "blame",
+            "search"
+          ],
+          "description": "Operation to run"
+        },
+        "repo": {
+          "type": "string",
+          "description": "Remote URL or local repo path"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Branch/tag/sha (default HEAD)"
+        },
+        "commit": {
+          "type": "string",
+          "description": "Commit sha for show"
+        },
+        "file": {
+          "type": "string",
+          "description": "File path / prefix / filter"
+        },
+        "limit": {
+          "type": "number",
+          "description": "Max commits for log"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search string"
+        },
+        "regex": {
+          "type": "boolean",
+          "description": "Query is a regex"
+        }
+      },
+      "required": [
+        "op",
+        "repo"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "info",
+            "branches",
+            "files",
+            "read",
+            "log",
+            "show",
+            "blame",
+            "search"
+          ],
+          "description": "Operation to run"
+        },
+        "repo": {
+          "type": "string",
+          "description": "Remote URL (https://github.com/o/r, git@host:o/r) or local repo path"
+        },
+        "ref": {
+          "description": "Branch, tag, or sha (default HEAD)",
+          "type": "string"
+        },
+        "commit": {
+          "description": "Commit sha for show",
+          "type": "string"
+        },
+        "file": {
+          "description": "File path for read/blame, path prefix for files, path filter for log",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max commits for log (default 30)",
+          "type": "number"
+        },
+        "query": {
+          "description": "Search string for search",
+          "type": "string"
+        },
+        "regex": {
+          "description": "Treat query as a POSIX regex (default literal)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "op",
+        "repo"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "web_fetch",
+    "description": "Fetch a URL and return its content as text. Strips HTML tags into readable prose. Use for documentation, API references, or any web resource the task requires. Capped at 64KB. Use web_search first if you do not have a specific URL.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Absolute http(s) URL to fetch."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Absolute http(s) URL to fetch."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "web_search",
+    "description": "Search the web for a query and return up to 10 results with title, URL, and snippet. Use to find documentation, library APIs, error messages, or recent information. Pair with web_fetch to read a specific result in full.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "dispatch_agent",
+    "description": "Spawn a specialized sub-agent for a focused subtask — the agent runs its own multi-step tool loop and returns a report. Dispatch PROACTIVELY when a specialty fits: code-reviewer to review a diff, simplifier for a cleanup pass, explore to locate code, general-purpose for broad research. Dispatch multiple agents in one response to run them in parallel. For simple lookups (one file, one grep) use the direct tools instead. The result includes a dispatchId; pass it as resumeFrom to continue that sub-agent with a follow-up task (it keeps its prior context — keep follow-up instructions brief; brief is intentional, not ambiguous). Every dispatch without resumeFrom starts completely fresh.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "code-reviewer",
+            "codebase-orchestrator",
+            "commit-writer",
+            "explore",
+            "general-purpose",
+            "pr-creator",
+            "security-reviewer",
+            "simplifier",
+            "web-research"
+          ],
+          "description": "The agent to dispatch."
+        },
+        "title": {
+          "type": "string",
+          "description": "Short human-readable label for this dispatch (3-6 words). Shown in the UI so parallel dispatches are distinguishable."
+        },
+        "task": {
+          "type": "string",
+          "description": "Self-contained task description. The agent sees only this string — include any context it needs (file paths, snippets, constraints). Do not assume the agent can see the prior conversation."
+        },
+        "resumeFrom": {
+          "type": "string",
+          "description": "Dispatch id from a previous dispatch_agent result (the dispatchId field in its output metadata). Continues that same sub-agent with its prior context instead of starting fresh. Only use it to follow up on an earlier dispatch in this same session."
+        },
+        "background": {
+          "type": "boolean",
+          "description": "Run the sub-agent in the background and continue your turn. You will be notified when it completes. DO NOT sleep, poll, or check its progress — work on non-overlapping tasks or end your response."
+        }
+      },
+      "required": [
+        "name",
+        "task"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "code-reviewer",
+            "codebase-orchestrator",
+            "commit-writer",
+            "explore",
+            "general-purpose",
+            "pr-creator",
+            "security-reviewer",
+            "simplifier",
+            "web-research"
+          ],
+          "description": "The agent to dispatch."
+        },
+        "title": {
+          "description": "Short human-readable label for this dispatch (3-6 words). Shown in the UI row so parallel dispatches are distinguishable. Example: \"Map auth flow\", \"Find all SQL sinks\".",
+          "type": "string"
+        },
+        "task": {
+          "type": "string",
+          "description": "Self-contained task description. The agent sees only this string — include any context it needs (file paths, snippets, constraints). Do not assume the agent can see the prior conversation."
+        },
+        "resumeFrom": {
+          "description": "Dispatch id from a previous dispatch_agent result (the dispatchId field in its output metadata). Continues that same sub-agent with its prior context instead of starting fresh. Only use it to follow up on an earlier dispatch in this same session.",
+          "type": "string"
+        },
+        "background": {
+          "description": "Run the sub-agent in the background and continue your turn. You will be notified when it completes. DO NOT sleep, poll, or check its progress — work on non-overlapping tasks or end your response.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "task"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_write",
+    "description": "Maintain a structured todo list for the current task. Call this BEFORE starting multi-step work to plan, then UPDATE statuses as you progress. Send the COMPLETE list on every call — it REPLACES the previous list (do not send deltas). Mark completed items \"completed\", the one you are working on \"in_progress\", pending ones \"pending\", and items you are dropping as \"cancelled\". Exactly one item may be in_progress at a time. The user sees this list live, so keep it accurate in real time — mark an item completed as soon as its work is done and verified. Use for tasks with 3+ distinct steps; skip for simple one-shot answers.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "todos": {
+          "type": "array",
+          "description": "The complete todo list. Sent in full on every call — replaces the previous list.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "Short description of the task."
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "completed",
+                  "cancelled"
+                ],
+                "description": "pending = not started, in_progress = actively working (at most one), completed = done + verified, cancelled = dropped."
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "description": "Optional priority."
+              }
+            },
+            "required": [
+              "content",
+              "status"
+            ]
+          }
+        }
+      },
+      "required": [
+        "todos"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "todos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "completed",
+                  "cancelled"
+                ]
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "description": "The complete todo list. Sent in full on every call — replaces the previous list."
+        }
+      },
+      "required": [
+        "todos"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ask_followup_question",
+    "description": "Ask the user a structured question when you need them to decide between concrete options. Use for approach selection, file-path choice, API-style decisions — not for every response. The user picks one option (or types a custom answer) and the turn resumes. Use sparingly: for a simple missing detail, just ask in plain text.\n\nFORMAT REQUIREMENT — options MUST be an array of objects with a `label` field:\n  options: [{ \"label\": \"Approach A\", \"description\": \"optional one-liner\" }, ...]\nPlain strings ([\"A\", \"B\"]) are REJECTED. Max 4 options.\n\nIMPORTANT: When you call this tool, DO NOT also write the question or options as text, Markdown, JSON blocks, or numbered lists. The tool call alone surfaces the popup — emitting a duplicate as prose causes the user to see the question twice. Either call this tool (no prose) OR ask in plain text (no tool call) — never both.\n\nStop emitting text after the tool call. The turn ends here; the user answers via the popup.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The question to ask."
+        },
+        "options": {
+          "type": "array",
+          "description": "Concrete options the user can pick from. Max 4. Each item MUST be an object with at least a `label` field — plain strings are rejected.",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Short option label (one line)."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional one-line context for this option."
+              }
+            },
+            "required": [
+              "label"
+            ]
+          }
+        },
+        "multiple": {
+          "type": "boolean",
+          "description": "True if the user can pick multiple options. Default false (single-select)."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The question to ask."
+        },
+        "options": {
+          "description": "Concrete options the user can pick from. Max 4. Each item MUST be an object with a `label` field.",
+          "minItems": 1,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "multiple": {
+          "description": "True if the user can pick multiple options. Default false.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "exit_plan_mode",
+    "description": "Signal that planning is complete. Use ONLY when autonomyMode is \"plan\" (read-only) and you have produced a concrete, actionable plan. Present the plan as the `plan` argument. The user reviews it and decides whether to proceed. Do not call this in other modes — it's a no-op there.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "type": "string",
+          "description": "The complete plan in markdown. Include the steps, files affected, and risks."
+        }
+      },
+      "required": [
+        "plan"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "plan": {
+          "type": "string",
+          "description": "The complete plan in markdown. Include the steps, files affected, and risks."
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "compact",
+    "description": "[Internal] Summarize earlier conversation history. The orchestrator handles this automatically — this tool exists for edge cases only.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "keep_last": {
+          "type": "number",
+          "description": "Number of most-recent messages to keep verbatim. Older ones get summarized. Default 6."
+        }
+      }
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "keep_last": {
+          "description": "Number of most-recent messages to keep verbatim. Default 6.",
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "slash_command",
+    "description": "Invoke a user-defined slash command. Commands live in <userData>/commands/*.md and bundle a prompt prefix + instructions. Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command body so you can apply its instructions.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command name without the leading slash (e.g. \"refactor\")."
+        },
+        "args": {
+          "type": "string",
+          "description": "Optional arguments to pass to the command."
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command name without the leading slash (e.g. \"refactor\")."
+        },
+        "args": {
+          "description": "Optional arguments to pass to the command.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "memory",
+    "description": "FIRST tool to call for ANY codebase question. Searches the workspace RAG index and registered knowledge sources by meaning and returns ranked chunks in ~0.5s. Call BEFORE directory_tree, list_dir, read_file, or grep. Returns file path + line range + source body; knowledge-source hits are labeled [source] origin.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Natural language: \"how is authentication handled\", \"database setup\", \"API routes\"."
+        },
+        "k": {
+          "type": "number",
+          "description": "Top-K results. Default 5, max 20."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Natural language query describing what you are looking for. Examples: \"user authentication flow\", \"database connection setup\", \"API route definitions\"."
+        },
+        "k": {
+          "description": "Top-K chunks to return. Default 5, max 20.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "init",
+    "description": "Initialize the project: scan the workspace and create a minimal AGENTS.md at the project root. The file captures non-obvious project rules, build commands, and gotchas. Call this when the user wants to set up project configuration for the agent.",
+    "schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "load_skill",
+    "description": "Load and activate a skill by reading its SKILL.md file. Call this when the user invokes a skill via /name, or when a skill matches the task. Returns the skill's full instructions — read and follow them before proceeding with any other action.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the skill's SKILL.md file, or a `builtin:<name>` id from the Available skills list."
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the skill's SKILL.md file, or a `builtin:<name>` id from the Available skills list."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
