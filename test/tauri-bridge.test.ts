@@ -60,6 +60,25 @@ describe("installTauriBridge", () => {
     ]);
     expect(invoke).toHaveBeenLastCalledWith("workspace_list", {});
 
+    const headers = [
+      {
+        id: "s_1",
+        workspaceId: "ws_1",
+        title: "One",
+        modelId: "model-x",
+        createdAt: "2026-08-27T00:00:00.000Z",
+        updatedAt: "2026-08-27T00:01:00.000Z",
+        messageCount: 2,
+        kind: "main",
+      },
+    ];
+    invoke.mockResolvedValueOnce(headers);
+    expect(await bridge.request.sessionList({ workspaceId: "ws_1" })).toEqual(headers);
+    expect(invoke).toHaveBeenLastCalledWith("session_list", { workspaceId: "ws_1" });
+
+    await bridge.request.sessionListArchived({ workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("session_list_archived", { workspaceId: "ws_1" });
+
     await bridge.request.sessionListV2({ workspacePath: "/repo/tide", opts: { limit: 5 } });
     expect(invoke).toHaveBeenLastCalledWith("session_list_v2", {
       workspacePath: "/repo/tide",

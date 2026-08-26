@@ -5,8 +5,9 @@
  *  failure mode is non-fatal: one console.warn and the app stays on the mock
  *  store — never a crash, never a half-installed bridge.
  *
- *  Command coverage is M1-scoped (workspaces / sessions-v2 / settings /
- *  providers). Every OTHER TideRPC method resolves to an async rejection via
+ *  Command coverage is M1-scoped (workspaces / sessions — the legacy sidebar
+ *  list pair + the v2 readers — / settings / providers). Every OTHER TideRPC
+ *  method resolves to an async rejection via
  *  the request Proxy — never a sync throw, so fire-and-forget `void` calls in
  *  client.ts can't escape a React commit. Push channels (terminal output,
  *  orchestrator/agent events, git changed…) stay on rpc.ts's single-slot
@@ -15,8 +16,10 @@
 import { activateRpcClient, type TideRpcClient } from './rpc';
 import type {
   AgentSettingsWire,
+  ArchivedSessionHeader,
   GeneralSettingsWire,
   Provider,
+  SessionHeader,
   SessionMessageV2,
   SessionMetaV2,
   Workspace,
@@ -32,6 +35,8 @@ type InvokeFn = typeof import('@tauri-apps/api/core').invoke;
 type M1Methods = Pick<
   TideRpcClient['request'],
   | 'workspaceList'
+  | 'sessionList'
+  | 'sessionListArchived'
   | 'sessionListV2'
   | 'sessionMessagesV2'
   | 'settingsGetAgent'
@@ -47,6 +52,9 @@ type M1Methods = Pick<
 function createBridgeClient(invoke: InvokeFn): TideRpcClient {
   const methods: M1Methods = {
     workspaceList: (params) => invoke<Workspace[]>('workspace_list', params),
+    sessionList: (params) => invoke<SessionHeader[]>('session_list', params),
+    sessionListArchived: (params) =>
+      invoke<ArchivedSessionHeader[]>('session_list_archived', params),
     sessionListV2: (params) =>
       invoke<{ sessions: SessionMetaV2[]; nextCursor: string | null }>('session_list_v2', params),
     sessionMessagesV2: (params) =>

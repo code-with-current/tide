@@ -1,11 +1,19 @@
-//! `sessionListV2` / `sessionMessagesV2` — thin command wrappers over the
+//! `sessionListV2` / `sessionMessagesV2` plus the legacy sidebar pair
+//! `sessionList` / `sessionListArchived` — thin command wrappers over the
 //! tide-store sessions-v2 reader. The 91ec558 shell created the db file at
 //! boot, so a missing db always read as an empty store; the command layer
 //! reproduces that (empty page, not an error) while real open/schema errors
 //! still surface.
+//!
+//! The legacy pair takes a config workspaceId (the v2 store keys rows by
+//! workspace_path): resolve id → path via the config workspaces, then stamp
+//! the requested id back onto every header. An unknown id matched nothing in
+//! the 91ec558 store (headers were keyed by workspaceId directly) and still
+//! returns an empty list — not a `WORKSPACE_NOT_FOUND` error.
 
 use tide_store::sessions_v2::{
-    SessionListOptsV2, SessionListPageV2, SessionMessagesPageV2, SessionWindowOptsV2, SessionsV2,
+    ArchivedHeaderWire, SessionHeaderWire, SessionListOptsV2, SessionListPageV2,
+    SessionMessagesPageV2, SessionWindowOptsV2, SessionsV2,
 };
 
 use crate::state::AppState;
@@ -68,6 +76,57 @@ fn open_store(state: &AppState) -> Result<Option<SessionsV2>, CommandError> {
         return Ok(None);
     }
     SessionsV2::open(&path).map(Some).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn session_list(
+    state: tauri::State<AppState>,
+    workspace_id: String,
+) -> Result<Vec<SessionHeaderWire>, CommandError> {
+    list_headers(&state, &workspace_id)
+}
+
+fn list_headers(state: &AppState, workspace_id: &str) -> Result<Vec<SessionHeaderWire>, CommandError> {
+    let Some(workspace_path) = workspace_path_of(state, workspace_id)? else {
+        return Ok(Vec::new());
+    };
+    match open_store(state)? {
+        Some(store) => store
+            .list_session_headers(&workspace_path, workspace_id)
+            .map_err(CommandError::from),
+        None => Ok(Vec::new()),
+    }
+}
+
+#[tauri::command]
+pub fn session_list_archived(
+    state: tauri::State<AppState>,
+    workspace_id: String,
+) -> Result<Vec<ArchivedHeaderWire>, CommandError> {
+    list_archived(&state, &workspace_id)
+}
+
+fn list_archived(state: &AppState, workspace_id: &str) -> Result<Vec<ArchivedHeaderWire>, CommandError> {
+    let Some(workspace_path) = workspace_path_of(state, workspace_id)? else {
+        return Ok(Vec::new());
+    };
+    match open_store(state)? {
+        Some(store) => store
+            .list_archived_headers(&workspace_path, workspace_id)
+            .map_err(CommandError::from),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Port of the 91ec558 `workspacePathOf`: first config workspace whose id
+/// matches. None for an unknown id — callers read that as an empty list.
+fn workspace_path_of(state: &AppState, workspace_id: &str) -> Result<Option<String>, CommandError> {
+    state.read_config(|cfg| {
+        cfg.workspaces
+            .iter()
+            .find(|ws| ws.id == workspace_id)
+            .map(|ws| ws.path.clone())
+    })
 }
 
 #[cfg(test)]
@@ -148,6 +207,57 @@ mod tests {
         if seed {
             seed_db(&dir);
         }
+        (AppState::load(dir.clone()), dir)
+    }
+
+    /// Config with two workspaces plus a db seeded for the legacy pair:
+    /// /ws/alpha holds two mains (one null-model), a subagent, and an
+    /// archived row; /ws/beta holds one main.
+    fn state_legacy(name: &str) -> (AppState, PathBuf) {
+        let dir = temp_dir(name);
+        fs::write(
+            dir.join("config.json"),
+            r#"{"workspaces":[
+                { "id": "ws_1", "name": "alpha", "path": "/ws/alpha" },
+                { "id": "ws_2", "name": "beta", "path": "/ws/beta" }
+            ]}"#,
+        )
+        .unwrap();
+        let conn = Connection::open(dir.join("sessions-v2.db")).unwrap();
+        conn.execute_batch(V2_SCHEMA).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        let rows = [
+            ("s-main-1", "/ws/alpha", "Main One", None as Option<&str>, None as Option<i64>, 4_000i64),
+            ("s-main-2", "/ws/alpha", "Main Two", Some("model-x"), None, 2_000),
+            ("s-sub", "/ws/alpha", "Child", None, None, 9_000),
+            ("s-arch", "/ws/alpha", "Archived", None, Some(3_000), 5_000),
+            ("s-beta-1", "/ws/beta", "Beta", None, None, 1_000),
+        ];
+        for (id, path, title, model, archived, updated) in rows {
+            conn.execute(
+                "INSERT INTO session (id, workspace_path, parent_id, title, model_id, archived_at, \
+                 time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    id,
+                    path,
+                    if id == "s-sub" { Some("s-main-1") } else { None },
+                    title,
+                    model,
+                    archived,
+                    updated - 1_000,
+                    updated
+                ],
+            )
+            .unwrap();
+        }
+        for i in 1..=2 {
+            conn.execute(
+                "INSERT INTO message (id, session_id, role, time_created) VALUES (?1, 's-main-1', 'user', 1_000)",
+                rusqlite::params![format!("m-{i}")],
+            )
+            .unwrap();
+        }
+        drop(conn);
         (AppState::load(dir.clone()), dir)
     }
 
@@ -248,6 +358,68 @@ mod tests {
         let wire = serde_json::to_value(&err).unwrap();
         assert_eq!(wire["message"], serde_json::json!(err.message));
         assert_eq!(wire["code"], serde_json::json!("DB_SCHEMA"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_list_resolves_workspace_id_and_matches_ts_shape() {
+        let (state, dir) = state_legacy("legacy-list");
+        let headers = list_headers(&state, "ws_1").unwrap();
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+        // Subagent + archived excluded; newest first; ids map back to ws_1.
+        assert_eq!(ids, ["s-main-1", "s-main-2"]);
+        assert!(headers.iter().all(|h| h.workspace_id == "ws_1"));
+        assert_eq!(headers[0].message_count, 2);
+        assert_eq!(headers[0].model_id, "");
+        assert_eq!(headers[1].model_id, "model-x");
+        assert_eq!(headers[0].updated_at, "1970-01-01T00:00:04.000Z");
+
+        let beta = list_headers(&state, "ws_2").unwrap();
+        let ids: Vec<&str> = beta.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["s-beta-1"]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_list_unknown_workspace_and_missing_db_read_empty() {
+        let (state, dir) = state_legacy("legacy-unknown");
+        // The 91ec558 store compared workspaceId against stored headers — an
+        // unknown id matched nothing and returned [], never an error.
+        assert!(list_headers(&state, "ws_nope").unwrap().is_empty());
+        assert!(list_archived(&state, "ws_nope").unwrap().is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+
+        let dir = temp_dir("legacy-missing-db");
+        fs::write(dir.join("config.json"), r#"{"workspaces":[{"id":"ws_1","name":"a","path":"/a"}]}"#).unwrap();
+        let state = AppState::load(dir.clone());
+        assert!(list_headers(&state, "ws_1").unwrap().is_empty());
+        assert!(list_archived(&state, "ws_1").unwrap().is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_list_archived_returns_archived_shape() {
+        let (state, dir) = state_legacy("legacy-archived");
+        let archived = list_archived(&state, "ws_1").unwrap();
+        let ids: Vec<&str> = archived.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["s-arch"]);
+        assert_eq!(archived[0].workspace_id, "ws_1");
+        assert_eq!(archived[0].model_id, "");
+        assert_eq!(archived[0].archived_at, "1970-01-01T00:00:03.000Z");
+
+        assert!(list_archived(&state, "ws_2").unwrap().is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_list_propagates_unreadable_config() {
+        let (_seeded, dir) = state_legacy("legacy-config");
+        fs::write(dir.join("config.json"), "{ broken").unwrap();
+        let state = AppState::load(dir.clone());
+        let err = list_headers(&state, "ws_1").unwrap_err();
+        assert_eq!(err.code.as_deref(), Some("CONFIG_UNREADABLE"));
+        let err = list_archived(&state, "ws_1").unwrap_err();
+        assert_eq!(err.code.as_deref(), Some("CONFIG_UNREADABLE"));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

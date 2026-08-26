@@ -11,6 +11,8 @@ pub fn run() {
             commands::bridge::tide_ping,
             commands::bridge::bridge_version,
             commands::workspaces::workspace_list,
+            commands::sessions::session_list,
+            commands::sessions::session_list_archived,
             commands::sessions::session_list_v2,
             commands::sessions::session_messages_v2,
             commands::settings::settings_get_agent,

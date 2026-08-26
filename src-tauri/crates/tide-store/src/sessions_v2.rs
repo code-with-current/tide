@@ -8,6 +8,12 @@
 //! `null` (the TS types are `T | null`, not optional — never omit them).
 //! Part `data` is passed through verbatim (`unknown` on the wire); the
 //! renderer owns any kind→block mapping.
+//!
+//! The legacy `SessionHeader`/`ArchivedSessionHeader` readers derive the old
+//! sidebar shapes from the same rows: ISO-8601 timestamps (`new
+//! Date(ms).toISOString()` parity), message-row counts, and the TS filters
+//! (subagents and archived rows never list; the archived list is archived
+//! rows only). `worktree` is not derivable from v2 and is omitted.
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -162,6 +168,44 @@ pub struct SessionMessagesPageV2 {
     pub next_before: Option<String>,
 }
 
+/// `SessionHeader` in shared/rpc.ts — the legacy sidebar-list shape, derived
+/// from v2 rows. Matching the 91ec558 producer (`sessionStore.listSessions`):
+/// subagent rows (`parent_id` set) never appear, archived rows never appear,
+/// `messageCount` counts ALL message rows, and a null `model_id` coerces to
+/// `""`. `providerId`/`parentId` are TS `?` optionals — omitted when unset.
+/// `worktree` is NOT derivable (the v2 schema has no worktree columns; only
+/// the legacy JSON store carried it) and is omitted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHeaderWire {
+    pub id: String,
+    pub workspace_id: String,
+    pub title: String,
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub message_count: i64,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+}
+
+/// `ArchivedSessionHeader` in shared/rpc.ts — the legacy Archived-section
+/// shape (`sessionStore.listArchived`). Ordering follows the TS manifest's
+/// insertion order: first-archive chronological.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedHeaderWire {
+    pub id: String,
+    pub workspace_id: String,
+    pub title: String,
+    pub model_id: String,
+    pub archived_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug)]
 pub struct SessionsV2 {
     conn: Connection,
@@ -287,6 +331,66 @@ impl SessionsV2 {
         })
     }
 
+    /// Legacy `listSessions` (91ec558 sessionStore.ts) derived from v2 rows:
+    /// non-archived, non-subagent sessions of one workspace, newest first.
+    /// `workspace_id` is the config-workspace id the caller resolved
+    /// `workspace_path` from — the TS headers carried it verbatim, so it is
+    /// stamped onto every row here rather than reverse-mapped.
+    pub fn list_session_headers(
+        &self,
+        workspace_path: &str,
+        workspace_id: &str,
+    ) -> Result<Vec<SessionHeaderWire>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.title, s.model_id, s.provider_id, s.time_created, s.time_updated, \
+             (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) \
+             FROM session s \
+             WHERE s.workspace_path = ?1 AND s.archived_at IS NULL AND s.parent_id IS NULL \
+             ORDER BY s.time_updated DESC, s.id DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![workspace_path], |row| {
+            Ok(SessionHeaderWire {
+                id: row.get(0)?,
+                workspace_id: workspace_id.to_owned(),
+                title: row.get(1)?,
+                model_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                provider_id: row.get(3)?,
+                created_at: iso_from_unix_ms(row.get(4)?),
+                updated_at: iso_from_unix_ms(row.get(5)?),
+                message_count: row.get(6)?,
+                kind: "main".to_owned(),
+                parent_id: None,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Legacy `listArchived` derived from v2 rows: archived sessions of one
+    /// workspace, in first-archive order (the TS manifest's insertion order).
+    pub fn list_archived_headers(
+        &self,
+        workspace_path: &str,
+        workspace_id: &str,
+    ) -> Result<Vec<ArchivedHeaderWire>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.title, s.model_id, s.archived_at, s.time_updated \
+             FROM session s \
+             WHERE s.workspace_path = ?1 AND s.archived_at IS NOT NULL \
+             ORDER BY s.archived_at ASC, s.id ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![workspace_path], |row| {
+            Ok(ArchivedHeaderWire {
+                id: row.get(0)?,
+                workspace_id: workspace_id.to_owned(),
+                title: row.get(1)?,
+                model_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                archived_at: iso_from_unix_ms(row.get::<_, Option<i64>>(3)?.unwrap_or_default()),
+                updated_at: iso_from_unix_ms(row.get(4)?),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     fn query_sessions(
         &self,
         sql: &str,
@@ -376,6 +480,38 @@ fn session_from_row(row: &Row<'_>) -> rusqlite::Result<SessionMetaV2> {
         time_created: row.get(15)?,
         time_updated: row.get(16)?,
     })
+}
+
+/// `new Date(ms).toISOString()`: UTC, always 3 fractional digits, `Z` suffix.
+/// The legacy headers carried ISO strings while v2 stores unix millis, so
+/// every legacy-shaped reader converts through here.
+fn iso_from_unix_ms(ms: i64) -> String {
+    let secs_total = ms.div_euclid(1000);
+    let millis = ms.rem_euclid(1000);
+    let days = secs_total.div_euclid(86_400);
+    let secs_of_day = secs_total.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let (hh, mm, ss) = (
+        secs_of_day / 3_600,
+        (secs_of_day % 3_600) / 60,
+        secs_of_day % 60,
+    );
+    format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}.{millis:03}Z")
+}
+
+/// Days-since-epoch to (y, m, d) — Howard Hinnant's civil_from_days, valid
+/// for the whole i64 range the millis column can hold (incl. pre-1970).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 #[cfg(test)]
@@ -823,6 +959,161 @@ mod tests {
         assert_eq!(missing.next_before, None);
     }
 
+    /// Explicit-column session seed for the legacy-header tests (the shared
+    /// `insert_session` hardcodes parent/model specials for other tests).
+    struct SeedSession {
+        id: &'static str,
+        workspace_path: &'static str,
+        title: &'static str,
+        parent_id: Option<&'static str>,
+        model_id: Option<&'static str>,
+        archived_at: Option<i64>,
+        time_created: i64,
+        time_updated: i64,
+    }
+
+    fn insert_session_full(conn: &Connection, seed: SeedSession) {
+        conn.execute(
+            "INSERT INTO session (id, workspace_path, parent_id, title, model_id, \
+             archived_at, time_created, time_updated) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                seed.id,
+                seed.workspace_path,
+                seed.parent_id,
+                seed.title,
+                seed.model_id,
+                seed.archived_at,
+                seed.time_created,
+                seed.time_updated
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn headers_match_legacy_filters_order_and_counts() {
+        let db = synthetic_db("headers-list");
+        // /ws/alpha gains: a subagent (excluded), a null-model main, and a
+        // second archived row archived BEFORE s-arch (manifest order check).
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-sub", workspace_path: "/ws/alpha", title: "Child",
+            parent_id: Some("s-two"), model_id: None, archived_at: None,
+            time_created: 8_000, time_updated: 9_000,
+        });
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-nomodel", workspace_path: "/ws/alpha", title: "NoModel",
+            parent_id: None, model_id: None, archived_at: None,
+            time_created: 1_000, time_updated: 500,
+        });
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-arch-old", workspace_path: "/ws/alpha", title: "OldArchived",
+            parent_id: None, model_id: None, archived_at: Some(3_000),
+            time_created: 900, time_updated: 2_950,
+        });
+        for i in 1..=3 {
+            insert_message(&db.conn, &format!("h-m{i}"), "s-two", "user", None);
+        }
+        insert_message(&db.conn, "h-sub-m1", "s-sub", "assistant", None);
+
+        let store = open_at(&db);
+        let headers = store.list_session_headers("/ws/alpha", "ws_alpha").unwrap();
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+        // Subagent (s-sub, newest) and archived (s-arch, s-arch-old) excluded —
+        // s-one too: the shared seed gives it a parent_id (subagent shape).
+        // Remaining mains newest-first; the s-three/s-four tie breaks on id DESC.
+        assert_eq!(ids, ["s-two", "s-three", "s-four", "s-nomodel"]);
+
+        let two = &headers[0];
+        assert_eq!(two.workspace_id, "ws_alpha");
+        assert_eq!(two.message_count, 3, "all message rows count");
+        assert_eq!(two.model_id, "");
+        assert_eq!(two.provider_id, None);
+        assert_eq!(two.kind, "main");
+        assert_eq!(two.parent_id, None);
+        assert_eq!(two.created_at, "1970-01-01T00:00:03.000Z");
+        assert_eq!(two.updated_at, "1970-01-01T00:00:04.000Z");
+
+        // Unknown workspace path: the TS filter matched nothing → empty list.
+        assert!(store.list_session_headers("/ws/missing", "ws_x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn headers_wire_shape_is_camel_case_with_iso_timestamps() {
+        let db = synthetic_db("headers-wire");
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-iso", workspace_path: "/ws/alpha", title: "Iso",
+            parent_id: None, model_id: Some("model-x"), archived_at: None,
+            time_created: 951_782_400_000, time_updated: 1_759_000_000_123,
+        });
+        let store = open_at(&db);
+        let headers = store.list_session_headers("/ws/alpha", "ws_1").unwrap();
+        let iso = headers.iter().find(|h| h.id == "s-iso").unwrap();
+        // providerId absent when null (TS `?` optional, dropped by JSON).
+        assert_eq!(
+            serde_json::to_value(iso).unwrap(),
+            json!({
+                "id": "s-iso",
+                "workspaceId": "ws_1",
+                "title": "Iso",
+                "modelId": "model-x",
+                "createdAt": "2000-02-29T00:00:00.000Z",
+                "updatedAt": "2025-09-27T19:06:40.123Z",
+                "messageCount": 0,
+                "kind": "main",
+            })
+        );
+    }
+
+    #[test]
+    fn archived_headers_list_archived_only_in_first_archive_order() {
+        let db = synthetic_db("headers-archived");
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-arch-old", workspace_path: "/ws/alpha", title: "OldArchived",
+            parent_id: None, model_id: None, archived_at: Some(3_000),
+            time_created: 900, time_updated: 2_950,
+        });
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-arch-beta", workspace_path: "/ws/beta", title: "OtherWorkspace",
+            parent_id: None, model_id: None, archived_at: Some(9_999),
+            time_created: 1, time_updated: 1,
+        });
+
+        let store = open_at(&db);
+        let archived = store.list_archived_headers("/ws/alpha", "ws_alpha").unwrap();
+        let ids: Vec<&str> = archived.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["s-arch-old", "s-arch"], "first-archive chronological");
+
+        let old = &archived[0];
+        assert_eq!(old.workspace_id, "ws_alpha");
+        assert_eq!(old.model_id, "", "null model coerces like the TS shape");
+        assert_eq!(old.archived_at, "1970-01-01T00:00:03.000Z");
+        assert_eq!(old.updated_at, "1970-01-01T00:00:02.950Z");
+        assert_eq!(
+            serde_json::to_value(old).unwrap(),
+            json!({
+                "id": "s-arch-old",
+                "workspaceId": "ws_alpha",
+                "title": "OldArchived",
+                "modelId": "",
+                "archivedAt": "1970-01-01T00:00:03.000Z",
+                "updatedAt": "1970-01-01T00:00:02.950Z",
+            })
+        );
+        assert!(store.list_archived_headers("/ws/missing", "ws_x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn iso_from_unix_ms_matches_js_to_iso_string() {
+        // Reference values from `new Date(ms).toISOString()`.
+        assert_eq!(iso_from_unix_ms(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso_from_unix_ms(-1), "1969-12-31T23:59:59.999Z");
+        assert_eq!(iso_from_unix_ms(1_759_000_000_123), "2025-09-27T19:06:40.123Z");
+        assert_eq!(iso_from_unix_ms(951_782_400_000), "2000-02-29T00:00:00.000Z");
+        assert_eq!(iso_from_unix_ms(1_709_164_800_000), "2024-02-29T00:00:00.000Z");
+        assert_eq!(iso_from_unix_ms(86_399_999), "1970-01-01T23:59:59.999Z");
+    }
+
     #[test]
     fn non_json_part_data_is_an_error() {
         let db = synthetic_db("bad-part");
@@ -883,5 +1174,39 @@ mod tests {
             assert!(page.sessions.len() as i64 <= *count);
         }
         assert!(total >= 0);
+    }
+
+    /// Dev-only sanity for the legacy-header readers against the REAL ~/.tide
+    /// (never part of `cargo test`): counts only — no titles or paths.
+    #[test]
+    #[ignore = "touches the real ~/.tide — run explicitly: cargo test -p tide-store -- --ignored --nocapture"]
+    fn live_real_db_legacy_headers() {
+        let path = crate::paths::sessions_db_path();
+        let store = SessionsV2::open(&path).expect("real sessions-v2.db opens");
+        let mut stmt = store
+            .conn
+            .prepare("SELECT DISTINCT workspace_path FROM session")
+            .unwrap();
+        let workspaces: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let mut total_headers = 0usize;
+        let mut total_archived = 0usize;
+        for workspace in &workspaces {
+            total_headers += store
+                .list_session_headers(workspace, "live")
+                .expect("list_session_headers over a real workspace")
+                .len();
+            total_archived += store
+                .list_archived_headers(workspace, "live")
+                .expect("list_archived_headers over a real workspace")
+                .len();
+        }
+        println!(
+            "legacy headers over {} workspaces: {total_headers} active, {total_archived} archived",
+            workspaces.len()
+        );
     }
 }
