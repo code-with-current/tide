@@ -7,16 +7,12 @@ Thanks for your interest in contributing! Tide is a local-first agentic coding c
 | Requirement | Version |
 |---|---|
 | [Bun](https://bun.sh) | 1.4.0+ (pinned via `packageManager` in package.json) |
-| [Hutch](https://framework.blackboard.sh/electrobun/guides/hutch/) | latest production channel |
+| [Rust](https://rustup.rs) | stable toolchain (1.97+) |
 | [Git](https://git-scm.com) | 2.20+ |
 
-Install Hutch:
+Rust targets used by the build matrix: `rustup target add universal-apple-darwin aarch64-pc-windows-msvc x86_64-unknown-linux-gnu` (local dev on Apple Silicon needs none beyond the default).
 
-```sh
-curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | bash -s -- --channel production --no-modify-path
-```
-
-Node.js 22+ is also handy for editor tooling (TypeScript server), but Bun owns the actual build and test pipeline.
+Node.js 22+ is also handy for editor tooling (TypeScript server), but Bun owns the renderer build and test pipeline.
 
 ## Getting started
 
@@ -32,11 +28,7 @@ bun install
 bun run app:dev
 ```
 
-This syncs the Electrobun devkit, then launches the app with `--watch` — main-process edits (`app/**`) rebuild and relaunch automatically. Renderer edits (`src/**`) need a rebuild + sync first:
-
-```sh
-bun run build && hutch electrobun sync
-```
+This starts the Vite dev server and the Rust shell in one command — renderer edits (`src/**`) hot-reload; Rust edits (`src-tauri/**`) rebuild and relaunch automatically.
 
 For renderer-only iteration in a plain browser (mock data, no bridge):
 
@@ -48,36 +40,40 @@ bun run dev
 
 | Command | What it does |
 |---|---|
-| `bun run app:dev` | Full dev — sync + launch with `--watch` |
+| `bun run app:dev` | Full dev — Vite + Tauri shell |
 | `bun run dev` | Renderer-only dev (plain browser, mock data) |
 | `bun run build` | Typecheck (`tsc -b`) + Vite production build |
-| `bun run app:build` | Full release build (renderer + Electrobun bundle) |
+| `bun run app:build` | Full release build (renderer + Tauri bundle) |
 | `bun run lint` | Run oxlint |
 | `bun run test` | Run the vitest suite once |
 | `bun run test:watch` | Run vitest in watch mode |
-| `bun run test:updater` | Local end-to-end update-flow scenario |
+| `cargo test --workspace`¹ | Rust test suite |
+
+¹ Run from `src-tauri/`. Use `cargo clippy --workspace --all-targets -- -D warnings` before opening a PR — CI enforces it.
 
 ### Before opening a PR
 
 1. **Typecheck** — `tsc -b` (incremental, fast). Always use this, never `tsc --noEmit`.
 2. **Lint** — `bun run lint` should pass clean.
-3. **Tests** — `bun run test` should pass. If you add a feature, add a test.
+3. **Tests** — `bun run test` and `cd src-tauri && cargo test --workspace` should pass. If you add a feature, add a test.
 
 ## Project structure
 
-Tide is an Electrobun app with a Bun main process and a React renderer. Read [`AGENTS.md`](./AGENTS.md) for the full architecture deep-dive — the short version:
+Tide is a Tauri app with a Rust main process and a React renderer. Read [`AGENTS.md`](./AGENTS.md) for the full architecture deep-dive — the short version:
 
 ```
-app/               Main process (Bun runtime)
-  core/            Agent runtime — orchestrator, tools, RAG, MCP, stores
-  rpc/             Typed RPC handlers, one module per domain
-  platform/        OS seams — sqlite, secrets, pty, paths, updater
-shared/            RPC schema (types-only, imported by both processes)
+src-tauri/          Main process (Rust, cargo workspace)
+  crates/tide-engine/  Agent engine — the only crate that may depend on rig
+  crates/tide-tools/   Tool implementations
+  crates/tide-store/   rusqlite stores — sessions-v2, config, RAG index
+  crates/tide-rag/     tree-sitter chunking + ONNX embeddings
+  crates/tide-mcp/     MCP server pool (rmcp)
+shared/            RPC schema (types-only, shared with the renderer)
 src/               Renderer — React SPA (components, stores, queries)
   components/      UI (chat, sidebar, panels)
   lib/             Stores, API client, stream logic, prompts
-build/             Build pipeline scripts + vendored native deps
-test/              Centralized test suite (test/app/ + test/core/)
+build/             Build pipeline scripts (version sync, prompt bundling)
+test/              Centralized test suite
 ```
 
 ### File naming
@@ -87,19 +83,20 @@ test/              Centralized test suite (test/app/ + test/core/)
 | `src/components/` and below | kebab-case (`chat-composer.tsx`) |
 | `src/lib/`, `src/hooks/` | kebab-case (`use-chat-stream.ts`) |
 | shadcn/ui primitives | single-word lowercase (`button.tsx`) |
-| `app/core/agent/tools/` | kebab-case, one file per tool |
+| `src-tauri/crates/*/src/` | snake_case modules, one concern per file |
 | System prompt fragments | numbered prefix (`01-identity.md`) |
 
-New files default to **kebab-case**. Match the directory you're in.
+New renderer files default to **kebab-case**; Rust modules are snake_case (the language requires it). Match the directory you're in.
 
 ### Key conventions
 
-- **Renderer never touches the filesystem, shell, or network directly** — all privileged ops go through the typed RPC bridge to the main process.
+- **Renderer never touches the filesystem, shell, or network directly** — all privileged ops go through the Tauri invoke bridge to the Rust process.
 - **One Zustand store** (`src/lib/stores/ui.ts`) for UI state. Don't create parallel stores.
 - **Path aliases**: `@/*` for renderer imports, `@shared/*` for the RPC schema.
-- **`shared/rpc.ts` stays types-only** — importing runtime modules from `app/core` into the schema drags the main-process graph into the renderer typecheck. Extract leaf types if you need them.
+- **`shared/rpc.ts` stays types-only** — runtime imports drag the main-process graph into the renderer typecheck. Extract leaf types if you need them.
+- **Only `tide-engine` may depend on rig** — the churn firewall. Provider quirks (thinking strip, budget carving, output clamps) live in that crate's construction-time layer.
 - **No comments by default** — only document the *why* when non-obvious.
-- **`bun.lock` must be committed** — CI installs with it.
+- **`bun.lock` and `src-tauri/Cargo.lock` are committed** — CI installs with them.
 
 ## Branches & commits
 

@@ -6,7 +6,7 @@
   <a href="https://github.com/code-with-current/tide/releases/latest"><img src="https://img.shields.io/github/package-json/v/code-with-current/tide?style=flat-square&logo=github&label=Release&color=blue" alt="Release" /></a>
   <a href="https://github.com/code-with-current/tide/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/code-with-current/tide/ci.yml?style=flat-square&logo=githubactions&label=Build" alt="Build" /></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.packageManager&style=flat-square&logo=bun&logoColor=white&label=Bun&color=blue" alt="Bun" /></a>
-  <a href="https://framework.blackboard.sh/electrobun/"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.electrobun&style=flat-square&label=Electrobun&color=blue" alt="Electrobun" /></a>
+  <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-2-blue?style=flat-square&logo=tauri&logoColor=white" alt="Tauri" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/code-with-current/tide/master/package.json&query=$.devDependencies.react&style=flat-square&logo=react&logoColor=white&label=React&color=blue" alt="React" /></a>
 </p>
 
