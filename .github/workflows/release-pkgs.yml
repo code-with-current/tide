@@ -1,0 +1,179 @@
+# Publishes package-manager manifests (winget, homebrew tap) after each
+# Release workflow succeeds. Wakes via workflow_run on the "Release"
+# workflow (name: Release in release.yml), which fires on tide/v* tags.
+#
+# Flow: parse the version from the workflow_run tag → render.mjs hashes the
+# release assets and fills the packaging/ templates → platform jobs submit.
+# Each platform job is gated on (a) its manifest actually being rendered
+# (partial releases skip with a notice) and (b) its secret being configured.
+#
+# One-time setup (see packaging/README.md):
+#   winget   — set WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
+#   homebrew — set HOMEBREW_GITHUB_API_TOKEN.
+#
+# NOTE: workflow_run always executes the copy of this file from the repo's
+# default branch, so changes here only take effect once merged there.
+name: Publish package manifests
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pkg-manifests-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    # Only act when the Release workflow that woke us up actually succeeded
+    # and was cutting a release (its only trigger is tide/v* tags, but guard
+    # anyway in case Release ever grows other triggers).
+    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'tide/v') }}
+    name: render · manifests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      winget_version: ${{ steps.meta.outputs.winget_version }}
+      release_url: ${{ steps.meta.outputs.release_url }}
+      homebrew: ${{ steps.meta.outputs.homebrew }}
+      winget: ${{ steps.meta.outputs.winget }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # For tag pushes, workflow_run.head_branch is the tag name
+      # (e.g. "tide/v0.3.0-beta.1") — strip the tide/v prefix.
+      - name: Resolve version from release tag
+        id: ver
+        run: |
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          VERSION="${TAG#tide/v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$'; then
+            echo "tag $TAG does not carry a semver (expected tide/vX.Y.Z)"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Render manifests
+        run: |
+          node packaging/render.mjs \
+            --version "${{ steps.ver.outputs.version }}" \
+            --repo "${{ github.repository }}"
+
+      - name: Expose manifest values to downstream jobs
+        id: meta
+        run: |
+          M=packaging/out/meta.json
+          echo "version=$(jq -r .version "$M")" >> "$GITHUB_OUTPUT"
+          echo "winget_version=$(jq -r .wingetVersion "$M")" >> "$GITHUB_OUTPUT"
+          echo "release_url=https://github.com/${{ github.repository }}/releases/tag/tide/v${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "homebrew=$(jq -r .platforms.homebrew "$M")" >> "$GITHUB_OUTPUT"
+          echo "winget=$(jq -r .platforms.winget "$M")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifests
+          path: packaging/out/
+          retention-days: 7
+
+  winget:
+    # Pushes rendered manifests to code-with-current/winget-pkgs (org fork)
+    # and opens a PR to microsoft/winget-pkgs. Requires WINGET_GITHUB_TOKEN.
+    name: publish · winget
+    needs: render
+    if: ${{ needs.render.outputs.winget == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+    steps:
+      - name: Skip — no WINGET_GITHUB_TOKEN configured
+        if: ${{ env.WINGET_TOKEN == '' }}
+        run: echo "::notice::Set the WINGET_GITHUB_TOKEN secret (PAT scopes public_repo + workflow) to enable winget submission."
+
+      - name: Download rendered manifests
+        if: ${{ env.WINGET_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+
+      - name: Push manifests and open PR
+        if: ${{ env.WINGET_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.render.outputs.winget_version }}"
+          PKG_ID="Tide.Tide"
+          # winget-pkgs stores manifests at manifests/<first-letter>/<Publisher>/<Product>/<Version>/
+          MANIFEST_DIR="manifests/t/Tide/Tide/${VERSION}"
+          BRANCH="${PKG_ID}.${VERSION}"
+          FORK="code-with-current/winget-pkgs"
+          UPSTREAM="microsoft/winget-pkgs"
+
+          # Sparse-clone the fork — only the Tide subtree to keep it fast.
+          git clone --depth=1 --filter=blob:none --sparse \
+            "https://x-access-token:${WINGET_TOKEN}@github.com/${FORK}" winget
+          cd winget
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git sparse-checkout set manifests/t/Tide
+          git checkout -b "$BRANCH"
+
+          # Copy rendered manifests into the version directory.
+          mkdir -p "$MANIFEST_DIR"
+          cp ../manifests/winget/*.yaml "$MANIFEST_DIR/"
+
+          git add -A
+          git commit -m "Add ${PKG_ID} version ${VERSION}" || true
+          git push -u origin "$BRANCH" --force
+
+          # Open PR to microsoft/winget-pkgs from the org fork.
+          gh pr create \
+            --repo "$UPSTREAM" \
+            --head "code-with-current:${BRANCH}" \
+            --base master \
+            --title "${PKG_ID} version ${VERSION}" \
+            --body "Adds ${PKG_ID} version ${VERSION}." || \
+          echo "::notice::PR may already exist for this version."
+
+  homebrew:
+    # Pushes the rendered cask directly to code-with-current/homebrew-tap.
+    # No fork, no PR, no notability requirements — it's our own tap.
+    # Users install via: brew install --cask code-with-current/tap/tide
+    name: publish · homebrew
+    needs: render
+    if: ${{ needs.render.outputs.homebrew == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+    steps:
+      - name: Skip — no HOMEBREW_GITHUB_API_TOKEN configured
+        if: ${{ env.GH_TOKEN == '' }}
+        run: echo "::notice::Set the HOMEBREW_GITHUB_API_TOKEN secret (scopes public_repo + workflow) to enable homebrew tap publishing."
+      - name: Download rendered manifests
+        if: ${{ env.GH_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: manifests
+          path: manifests
+      - name: Push cask to code-with-current/homebrew-tap
+        if: ${{ env.GH_TOKEN != '' }}
+        run: |
+          VERSION="${{ needs.render.outputs.version }}"
+          TAP="code-with-current/homebrew-tap"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TAP}" tap
+          cd tap
+          mkdir -p Casks
+          cp ../manifests/homebrew/tide.rb Casks/tide.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "tide ${VERSION}" || true
+          git push
+          echo "::notice::Updated Casks/tide.rb in ${TAP} to ${VERSION}"

@@ -7,31 +7,26 @@
 # After the cask is merged, subsequent releases are bumped automatically by
 # .github/workflows/release-pkgs.yml (`brew bump-cask-pr`).
 #
-# Markers filled by packaging/render.mjs: VERSION, SHA256_ARM64, SHA256_X64.
+# Markers filled by packaging/render.mjs: VERSION, SHA256_ARM64.
 
 cask "tide" do
   version "@@VERSION@@"
 
-  on_arm do
-    sha256 "@@SHA256_ARM64@@"
+  sha256 "@@SHA256_ARM64@@"
 
-    url "https://github.com/code-with-current/tide/releases/download/v#{version}/Tide-#{version}-arm64.dmg"
-  end
-  on_intel do
-    sha256 "@@SHA256_X64@@"
-
-    url "https://github.com/code-with-current/tide/releases/download/v#{version}/Tide-#{version}-x64.dmg"
-  end
-
+  url "https://github.com/code-with-current/tide/releases/download/tide/v#{version}/Tide-#{version}-arm64.dmg"
   name "Tide"
   desc "Local-first agentic coding companion"
   homepage "https://tide.codes/"
 
+  # mac builds are arm64-only (no x64 dmg is published), so gate the cask
+  # on Apple Silicon instead of an on_intel fallback.
+  depends_on :macos
+  depends_on arch: :arm64
+
   # The .app is ad-hoc signed (no Apple Developer ID), so users see an
   # "unidentified developer" prompt on first launch. homebrew passes
   # --no-quarantine by default for casks, which suppresses Gatekeeper.
-  depends_on :macos
-
   app "Tide.app"
 
   zap trash: [
