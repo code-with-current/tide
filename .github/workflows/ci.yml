@@ -56,6 +56,12 @@ jobs:
       - name: Sync Electrobun devkit
         run: hutch electrobun sync
 
+      # Generates src/lib/prompts/_*-bundle.ts from the markdown sources —
+      # these are gitignored and only exist after this step, but tsc -b
+      # resolves them (and app/core/agent imports their types).
+      - name: Generate prompt bundles
+        run: node build/promptMarkdownUtils.mjs
+
       - name: Lint
         run: ./node_modules/.bin/oxlint
 
