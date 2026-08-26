@@ -3,20 +3,22 @@
 # Why this exists: green main is a P0. Before this workflow the only CI was
 # release.yml, which fires on v* tags — so a broken main could sit for
 # days and only surface at release time. This gates the default branch on the
-# cheap, fast checks (lint, typecheck, unit tests) so a red main is
-# visible immediately, not at the next release.
+# cheap, fast checks so a red main is visible immediately, not at the next
+# release.
 #
-# Toolchain intentionally mirrors release.yml (bun + Hutch) so a push build
-# and a release build can never disagree about the environment. Gates invoke
-# the local node_modules/.bin entries directly (same binaries build/build.js
-# drives) rather than package.json scripts. setup-bun caches ~/.bun keyed on
-# bun.lock automatically.
+# Two jobs:
+#   verify — renderer: bun install → prompt bundles → tsc -b → oxlint → vitest.
+#   rust   — src-tauri workspace: cargo test + clippy -D warnings on the Linux
+#            webkit deps the workspace links against.
 #
-# `hutch electrobun sync` is not optional: app/tsconfig.json extends
-# .hutch/devkit/tsconfig.json, which is gitignored and only exists after
-# sync — without it `tsc -b` can't even load the app project. bun install
-# also runs the root postinstall (build/copy-tree-sitter-grammars.mjs),
-# which vendors the tree-sitter grammars the rag chunker tests load.
+# Toolchain intentionally mirrors release.yml (bun + stable Rust) so a push
+# build and a release build can never disagree about the environment.
+# setup-bun caches ~/.bun keyed on bun.lock automatically; Swatinem/rust-cache
+# keys on src-tauri/Cargo.lock.
+#
+# `node build/promptMarkdownUtils.mjs` is not optional: it generates the
+# gitignored src/lib/prompts/_*-bundle.ts files that `tsc -b` resolves —
+# without them the typecheck can't even load the prompts project.
 name: CI
 
 on:
@@ -41,34 +43,44 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Setup Hutch
-        shell: bash
-        run: |
-          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | bash -s -- --channel production --no-modify-path
-          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
-
       - name: Install
         run: bun install
 
-      # Generates .hutch/devkit (gitignored) — extended by app/tsconfig.json
-      # and the target of the electrobun/electrobun-main/electrobun-view
-      # path mappings the typecheck below resolves against.
-      - name: Sync Electrobun devkit
-        run: hutch electrobun sync
-
       # Generates src/lib/prompts/_*-bundle.ts from the markdown sources —
       # these are gitignored and only exist after this step, but tsc -b
-      # resolves them (and app/core/agent imports their types).
+      # resolves them (and src/lib/prompts/tide-system-prompt.ts imports
+      # their types).
       - name: Generate prompt bundles
         run: node build/promptMarkdownUtils.mjs
 
       - name: Lint
-        run: ./node_modules/.bin/oxlint
+        run: bun run lint
 
-      # Type gate: tsc -b covers the renderer + app projects via tsconfig
+      # Type gate: tsc -b covers the renderer + node projects via tsconfig
       # references. A red build here means main doesn't compile.
       - name: Typecheck
-        run: ./node_modules/.bin/tsc -b
+        run: bunx tsc -b
 
       - name: Test
-        run: ./node_modules/.bin/vitest run
+        run: bun run test
+
+  rust:
+    name: cargo · test + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: install linux webkit deps
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - run: cargo test --workspace
+        working-directory: src-tauri
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: src-tauri

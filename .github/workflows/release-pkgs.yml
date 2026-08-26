@@ -1,3 +1,6 @@
+# Dormant until Tauri-rewrite M5: winget/homebrew manifests must be rewired
+# to tauri-action artifact names/hashes.
+#
 # Publishes package-manager manifests (winget, homebrew tap) after each
 # Release workflow succeeds. Wakes via workflow_run on the "Release"
 # workflow (name: Release in release.yml), which fires on v* tags.
@@ -16,9 +19,7 @@
 name: Publish package manifests
 
 on:
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
+  workflow_dispatch:
 
 permissions:
   contents: read

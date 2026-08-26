@@ -1,24 +1,25 @@
-# Release — cuts Electrobun installers and a GitHub Release when a v* tag
-# is pushed.
+# Release — cuts Tauri installers via tauri-action.
 #
 # How to cut a release:
-#   1. Bump `app.version` in electrobun.config.ts (semver, e.g. 0.3.0-beta.1).
-#   2. git tag v0.3.0 && git push origin v0.3.0
-#   (CI re-applies the tag's version to electrobun.config.ts via
-#   build/build.js --version, so the tag is the authority.)
+#   1. Bump `version` in src-tauri/Cargo.toml ([workspace.package]) and sync
+#      tauri.conf.json (node build/sync-version.mjs — the `preapp:build` hook
+#      does this on `bun run app:build`).
+#   2. git tag v0.4.0 && git push origin v0.4.0
 #
-# Architecture (follows the Electrobun updates guide,
-# framework.blackboard.sh/electrobun/guides/updates/):
-#   - Each `build` matrix leg builds ONE target with build/build.js
-#     (renderer → hutch electrobun build --env=stable → artifact validation)
-#     and uploads artifacts/ as a workflow artifact.
-#   - A single `release` job, gated on every leg succeeding, downloads them
-#     all and creates the GitHub Release in one shot. This is the only step
-#     that talks to the Releases API.
+# M0 scope — artifacts only: no publishing beyond the draft release, no
+# signing, no updater keys (those land with M5). Until then:
+#   - v* tag push    → each matrix leg attaches its installers to ONE draft
+#     GitHub Release (tauri-action finds-or-creates it). Drafts never
+#     disturb the `latest` channel current Electron users poll — publish
+#     manually from the draft once the installers are verified.
+#   - workflow_dispatch → build + upload workflow artifacts only (no release
+#     is created; tauri-action skips release creation when tagName is empty).
 #
-# mac builds are unsigned (Hutch ad-hoc signs launcher binaries as required by
-# Apple Silicon; no Developer ID / notarization yet — add ELECTROBUN_DEVELOPER_ID
-# etc. and mac.codesign/notarize in electrobun.config.ts when that changes).
+# Matrix = five installers across four legs:
+#   macos universal dmg · windows x64 · windows arm64 · ubuntu AppImage+deb.
+# tauri-action runs `tauri build` with beforeBuildCommand (bun run build →
+# prompt bundles → tsc -b → vite) so the frontend is built from the same
+# checkout, no separate renderer job needed.
 name: Release
 
 on:
@@ -32,131 +33,84 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # the release job creates the GitHub Release.
+  contents: write   # tauri-action creates the draft GitHub Release on tags.
 
 jobs:
   build:
-    name: build · ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    name: build · ${{ matrix.os }} ${{ matrix.rust_target }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: macos-arm64
-            runner: macos-14
-          - target: linux-x64
-            runner: ubuntu-24.04
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-          - target: win-x64
-            runner: windows-2025
-
-    permissions:
-      contents: read
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+            rust_target: universal-apple-darwin
+          - os: windows-latest
+            args: ''
+            rust_target: ''
+          - os: windows-latest
+            args: '--target aarch64-pc-windows-msvc'
+            rust_target: aarch64-pc-windows-msvc
+          - os: ubuntu-22.04
+            args: ''
+            rust_target: ''
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Hutch (macOS/Linux)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | bash -s -- --channel production --no-modify-path
-          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
-      - name: Setup Hutch (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          irm https://hutch.blackboard.sh/hutch/install.ps1 -OutFile install-hutch.ps1
-          ./install-hutch.ps1 -Channel production
-          "$HOME\.hutch\bin" >> $env:GITHUB_PATH
+      - name: Add Rust cross-compile target
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
 
-      # WebKitGTK 4.1 + GTK3 + Ayatana AppIndicator + librsvg — the runtime
-      # deps Electrobun's Linux webview layer links against (per the
-      # cross-platform guide). Missing any of these hard-fails at link time.
+      # WebKitGTK 4.1 + GTK3 + Ayatana AppIndicator + librsvg + patchelf
+      # (AppImage) — the libs the Tauri linux webview links against on
+      # 22.04's older base.
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev
+            libayatana-appindicator3-dev librsvg2-dev patchelf
 
-      - name: Install dependencies
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
         run: bun install
 
-      # Generates .hutch/devkit (gitignored) — build/build.js typechecks via
-      # tsc -b first, which hard-fails without the devkit's tsconfig/paths.
-      - name: Sync Electrobun devkit
-        run: hutch electrobun sync
+      # tagName is the release gate: tauri-action only creates/attaches to a
+      # GitHub Release when it is non-empty, so dispatch runs build without
+      # touching Releases at all. Draft (+ prerelease: false) keeps the tag's
+      # installers invisible until a human publishes.
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: src-tauri
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: 'Tide ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
 
-      # GNU tar (Git for Windows) interprets D:\a\... as tar's host:path
-      # remote syntax — "Cannot connect to D: resolve failed". TAR_OPTIONS
-      # is a GNU tar env var that injects --force-local into every
-      # invocation, telling it to treat drive-letter colons literally.
-      # (Windows' System32 bsdtar handles this natively but loses to
-      # Git's tar in PATH on GitHub runners.)
-      - name: Fix tar for Windows drive letters
-        if: runner.os == 'Windows'
-        shell: bash
-        run: echo "TAR_OPTIONS=--force-local" >> "$GITHUB_ENV"
-
-      - name: Derive version from tag
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$'; then
-            echo "tag $GITHUB_REF_NAME does not carry a semver (expected vX.Y.Z)"; exit 1
-          fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
-      # build/build.js runs: renderer build (prompt bundle → tsc -b → vite) →
-      # hutch electrobun build --env=stable → artifact validation. --version
-      # patches electrobun.config.ts in place for the build.
-      - name: Build
-        shell: bash
-        run: node build/build.js --version "$VERSION" --base-url "https://github.com/code-with-current/tide/releases/latest/download/"
-
-      - name: Upload artifacts
+      # Dispatch runs have no release to attach to — surface the bundles as
+      # workflow artifacts instead. Covers both --target layouts
+      # (target/<triple>/release/bundle) and the host default
+      # (target/release/bundle).
+      - name: Upload installers (dispatch only)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.target }}
-          path: artifacts/*
+          name: installers-${{ matrix.os }}-${{ matrix.rust_target || 'host' }}
+          path: src-tauri/target/**/bundle/**
           if-no-files-found: error
-          retention-days: 1
-
-  # ───────────────────────────── Publish ───────────────────────────
-  # Runs only after every build leg succeeds. Attaches the installers
-  # (*.dmg / *.exe / *.AppImage / *.deb depending on target) plus each
-      # target's full-tar update envelope (*.tar.zst) and update metadata
-      # (*-update.json) to one GitHub Release. Published as a prerelease when the
-      # tag carries a semver pre-release segment (any '-' after the patch
-      # version, e.g. v0.3.0-beta.1).
-  release:
-    name: publish · GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          path: assets
-          merge-multiple: true
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: assets/*
-
-      # update host is undecided — full-tar updates work without it, and
-      # *-update.json above is already release-attached. Once a host is
-      # chosen: pass `--base-url <host>` to build/build.js on the build legs
-      # and add a step here (or on the build legs) uploading artifacts/ to
-      # that host (e.g. R2) WITHOUT renaming — clients resolve
-      # <channel>-<os>-<arch>-update.json under the baseUrl.
+          retention-days: 7
