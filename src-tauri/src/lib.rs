@@ -8,6 +8,8 @@ use tauri_plugin_opener::OpenerExt;
 
 use agent::hub::ChatHubCell;
 use agent::mcp::McpPoolCell;
+use commands::scripts::ScriptRegistry;
+use commands::sources::SourcesState;
 use state::AppState;
 use terminal::TerminalCell;
 
@@ -16,6 +18,10 @@ pub fn run() {
     let hub_cell = ChatHubCell::new();
     let mcp_cell = McpPoolCell::new();
     let terminal_cell = TerminalCell::new();
+    // RAG memory-tool seam (M4 T7): the process-wide index backend the
+    // memory tool consults — queries resolve per-workspace against the
+    // rag/ + knowledge/ indexes under the data dir.
+    commands::rag::install_memory_index(app_state.data_dir());
     // Boot-connect the MCP pool (TS app.main initUserServers): user servers
     // come up in the background; turns pick up whatever is connected.
     {
@@ -34,6 +40,8 @@ pub fn run() {
         .manage(hub_cell)
         .manage(mcp_cell)
         .manage(terminal_cell)
+        .manage(SourcesState::new())
+        .manage(std::sync::Arc::new(ScriptRegistry::default()))
         .setup(|app| {
             // models.dev catalog boot init (TS initModelCatalog): load the
             // bundled/cache baseline, refresh in the background when stale.
@@ -196,7 +204,33 @@ pub fn run() {
             commands::git::git_fetch,
             commands::git::git_pull,
             commands::git::git_push,
-            commands::git::git_repo_detect
+            commands::git::git_repo_detect,
+            commands::rag::rag_status,
+            commands::rag::rag_model_exists,
+            commands::rag::rag_download_model,
+            commands::rag::rag_enable_workspace,
+            commands::rag::rag_disable_workspace,
+            commands::rag::rag_init_workspace,
+            commands::sources::sources_list,
+            commands::sources::sources_add,
+            commands::sources::sources_update,
+            commands::sources::sources_remove,
+            commands::sources::sources_set_enabled,
+            commands::sources::sources_reindex,
+            commands::scripts::script_run,
+            commands::scripts::script_stop,
+            commands::scripts::script_lines,
+            commands::scripts::script_ports,
+            commands::extensions::extensions_list,
+            commands::extensions::extensions_set_enabled,
+            commands::extensions::extensions_list_agents,
+            commands::extensions::extensions_list_skills,
+            commands::extensions::project_entries_list,
+            commands::open_in_app::open_in_app_detect,
+            commands::open_in_app::open_in_app_open,
+            commands::chat::chat_update_mode,
+            commands::misc::todos_list,
+            commands::workspaces::file_tree_get
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

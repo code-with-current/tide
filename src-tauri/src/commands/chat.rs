@@ -545,6 +545,26 @@ pub async fn chat_abort(
     Ok(())
 }
 
+/// `chatUpdateMode` — the mid-turn mode switch (TS dispatch
+/// 'agent:updateMode'). Mutates the active turn's mode cell; no-op when
+/// no turn holds the session (the TS dispatch reached nothing either).
+#[tauri::command]
+pub async fn chat_update_mode(
+    state: tauri::State<'_, AppState>,
+    hub_cell: tauri::State<'_, ChatHubCell>,
+    session_id: String,
+    mode: String,
+) -> Result<(), CommandError> {
+    let hub = hub_cell
+        .get(state.data_dir())
+        .await
+        .map_err(|e| CommandError::with_code(e, "DB_OPEN"))?;
+    if let Some(mode) = parse_mode(&mode) {
+        hub.set_turn_mode(&session_id, mode);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn permission_respond(
     state: tauri::State<'_, AppState>,

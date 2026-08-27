@@ -62,7 +62,7 @@ pub(crate) fn spawn_reader<R: Read + Send + 'static>(
 
 /// Signal the whole process group (Unix — the child was spawned with
 /// `process_group(0)`), falling back to the child alone.
-pub(crate) fn kill_process_group(child: &mut Child, sig_kill: bool) {
+pub fn kill_process_group(child: &mut Child, sig_kill: bool) {
     #[cfg(unix)]
     {
         let pid = child.id() as i32;
@@ -187,13 +187,13 @@ fn finish_run(
 }
 
 #[cfg(unix)]
-pub(crate) fn unix_process_group(cmd: &mut Command) {
+pub fn unix_process_group(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;
     cmd.process_group(0);
 }
 
 #[cfg(not(unix))]
-pub(crate) fn unix_process_group(_cmd: &mut Command) {}
+pub fn unix_process_group(_cmd: &mut Command) {}
 
 /// Paths commonly used by version managers and package managers
 /// (TS `EXTRA_PATHS_UNIX`).
@@ -246,7 +246,7 @@ fn captured_shell_env() -> &'static HashMap<String, String> {
 /// The tool subprocess environment: captured login-shell env + PATH
 /// safety-net entries + CI=1 (package managers skip prompts).
 /// Port of the TS `toolEnv()`.
-pub(crate) fn tool_env() -> HashMap<String, String> {
+pub fn tool_env() -> HashMap<String, String> {
     let mut env = captured_shell_env().clone();
     if !cfg!(unix) {
         env.entry("CI".to_string()).or_insert_with(|| "1".into());

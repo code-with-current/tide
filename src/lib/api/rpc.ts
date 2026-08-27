@@ -227,6 +227,18 @@ export function emitMcpEvent(event: McpEvent): void {
   mcpEventsCallback?.(event);
 }
 
+/** Deliver one rag-progress message to the onRagProgress consumer (ChatPush
+ *  `ragProgress` — init + download phases discriminated by msg.kind). */
+export function emitRagProgress(msg: RagProgressMessage): void {
+  ragProgressCallback?.(msg);
+}
+
+/** Deliver one knowledge-sources progress event to the onSourcesProgress
+ *  consumer (ChatPush `sourcesProgress`). */
+export function emitSourcesProgress(event: SourceProgressEvent): void {
+  sourcesProgressCallback?.(event);
+}
+
 /** Register the update-status consumer (the updater store). Same single-slot
  *  shape as the other push channels. */
 export function onUpdateStatus(cb: UpdateStatusCallback): () => void {

@@ -41,7 +41,7 @@ fn embedder_max_tokens(embedder_id: &str) -> Option<u64> {
 /// force `dim` to 384, and clamp `chunkTokens` to the recorded embedder's
 /// max so a workspace flipped between embedders never keeps an
 /// un-embeddable chunk size.
-fn hydrate_rag_config(ws: &mut Value) {
+pub(crate) fn hydrate_rag_config(ws: &mut Value) {
     let Some(obj) = ws.as_object_mut() else {
         return;
     };
@@ -105,6 +105,96 @@ use crate::agent::hub::{ChatHub, ChatHubCell};
 use crate::agent::sink::{iso_ms, unix_ms_now};
 
 use super::worktree;
+
+
+// ── M4 T7: fileTreeGet (right-panel file explorer) ────────────────────────
+
+/// `FileNode` (src/types) — the explorer tree node.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileNodeWire {
+    pub name: String,
+    pub path: String,
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<FileNodeWire>>,
+}
+
+/// Port of `readDirTree` (app/rpc/workspaces.ts @ 91ec558): depth-3 tree,
+/// skipping .git/.DS_Store/node_modules/dist/release.
+pub(crate) fn read_dir_tree(base_path: &Path, relative_path: &str, max_depth: i32) -> Vec<FileNodeWire> {
+    if max_depth < 0 {
+        return vec![];
+    }
+    let full_path = if relative_path.is_empty() {
+        base_path.to_path_buf()
+    } else {
+        base_path.join(relative_path)
+    };
+    let Ok(entries) = std::fs::read_dir(&full_path) else {
+        return vec![];
+    };
+    let mut names: Vec<_> = entries.flatten().collect();
+    names.sort_by_key(|e| e.file_name());
+    let mut nodes = Vec::new();
+    for entry in names {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".git" || name == ".DS_Store" {
+            continue;
+        }
+        if name == "node_modules" || name == "dist" || name == "release" {
+            continue;
+        }
+        let entry_relative = if relative_path.is_empty() {
+            name.clone()
+        } else {
+            format!("{relative_path}/{name}")
+        };
+        let Ok(file_type) = entry.file_type() else { continue };
+        if file_type.is_dir() {
+            nodes.push(FileNodeWire {
+                name,
+                path: entry_relative.clone(),
+                kind: "dir",
+                expanded: Some(max_depth > 1),
+                children: Some(read_dir_tree(base_path, &entry_relative, max_depth - 1)),
+            });
+        } else {
+            nodes.push(FileNodeWire {
+                name,
+                path: entry_relative,
+                kind: "file",
+                expanded: None,
+                children: None,
+            });
+        }
+    }
+    nodes
+}
+
+/// `fileTreeGet` — the workspace's depth-3 file tree (empty for unknown
+/// workspaces or missing roots).
+#[tauri::command]
+pub fn file_tree_get(
+    state: tauri::State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<FileNodeWire>, CommandError> {
+    let path = state.read_config(|cfg| {
+        cfg.workspaces
+            .iter()
+            .find(|ws| ws.id == workspace_id)
+            .map(|ws| worktree::expand_home(&ws.path))
+    })?;
+    let Some(dir_path) = path else {
+        return Ok(vec![]);
+    };
+    let dir = PathBuf::from(&dir_path);
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+    Ok(read_dir_tree(&dir, "", 3))
+}
 
 /// `WorkspaceAddInput` params.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -298,6 +388,7 @@ fn unarchive_workspace(state: &AppState, hub: &Arc<ChatHub>, workspace_id: &str)
 pub async fn workspace_delete(
     state: tauri::State<'_, AppState>,
     hub_cell: tauri::State<'_, ChatHubCell>,
+    scripts: tauri::State<'_, std::sync::Arc<crate::commands::scripts::ScriptRegistry>>,
     workspace_id: String,
 ) -> Result<WorkspaceDeleteResultWire, CommandError> {
     let hub = hub_cell
@@ -305,7 +396,12 @@ pub async fn workspace_delete(
         .await
         .map_err(|e| CommandError::with_code(e, "DB_OPEN"))?;
     match delete_workspace(&state, &hub, &workspace_id) {
-        Ok(()) => Ok(WorkspaceDeleteResultWire { ok: true, error: None }),
+        Ok(()) => {
+            // Kill the workspace's running scripts (TS killWorkspaceScripts
+            // fired on removal).
+            crate::commands::scripts::kill_workspace_scripts(&scripts, &workspace_id);
+            Ok(WorkspaceDeleteResultWire { ok: true, error: None })
+        }
         Err(error) => Ok(WorkspaceDeleteResultWire { ok: false, error: Some(error.message) }),
     }
 }

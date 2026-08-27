@@ -841,6 +841,96 @@ pub fn agent_list() -> Vec<AgentCatalogEntryWire> {
         .collect()
 }
 
+/// `TodoItemWire` — the todosList read shape.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TodoItemWire {
+    pub content: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TodosListResultWire {
+    pub todos: Vec<TodoItemWire>,
+}
+
+/// `todosList` — the in-memory todo state first, falling back to the
+/// persisted side table for sessions not touched this run (TS
+/// getSessionTodos' loadFromStore).
+#[tauri::command]
+pub fn todos_list(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<TodosListResultWire, CommandError> {
+    Ok(TodosListResultWire { todos: todos_of(&state, &session_id) })
+}
+
+fn todos_of(state: &AppState, session_id: &str) -> Vec<TodoItemWire> {
+    let live = tide_tools::TodoState::shared().todos(session_id);
+    if !live.is_empty() {
+        return live.iter().map(todo_wire).collect();
+    }
+    // Persisted fallback: the session_todos side table.
+    let db_path = state.sessions_db_path();
+    if !db_path.is_file() {
+        return vec![];
+    }
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return vec![];
+    };
+    let Ok(raw) = conn.query_row(
+        "SELECT todos FROM session_todos WHERE session_id = ?1",
+        [session_id],
+        |row| row.get::<_, Option<String>>(0),
+    ) else {
+        return vec![];
+    };
+    let Some(raw) = raw else { return vec![] };
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => return vec![],
+    };
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(TodoItemWire {
+                        content: item.get("content")?.as_str()?.to_string(),
+                        status: item.get("status")?.as_str()?.to_string(),
+                        priority: item.get("priority").and_then(|p| p.as_str()).map(str::to_string),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn todo_wire(item: &tide_tools::TodoItem) -> TodoItemWire {
+    // Wire strings are the serde snake_case forms ("in_progress", "high").
+    let status = match item.status {
+        tide_tools::TodoStatus::Pending => "pending",
+        tide_tools::TodoStatus::InProgress => "in_progress",
+        tide_tools::TodoStatus::Completed => "completed",
+        tide_tools::TodoStatus::Cancelled => "cancelled",
+    };
+    let priority = item.priority.as_ref().map(|p| match p {
+        tide_tools::TodoPriority::High => "high",
+        tide_tools::TodoPriority::Medium => "medium",
+        tide_tools::TodoPriority::Low => "low",
+    });
+    TodoItemWire {
+        content: item.content.clone(),
+        status: status.to_string(),
+        priority: priority.map(str::to_string),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

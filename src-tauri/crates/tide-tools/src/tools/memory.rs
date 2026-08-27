@@ -51,14 +51,36 @@ pub struct MemoryHit {
 
 /// The search backend the memory tool consults — the seam tide-rag fills
 /// in (vector + FTS rankings over the workspace index and any registered
-/// knowledge sources visible to the workspace).
+/// knowledge sources visible to the workspace). Methods take the
+/// workspace id because the TS tool routed every store operation through
+/// it — one process-wide backend resolves both halves per workspace.
 pub trait MemoryIndex: std::fmt::Debug + Send + Sync {
     /// Total indexed chunks visible to this workspace.
-    fn total_chunks(&self) -> u64;
+    fn total_chunks(&self, workspace_id: &str) -> u64;
     /// Top-k vector (semantic) ranking for the query.
-    fn vector_hits(&self, query: &str, k: usize) -> Vec<MemoryHit>;
+    fn vector_hits(&self, workspace_id: &str, query: &str, k: usize) -> Vec<MemoryHit>;
     /// Top-k full-text ranking for the query.
-    fn fts_hits(&self, query: &str, k: usize) -> Vec<MemoryHit>;
+    fn fts_hits(&self, workspace_id: &str, query: &str, k: usize) -> Vec<MemoryHit>;
+}
+
+/// Process-wide backend slot (the [`TodoState::shared`] pattern): the
+/// command layer installs the tide-rag-backed index once the RAG domain
+/// comes online; until then queries take the "RAG is not enabled" hint.
+static SHARED_INDEX: std::sync::RwLock<Option<std::sync::Arc<dyn MemoryIndex>>> =
+    std::sync::RwLock::new(None);
+
+/// Install (or clear) the process-wide memory index backend.
+pub fn set_shared_memory_index(index: Option<std::sync::Arc<dyn MemoryIndex>>) {
+    let mut guard = SHARED_INDEX.write().expect("memory index slot poisoned");
+    *guard = index;
+}
+
+/// The installed backend, if any.
+pub fn shared_memory_index() -> Option<std::sync::Arc<dyn MemoryIndex>> {
+    SHARED_INDEX
+        .read()
+        .expect("memory index slot poisoned")
+        .clone()
 }
 
 /// Reciprocal Rank Fusion — zero-parameter merge of two rankings using
@@ -123,7 +145,7 @@ pub(crate) fn run_memory(
         );
     };
 
-    let total = index.total_chunks();
+    let total = index.total_chunks(workspace_id);
     if total == 0 {
         return ToolOutcome::executed(
             "RAG index for this workspace is empty. Re-trigger ingestion from Settings → Memory & RAG → Re-index.",
@@ -132,8 +154,8 @@ pub(crate) fn run_memory(
 
     let k_clamped = k.clamp(1, MAX_K) as usize;
     let fused = rrf_fuse(
-        index.vector_hits(query, k_clamped),
-        index.fts_hits(query, k_clamped),
+        index.vector_hits(workspace_id, query, k_clamped),
+        index.fts_hits(workspace_id, query, k_clamped),
         k_clamped,
     );
 
@@ -221,12 +243,11 @@ impl Tool for MemoryTool {
     ) -> Result<ToolOutcome, ToolError> {
         let query = arg_str(&args, "query");
         let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_K);
-        Ok(run_memory(
-            &query,
-            k,
-            &ctx.workspace_id,
-            self.index.as_deref(),
-        ))
+        // The constructor-bound index wins (tests); production rides the
+        // process-wide slot installed by the RAG command layer.
+        let shared = shared_memory_index();
+        let index = self.index.as_deref().or(shared.as_deref());
+        Ok(run_memory(&query, k, &ctx.workspace_id, index))
     }
 }
 
@@ -243,13 +264,13 @@ mod tests {
     }
 
     impl MemoryIndex for FakeIndex {
-        fn total_chunks(&self) -> u64 {
+        fn total_chunks(&self, _workspace_id: &str) -> u64 {
             self.total
         }
-        fn vector_hits(&self, _query: &str, k: usize) -> Vec<MemoryHit> {
+        fn vector_hits(&self, _workspace_id: &str, _query: &str, k: usize) -> Vec<MemoryHit> {
             self.vector.iter().take(k).cloned().collect()
         }
-        fn fts_hits(&self, _query: &str, k: usize) -> Vec<MemoryHit> {
+        fn fts_hits(&self, _workspace_id: &str, _query: &str, k: usize) -> Vec<MemoryHit> {
             self.fts.iter().take(k).cloned().collect()
         }
     }

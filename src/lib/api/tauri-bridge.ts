@@ -74,12 +74,32 @@
  *  mcpWorkspaceActivated (the pool-rebuild hook on workspace switch). The
  *  mcpEvents status ping joins the chat Channel here too, fanned out
  *  through rpc.ts's emitMcpEvent into the onMcpEvent slot
- *  client.ts's subscribeMcpStatus installs. */
+ *  client.ts's subscribeMcpStatus installs.
+ *
+ *  M4 T7 adds the RAG + knowledge-sources domain (12 methods): the status
+ *  snapshot + model download gate + per-workspace enablement + init
+ *  (ragStatus/ragModelExists/ragDownloadModel/ragEnableWorkspace/
+ *  ragDisableWorkspace/ragInitWorkspace) and the sources CRUD family
+ *  (sourcesList/Add/Update/Remove/SetEnabled/Reindex — sourcesSetEnabled's
+ *  id param rides sourceId since `id` can't be a Rust identifier). The
+ *  ragProgress/sourcesProgress pushes join the chat Channel, fanned out
+ *  through rpc.ts's emitRagProgress/emitSourcesProgress. The scripts
+ *  domain (scriptRun/Stop/Lines/Ports over /bin/sh + port detection) and
+ *  its scriptOutput/scriptExit/scriptPorts pushes, the extensions quartet
+ *  (extensionsList/SetEnabled/ListAgents/ListSkills off config.json's
+ *  disabled set + the .claude/.agent scan), openInAppDetect/Open (the
+ *  external-app surface), chatUpdateMode (mid-turn autonomy switch),
+ *  todosList, projectEntriesList, and fileTreeGet round out the family. */
 import {
   activateRpcClient,
   emitAgentEvent,
   emitMcpEvent,
   emitOrchestratorEvents,
+  emitRagProgress,
+  emitScriptExit,
+  emitScriptOutput,
+  emitScriptPorts,
+  emitSourcesProgress,
   emitTerminalExit,
   emitTerminalOutput,
   emitTerminalPorts,
@@ -89,12 +109,16 @@ import {
 import type { AgentEvent } from '@/lib/agent/events';
 import type {
   AgentCatalogEntry,
+  AgentExtensionEntry,
   AgentSettingsWire,
   ArchivedSessionHeader,
   ChatSendResult,
   DiagnosticsInfo,
   EnvInfo,
+  ExternalApp,
   ExternalFileContent,
+  ExtensionsDisabledSet,
+  FileNode,
   FlushBatch,
   GeneralSettingsWire,
   GitAheadBehindResult,
@@ -124,19 +148,34 @@ import type {
   ProviderDetectResult,
   ProviderProbeResult,
   ProviderTestResult,
+  ProjectEntriesResult,
   ProviderUsageReportWire,
   ProviderUsageWindowsResult,
+  ScriptOutputEvent,
+  ScriptExitEvent,
+  ScriptPortsEvent,
+  ScriptRunResult,
+  ScriptTerminalLine,
   SessionHeader,
   SessionMessageV2,
   SessionMetaV2,
   SessionWorktree,
   ShellOpResult,
+  SkillExtensionEntry,
+  SourcesAddResult,
+  SourcesListResult,
+  SourcesOpResult,
+  SourceProgressEvent,
+  ScriptPort,
   TerminalPort,
   TerminalScrollbackResult,
+  TodoItemWire,
   TodosUpdatedEvent,
   Workspace,
   WorkspaceFileReadResult,
 } from '@shared/rpc';
+import type { RagProgressMessage } from '@shared/rpc';
+import type { RagInitResult, RagStatus, RagWorkspaceOpResult } from '@/types';
 import type { DiffHunk } from '@/types';
 
 /** Must match BRIDGE_PROTOCOL in src-tauri/src/commands/bridge.rs. */
@@ -293,6 +332,32 @@ type BridgeMethods = Pick<
   | 'mcpReadRaw'
   | 'mcpWriteRaw'
   | 'mcpWorkspaceActivated'
+  | 'ragStatus'
+  | 'ragModelExists'
+  | 'ragDownloadModel'
+  | 'ragEnableWorkspace'
+  | 'ragDisableWorkspace'
+  | 'ragInitWorkspace'
+  | 'sourcesList'
+  | 'sourcesAdd'
+  | 'sourcesUpdate'
+  | 'sourcesRemove'
+  | 'sourcesSetEnabled'
+  | 'sourcesReindex'
+  | 'scriptRun'
+  | 'scriptStop'
+  | 'scriptLines'
+  | 'scriptPorts'
+  | 'extensionsList'
+  | 'extensionsSetEnabled'
+  | 'extensionsListAgents'
+  | 'extensionsListSkills'
+  | 'openInAppDetect'
+  | 'openInAppOpen'
+  | 'chatUpdateMode'
+  | 'todosList'
+  | 'projectEntriesList'
+  | 'fileTreeGet'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
@@ -314,7 +379,12 @@ type ChatPush =
     }
   | { channel: 'terminalExit'; terminalId: string; code: number | null }
   | { channel: 'terminalPorts'; terminalId: string; ports: TerminalPort[] }
-  | { channel: 'mcpEvents'; event: McpEvent };
+  | { channel: 'mcpEvents'; event: McpEvent }
+  | { channel: 'ragProgress'; message: RagProgressMessage }
+  | { channel: 'sourcesProgress'; event: SourceProgressEvent }
+  | { channel: 'scriptOutput'; event: ScriptOutputEvent }
+  | { channel: 'scriptExit'; event: ScriptExitEvent }
+  | { channel: 'scriptPorts'; event: ScriptPortsEvent };
 
 /** Params pass through verbatim: Tauri v2 maps camelCase JSON keys onto the
  *  snake_case Rust command params (workspacePath → workspace_path), which is
@@ -504,6 +574,45 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     mcpReadRaw: (params) => invoke<McpRawConfigResult>('mcp_read_raw', params),
     mcpWriteRaw: (params) => invoke<McpOpResult>('mcp_write_raw', params),
     mcpWorkspaceActivated: (params) => invoke<{ ok: boolean }>('mcp_workspace_activated', params),
+    // RAG domain (M4 T7) — ragStatus returns the RagStatus | {error} union.
+    ragStatus: (params) => invoke<RagStatus | { error: string }>('rag_status', params),
+    ragModelExists: (params) => invoke<boolean>('rag_model_exists', params),
+    ragDownloadModel: (params) => invoke<RagWorkspaceOpResult>('rag_download_model', params),
+    ragEnableWorkspace: (params) => invoke<RagWorkspaceOpResult>('rag_enable_workspace', params),
+    ragDisableWorkspace: (params) => invoke<RagWorkspaceOpResult>('rag_disable_workspace', params),
+    ragInitWorkspace: (params) => invoke<RagInitResult>('rag_init_workspace', params),
+    // Knowledge sources — `id` remaps onto sourceId (reserved word in the
+    // Rust param list, same remap class as T1's permissionRequest).
+    sourcesList: (params) => invoke<SourcesListResult>('sources_list', passthroughArgs(params)),
+    sourcesAdd: (params) => invoke<SourcesAddResult>('sources_add', params),
+    sourcesUpdate: (params) => invoke<SourcesOpResult>('sources_update', passthroughArgs(params)),
+    sourcesRemove: (params) => invoke<SourcesOpResult>('sources_remove', { sourceId: params.id }),
+    sourcesSetEnabled: (params) =>
+      invoke<SourcesOpResult>('sources_set_enabled', {
+        sourceId: params.id,
+        workspaceId: params.workspaceId,
+        enabled: params.enabled,
+      }),
+    sourcesReindex: (params) => invoke<SourcesOpResult>('sources_reindex', { sourceId: params.id }),
+    // Workspace scripts.
+    scriptRun: (params) => invoke<ScriptRunResult>('script_run', params),
+    scriptStop: (params) => invoke<{ ok: boolean; reason?: string }>('script_stop', params),
+    scriptLines: (params) => invoke<{ lines: ScriptTerminalLine[] }>('script_lines', params),
+    scriptPorts: (params) => invoke<{ ports: ScriptPort[] }>('script_ports', params),
+    // Extensions + project catalog.
+    extensionsList: (params) => invoke<ExtensionsDisabledSet>('extensions_list', params),
+    extensionsSetEnabled: (params) => invoke('extensions_set_enabled', params),
+    extensionsListAgents: (params) => invoke<AgentExtensionEntry[]>('extensions_list_agents', params),
+    extensionsListSkills: (params) => invoke<SkillExtensionEntry[]>('extensions_list_skills', params),
+    projectEntriesList: (params) => invoke<ProjectEntriesResult>('project_entries_list', params),
+    // Open-in-app surface.
+    openInAppDetect: (params) => invoke<ExternalApp[]>('open_in_app_detect', params),
+    openInAppOpen: (params) =>
+      invoke<{ ok: boolean; error?: string }>('open_in_app_open', passthroughArgs(params)),
+    // Mid-turn autonomy switch + todos read + file explorer tree.
+    chatUpdateMode: (params) => invoke('chat_update_mode', params),
+    todosList: (params) => invoke<{ todos: TodoItemWire[] }>('todos_list', params),
+    fileTreeGet: (params) => invoke<FileNode[]>('file_tree_get', params),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {
@@ -534,6 +643,11 @@ async function attachChatChannel(invoke: InvokeFn, Channel: ChannelCtor): Promis
     else if (push.channel === 'terminalPorts')
       emitTerminalPorts({ terminalId: push.terminalId, ports: push.ports });
     else if (push.channel === 'mcpEvents') emitMcpEvent(push.event);
+    else if (push.channel === 'ragProgress') emitRagProgress(push.message);
+    else if (push.channel === 'sourcesProgress') emitSourcesProgress(push.event);
+    else if (push.channel === 'scriptOutput') emitScriptOutput(push.event);
+    else if (push.channel === 'scriptExit') emitScriptExit(push.event);
+    else if (push.channel === 'scriptPorts') emitScriptPorts(push.event);
     else console.warn('[tide] unknown ChatPush channel tag — dropped:', push);
   };
   await invoke('chat_attach_channel', { channel });

@@ -185,8 +185,8 @@ describe("installTauriBridge", () => {
     await installBridge();
 
     const bridge = installedBridge();
-    // ragStatus is T7 — still unported, unlike mcpScan (ported in T6).
-    const pending = bridge.request.ragStatus({ workspaceId: "ws_1" });
+    // updaterStatus is T8 — still unported, unlike ragStatus (ported in T7).
+    const pending = bridge.request.updaterStatus({});
     expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow(/not ported/);
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -1270,5 +1270,304 @@ describe("MCP panel routing (M4 T6)", () => {
     unsubscribe();
     channel().onmessage?.({ channel: "mcpEvents", event: { kind: "statusChanged" } });
     expect(events).toEqual([{ kind: "statusChanged" }]);
+  });
+});
+
+describe("RAG + sources routing (M4 T7)", () => {
+  function channel(): FakeChannel {
+    const channels = globals().__tideChannels as FakeChannel[];
+    expect(channels.length).toBe(1);
+    return channels[0];
+  }
+
+  it("routes the rag family with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const status = {
+      embedderId: "local-code-512",
+      dim: 384,
+      enabledWorkspaces: ["ws_1"],
+      cloudAllowed: false,
+      chunkTokens: 384,
+      localAvailable: true,
+      cloudConfigured: false,
+      chunkCount: 1204,
+      initState: "done",
+      lastIngestedAt: 1724000000000,
+      state: "ok",
+    };
+    invoke.mockResolvedValueOnce(status);
+    expect(await bridge.request.ragStatus({ workspaceId: "ws_1" })).toEqual(status);
+    expect(invoke).toHaveBeenLastCalledWith("rag_status", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce(true);
+    expect(await bridge.request.ragModelExists({})).toBe(true);
+    expect(invoke).toHaveBeenLastCalledWith("rag_model_exists", {});
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.ragDownloadModel({})).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("rag_download_model", {});
+
+    await bridge.request.ragEnableWorkspace({ workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("rag_enable_workspace", { workspaceId: "ws_1" });
+    await bridge.request.ragDisableWorkspace({ workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("rag_disable_workspace", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce({ ok: true, startedAt: 1724000000001 });
+    expect(await bridge.request.ragInitWorkspace({ workspaceId: "ws_1" })).toEqual({
+      ok: true,
+      startedAt: 1724000000001,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("rag_init_workspace", { workspaceId: "ws_1" });
+  });
+
+  it("routes the sources CRUD family, remapping id onto sourceId", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const list = {
+      sources: [
+        {
+          id: "src_1",
+          name: "React Docs",
+          kind: "url",
+          location: "https://react.dev/learn",
+          createdAt: 1724000000000,
+          lastIndexedAt: null,
+          status: "idle",
+          error: null,
+          chunkCount: 8,
+          embedderId: "local-code-512",
+          enabledWorkspaceIds: ["*"],
+        },
+      ],
+      enabledSourceIds: ["src_1"],
+    };
+    invoke.mockResolvedValueOnce(list);
+    expect(await bridge.request.sourcesList({ workspaceId: "ws_1" })).toEqual(list);
+    expect(invoke).toHaveBeenLastCalledWith("sources_list", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce({ ok: true, id: "src_2" });
+    expect(
+      await bridge.request.sourcesAdd({
+        name: "Guide",
+        kind: "docs",
+        location: "/docs",
+        enabledWorkspaceIds: ["ws_1"],
+      }),
+    ).toEqual({ ok: true, id: "src_2" });
+    expect(invoke).toHaveBeenLastCalledWith("sources_add", {
+      name: "Guide",
+      kind: "docs",
+      location: "/docs",
+      enabledWorkspaceIds: ["ws_1"],
+    });
+
+    const patch = { name: "Renamed", location: "/docs2" };
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.sourcesUpdate({ id: "src_2", patch })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("sources_update", { id: "src_2", patch });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.sourcesRemove({ id: "src_2" })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("sources_remove", { sourceId: "src_2" });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(
+      await bridge.request.sourcesSetEnabled({ id: "src_2", workspaceId: "ws_1", enabled: false }),
+    ).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("sources_set_enabled", {
+      sourceId: "src_2",
+      workspaceId: "ws_1",
+      enabled: false,
+    });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.sourcesReindex({ id: "src_2" })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("sources_reindex", { sourceId: "src_2" });
+  });
+
+  it("delivers ragProgress and sourcesProgress pushes to their seams", async () => {
+    await installBridge();
+    const rpcModule = await import("@/lib/api/rpc");
+
+    const ragMessages: unknown[] = [];
+    const sourceEvents: unknown[] = [];
+    const offRag = rpcModule.onRagProgress((msg) => ragMessages.push(msg));
+    const offSources = rpcModule.onSourcesProgress((event) => sourceEvents.push(event));
+
+    channel().onmessage?.({
+      channel: "ragProgress",
+      message: {
+        kind: "init",
+        event: {
+          workspaceId: "ws_1",
+          phase: "embedding",
+          filesSeen: 12,
+          chunksTotal: 40,
+          chunksEmbedded: 32,
+        },
+      },
+    });
+    channel().onmessage?.({
+      channel: "ragProgress",
+      message: { kind: "download", event: { received: 1024, total: 22862151, phase: "downloading" } },
+    });
+    expect(ragMessages).toEqual([
+      {
+        kind: "init",
+        event: { workspaceId: "ws_1", phase: "embedding", filesSeen: 12, chunksTotal: 40, chunksEmbedded: 32 },
+      },
+      { kind: "download", event: { received: 1024, total: 22862151, phase: "downloading" } },
+    ]);
+
+    channel().onmessage?.({
+      channel: "sourcesProgress",
+      event: { sourceId: "src_1", phase: "fetching", pagesSeen: 2, current: "https://react.dev" },
+    });
+    expect(sourceEvents).toEqual([
+      { sourceId: "src_1", phase: "fetching", pagesSeen: 2, current: "https://react.dev" },
+    ]);
+
+    offRag();
+    offSources();
+  });
+});
+
+describe("scripts + extensions + open-in-app + misc routing (M4 T7)", () => {
+  function channel(): FakeChannel {
+    const channels = globals().__tideChannels as FakeChannel[];
+    expect(channels.length).toBe(1);
+    return channels[0];
+  }
+
+  it("routes the script family with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ ok: true, pid: 4242 });
+    expect(await bridge.request.scriptRun({ workspaceId: "ws_1", command: "npm run dev" })).toEqual({
+      ok: true,
+      pid: 4242,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("script_run", { workspaceId: "ws_1", command: "npm run dev" });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.scriptStop({ workspaceId: "ws_1", command: "npm run dev" })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("script_stop", { workspaceId: "ws_1", command: "npm run dev" });
+
+    const lines = [{ prompt: true, cwd: "/repo", cmd: "npm run dev" }, { text: "ready" }];
+    invoke.mockResolvedValueOnce({ lines });
+    expect(await bridge.request.scriptLines({ workspaceId: "ws_1" })).toEqual({ lines });
+    expect(invoke).toHaveBeenLastCalledWith("script_lines", { workspaceId: "ws_1" });
+
+    const ports = [{ port: 5173, label: "npm run dev", url: "http://localhost:5173" }];
+    invoke.mockResolvedValueOnce({ ports });
+    expect(await bridge.request.scriptPorts({ workspaceId: "ws_1" })).toEqual({ ports });
+    expect(invoke).toHaveBeenLastCalledWith("script_ports", { workspaceId: "ws_1" });
+  });
+
+  it("delivers scriptOutput/scriptExit/scriptPorts pushes to the setScript*Callback seams", async () => {
+    await installBridge();
+    const rpcModule = await import("@/lib/api/rpc");
+
+    const outputs: unknown[] = [];
+    const exits: unknown[] = [];
+    const ports: unknown[] = [];
+    rpcModule.setScriptOutputCallback((event) => outputs.push(event));
+    rpcModule.setScriptExitCallback((event) => exits.push(event));
+    rpcModule.setScriptPortsCallback((event) => ports.push(event));
+
+    channel().onmessage?.({
+      channel: "scriptOutput",
+      event: { workspaceId: "ws_1", command: "npm run dev", stream: "stdout", line: "ready" },
+    });
+    channel().onmessage?.({
+      channel: "scriptExit",
+      event: { workspaceId: "ws_1", command: "npm run dev", code: 0 },
+    });
+    channel().onmessage?.({
+      channel: "scriptPorts",
+      event: { workspaceId: "ws_1", ports: [{ port: 5173, label: "npm run dev", url: "http://localhost:5173" }] },
+    });
+    expect(outputs).toEqual([{ workspaceId: "ws_1", command: "npm run dev", stream: "stdout", line: "ready" }]);
+    expect(exits).toEqual([{ workspaceId: "ws_1", command: "npm run dev", code: 0 }]);
+    expect(ports).toEqual([
+      { workspaceId: "ws_1", ports: [{ port: 5173, label: "npm run dev", url: "http://localhost:5173" }] },
+    ]);
+
+    rpcModule.setScriptOutputCallback(null);
+    rpcModule.setScriptExitCallback(null);
+    rpcModule.setScriptPortsCallback(null);
+  });
+
+  it("routes the extensions quartet and project entries", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const disabled = { agents: ["explore"], skills: [] };
+    invoke.mockResolvedValueOnce(disabled);
+    expect(await bridge.request.extensionsList({})).toEqual(disabled);
+    expect(invoke).toHaveBeenLastCalledWith("extensions_list", {});
+
+    await bridge.request.extensionsSetEnabled({ domain: "agents", name: "explore", enabled: true });
+    expect(invoke).toHaveBeenLastCalledWith("extensions_set_enabled", {
+      domain: "agents",
+      name: "explore",
+      enabled: true,
+    });
+
+    const agents = [
+      { name: "explore", description: "d", whenToUse: "w", source: "builtin", enabled: false },
+      { name: "custom", description: "c", whenToUse: "", source: "project", path: "/p/a.md", enabled: true },
+    ];
+    invoke.mockResolvedValueOnce(agents);
+    expect(await bridge.request.extensionsListAgents({ workspaceRoot: "/repo" })).toEqual(agents);
+    expect(invoke).toHaveBeenLastCalledWith("extensions_list_agents", { workspaceRoot: "/repo" });
+
+    const skills = [
+      { name: "pdf", description: "d", source: "project", path: ".claude/skills/pdf/SKILL.md", absPath: "/repo/.claude/skills/pdf/SKILL.md", enabled: true },
+    ];
+    invoke.mockResolvedValueOnce(skills);
+    expect(await bridge.request.extensionsListSkills({ workspaceRoot: "/repo" })).toEqual(skills);
+    expect(invoke).toHaveBeenLastCalledWith("extensions_list_skills", { workspaceRoot: "/repo" });
+
+    const entries = { contextFiles: [], skills: [], agents: [] };
+    invoke.mockResolvedValueOnce(entries);
+    expect(await bridge.request.projectEntriesList({ workspaceId: "ws_1" })).toEqual(entries);
+    expect(invoke).toHaveBeenLastCalledWith("project_entries_list", { workspaceId: "ws_1" });
+  });
+
+  it("routes open-in-app, chatUpdateMode, todosList, and fileTreeGet", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const apps = [
+      { id: "finder", label: "Finder", available: true, iconDataUrl: null },
+      { id: "terminal", label: "Terminal", available: true, iconDataUrl: null },
+      { id: "vscode", label: "VSCode", available: true, iconDataUrl: null },
+      { id: "zed", label: "Zed", available: false, iconDataUrl: null },
+    ];
+    invoke.mockResolvedValueOnce(apps);
+    expect(await bridge.request.openInAppDetect({})).toEqual(apps);
+    expect(invoke).toHaveBeenLastCalledWith("open_in_app_detect", {});
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.openInAppOpen({ target: "vscode", sessionId: "s_1" })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("open_in_app_open", { target: "vscode", sessionId: "s_1" });
+
+    await bridge.request.chatUpdateMode({ sessionId: "s_1", mode: "edit" });
+    expect(invoke).toHaveBeenLastCalledWith("chat_update_mode", { sessionId: "s_1", mode: "edit" });
+
+    const todos = [{ content: "Ship it", status: "in_progress", priority: "high" }];
+    invoke.mockResolvedValueOnce({ todos });
+    expect(await bridge.request.todosList({ sessionId: "s_1" })).toEqual({ todos });
+    expect(invoke).toHaveBeenLastCalledWith("todos_list", { sessionId: "s_1" });
+
+    const tree = [{ name: "src", path: "src", kind: "dir", expanded: true, children: [] }];
+    invoke.mockResolvedValueOnce(tree);
+    expect(await bridge.request.fileTreeGet({ workspaceId: "ws_1" })).toEqual(tree);
+    expect(invoke).toHaveBeenLastCalledWith("file_tree_get", { workspaceId: "ws_1" });
   });
 });

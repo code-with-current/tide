@@ -292,6 +292,100 @@ pub enum ChatPush {
     /// just `{ kind: 'statusChanged' }`, the panel re-fetches via `mcpList`.
     #[serde(rename = "mcpEvents")]
     McpStatus { event: McpStatusEvent },
+    /// RAG domain pushes (M4 T7): one message carrying both TS progress
+    /// channels (init + download), discriminated by `kind`.
+    #[serde(rename = "ragProgress")]
+    RagProgress { message: RagProgressMessage },
+    /// Knowledge-sources ingestion progress (M4 T7).
+    #[serde(rename = "sourcesProgress")]
+    SourcesProgress { event: tide_rag::SourceProgressEvent },
+    /// Workspace-scripts pushes (M4 T7) — streamed output lines, exit, and
+    /// detected dev-server ports (payload = the old tide:script:* shapes).
+    #[serde(rename = "scriptOutput")]
+    ScriptOutput { event: ScriptOutputEvent },
+    #[serde(rename = "scriptExit")]
+    ScriptExit { event: ScriptExitEvent },
+    #[serde(rename = "scriptPorts")]
+    ScriptPorts { event: ScriptPortsEvent },
+}
+
+/// `RagProgressMessage` (shared/rpc.ts) — the discriminated wrapper for
+/// the two Electron progress channels.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
+pub enum RagProgressMessage {
+    #[serde(rename = "init")]
+    Init {
+        event: RagInitProgressEvent,
+    },
+    #[serde(rename = "download")]
+    Download {
+        event: RagDownloadProgressEvent,
+    },
+}
+
+/// `RagInitProgressEvent` (src/types).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RagInitProgressEvent {
+    pub workspace_id: String,
+    /// walking | chunking | embedding | done | failed
+    pub phase: String,
+    pub files_seen: u64,
+    pub chunks_total: u64,
+    pub chunks_embedded: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `RagDownloadProgressEvent` (src/types).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RagDownloadProgressEvent {
+    pub received: u64,
+    pub total: u64,
+    /// downloading | done | failed
+    pub phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `ScriptOutputEvent` (shared/rpc.ts).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptOutputEvent {
+    pub workspace_id: String,
+    pub command: String,
+    /// stdout | stderr | info
+    pub stream: String,
+    pub line: String,
+}
+
+/// `ScriptExitEvent`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptExitEvent {
+    pub workspace_id: String,
+    pub command: String,
+    pub code: Option<i32>,
+}
+
+/// `ScriptPortsEvent` (flat `ports` array of the `ScriptPort` shape).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptPortsEvent {
+    pub workspace_id: String,
+    pub ports: Vec<ScriptPort>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptPort {
+    pub port: u16,
+    pub label: String,
+    pub url: String,
 }
 
 /// The `McpEvent` wire shape (`shared/rpc.ts`) — a discriminated `kind` so
@@ -497,6 +591,89 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn rag_and_script_pushes_match_the_rpc_payload_shapes() {
+        let init = ChatPush::RagProgress {
+            message: RagProgressMessage::Init {
+                event: RagInitProgressEvent {
+                    workspace_id: "ws_1".into(),
+                    phase: "embedding".into(),
+                    files_seen: 12,
+                    chunks_total: 40,
+                    chunks_embedded: 32,
+                    current_file: Some("/repo/a.ts".into()),
+                    error: None,
+                },
+            },
+        };
+        let wire = serde_json::to_value(&init).unwrap();
+        assert_eq!(wire["channel"], serde_json::json!("ragProgress"));
+        assert_eq!(wire["message"]["kind"], serde_json::json!("init"));
+        assert_eq!(wire["message"]["event"]["workspaceId"], serde_json::json!("ws_1"));
+        assert_eq!(wire["message"]["event"]["chunksEmbedded"], serde_json::json!(32));
+        assert!(wire["message"]["event"].get("error").is_none());
+
+        let download = ChatPush::RagProgress {
+            message: RagProgressMessage::Download {
+                event: RagDownloadProgressEvent {
+                    received: 0,
+                    total: 0,
+                    phase: "done".into(),
+                    error: None,
+                },
+            },
+        };
+        let wire = serde_json::to_value(&download).unwrap();
+        assert_eq!(wire["message"]["kind"], serde_json::json!("download"));
+        assert_eq!(wire["message"]["event"]["phase"], serde_json::json!("done"));
+
+        let output = ChatPush::ScriptOutput {
+            event: ScriptOutputEvent {
+                workspace_id: "ws_1".into(),
+                command: "npm run dev".into(),
+                stream: "stdout".into(),
+                line: "ready".into(),
+            },
+        };
+        let wire = serde_json::to_value(&output).unwrap();
+        assert_eq!(wire["channel"], serde_json::json!("scriptOutput"));
+        assert_eq!(wire["event"]["workspaceId"], serde_json::json!("ws_1"));
+        assert_eq!(wire["event"]["stream"], serde_json::json!("stdout"));
+
+        let ports = ChatPush::ScriptPorts {
+            event: ScriptPortsEvent {
+                workspace_id: "ws_1".into(),
+                ports: vec![ScriptPort {
+                    port: 5173,
+                    label: "npm run dev".into(),
+                    url: "http://localhost:5173".into(),
+                }],
+            },
+        };
+        let wire = serde_json::to_value(&ports).unwrap();
+        assert_eq!(
+            wire["event"]["ports"][0],
+            serde_json::json!({ "port": 5173, "label": "npm run dev", "url": "http://localhost:5173" })
+        );
+
+        let sources = ChatPush::SourcesProgress {
+            event: tide_rag::SourceProgressEvent {
+                source_id: "src_1".into(),
+                phase: "fetching".into(),
+                pages_seen: Some(2),
+                chunks_total: None,
+                chunks_embedded: None,
+                current: Some("https://react.dev".into()),
+                error: None,
+            },
+        };
+        let wire = serde_json::to_value(&sources).unwrap();
+        assert_eq!(wire["channel"], serde_json::json!("sourcesProgress"));
+        assert_eq!(wire["event"]["sourceId"], serde_json::json!("src_1"));
+        assert_eq!(wire["event"]["pagesSeen"], serde_json::json!(2));
+        assert!(wire["event"].get("chunksTotal").is_none());
     }
 
     #[test]

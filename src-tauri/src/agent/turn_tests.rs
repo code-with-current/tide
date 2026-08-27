@@ -356,6 +356,11 @@ impl Fixture {
                 Ok(Ok(ChatPush::TerminalExit { .. })) => continue,
                 Ok(Ok(ChatPush::TerminalPorts { .. })) => continue,
                 Ok(Ok(ChatPush::McpStatus { .. })) => continue,
+                Ok(Ok(ChatPush::RagProgress { .. })) => continue,
+                Ok(Ok(ChatPush::SourcesProgress { .. })) => continue,
+                Ok(Ok(ChatPush::ScriptOutput { .. })) => continue,
+                Ok(Ok(ChatPush::ScriptExit { .. })) => continue,
+                Ok(Ok(ChatPush::ScriptPorts { .. })) => continue,
                 Ok(Err(e)) => panic!("broadcast ended: {e}"),
                 Err(_) => panic!("timed out waiting for an agent event"),
             }

@@ -47,7 +47,7 @@ pub use tools::ask_followup::{
 pub use tools::compact::{run_compact, DEFAULT_KEEP_LAST};
 pub use tools::exit_plan_mode::run_exit_plan_mode;
 pub use tools::load_skill::{build_skill_catalog_md, builtin_skills, SkillSummary};
-pub use tools::memory::{MemoryHit, rrf_fuse};
+pub use tools::memory::{MemoryHit, rrf_fuse, set_shared_memory_index, shared_memory_index};
 pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`

@@ -31,16 +31,18 @@ tide-store = { path = "crates/tide-store" }
 tide-engine = { path = "crates/tide-engine" }
 tide-tools = { path = "crates/tide-tools" }
 tide-mcp = { path = "crates/tide-mcp" }
+tide-rag = { path = "crates/tide-rag" }
 futures = "0.3"
 tokio = { version = "1", features = ["sync", "time", "macros", "rt", "process"] }
 reqwest = { version = "0.13", features = ["json"] }
 base64 = "0.22"
 git2 = { version = "0.21", features = ["https"] }
 portable-pty = "0.9"
+regex = "1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
-rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3"

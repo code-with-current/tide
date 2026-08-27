@@ -33,8 +33,30 @@ pub struct Config {
     pub mcp_servers: Option<Map<String, Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rag_enabled_workspaces: Option<Vec<String>>,
+    /// Disabled extensions (agents/skills/mcp allowlist of what's OFF).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<ExtensionsConfig>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// `config.extensions` (TS shape: `{ disabled: { agents, skills, mcp } }`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionsConfig {
+    #[serde(default)]
+    pub disabled: ExtensionsDisabled,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionsDisabled {
+    #[serde(default)]
+    pub agents: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub mcp: Vec<String>,
 }
 
 impl Config {
