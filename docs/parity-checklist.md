@@ -2,6 +2,11 @@
 
 Every row below must be checked off by **dogfooding the behavior in the rewritten app**, not by code presence. A row counts only when the behavior was exercised end-to-end in the Tauri build. Reference material: the TS backend under `app/` (removed after export) and the frozen fixtures in `src-tauri/crates/tide-engine/fixtures/` (`schemas/tools.json`, `schemas/mcp-config.json`, `schemas/sse/`).
 
+
+<!-- M3 code-complete 2026-08-27 (feat/tauri-rewrite through 1358f31): all 26 tools implemented +
+MCP pool (rmcp) + subagents + auto-compact + followup/exit-plan. Rows below remain UNTICKED until
+dogfooded per the gate rule; this note records implementation coverage only. -->
+
 ## Tools
 
 All 26 registered tools (see `fixtures/schemas/tools.json` for name/description/JSON Schema, both legacy wire format and live zod-converted SDK schema):
