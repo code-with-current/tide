@@ -7,7 +7,8 @@
 //! panic when called from inside any tokio context, and the orchestrator
 //! invokes tools on `spawn_blocking` threads, which carry the runtime
 //! context. Owning the runtime on a plain thread sidesteps the guard
-//! entirely. Shared by `git_repo`'s REST fast path and (M3 T4) web_fetch.
+//! entirely. Shared by `git_repo`'s REST fast path and (M3 T4) web_fetch
+//! + web_search.
 
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
@@ -31,6 +32,9 @@ impl std::fmt::Display for HttpError {
 #[derive(Debug, Clone)]
 pub(crate) struct HttpReply {
     pub status: u16,
+    /// Response `Content-Type` header, `""` when absent — web_fetch's
+    /// HTML-detection branch keys off it.
+    pub content_type: String,
     pub body: String,
 }
 
@@ -83,8 +87,18 @@ async fn fetch(client: &reqwest::Client, job: &Job) -> Result<HttpReply, HttpErr
     }
     let resp = req.send().await.map_err(map_reqwest_err)?;
     let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let body = resp.text().await.map_err(map_reqwest_err)?;
-    Ok(HttpReply { status, body })
+    Ok(HttpReply {
+        status,
+        content_type,
+        body,
+    })
 }
 
 fn map_reqwest_err(e: reqwest::Error) -> HttpError {

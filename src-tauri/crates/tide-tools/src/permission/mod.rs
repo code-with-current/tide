@@ -115,8 +115,8 @@ pub enum Decision {
 pub fn risk_tier_for(tool_name: &str) -> RiskTier {
     match tool_name {
         "read_file" | "grep" | "glob" | "list_dir" | "directory_tree" | "read_media_file"
-        | "bash_output" | "git_repo" | "todo_write" | "slash_command" | "memory" | "init"
-        | "load_skill" => RiskTier::ReadOnly,
+        | "bash_output" | "git_repo" | "web_fetch" | "web_search" | "todo_write"
+        | "slash_command" | "memory" | "init" | "load_skill" => RiskTier::ReadOnly,
         "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell" => {
             RiskTier::Write
         }
@@ -407,6 +407,23 @@ mod tests {
             for mode in [AutonomyMode::Plan, AutonomyMode::Ask, AutonomyMode::Edit, AutonomyMode::FullAccess] {
                 assert_eq!(
                     g.check(mode, name, &json!({})),
+                    Decision::Allow,
+                    "{name} in {mode:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn web_tools_are_read_tier_everywhere() {
+        // TS toolMeta: web_fetch/web_search are read_only + auto-approved
+        // in every mode (exploration category).
+        let g = gate(RuleSet::default());
+        for name in ["web_fetch", "web_search"] {
+            assert_eq!(risk_tier_for(name), RiskTier::ReadOnly, "{name}");
+            for mode in [AutonomyMode::Plan, AutonomyMode::Ask, AutonomyMode::Edit, AutonomyMode::FullAccess] {
+                assert_eq!(
+                    g.check(mode, name, &json!({"url": "https://x/", "query": "x"})),
                     Decision::Allow,
                     "{name} in {mode:?}"
                 );

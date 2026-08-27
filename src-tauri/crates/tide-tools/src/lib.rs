@@ -5,7 +5,7 @@
 //! BEFORE calling [`Tool::execute`].
 //!
 //! Ports of the TS stack at `91ec558`:
-//! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob,list-dir,directory-tree,read-media-file,multi-edit,notebook-edit,background-shell,git,git-repo,todo-write,slash-command,init,memory,load-skill}.ts`
+//! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob,list-dir,directory-tree,read-media-file,multi-edit,notebook-edit,background-shell,git,git-repo,web-fetch,web-search,todo-write,slash-command,init,memory,load-skill}.ts`
 //! - path sandboxing: `app/core/agent/path-safety.ts` → [`path_safety`]
 //! - permission gate: `app/core/agent/permission.ts` + `permissions/rules.ts`
 //!   + `permission-wrapper.ts` → [`permission`]
@@ -32,7 +32,7 @@ pub use tools::{
     core_tools, BashOutputTool, BashTool, DirectoryTreeTool, EditFileTool, GitRepoTool, GitTool,
     GlobTool, GrepTool, InitTool, KillShellTool, ListDirTool, LoadSkillTool, MemoryIndex,
     MemoryTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool, SlashCommandTool,
-    TodoWriteTool, WriteFileTool,
+    TodoWriteTool, WebFetchTool, WebSearchTool, WriteFileTool,
 };
 pub use tools::load_skill::{build_skill_catalog_md, builtin_skills, SkillSummary};
 pub use tools::memory::{MemoryHit, rrf_fuse};
@@ -322,6 +322,8 @@ mod tests {
                 "kill_shell",
                 "git",
                 "git_repo",
+                "web_fetch",
+                "web_search",
                 "todo_write",
                 "slash_command",
                 "memory",
@@ -346,8 +348,11 @@ mod tests {
         assert_eq!(tools[12].risk_tier(), RiskTier::Write);
         assert_eq!(tools[13].risk_tier(), RiskTier::Destructive);
         assert_eq!(tools[14].risk_tier(), RiskTier::ReadOnly);
+        // M3 T4 web tools: read-tier per TS toolMeta.
+        assert_eq!(tools[15].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[16].risk_tier(), RiskTier::ReadOnly);
         // M3 T3 batch: all read-tier per TS toolMeta.
-        for t in &tools[15..=19] {
+        for t in &tools[17..=21] {
             assert_eq!(t.risk_tier(), RiskTier::ReadOnly);
         }
     }

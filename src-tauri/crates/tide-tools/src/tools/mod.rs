@@ -21,6 +21,8 @@ pub mod read_file;
 pub mod read_media_file;
 pub mod slash_command;
 pub mod todo_write;
+pub mod web_fetch;
+pub mod web_search;
 pub mod write_file;
 
 use crate::Tool;
@@ -43,6 +45,8 @@ pub use read_file::ReadFileTool;
 pub use read_media_file::ReadMediaFileTool;
 pub use slash_command::SlashCommandTool;
 pub use todo_write::TodoWriteTool;
+pub use web_fetch::WebFetchTool;
+pub use web_search::WebSearchTool;
 pub use write_file::WriteFileTool;
 
 /// The tool instances the orchestrator registers, in the order the frozen
@@ -64,6 +68,8 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(KillShellTool),
         Box::new(GitTool),
         Box::new(GitRepoTool),
+        Box::new(WebFetchTool),
+        Box::new(WebSearchTool),
         Box::new(TodoWriteTool),
         Box::new(SlashCommandTool),
         Box::new(MemoryTool::new(None)),
