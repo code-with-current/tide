@@ -20,6 +20,7 @@ pub mod providers;
 pub mod sessions;
 pub mod settings;
 pub mod shortcuts;
+pub mod terminal;
 pub mod usage_report;
 pub mod workspaces;
 pub mod worktree;

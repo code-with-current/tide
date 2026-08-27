@@ -50,11 +50,22 @@
  *  catalog pair (modelCatalogRefresh fire-and-forget / modelCatalogResolve
  *  with its flat catalogId/modelId/contextWindow params), and agentList (the
  *  dispatch catalog for the @mention picker). All params pass through
- *  verbatim under Tauri's camelCase → snake_case mapping. */
+ *  verbatim under Tauri's camelCase → snake_case mapping.
+ *
+ *  M4 T5 adds the terminal domain (8 methods) over portable-pty:
+ *  terminalCreate/Write/Resize/Stop/Kill/Dispose/GetPid/Scrollback, all
+ *  passthrough. The terminal push channels also come online here — the same
+ *  chat Channel now carries ChatPush tagged terminalOutput/terminalExit/
+ *  terminalPorts (the old webview message names, flat payloads), fanned out
+ *  through rpc.ts's emitTerminal* seams into the setTerminal*Callback slots
+ *  client.ts's subscribeTerminalEvents installs. */
 import {
   activateRpcClient,
   emitAgentEvent,
   emitOrchestratorEvents,
+  emitTerminalExit,
+  emitTerminalOutput,
+  emitTerminalPorts,
   emitTodosUpdated,
   type TideRpcClient,
 } from './rpc';
@@ -97,6 +108,8 @@ import type {
   SessionMetaV2,
   SessionWorktree,
   ShellOpResult,
+  TerminalPort,
+  TerminalScrollbackResult,
   TodosUpdatedEvent,
   Workspace,
   WorkspaceFileReadResult,
@@ -231,16 +244,34 @@ type BridgeMethods = Pick<
   | 'providerUsageWindows'
   | 'providerUsageReport'
   | 'agentList'
+  | 'terminalCreate'
+  | 'terminalWrite'
+  | 'terminalResize'
+  | 'terminalStop'
+  | 'terminalKill'
+  | 'terminalDispose'
+  | 'terminalScrollback'
+  | 'terminalGetPid'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
- *  tag mirrors the webview message names in shared/rpc.ts so routing uses
- *  the same discriminator the Electrobun push did. Payload shapes are the
- *  shared/rpc.ts AgentEvent / FlushBatch / TodosUpdatedEvent verbatim. */
+ *  tag mirrors the webview message names in shared/rpc.ts so routing uses the
+ *  same discriminator the Electrobun push did. Payload shapes are the
+ *  shared/rpc.ts AgentEvent / FlushBatch / TodosUpdatedEvent verbatim; the
+ *  terminal tags carry their old ipc payload shapes flat (terminalId/data/seq,
+ *  terminalId/code, terminalId/ports). */
 type ChatPush =
   | { channel: 'agentEvents'; event: AgentEvent }
   | { channel: 'orchestratorEvents'; batch: FlushBatch }
-  | { channel: 'todosUpdated'; event: TodosUpdatedEvent };
+  | { channel: 'todosUpdated'; event: TodosUpdatedEvent }
+  | {
+      channel: 'terminalOutput';
+      terminalId: string;
+      data: string;
+      seq: number;
+    }
+  | { channel: 'terminalExit'; terminalId: string; code: number | null }
+  | { channel: 'terminalPorts'; terminalId: string; ports: TerminalPort[] };
 
 /** Params pass through verbatim: Tauri v2 maps camelCase JSON keys onto the
  *  snake_case Rust command params (workspacePath → workspace_path), which is
@@ -398,6 +429,15 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     providerUsageReport: (params) =>
       invoke<ProviderUsageReportWire | null>('provider_usage_report', params),
     agentList: (params) => invoke<AgentCatalogEntry[]>('agent_list', params),
+    terminalCreate: (params) => invoke('terminal_create', params),
+    terminalWrite: (params) => invoke('terminal_write', params),
+    terminalResize: (params) => invoke('terminal_resize', params),
+    terminalStop: (params) => invoke('terminal_stop', params),
+    terminalKill: (params) => invoke('terminal_kill', params),
+    terminalDispose: (params) => invoke('terminal_dispose', params),
+    terminalScrollback: (params) =>
+      invoke<TerminalScrollbackResult>('terminal_scrollback', params),
+    terminalGetPid: (params) => invoke<{ pid: number | null }>('terminal_get_pid', params),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {
@@ -421,6 +461,12 @@ async function attachChatChannel(invoke: InvokeFn, Channel: ChannelCtor): Promis
     if (push.channel === 'agentEvents') emitAgentEvent(push.event);
     else if (push.channel === 'orchestratorEvents') emitOrchestratorEvents(push.batch);
     else if (push.channel === 'todosUpdated') emitTodosUpdated(push.event);
+    else if (push.channel === 'terminalOutput')
+      emitTerminalOutput({ terminalId: push.terminalId, data: push.data, seq: push.seq });
+    else if (push.channel === 'terminalExit')
+      emitTerminalExit({ terminalId: push.terminalId, code: push.code });
+    else if (push.channel === 'terminalPorts')
+      emitTerminalPorts({ terminalId: push.terminalId, ports: push.ports });
     else console.warn('[tide] unknown ChatPush channel tag — dropped:', push);
   };
   await invoke('chat_attach_channel', { channel });

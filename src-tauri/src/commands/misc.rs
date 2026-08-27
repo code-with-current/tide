@@ -488,7 +488,7 @@ pub struct AliveWire {
     pub alive: bool,
 }
 
-fn is_process_alive(pid: i64) -> bool {
+pub(crate) fn is_process_alive(pid: i64) -> bool {
     if pid <= 0 {
         return false;
     }

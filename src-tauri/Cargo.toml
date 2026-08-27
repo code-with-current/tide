@@ -32,10 +32,11 @@ tide-engine = { path = "crates/tide-engine" }
 tide-tools = { path = "crates/tide-tools" }
 tide-mcp = { path = "crates/tide-mcp" }
 futures = "0.3"
-tokio = { version = "1", features = ["sync", "time", "macros"] }
+tokio = { version = "1", features = ["sync", "time", "macros", "rt", "process"] }
 reqwest = { version = "0.13", features = ["json"] }
 base64 = "0.22"
 git2 = { version = "0.21", features = ["https"] }
+portable-pty = "0.9"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

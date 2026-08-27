@@ -247,11 +247,11 @@ pub enum AgentEvent {
 }
 
 /// One message the Rust side pushes over the Tauri Channel. The `channel`
-/// tag mirrors the two webview message names in `shared/rpc.ts`
-/// (`agentEvents`, `orchestratorEvents`) so the renderer bridge routes by
-/// the same discriminator the old RPC schema used.
+/// tag mirrors the webview message names in `shared/rpc.ts`
+/// (`agentEvents`, `orchestratorEvents`, `terminalOutput`, …) so the
+/// renderer bridge routes by the same discriminator the old RPC schema used.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "channel")]
+#[serde(tag = "channel", rename_all_fields = "camelCase")]
 // The Agent variant is ~320 bytes; broadcast buffers are capacity-bounded
 // (1024 slots), so the padding cost is bounded and boxing every event would
 // tax the hot path.
@@ -267,6 +267,26 @@ pub enum ChatPush {
     #[serde(rename = "todosUpdated")]
     TodosUpdated {
         event: tide_tools::TodosUpdated,
+    },
+    /// Terminal domain pushes (M4 T5): one coalesced output batch with its
+    /// scrollback seq, the child's exit, and dev-server port-set changes.
+    /// Flat payloads — the bridge hands them straight to the renderer's
+    /// setTerminal*Callback seams.
+    #[serde(rename = "terminalOutput")]
+    TerminalOutput {
+        terminal_id: String,
+        data: String,
+        seq: u64,
+    },
+    #[serde(rename = "terminalExit")]
+    TerminalExit {
+        terminal_id: String,
+        code: Option<i32>,
+    },
+    #[serde(rename = "terminalPorts")]
+    TerminalPorts {
+        terminal_id: String,
+        ports: Vec<crate::terminal::ports::TerminalPortWire>,
     },
 }
 
@@ -412,6 +432,52 @@ mod tests {
         let wire = serde_json::to_value(&push).unwrap();
         assert_eq!(wire["channel"], serde_json::json!("agentEvents"));
         assert_eq!(wire["event"]["type"], serde_json::json!("error"));
+    }
+
+    #[test]
+    fn terminal_pushes_serialize_with_the_old_ipc_payload_shapes() {
+        let output = ChatPush::TerminalOutput {
+            terminal_id: "t_1".into(),
+            data: "hello\r\n".into(),
+            seq: 3,
+        };
+        assert_eq!(
+            serde_json::to_value(&output).unwrap(),
+            serde_json::json!({
+                "channel": "terminalOutput",
+                "terminalId": "t_1",
+                "data": "hello\r\n",
+                "seq": 3
+            })
+        );
+
+        let exit = ChatPush::TerminalExit {
+            terminal_id: "t_1".into(),
+            code: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&exit).unwrap(),
+            serde_json::json!({ "channel": "terminalExit", "terminalId": "t_1", "code": null })
+        );
+
+        let ports = ChatPush::TerminalPorts {
+            terminal_id: "t_1".into(),
+            ports: vec![crate::terminal::ports::TerminalPortWire {
+                port: 3000,
+                url: "http://localhost:3000".into(),
+                label: "Dev server",
+            }],
+        };
+        assert_eq!(
+            serde_json::to_value(&ports).unwrap(),
+            serde_json::json!({
+                "channel": "terminalPorts",
+                "terminalId": "t_1",
+                "ports": [
+                    { "port": 3000, "url": "http://localhost:3000", "label": "Dev server" }
+                ]
+            })
+        );
     }
 
     #[test]

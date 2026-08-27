@@ -1,17 +1,20 @@
 mod agent;
 mod commands;
 mod state;
+mod terminal;
 
 use tauri::Manager;
 
 use agent::hub::ChatHubCell;
 use agent::mcp::McpPoolCell;
 use state::AppState;
+use terminal::TerminalCell;
 
 pub fn run() {
     let app_state = AppState::from_env();
     let hub_cell = ChatHubCell::new();
     let mcp_cell = McpPoolCell::new();
+    let terminal_cell = TerminalCell::new();
     // Boot-connect the MCP pool (TS app.main initUserServers): user servers
     // come up in the background; turns pick up whatever is connected.
     {
@@ -29,6 +32,7 @@ pub fn run() {
         .manage(app_state)
         .manage(hub_cell)
         .manage(mcp_cell)
+        .manage(terminal_cell)
         .setup(|app| {
             // models.dev catalog boot init (TS initModelCatalog): load the
             // bundled/cache baseline, refresh in the background when stale.
@@ -124,6 +128,14 @@ pub fn run() {
             commands::chat::events_subscribe,
             commands::chat::events_unsubscribe,
             commands::mcp::mcp_list,
+            commands::terminal::terminal_create,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_stop,
+            commands::terminal::terminal_kill,
+            commands::terminal::terminal_dispose,
+            commands::terminal::terminal_scrollback,
+            commands::terminal::terminal_get_pid,
             commands::git::git_status,
             commands::git::git_diff,
             commands::git::git_staged_diff,

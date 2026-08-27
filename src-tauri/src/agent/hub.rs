@@ -149,6 +149,14 @@ impl ChatHub {
         let _ = self.push_tx.send(ChatPush::Agent { event });
     }
 
+    /// The process-wide push bus — every domain that streams to the renderer
+    /// (terminal output/exit/ports today) sends its tagged ChatPush variants
+    /// through the same broadcast the webview Channel forwarder subscribes
+    /// to, so one attach call covers the whole app.
+    pub fn push_bus(&self) -> &broadcast::Sender<ChatPush> {
+        &self.push_tx
+    }
+
     pub fn subscribe_push(&self) -> broadcast::Receiver<ChatPush> {
         self.push_tx.subscribe()
     }

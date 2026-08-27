@@ -185,7 +185,7 @@ describe("installTauriBridge", () => {
     await installBridge();
 
     const bridge = installedBridge();
-    const pending = bridge.request.terminalCreate({ shellId: "t_1" });
+    const pending = bridge.request.mcpScan({ root: "/repo" });
     expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow(/not ported/);
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -305,7 +305,7 @@ describe("chat Channel push routing", () => {
     rpcModule.onAgentEvent((event) => seen.push(event));
 
     expect(() =>
-      channel().onmessage?.({ channel: "terminalOutput", data: "x" }),
+      channel().onmessage?.({ channel: "bogusChannel", data: "x" }),
     ).not.toThrow();
     expect(seen).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1071,5 +1071,94 @@ describe("providers + model catalog routing (M4 T4)", () => {
     invoke.mockResolvedValueOnce(agents);
     expect(await bridge.request.agentList({})).toEqual(agents);
     expect(invoke).toHaveBeenLastCalledWith("agent_list", {});
+  });
+});
+
+describe("terminal routing (M4 T5)", () => {
+  function channel(): FakeChannel {
+    const channels = globals().__tideChannels as FakeChannel[];
+    expect(channels.length).toBe(1);
+    return channels[0];
+  }
+
+  it("routes the pty command family with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const createParams = { terminalId: "t_1", sessionId: "s_1", cols: 120, rows: 32 };
+    await bridge.request.terminalCreate(createParams);
+    expect(invoke).toHaveBeenLastCalledWith("terminal_create", createParams);
+
+    const writeParams = { terminalId: "t_1", data: "npm run dev\n" };
+    await bridge.request.terminalWrite(writeParams);
+    expect(invoke).toHaveBeenLastCalledWith("terminal_write", writeParams);
+
+    const resizeParams = { terminalId: "t_1", cols: 100, rows: 40 };
+    await bridge.request.terminalResize(resizeParams);
+    expect(invoke).toHaveBeenLastCalledWith("terminal_resize", resizeParams);
+
+    await bridge.request.terminalStop({ terminalId: "t_1" });
+    expect(invoke).toHaveBeenLastCalledWith("terminal_stop", { terminalId: "t_1" });
+
+    await bridge.request.terminalKill({ terminalId: "t_1" });
+    expect(invoke).toHaveBeenLastCalledWith("terminal_kill", { terminalId: "t_1" });
+
+    await bridge.request.terminalDispose({});
+    expect(invoke).toHaveBeenLastCalledWith("terminal_dispose", {});
+
+    invoke.mockResolvedValueOnce({ pid: 4242 });
+    expect(await bridge.request.terminalGetPid({ terminalId: "t_1" })).toEqual({ pid: 4242 });
+    expect(invoke).toHaveBeenLastCalledWith("terminal_get_pid", { terminalId: "t_1" });
+
+    invoke.mockResolvedValueOnce({ pid: null });
+    expect(await bridge.request.terminalGetPid({ terminalId: "t_ghost" })).toEqual({ pid: null });
+    expect(invoke).toHaveBeenLastCalledWith("terminal_get_pid", { terminalId: "t_ghost" });
+  });
+
+  it("routes terminalScrollback with the alive discriminated union", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ alive: true, data: "hello\r\n", seq: 3 });
+    expect(await bridge.request.terminalScrollback({ terminalId: "t_1" })).toEqual({
+      alive: true,
+      data: "hello\r\n",
+      seq: 3,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("terminal_scrollback", { terminalId: "t_1" });
+
+    invoke.mockResolvedValueOnce({ alive: false });
+    expect(await bridge.request.terminalScrollback({ terminalId: "t_ghost" })).toEqual({
+      alive: false,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("terminal_scrollback", { terminalId: "t_ghost" });
+  });
+
+  it("delivers terminal pushes to the setTerminal*Callback seams", async () => {
+    await installBridge();
+    const rpcModule = await import("@/lib/api/rpc");
+
+    const outputs: unknown[] = [];
+    const exits: unknown[] = [];
+    const ports: unknown[] = [];
+    rpcModule.setTerminalOutputCallback((event) => outputs.push(event));
+    rpcModule.setTerminalExitCallback((event) => exits.push(event));
+    rpcModule.setTerminalPortsCallback((event) => ports.push(event));
+
+    channel().onmessage?.({ channel: "terminalOutput", terminalId: "t_1", data: "hi", seq: 7 });
+    expect(outputs).toEqual([{ terminalId: "t_1", data: "hi", seq: 7 }]);
+
+    channel().onmessage?.({ channel: "terminalExit", terminalId: "t_1", code: null });
+    expect(exits).toEqual([{ terminalId: "t_1", code: null }]);
+
+    const chips = [{ port: 3000, url: "http://localhost:3000", label: "Dev server" }];
+    channel().onmessage?.({ channel: "terminalPorts", terminalId: "t_1", ports: chips });
+    expect(ports).toEqual([{ terminalId: "t_1", ports: chips }]);
+
+    // Slot semantics: clearing a callback stops delivery (the single-slot
+    // replace-on-set contract client.ts relies on when tabs re-subscribe).
+    rpcModule.setTerminalOutputCallback(null);
+    channel().onmessage?.({ channel: "terminalOutput", terminalId: "t_1", data: "x", seq: 8 });
+    expect(outputs).toEqual([{ terminalId: "t_1", data: "hi", seq: 7 }]);
   });
 });
