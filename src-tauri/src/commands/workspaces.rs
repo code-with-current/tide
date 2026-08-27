@@ -496,13 +496,13 @@ fn run_template_step(
 /// `detectGit`: `{branch, headCommit, fileCount}` for a repo dir (None when
 /// the path isn't a repo). Detached heads read "HEAD" like the CLI's
 /// `rev-parse --abbrev-ref HEAD`.
-struct GitInfo {
+pub(crate) struct GitInfo {
     pub branch: String,
     pub head_commit: String,
     pub file_count: usize,
 }
 
-fn detect_git(dir: &Path) -> Option<GitInfo> {
+pub(crate) fn detect_git(dir: &Path) -> Option<GitInfo> {
     if !dir.join(".git").exists() {
         return None;
     }

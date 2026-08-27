@@ -30,7 +30,16 @@
  *  contextGet/fileRead/listBranches/listConfigFiles/workspacesExist.
  *  All pass their TideRPC params through verbatim — Tauri's camelCase →
  *  snake_case param mapping covers every one (no reserved words in this
- *  batch, unlike T1's permissionRequest remap). */
+ *  batch, unlike T1's permissionRequest remap).
+ *
+ *  M4 T3 adds the git panel domain (30 methods): status/diff/stagedDiff/log/
+ *  commitFiles/commitFileDiff/commitMessage/bulk/stashList/stage/restoreFile/
+ *  discardFile/commit/amend/revert/aheadBehind/headSha/branchInfo/
+ *  branchesDetailed/createBranch/deleteBranch/checkout/recentBranches/
+ *  mergeBranch/conflictFiles/resolveFile/fetch/pull/push — all git2 in the
+ *  backend — plus gitRepoDetect (the workspaces-rpc detection entry). Every
+ *  method passes its GitSessionScope params through verbatim; the gitChanged
+ *  watcher push stays dormant (no bridge channel yet — the panel polls). */
 import {
   activateRpcClient,
   emitAgentEvent,
@@ -48,6 +57,18 @@ import type {
   ExternalFileContent,
   FlushBatch,
   GeneralSettingsWire,
+  GitAheadBehindResult,
+  GitBranchDetailed,
+  GitBranchInfoResult,
+  GitCommit,
+  GitCommitResult,
+  GitConflictEntry,
+  GitFileChange,
+  GitMergeResult,
+  GitOpResult,
+  GitRevertResult,
+  GitRepoInfo,
+  GitStash,
   HydratedSession,
   ImageFileContent,
   MacPermissionStatus,
@@ -62,9 +83,15 @@ import type {
   Workspace,
   WorkspaceFileReadResult,
 } from '@shared/rpc';
+import type { DiffHunk } from '@/types';
 
 /** Must match BRIDGE_PROTOCOL in src-tauri/src/commands/bridge.rs. */
 const BRIDGE_PROTOCOL = 1;
+
+/** GitSessionScope is an interface (no implicit index signature), so the
+ *  invoke args need this widening cast — the payload still passes through
+ *  verbatim, like every other domain. */
+const gitArgs = (params: object): Record<string, unknown> => params as Record<string, unknown>;
 
 const NOT_PORTED = '[tide] RPC method not ported yet (Tauri rewrite M2+)';
 
@@ -144,6 +171,36 @@ type BridgeMethods = Pick<
   | 'settingsGet'
   | 'settingsSetShortcut'
   | 'settingsResetShortcuts'
+  | 'gitStatus'
+  | 'gitDiff'
+  | 'gitStagedDiff'
+  | 'gitLog'
+  | 'gitCommitFiles'
+  | 'gitCommitFileDiff'
+  | 'gitCommitMessage'
+  | 'gitBulk'
+  | 'gitStashList'
+  | 'gitStage'
+  | 'gitRestoreFile'
+  | 'gitDiscardFile'
+  | 'gitCommit'
+  | 'gitAmend'
+  | 'gitRevert'
+  | 'gitAheadBehind'
+  | 'gitHeadSha'
+  | 'gitBranchInfo'
+  | 'gitBranchesDetailed'
+  | 'gitCreateBranch'
+  | 'gitDeleteBranch'
+  | 'gitCheckout'
+  | 'gitRecentBranches'
+  | 'gitMergeBranch'
+  | 'gitConflictFiles'
+  | 'gitResolveFile'
+  | 'gitFetch'
+  | 'gitPull'
+  | 'gitPush'
+  | 'gitRepoDetect'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
@@ -261,6 +318,38 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
       invoke<{ overrides: Record<string, string[]> }>('settings_set_shortcut', params),
     settingsResetShortcuts: (params) =>
       invoke<{ overrides: Record<string, string[]> }>('settings_reset_shortcuts', params),
+    gitStatus: (params) => invoke<GitFileChange[]>('git_status', gitArgs(params)),
+    gitDiff: (params) => invoke<DiffHunk[]>('git_diff', gitArgs(params)),
+    gitStagedDiff: (params) => invoke<{ text: string }>('git_staged_diff', gitArgs(params)),
+    gitLog: (params) => invoke<GitCommit[]>('git_log', gitArgs(params)),
+    gitCommitFiles: (params) => invoke<GitFileChange[]>('git_commit_files', gitArgs(params)),
+    gitCommitFileDiff: (params) => invoke<DiffHunk[]>('git_commit_file_diff', gitArgs(params)),
+    gitCommitMessage: (params) => invoke<{ text: string }>('git_commit_message', gitArgs(params)),
+    gitBulk: (params) => invoke<GitOpResult>('git_bulk', gitArgs(params)),
+    gitStashList: (params) => invoke<GitStash[]>('git_stash_list', gitArgs(params)),
+    gitStage: (params) => invoke<GitOpResult>('git_stage', gitArgs(params)),
+    gitRestoreFile: (params) => invoke<GitOpResult>('git_restore_file', gitArgs(params)),
+    gitDiscardFile: (params) => invoke<GitOpResult>('git_discard_file', gitArgs(params)),
+    gitCommit: (params) => invoke<GitCommitResult>('git_commit', gitArgs(params)),
+    gitAmend: (params) => invoke<GitCommitResult>('git_amend', gitArgs(params)),
+    gitRevert: (params) => invoke<GitRevertResult>('git_revert', gitArgs(params)),
+    gitAheadBehind: (params) =>
+      invoke<GitAheadBehindResult | null>('git_ahead_behind', gitArgs(params)),
+    gitHeadSha: (params) => invoke<{ sha: string | null }>('git_head_sha', gitArgs(params)),
+    gitBranchInfo: (params) => invoke<GitBranchInfoResult>('git_branch_info', gitArgs(params)),
+    gitBranchesDetailed: (params) =>
+      invoke<GitBranchDetailed[]>('git_branches_detailed', gitArgs(params)),
+    gitCreateBranch: (params) => invoke<GitOpResult>('git_create_branch', gitArgs(params)),
+    gitDeleteBranch: (params) => invoke<GitOpResult>('git_delete_branch', gitArgs(params)),
+    gitCheckout: (params) => invoke<GitOpResult>('git_checkout', gitArgs(params)),
+    gitRecentBranches: (params) => invoke<string[]>('git_recent_branches', gitArgs(params)),
+    gitMergeBranch: (params) => invoke<GitMergeResult>('git_merge_branch', gitArgs(params)),
+    gitConflictFiles: (params) => invoke<GitConflictEntry[]>('git_conflict_files', gitArgs(params)),
+    gitResolveFile: (params) => invoke<GitOpResult>('git_resolve_file', gitArgs(params)),
+    gitFetch: (params) => invoke<GitOpResult>('git_fetch', gitArgs(params)),
+    gitPull: (params) => invoke<GitOpResult>('git_pull', gitArgs(params)),
+    gitPush: (params) => invoke<GitOpResult>('git_push', gitArgs(params)),
+    gitRepoDetect: (params) => invoke<GitRepoInfo | null>('git_repo_detect', gitArgs(params)),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {

@@ -11,6 +11,7 @@
 pub mod boot;
 pub mod bridge;
 pub mod chat;
+pub mod git;
 pub mod mcp;
 pub mod misc;
 pub mod providers;

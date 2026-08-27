@@ -185,7 +185,7 @@ describe("installTauriBridge", () => {
     await installBridge();
 
     const bridge = installedBridge();
-    const pending = bridge.request.gitStatus({ workspaceId: "ws_1" });
+    const pending = bridge.request.terminalCreate({ shellId: "t_1" });
     expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow(/not ported/);
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -762,5 +762,159 @@ describe("OS/window glue routing (M4 T1)", () => {
       name: "pasted-file",
       dataBase64: "AAA",
     });
+  });
+});
+
+describe("git panel routing (M4 T3)", () => {
+  it("routes gitStatus with the session-scoped passthrough", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const changes = [
+      {
+        path: "src/main.rs",
+        status: "modified" as const,
+        staged: false,
+        additions: 3,
+        deletions: 1,
+      },
+    ];
+    invoke.mockResolvedValueOnce(changes);
+    const params = { workspaceId: "ws_1", sessionId: "s_wt" };
+    expect(await bridge.request.gitStatus(params)).toEqual(changes);
+    expect(invoke).toHaveBeenLastCalledWith("git_status", params);
+
+    invoke.mockResolvedValueOnce([]);
+    expect(await bridge.request.gitStatus({ workspaceId: "ws_ghost" })).toEqual([]);
+    expect(invoke).toHaveBeenLastCalledWith("git_status", { workspaceId: "ws_ghost" });
+  });
+
+  it("routes gitBulk with the op + opts shape", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(
+      await bridge.request.gitBulk({ workspaceId: "ws_1", op: "stash", opts: { message: "wip" } }),
+    ).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("git_bulk", {
+      workspaceId: "ws_1",
+      op: "stash",
+      opts: { message: "wip" },
+    });
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "no workspace" });
+    expect(await bridge.request.gitBulk({ workspaceId: "ws_x", op: "stage-all" })).toEqual({
+      ok: false,
+      error: "no workspace",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("git_bulk", {
+      workspaceId: "ws_x",
+      op: "stage-all",
+    });
+  });
+
+  it("routes gitLog with the limit arg and gitDiff with contextLines", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const commits = [
+      {
+        sha: "1cd734e",
+        author: "Ann",
+        date: "2026-08-27T09:41:00+02:00",
+        subject: "feat: thing",
+        parents: ["0da9f21"],
+        isHead: true,
+        branchHeads: ["main"],
+      },
+    ];
+    invoke.mockResolvedValueOnce(commits);
+    expect(await bridge.request.gitLog({ workspaceId: "ws_1", limit: 50 })).toEqual(commits);
+    expect(invoke).toHaveBeenLastCalledWith("git_log", { workspaceId: "ws_1", limit: 50 });
+
+    const hunks = [
+      {
+        header: "@@ -1,3 +1,4 @@ fn main",
+        lines: [
+          { type: "context" as const, oldNo: 1, newNo: 1, text: " fn main() {" },
+          { type: "add" as const, newNo: 2, text: "+    todo();" },
+        ],
+      },
+    ];
+    invoke.mockResolvedValueOnce(hunks);
+    const diffParams = {
+      workspaceId: "ws_1",
+      filePath: "src/main.rs",
+      staged: false,
+      contextLines: 24,
+    };
+    expect(await bridge.request.gitDiff(diffParams)).toEqual(hunks);
+    expect(invoke).toHaveBeenLastCalledWith("git_diff", diffParams);
+  });
+
+  it("routes the op-result family and the diff/text readers", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ ok: true, sha: "b31f0c9" });
+    expect(
+      await bridge.request.gitCommit({ workspaceId: "ws_1", message: "feat: x" }),
+    ).toEqual({ ok: true, sha: "b31f0c9" });
+    expect(invoke).toHaveBeenLastCalledWith("git_commit", {
+      workspaceId: "ws_1",
+      message: "feat: x",
+    });
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "conflict" });
+    expect(
+      await bridge.request.gitMergeBranch({ workspaceId: "ws_1", name: "feature" }),
+    ).toEqual({ ok: false, error: "conflict" });
+    expect(invoke).toHaveBeenLastCalledWith("git_merge_branch", {
+      workspaceId: "ws_1",
+      name: "feature",
+    });
+
+    invoke.mockResolvedValueOnce({ ok: true, newSha: "aa19c22" });
+    expect(await bridge.request.gitRevert({ workspaceId: "ws_1", sha: "1cd734e" })).toEqual({
+      ok: true,
+      newSha: "aa19c22",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("git_revert", { workspaceId: "ws_1", sha: "1cd734e" });
+
+    invoke.mockResolvedValueOnce({ text: "diff --git a/x b/x" });
+    expect(await bridge.request.gitStagedDiff({ workspaceId: "ws_1" })).toEqual({
+      text: "diff --git a/x b/x",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("git_staged_diff", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce([{ ref: "stash@{0}", message: "On main: wip" }]);
+    expect(await bridge.request.gitStashList({ workspaceId: "ws_1" })).toEqual([
+      { ref: "stash@{0}", message: "On main: wip" },
+    ]);
+    expect(invoke).toHaveBeenLastCalledWith("git_stash_list", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(
+      await bridge.request.gitResolveFile({
+        workspaceId: "ws_1",
+        filePath: "src/both.rs",
+        side: "theirs",
+      }),
+    ).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("git_resolve_file", {
+      workspaceId: "ws_1",
+      filePath: "src/both.rs",
+      side: "theirs",
+    });
+
+    invoke.mockResolvedValueOnce({ branch: "main", headCommit: "1cd734e", fileCount: 12, isRepo: true });
+    expect(await bridge.request.gitRepoDetect({ dirPath: "/repo/tide" })).toEqual({
+      branch: "main",
+      headCommit: "1cd734e",
+      fileCount: 12,
+      isRepo: true,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("git_repo_detect", { dirPath: "/repo/tide" });
   });
 });
