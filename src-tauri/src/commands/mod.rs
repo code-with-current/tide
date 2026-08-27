@@ -12,9 +12,11 @@ pub mod boot;
 pub mod bridge;
 pub mod chat;
 pub mod mcp;
+pub mod misc;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
+pub mod shortcuts;
 pub mod workspaces;
 
 use serde::Serialize;

@@ -10,8 +10,13 @@
  *  pair + the v2 readers — / settings / providers) plus the M2 chat domain
  *  (`sessionCreate`, `chatSend`→`chat_run_turn`, `chatAbort`,
  *  `chatApproveTools`/`chatRejectTools`→`permission_respond`, the
- *  `eventsSubscribe` replay pair). Every OTHER TideRPC method resolves to an
- *  async rejection via the request Proxy — never a sync throw, so
+ *  `eventsSubscribe` replay pair), and the M4 T1 OS/window glue (window
+ *  controls, dialogs, shell opener, clipboard persistence, log/env/
+ *  diagnostics, macOS permission consent, pid liveness, mermaid repair,
+ *  external/image reads, and the settings.json shortcut trio —
+ *  `permissionRequest`'s `type` param remaps onto `permission_type` since
+ *  `type` can't be a Rust identifier). Every OTHER TideRPC method resolves
+ *  to an async rejection via the request Proxy — never a sync throw, so
  *  fire-and-forget `void` calls in client.ts can't escape a React commit.
  *  Agent/orchestrator pushes arrive on the single `chat_attach_channel`
  *  Channel and fan out through rpc.ts's emit* seams (the on*-registered
@@ -29,13 +34,20 @@ import type {
   AgentSettingsWire,
   ArchivedSessionHeader,
   ChatSendResult,
+  DiagnosticsInfo,
+  EnvInfo,
+  ExternalFileContent,
   FlushBatch,
   GeneralSettingsWire,
   HydratedSession,
+  ImageFileContent,
+  MacPermissionStatus,
+  MermaidRepairResult,
   Provider,
   SessionHeader,
   SessionMessageV2,
   SessionMetaV2,
+  ShellOpResult,
   TodosUpdatedEvent,
   Workspace,
 } from '@shared/rpc';
@@ -72,6 +84,28 @@ type BridgeMethods = Pick<
   | 'lastSessionGet'
   | 'lastSessionSet'
   | 'consentShouldShow'
+  | 'windowClose'
+  | 'windowMinimize'
+  | 'windowToggleMaximize'
+  | 'windowIsFullScreen'
+  | 'dialogPickFiles'
+  | 'dialogPickDirectory'
+  | 'shellOpenExternal'
+  | 'shellOpenPath'
+  | 'shellShowItemInFolder'
+  | 'clipboardFileSave'
+  | 'logSend'
+  | 'envInfoGet'
+  | 'diagnosticsGet'
+  | 'permissionStatusGet'
+  | 'permissionRequest'
+  | 'processIsAlive'
+  | 'mermaidRepair'
+  | 'externalFileRead'
+  | 'imageFileRead'
+  | 'settingsGet'
+  | 'settingsSetShortcut'
+  | 'settingsResetShortcuts'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
@@ -134,6 +168,34 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     lastSessionGet: (params) => invoke<{ sessionId: string | null; workspaceId: string | null }>('last_session_get', params),
     lastSessionSet: (params) => invoke('last_session_set', params),
     consentShouldShow: (params) => invoke<{ shouldShow: boolean }>('consent_should_show', params),
+    windowClose: (params) => invoke('window_close', params),
+    windowMinimize: (params) => invoke('window_minimize', params),
+    windowToggleMaximize: (params) => invoke<{ maximized: boolean }>('window_toggle_maximize', params),
+    windowIsFullScreen: (params) => invoke<{ fullscreen: boolean }>('window_is_full_screen', params),
+    dialogPickFiles: (params) => invoke<{ paths: string[] }>('dialog_pick_files', params),
+    dialogPickDirectory: (params) => invoke<{ path: string | null }>('dialog_pick_directory', params),
+    shellOpenExternal: (params) => invoke<{ ok: boolean }>('shell_open_external', params),
+    shellOpenPath: (params) => invoke<ShellOpResult>('shell_open_path', params),
+    shellShowItemInFolder: (params) => invoke('shell_show_item_in_folder', params),
+    clipboardFileSave: (params) => invoke<{ path: string }>('clipboard_file_save', params),
+    logSend: (params) => invoke('log_send', params),
+    envInfoGet: (params) => invoke<EnvInfo>('env_info_get', params),
+    diagnosticsGet: (params) => invoke<DiagnosticsInfo>('diagnostics_get', params),
+    permissionStatusGet: (params) => invoke<MacPermissionStatus>('permission_status_get', params),
+    permissionRequest: (params) =>
+      invoke<{ result: 'opened' | 'unavailable' }>('permission_request', {
+        permissionType: params.type,
+      }),
+    processIsAlive: (params) => invoke<{ alive: boolean }>('process_is_alive', params),
+    mermaidRepair: (params) => invoke<MermaidRepairResult>('mermaid_repair', params),
+    externalFileRead: (params) => invoke<ExternalFileContent | null>('external_file_read', params),
+    imageFileRead: (params) => invoke<ImageFileContent | null>('image_file_read', params),
+    settingsGet: (params) =>
+      invoke<{ overrides: Record<string, string[]>; defaults: Record<string, string[]> }>('settings_get', params),
+    settingsSetShortcut: (params) =>
+      invoke<{ overrides: Record<string, string[]> }>('settings_set_shortcut', params),
+    settingsResetShortcuts: (params) =>
+      invoke<{ overrides: Record<string, string[]> }>('settings_reset_shortcuts', params),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {

@@ -23,6 +23,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 serde.workspace = true
 serde_json.workspace = true
 tide-store = { path = "crates/tide-store" }
@@ -31,6 +33,11 @@ tide-tools = { path = "crates/tide-tools" }
 tide-mcp = { path = "crates/tide-mcp" }
 futures = "0.3"
 tokio = { version = "1", features = ["sync", "time", "macros"] }
+reqwest = { version = "0.13", features = ["json"] }
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }

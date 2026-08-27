@@ -22,6 +22,8 @@ pub fn run() {
         });
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .manage(hub_cell)
         .manage(mcp_cell)
@@ -40,6 +42,28 @@ pub fn run() {
             commands::settings::settings_update_agent,
             commands::settings::settings_get_general,
             commands::settings::settings_update_general,
+            commands::misc::window_close,
+            commands::misc::window_minimize,
+            commands::misc::window_toggle_maximize,
+            commands::misc::window_is_full_screen,
+            commands::misc::dialog_pick_files,
+            commands::misc::dialog_pick_directory,
+            commands::misc::shell_open_external,
+            commands::misc::shell_open_path,
+            commands::misc::shell_show_item_in_folder,
+            commands::misc::clipboard_file_save,
+            commands::misc::log_send,
+            commands::misc::env_info_get,
+            commands::misc::diagnostics_get,
+            commands::misc::permission_status_get,
+            commands::misc::permission_request,
+            commands::misc::process_is_alive,
+            commands::misc::mermaid_repair,
+            commands::misc::external_file_read,
+            commands::misc::image_file_read,
+            commands::shortcuts::settings_get,
+            commands::shortcuts::settings_set_shortcut,
+            commands::shortcuts::settings_reset_shortcuts,
             commands::providers::provider_list,
             commands::chat::session_create,
             commands::chat::chat_run_turn,

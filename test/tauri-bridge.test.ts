@@ -456,3 +456,115 @@ describe("chat request routing", () => {
     expect(invoke).toHaveBeenLastCalledWith("last_session_set", { sessionId: null, workspaceId: "ws_1" });
   });
 });
+
+describe("OS/window glue routing (M4 T1)", () => {
+  it("routes windowIsFullScreen to the fullscreen-query command", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ fullscreen: true });
+    expect(await bridge.request.windowIsFullScreen({})).toEqual({ fullscreen: true });
+    expect(invoke).toHaveBeenLastCalledWith("window_is_full_screen", {});
+
+    invoke.mockResolvedValueOnce({ maximized: false });
+    expect(await bridge.request.windowToggleMaximize({})).toEqual({ maximized: false });
+    expect(invoke).toHaveBeenLastCalledWith("window_toggle_maximize", {});
+
+    invoke.mockResolvedValueOnce(undefined);
+    await bridge.request.windowClose({});
+    expect(invoke).toHaveBeenLastCalledWith("window_close", {});
+  });
+
+  it("routes dialogPickFiles/dialogPickDirectory with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ paths: ["/a/pic.png", "/b/notes.md"] });
+    expect(await bridge.request.dialogPickFiles({})).toEqual({ paths: ["/a/pic.png", "/b/notes.md"] });
+    expect(invoke).toHaveBeenLastCalledWith("dialog_pick_files", {});
+
+    invoke.mockResolvedValueOnce({ path: "/repo/tide" });
+    expect(await bridge.request.dialogPickDirectory({})).toEqual({ path: "/repo/tide" });
+    expect(invoke).toHaveBeenLastCalledWith("dialog_pick_directory", {});
+  });
+
+  it("routes shellOpenPath with the ShellOpResult shape", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "Failed to open path" });
+    expect(await bridge.request.shellOpenPath({ path: "/tmp/missing" })).toEqual({
+      ok: false,
+      error: "Failed to open path",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("shell_open_path", { path: "/tmp/missing" });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.shellOpenExternal({ url: "https://tide.codes" })).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("shell_open_external", { url: "https://tide.codes" });
+
+    invoke.mockResolvedValueOnce(undefined);
+    await bridge.request.shellShowItemInFolder({ fullPath: "/repo/tide/src/main.rs" });
+    expect(invoke).toHaveBeenLastCalledWith("shell_show_item_in_folder", { fullPath: "/repo/tide/src/main.rs" });
+  });
+
+  it("routes settingsGet with the overrides/defaults pair", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const wire = { overrides: { sendMessage: ["Ctrl", "Enter"] }, defaults: { commandPalette: ["⌘", "K"] } };
+    invoke.mockResolvedValueOnce(wire);
+    expect(await bridge.request.settingsGet({})).toEqual(wire);
+    expect(invoke).toHaveBeenLastCalledWith("settings_get", {});
+
+    invoke.mockResolvedValueOnce({ overrides: {} });
+    expect(await bridge.request.settingsResetShortcuts({})).toEqual({ overrides: {} });
+    expect(invoke).toHaveBeenLastCalledWith("settings_reset_shortcuts", {});
+  });
+
+  it("remaps permissionRequest's reserved-word type param onto permissionType", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ result: "opened" });
+    expect(await bridge.request.permissionRequest({ type: "accessibility" })).toEqual({ result: "opened" });
+    expect(invoke).toHaveBeenLastCalledWith("permission_request", { permissionType: "accessibility" });
+
+    invoke.mockResolvedValueOnce({ result: "unavailable" });
+    expect(await bridge.request.permissionRequest({ type: "folders" })).toEqual({ result: "unavailable" });
+    expect(invoke).toHaveBeenLastCalledWith("permission_request", { permissionType: "folders" });
+  });
+
+  it("routes settingsSetShortcut and the file/clipboard read-save pair verbatim", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ overrides: { commandPalette: ["⌥", "P"] } });
+    expect(await bridge.request.settingsSetShortcut({ id: "commandPalette", keys: ["⌥", "P"] })).toEqual({
+      overrides: { commandPalette: ["⌥", "P"] },
+    });
+    expect(invoke).toHaveBeenLastCalledWith("settings_set_shortcut", {
+      id: "commandPalette",
+      keys: ["⌥", "P"],
+    });
+
+    invoke.mockResolvedValueOnce({ dataUrl: "data:image/png;base64,AAA", bytes: 3 });
+    expect(await bridge.request.imageFileRead({ workspaceId: "ws_1", relPath: "pic.png" })).toEqual({
+      dataUrl: "data:image/png;base64,AAA",
+      bytes: 3,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("image_file_read", {
+      workspaceId: "ws_1",
+      relPath: "pic.png",
+    });
+
+    invoke.mockResolvedValueOnce({ path: "/data/attachments/1-pasted-file" });
+    expect(await bridge.request.clipboardFileSave({ name: "pasted-file", dataBase64: "AAA" })).toEqual({
+      path: "/data/attachments/1-pasted-file",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("clipboard_file_save", {
+      name: "pasted-file",
+      dataBase64: "AAA",
+    });
+  });
+});
