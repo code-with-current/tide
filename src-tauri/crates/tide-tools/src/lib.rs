@@ -15,6 +15,7 @@
 //! (`{toolName, input, output, status, durationMs}`) and emit
 //! `tool_result` AgentEvents carrying `display`/`meta` without adaptation.
 
+pub mod agents;
 pub mod http;
 pub mod path_safety;
 pub mod permission;
@@ -27,12 +28,16 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+pub use agents::{
+    agent_risk_tier, agent_names, builtin_agents, can_dispatch_to, effective_child_tools,
+    get_agent, AgentDef, DEFAULT_MAX_STEPS, MAX_AGENT_DEPTH,
+};
 pub use permission::{AutonomyMode, Decision, PermissionGate, RiskTier};
 pub use tools::{
-    core_tools, BashOutputTool, BashTool, DirectoryTreeTool, EditFileTool, GitRepoTool, GitTool,
-    GlobTool, GrepTool, InitTool, KillShellTool, ListDirTool, LoadSkillTool, MemoryIndex,
-    MemoryTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool, SlashCommandTool,
-    TodoWriteTool, WebFetchTool, WebSearchTool, WriteFileTool,
+    core_tools, BashOutputTool, BashTool, DirectoryTreeTool, DispatchAgentTool, EditFileTool,
+    GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, KillShellTool, ListDirTool, LoadSkillTool,
+    MemoryIndex, MemoryTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool,
+    SlashCommandTool, TodoWriteTool, WebFetchTool, WebSearchTool, WriteFileTool,
 };
 pub use tools::load_skill::{build_skill_catalog_md, builtin_skills, SkillSummary};
 pub use tools::memory::{MemoryHit, rrf_fuse};
@@ -192,6 +197,21 @@ pub enum ToolDisplay {
         data_url: String,
         mime_type: String,
     },
+    /// Live sub-agent report for dispatch_agent — the renderer's AgentDetail
+    /// row (`{ kind: 'agent', agentName, title?, task, report, reasoning?,
+    /// dispatchId? }`; the TS runtime never populated `usage`/`background*`).
+    /// `dispatch_id` is the child session id — what `resumeFrom` refers to.
+    Agent {
+        agent_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        task: String,
+        report: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dispatch_id: Option<String>,
+    },
 }
 
 /// Result of a tool execution — the TS `ToolResult` contract. `output` is
@@ -324,6 +344,7 @@ mod tests {
                 "git_repo",
                 "web_fetch",
                 "web_search",
+                "dispatch_agent",
                 "todo_write",
                 "slash_command",
                 "memory",
@@ -351,8 +372,11 @@ mod tests {
         // M3 T4 web tools: read-tier per TS toolMeta.
         assert_eq!(tools[15].risk_tier(), RiskTier::ReadOnly);
         assert_eq!(tools[16].risk_tier(), RiskTier::ReadOnly);
+        // M3 T6 dispatch_agent: read-tier (the target agent's effective
+        // tier is gated separately at dispatch time).
+        assert_eq!(tools[17].risk_tier(), RiskTier::ReadOnly);
         // M3 T3 batch: all read-tier per TS toolMeta.
-        for t in &tools[17..=21] {
+        for t in &tools[18..=22] {
             assert_eq!(t.risk_tier(), RiskTier::ReadOnly);
         }
     }

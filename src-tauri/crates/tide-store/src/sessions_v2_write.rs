@@ -392,6 +392,20 @@ impl SessionsV2Writer {
             .ok()
     }
 
+    /// The session's `parent_id` — `None` when no such session row exists,
+    /// `Some(None)` for a root session. The dispatch runner validates
+    /// `resumeFrom` ids against it (a resumable dispatch must be a child of
+    /// the asking session).
+    pub fn session_parent_id(&self, id: &str) -> Option<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT parent_id FROM session WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
     /// `createSession`: one session row; `time_created` == `time_updated`.
     pub fn create_session(&self, o: CreateSessionInput<'_>, now_ms: i64) -> Result<()> {
         self.conn

@@ -6,10 +6,11 @@
 //!
 //! The engine's streaming subset arrives here wrapped by the orchestrator;
 //! tool-result / permission / retry / error / turn_end are orchestrator-only
-//! and defined here directly. Optional renderer extras the M2 orchestrator
-//! does not produce (`parentToolCallId`, sub-agent kinds, `blocks` on
-//! turn_end — the renderer's reducer builds blocks from the streamed deltas)
-//! are deliberately absent.
+//! and defined here directly. Optional renderer extras the orchestrator
+//! does not produce at the top level (`blocks` on turn_end — the renderer's
+//! reducer builds blocks from the streamed deltas) are deliberately absent;
+//! `parentToolCallId` IS produced — dispatch children mirror their stream
+//! into the parent's session tagged with the dispatch tool call id.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -84,6 +85,10 @@ pub enum AgentEvent {
         message_id: String,
         text: String,
         block_id: String,
+        /// Sub-agent origin marker — set when a dispatched child emitted
+        /// this; the renderer nests the block under that dispatch row.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Streamed reasoning token — TS `reasoning`.
     Reasoning {
@@ -92,6 +97,8 @@ pub enum AgentEvent {
         message_id: String,
         delta: String,
         block_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Tool call started (id + name known) — TS `tool_call_start`.
     /// `block_id` always equals `tool_call_id` (documented TS invariant).
@@ -102,6 +109,8 @@ pub enum AgentEvent {
         tool_call_id: String,
         tool_name: String,
         block_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Partial tool-args JSON — TS `tool_call_delta`.
     ToolCallDelta {
@@ -109,6 +118,8 @@ pub enum AgentEvent {
         seq: u64,
         tool_call_id: String,
         delta: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Tool call assembled — TS `tool_call`.
     ToolCall {
@@ -120,12 +131,16 @@ pub enum AgentEvent {
         arguments: Value,
         arg_preview: String,
         risk_tier: RiskTier,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Execution started — TS `tool_executing`.
     ToolExecuting {
         session_id: String,
         seq: u64,
         tool_call_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Tool finished — TS `tool_result`.
     ToolResult {
@@ -141,6 +156,8 @@ pub enum AgentEvent {
         duration_ms: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         meta: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
     },
     /// Per-step usage — TS `usage`.
     Usage {
@@ -270,6 +287,7 @@ mod tests {
             message_id: "m_1".into(),
             text: "hi".into(),
             block_id: "p_1".into(),
+            parent_tool_call_id: None,
         };
         assert_eq!(
             serde_json::to_value(&event).unwrap(),
@@ -278,6 +296,24 @@ mod tests {
                 "messageId": "m_1", "text": "hi", "blockId": "p_1"
             })
         );
+    }
+
+    #[test]
+    fn child_delta_carries_parent_tool_call_id() {
+        let event = AgentEvent::ToolResult {
+            session_id: "s_root".into(),
+            seq: 7,
+            tool_call_id: "t_child".into(),
+            status: OutcomeStatus::Executed,
+            output: Some("nested".into()),
+            display: None,
+            duration_ms: None,
+            meta: None,
+            parent_tool_call_id: Some("t_dispatch".into()),
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["parentToolCallId"], serde_json::json!("t_dispatch"));
+        assert_eq!(wire["sessionId"], serde_json::json!("s_root"));
     }
 
     #[test]
@@ -291,6 +327,7 @@ mod tests {
             display: None,
             duration_ms: Some(12),
             meta: None,
+            parent_tool_call_id: None,
         };
         let wire = serde_json::to_value(&event).unwrap();
         assert_eq!(
@@ -303,6 +340,7 @@ mod tests {
         );
         assert!(!wire.to_string().contains("display"));
         assert!(!wire.to_string().contains("meta"));
+        assert!(!wire.to_string().contains("parentToolCallId"));
     }
 
     #[test]

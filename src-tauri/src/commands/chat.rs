@@ -325,6 +325,8 @@ pub(crate) async fn start_turn(
         )),
         retry_delay: crate::agent::orchestrator::RETRY_DELAY,
         workspace_root: std::path::PathBuf::from(workspace_path),
+        system: None,
+        mirror: None,
     };
 
     let task_hub = Arc::clone(hub);
@@ -451,19 +453,28 @@ pub async fn permission_respond(
 }
 
 pub(crate) fn respond_permission(hub: &ChatHub, args: PermissionRespondArgs) {
-    if let Some(new_mode) = args.new_mode.as_deref().and_then(parse_mode) {
-        hub.set_turn_mode(&args.session_id, new_mode);
-    }
+    // Escalation rides the ask: the owning turn's mode cell (a child's
+    // private cell for sub-agent cards, the active turn for root cards) —
+    // only a card that no longer matches a pending ask falls back to the
+    // session-level escalation.
+    let new_mode = args.new_mode.as_deref().and_then(parse_mode);
+    let mut resolved_any = false;
     for tool_call_id in &args.tool_call_ids {
-        hub.resolve_ask(
+        resolved_any |= hub.resolve_ask(
             &args.session_id,
             tool_call_id,
             PermissionAnswer {
                 approve: args.approve,
                 remember: args.remember.unwrap_or(false),
-                    reason: args.reason.clone(),
+                reason: args.reason.clone(),
             },
+            new_mode,
         );
+    }
+    if !resolved_any {
+        if let Some(mode) = new_mode {
+            hub.set_turn_mode(&args.session_id, mode);
+        }
     }
 }
 

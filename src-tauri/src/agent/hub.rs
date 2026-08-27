@@ -25,14 +25,25 @@ pub struct PermissionAnswer {
     pub reason: Option<String>,
 }
 
+/// One parked permission ask. `mode` is the autonomy cell an escalation
+/// answer mutates: the asking turn's own cell (root turns share the
+/// `ChatHub::active` entry's cell; dispatch children own a private cell) —
+/// a sub-agent's approved escalation can never reach the parent turn's mode.
+struct PendingAsk {
+    tx: oneshot::Sender<PermissionAnswer>,
+    mode: Option<Arc<StdMutex<AutonomyMode>>>,
+}
+
 struct ActiveTurn {
     abort: watch::Sender<bool>,
     tool_abort: AbortFlag,
     mode: Arc<StdMutex<AutonomyMode>>,
 }
 
-/// The abort surface a running turn sees. Cloned out of [`ChatHub::begin_turn`].
-#[derive(Debug)]
+/// The abort surface a running turn sees. Cloned out of [`ChatHub::begin_turn`];
+/// dispatch children clone the parent's abort surfaces but carry a PRIVATE
+/// mode cell (contained escalation).
+#[derive(Debug, Clone)]
 pub struct TurnHandle {
     pub abort_rx: watch::Receiver<bool>,
     pub tool_abort: AbortFlag,
@@ -56,7 +67,7 @@ pub struct ChatHub {
     seq: SeqCounters,
     active: StdMutex<HashMap<String, ActiveTurn>>,
     /// Keyed `session_id + '\u{0}' + tool_call_id`.
-    asks: StdMutex<HashMap<String, oneshot::Sender<PermissionAnswer>>>,
+    asks: StdMutex<HashMap<String, PendingAsk>>,
     channel_generation: AtomicU64,
     /// App-wide todo store shared with every turn's ToolContext. The
     /// subscription wired in [`ChatHub::open`] forwards each store change
@@ -217,34 +228,71 @@ impl ChatHub {
             .cloned()
             .collect();
         for key in keys {
-            if let Some(tx) = asks.remove(&key) {
+            if let Some(pending) = asks.remove(&key) {
                 let tool_call_id = key.split('\u{0}').nth(1).unwrap_or("");
-                let _ = tx.send(answer(tool_call_id));
+                let _ = pending.tx.send(answer(tool_call_id));
             }
         }
     }
 
     /// Park a gated tool call: the orchestrator awaits the matching oneshot.
+    /// Escalation answers target the session's active (root) turn.
     pub fn register_ask(
         &self,
         session_id: &str,
         tool_call_id: &str,
     ) -> oneshot::Receiver<PermissionAnswer> {
+        self.register_ask_with_mode(session_id, tool_call_id, None)
+    }
+
+    /// Sub-agent variant: the ask rides the root session's id space (the
+    /// renderer card and `permission_respond` address the root session) but
+    /// an escalation answer mutates only `mode` — the child turn's private
+    /// cell, never the parent's.
+    pub fn register_ask_with_mode(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        mode: Option<Arc<StdMutex<AutonomyMode>>>,
+    ) -> oneshot::Receiver<PermissionAnswer> {
         let (tx, rx) = oneshot::channel();
         self.asks
             .lock()
             .expect("permission asks poisoned")
-            .insert(format!("{session_id}\u{0}{tool_call_id}"), tx);
+            .insert(
+                format!("{session_id}\u{0}{tool_call_id}"),
+                PendingAsk { tx, mode },
+            );
         rx
     }
 
     /// `permission_respond`: resolve the listed asks. Unknown ids no-op (the
-    /// turn may have ended). Returns how many were actually resolved.
-    pub fn resolve_ask(&self, session_id: &str, tool_call_id: &str, answer: PermissionAnswer) -> bool {
+    /// turn may have ended). `new_mode` escalates the ask's owning mode cell
+    /// — the child's for sub-agent asks (contained), the session's active
+    /// turn for root asks. Returns whether an ask was actually resolved.
+    pub fn resolve_ask(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        answer: PermissionAnswer,
+        new_mode: Option<AutonomyMode>,
+    ) -> bool {
         let key = format!("{session_id}\u{0}{tool_call_id}");
-        let mut asks = self.asks.lock().expect("permission asks poisoned");
-        match asks.remove(&key) {
-            Some(tx) => tx.send(answer).is_ok(),
+        // Release the asks lock before touching `active` (end_turn takes
+        // active → asks; the reverse order here would deadlock).
+        let pending = self.asks.lock().expect("permission asks poisoned").remove(&key);
+        match pending {
+            Some(pending) => {
+                if let Some(mode) = new_mode {
+                    match pending.mode {
+                        Some(cell) => *cell.lock().expect("turn mode poisoned") = mode,
+                        None => {
+                            self.set_turn_mode(session_id, mode);
+                        }
+                    }
+                }
+                pending.tx.send(answer).is_ok()
+            }
             None => false,
         }
     }
@@ -347,7 +395,8 @@ mod tests {
                 approve: true,
                 remember: false,
                     reason: None,
-            }
+            },
+            None,
         ));
         assert!(rx.try_recv().is_ok());
         // Second respond for the same id no-ops.
@@ -357,8 +406,9 @@ mod tests {
             PermissionAnswer {
                 approve: false,
                 remember: false,
-                    reason: None,
-            }
+                reason: None,
+            },
+            None,
         ));
 
         let mut pending = hub.register_ask("s_1", "t_2");
@@ -366,5 +416,49 @@ mod tests {
         let answer = pending.try_recv().expect("end_turn denies pending asks");
         assert!(!answer.approve);
         assert!(answer.reason.unwrap().contains("Turn ended"));
+    }
+
+    /// Sub-agent asks ride the root session's id space but escalate only the
+    /// child's private mode cell — the parent turn's mode is unreachable
+    /// from a child card (children may never escalate the parent).
+    #[tokio::test]
+    async fn child_ask_escalation_never_reaches_the_parent_mode() {
+        let hub = hub("child-ask");
+        let parent = hub.begin_turn("s_root", AutonomyMode::Plan).unwrap();
+        let child_mode = Arc::new(StdMutex::new(AutonomyMode::Plan));
+
+        let mut rx = hub.register_ask_with_mode(
+            "s_root",
+            "t_child",
+            Some(Arc::clone(&child_mode)),
+        );
+        assert!(hub.resolve_ask(
+            "s_root",
+            "t_child",
+            PermissionAnswer {
+                approve: true,
+                remember: false,
+                reason: None,
+            },
+            Some(AutonomyMode::Edit),
+        ));
+        assert!(rx.try_recv().unwrap().approve);
+        assert_eq!(*child_mode.lock().unwrap(), AutonomyMode::Edit, "child escalated");
+        assert_eq!(parent.mode(), AutonomyMode::Plan, "parent unchanged");
+
+        // Root asks escalate the session's active turn as before.
+        let mut rx = hub.register_ask("s_root", "t_root");
+        assert!(hub.resolve_ask(
+            "s_root",
+            "t_root",
+            PermissionAnswer {
+                approve: true,
+                remember: false,
+                reason: None,
+            },
+            Some(AutonomyMode::FullAccess),
+        ));
+        assert!(rx.try_recv().unwrap().approve);
+        assert_eq!(parent.mode(), AutonomyMode::FullAccess);
     }
 }

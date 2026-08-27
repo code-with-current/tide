@@ -49,6 +49,7 @@ use tide_tools::permission::risk_tier_for;
 use tide_tools::{AutonomyMode, OutcomeStatus, Tool, ToolContext, ToolOutcome};
 use tokio::sync::watch;
 
+use super::dispatch;
 use super::events::{
     format_arg_preview, AgentEvent, TimelineEntry, ToolCallWire, TurnStopReason,
 };
@@ -102,6 +103,26 @@ impl StepStream for RigStepStream {
 
 // ── Turn spec ───────────────────────────────────────────────────────────────
 
+/// Mirror wiring for a dispatch child — the TS `runAgent` inheritance
+/// contract. The child's parts persist into its OWN session (the spec's
+/// `session_id`); its AgentEvents ride the ROOT session's stream, tagged
+/// with the dispatch's tool call id so the renderer nests them; its
+/// permission asks park in the root session's id space but escalate only
+/// the child's private mode cell.
+#[derive(Clone)]
+pub struct MirrorTarget {
+    /// ROOT session id — whose stream the child's events ride and whose id
+    /// the renderer's permission cards address.
+    pub parent_session_id: String,
+    /// The dispatch_agent tool call the child's events nest under.
+    pub parent_tool_call_id: String,
+    /// 1 for a direct child of the root turn; the recursion-guard input.
+    pub depth: u32,
+    /// The catalog agent this child runs — a nested dispatch consults it
+    /// for its canDispatch grants.
+    pub agent: String,
+}
+
 /// Everything one turn needs, resolved from session/model config by the
 /// command layer before spawning the loop. The autonomy mode lives in the
 /// [`TurnHandle`] (escalations mutate it mid-turn), not here.
@@ -117,6 +138,11 @@ pub struct TurnSpec {
     /// tests shrink it instead of sleeping through the real thing.
     pub retry_delay: Duration,
     pub workspace_root: PathBuf,
+    /// System prompt override — `None` = the Tide default. Dispatch children
+    /// run their catalog agent's prompt.
+    pub system: Option<String>,
+    /// Set for dispatch children: event mirroring + recursion metadata.
+    pub mirror: Option<MirrorTarget>,
 }
 
 impl Default for TurnSpec {
@@ -130,8 +156,26 @@ impl Default for TurnSpec {
             permission_timeout: PERMISSION_TIMEOUT_DEFAULT,
             retry_delay: RETRY_DELAY,
             workspace_root: PathBuf::new(),
+            system: None,
+            mirror: None,
         }
     }
+}
+
+/// What a finished turn reports to its spawner. The root turn's summary
+/// already rode its TurnEnd event (the renderer consumes it there); a
+/// dispatch child's summary becomes the dispatch tool result, with its
+/// usage folded into the parent's rollup (TS `onUsage` folding).
+#[derive(Debug, Clone)]
+pub struct TurnSummary {
+    pub stop_reason: TurnStopReason,
+    pub usage: EngineUsage,
+    pub text: String,
+    pub reasoning: Option<String>,
+    pub steps: u32,
+    /// The terminal error when the turn failed (empty-text refusal etc.) —
+    /// children surface it in the dispatch result instead of an error event.
+    pub error: Option<String>,
 }
 
 impl TurnSpec {
@@ -395,10 +439,21 @@ impl TurnState {
     }
 }
 
-struct PendingCall {
-    tool_call_id: String,
-    tool_name: String,
-    arguments: serde_json::Value,
+#[derive(Clone)]
+pub(crate) struct PendingCall {
+    pub(crate) tool_call_id: String,
+    pub(crate) tool_name: String,
+    pub(crate) arguments: serde_json::Value,
+}
+
+/// Where a turn's AgentEvents ride. Root turns: their own session, no
+/// parentage tag. Dispatch children: the ROOT session, every stream event
+/// tagged with the dispatch's tool call id (renderer nesting); v2 parts
+/// still persist into the child session through the tracker.
+#[derive(Clone)]
+pub(crate) struct EmitCtx {
+    emit_id: String,
+    parent_tc: Option<String>,
 }
 
 enum LoopOutcome {
@@ -410,15 +465,27 @@ enum LoopOutcome {
 
 /// Run one full agent turn to completion (or abort). Returns Err ONLY for
 /// pre-loop setup failures (missing session, unreadable store); everything
-/// the model/provider does wrong is an error+turn_end event pair.
+/// the model/provider does wrong is an error+turn_end event pair (for a
+/// dispatch child: a failed summary the dispatch runner turns into the
+/// tool result — children never emit error/turn_end into the root stream).
 pub async fn execute_turn(
-    hub: &ChatHub,
+    hub: &Arc<ChatHub>,
     spec: &TurnSpec,
     engine: Arc<dyn StepStream>,
     tools: Vec<Arc<dyn Tool>>,
     turn: TurnHandle,
-) -> Result<(), String> {
+) -> Result<TurnSummary, String> {
     let session_id = spec.session_id.as_str();
+    // Children mirror into the root stream; roots emit as themselves.
+    let emit = EmitCtx {
+        emit_id: spec
+            .mirror
+            .as_ref()
+            .map(|m| m.parent_session_id.clone())
+            .unwrap_or_else(|| session_id.to_owned()),
+        parent_tc: spec.mirror.as_ref().map(|m| m.parent_tool_call_id.clone()),
+    };
+    let mirroring = emit.parent_tc.is_some();
 
     // v2 message row lands at turn start (parts reference it; message.end
     // completes it). A failed insert = no v2 session row → v2 emission off,
@@ -466,7 +533,7 @@ pub async fn execute_turn(
         .collect();
 
     let params = TurnParams {
-        system: Some(system_prompt()),
+        system: Some(spec.system.clone().unwrap_or_else(system_prompt)),
         thinking_level: spec.thinking_level,
         reasoning_contracts: Vec::new(),
         model_max_output_tokens: spec.model_max_output_tokens,
@@ -520,7 +587,7 @@ pub async fn execute_turn(
                     None => break,
                     Some(Ok(event)) => {
                         handle_engine_event(
-                            hub, &mut state, &mut tracker, &mut pending_calls,
+                            hub, &emit, &mut state, &mut tracker, &mut pending_calls,
                             &mut step_stop, &mut history, &message_id, &event, v2,
                         );
                     }
@@ -539,11 +606,14 @@ pub async fn execute_turn(
         }
 
         if let Some(error) = step_error {
-            if retry_count < TURN_MAX_RETRIES && is_transient_error(&error) {
+            // The TS sub-agent loop ran with retries off (streamText
+            // maxRetries: 0) — children fail straight into the dispatch
+            // result instead of retry events in the root stream.
+            if !mirroring && retry_count < TURN_MAX_RETRIES && is_transient_error(&error) {
                 retry_count += 1;
                 hub.emit_agent(AgentEvent::Retry {
-                    session_id: session_id.to_owned(),
-                    seq: hub.next_seq(session_id),
+                    session_id: emit.emit_id.clone(),
+                    seq: hub.next_seq(&emit.emit_id),
                     attempt: retry_count,
                     max_attempts: TURN_MAX_RETRIES,
                     reason: error,
@@ -569,25 +639,84 @@ pub async fn execute_turn(
         last_error = None;
         state.steps_completed += 1;
 
-        // Execute the step's tool calls (emission order), gated.
+        // Execute the step's tool calls (emission order), gated. Plain
+        // tools run inline; dispatch_agent calls spawn child turns — several
+        // in one step run in parallel (TS parallel dispatch), their results
+        // landing back in call order.
         let step_message = history.last().cloned();
         let call_id_map = step_message.as_ref().map(|m| map_call_ids(m, &pending_calls));
-        let mut step_results: Vec<HistoryPart> = Vec::new();
+        let mut step_results: Vec<Option<HistoryPart>> = vec![None; pending_calls.len()];
+        let mut dispatches: Vec<(usize, tokio::task::JoinHandle<Result<dispatch::DispatchDone, String>>)> =
+            Vec::new();
         let mut had_tool_calls = false;
-        for call in &pending_calls {
+        for (index, call) in pending_calls.iter().enumerate() {
             had_tool_calls = true;
-            let outcome = run_gated_tool(
-                hub, spec, &turn, &mut gate, &tool_ctx, &tools, call,
-                &call_id_map, &message_id, &mut state, &mut tracker, v2,
-            )
-            .await;
-            if let Some(result) = outcome {
-                step_results.push(result);
-            }
             if turn.is_aborted() {
                 break;
             }
+            if call.tool_name == "dispatch_agent" {
+                // dispatch_agent itself is read-tiered; deny rules reject
+                // here, everything else hands to the dispatch runner (which
+                // applies the plan-mode target-tier gate).
+                let denied = match gate.check(turn.mode(), &call.tool_name, &call.arguments) {
+                    Decision::Deny { reason } => Some(ToolOutcome::rejected(reason)),
+                    Decision::Allow | Decision::Ask { .. } => None,
+                };
+                match denied {
+                    Some(outcome) => {
+                        step_results[index] = finalize_tool_call(
+                            hub, &emit, &mut state, &mut tracker, call, &call_id_map,
+                            &message_id, outcome, v2,
+                        );
+                    }
+                    None => {
+                        hub.emit_agent(AgentEvent::ToolExecuting {
+                            session_id: emit.emit_id.clone(),
+                            seq: hub.next_seq(&emit.emit_id),
+                            tool_call_id: call.tool_call_id.clone(),
+                            parent_tool_call_id: None,
+                        });
+                        dispatches.push((
+                            index,
+                            dispatch::spawn_dispatch(
+                                Arc::clone(hub),
+                                spec.clone(),
+                                turn.clone(),
+                                Arc::clone(&engine),
+                                tools.clone(),
+                                call.clone(),
+                                emit.emit_id.clone(),
+                                message_id.clone(),
+                            ),
+                        ));
+                    }
+                }
+                continue;
+            }
+            let outcome = run_gated_tool(
+                hub, spec, &turn, &mut gate, &tool_ctx, &tools, call, &emit, &message_id,
+            )
+            .await;
+            step_results[index] = finalize_tool_call(
+                hub, &emit, &mut state, &mut tracker, call, &call_id_map, &message_id,
+                outcome, v2,
+            );
         }
+        for (index, handle) in dispatches {
+            let (outcome, usage) = match handle.await {
+                Ok(Ok(done)) => (done.outcome, done.usage),
+                Ok(Err(message)) => (ToolOutcome::failed(message), EngineUsage::default()),
+                Err(e) => (ToolOutcome::failed(format!("dispatch task failed: {e}")), EngineUsage::default()),
+            };
+            accumulate_usage(&mut state.usage, &usage);
+            if let Some(call) = pending_calls.get(index) {
+                step_results[index] = finalize_tool_call(
+                    hub, &emit, &mut state, &mut tracker, call, &call_id_map, &message_id,
+                    outcome, v2,
+                );
+            }
+        }
+        let step_results: Vec<HistoryPart> = step_results.into_iter().flatten().collect();
         if !step_results.is_empty() {
             history.push(HistoryMessage {
                 role: HistoryRole::User,
@@ -627,12 +756,13 @@ pub async fn execute_turn(
         LoopOutcome::Aborted => TurnStopReason::Aborted,
     };
     // Aborted turns surface why they were failing, if they were (TS
-    // emitTurnEnd: failureMsg on refusal|aborted).
-    if matches!(stop_reason, TurnStopReason::Refusal | TurnStopReason::Aborted) {
-        if let Some(message) = last_error {
+    // emitTurnEnd: failureMsg on refusal|aborted). Children keep the error
+    // in their summary — the dispatch result reports it.
+    if !mirroring && matches!(stop_reason, TurnStopReason::Refusal | TurnStopReason::Aborted) {
+        if let Some(message) = last_error.clone() {
             hub.emit_agent(AgentEvent::Error {
-                session_id: session_id.to_owned(),
-                seq: hub.next_seq(session_id),
+                session_id: emit.emit_id.clone(),
+                seq: hub.next_seq(&emit.emit_id),
                 message,
             });
         }
@@ -648,28 +778,39 @@ pub async fn execute_turn(
         .into_iter()
         .filter(|e| !matches!(e, TimelineEntry::Text { text } if text.trim().is_empty()))
         .collect::<Vec<_>>();
-    hub.emit_agent(AgentEvent::TurnEnd {
-        session_id: session_id.to_owned(),
-        seq: hub.next_seq(session_id),
-        message_id: message_id.clone(),
+    if !mirroring {
+        hub.emit_agent(AgentEvent::TurnEnd {
+            session_id: emit.emit_id.clone(),
+            seq: hub.next_seq(&emit.emit_id),
+            message_id: message_id.clone(),
+            stop_reason,
+            content: state.final_text.clone(),
+            timeline: Some(timeline),
+            reasoning: (!state.reasoning.is_empty()).then(|| state.reasoning.clone()),
+            reasoning_tokens: (usage.reasoning_tokens > 0).then_some(usage.reasoning_tokens),
+            total_ms: Some(started.elapsed().as_millis() as u64),
+            tool_calls: (!state.tool_calls.is_empty()).then(|| state.tool_calls.clone()),
+            usage: Some(usage),
+            last_step_usage: state.last_step_usage,
+        });
+    }
+    Ok(TurnSummary {
         stop_reason,
-        content: state.final_text.clone(),
-        timeline: Some(timeline),
-        reasoning: (!state.reasoning.is_empty()).then(|| state.reasoning.clone()),
-        reasoning_tokens: (usage.reasoning_tokens > 0).then_some(usage.reasoning_tokens),
-        total_ms: Some(started.elapsed().as_millis() as u64),
-        tool_calls: (!state.tool_calls.is_empty()).then(|| state.tool_calls.clone()),
-        usage: Some(usage),
-        last_step_usage: state.last_step_usage,
-    });
-    Ok(())
+        usage,
+        text: state.final_text,
+        reasoning: (!state.reasoning.is_empty()).then_some(state.reasoning),
+        steps: state.steps_completed,
+        error: last_error,
+    })
 }
 
 /// Translate one EngineEvent into AgentEvents + sink events + state updates.
-/// Appends the StepEnd assistant message to `history`.
+/// Appends the StepEnd assistant message to `history`. Events ride
+/// `emit.emit_id`, tagged with `emit.parent_tc` for dispatch children.
 #[allow(clippy::too_many_arguments)]
 fn handle_engine_event(
     hub: &ChatHub,
+    emit: &EmitCtx,
     state: &mut TurnState,
     tracker: &mut TurnTracker,
     pending_calls: &mut Vec<PendingCall>,
@@ -679,7 +820,8 @@ fn handle_engine_event(
     event: &EngineEvent,
     v2: bool,
 ) {
-    let session_id = tracker.session_id.clone();
+    let session_id = emit.emit_id.clone();
+    let parent_tc = emit.parent_tc.clone();
     let sink = hub.sink();
     match event {
         EngineEvent::Delta { text } => {
@@ -704,6 +846,7 @@ fn handle_engine_event(
                 message_id: message_id.to_owned(),
                 text: text.clone(),
                 block_id,
+                parent_tool_call_id: parent_tc,
             });
         }
         EngineEvent::Reasoning { delta } => {
@@ -723,6 +866,7 @@ fn handle_engine_event(
                 message_id: message_id.to_owned(),
                 delta: delta.clone(),
                 block_id,
+                parent_tool_call_id: parent_tc,
             });
         }
         EngineEvent::ToolCallStart {
@@ -745,6 +889,7 @@ fn handle_engine_event(
                 tool_call_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),
                 block_id: tool_call_id.clone(),
+                parent_tool_call_id: parent_tc,
             });
         }
         EngineEvent::ToolCallDelta {
@@ -756,6 +901,7 @@ fn handle_engine_event(
                 seq: hub.next_seq(&session_id),
                 tool_call_id: tool_call_id.clone(),
                 delta: delta.clone(),
+                parent_tool_call_id: parent_tc,
             });
         }
         EngineEvent::ToolCall {
@@ -764,7 +910,13 @@ fn handle_engine_event(
             arguments,
         } => {
             // Defensive: a start-less call (engine-shape gap) still gets its
-            // part armed and the open text committed at the boundary.
+            // part armed and the open text committed at the boundary — and
+            // the boundary must close the open text block too (the TS
+            // translatePart reset its carry at BOTH tool events; without
+            // this, post-tool text reuses the pre-tool part id and the
+            // re-commit no-ops).
+            state.text_block = None;
+            state.reasoning_block = None;
             if v2 {
                 for ev in tracker.ensure_armed(tool_call_id) {
                     sink.emit(ev);
@@ -784,20 +936,26 @@ fn handle_engine_event(
                 arguments: arguments.clone(),
                 arg_preview: format_arg_preview(tool_name, arguments),
                 risk_tier: risk_tier_for(tool_name),
+                parent_tool_call_id: parent_tc,
             });
         }
         EngineEvent::Usage { tokens } => {
             accumulate_usage(&mut state.usage, tokens);
             state.last_step_usage = Some(*tokens);
-            hub.emit_agent(AgentEvent::Usage {
-                session_id: session_id.clone(),
-                seq: hub.next_seq(&session_id),
-                message_id: message_id.to_owned(),
-                tokens: *tokens,
-                cost_usd: tokens.cost_usd,
-                running_total_usd: state.usage.cost_usd,
-                iteration: state.steps_completed + 1,
-            });
+            // Children fold usage into the parent's rollup (returned in
+            // their TurnSummary) — no per-step usage events in the root
+            // stream, matching the TS onUsage folding.
+            if parent_tc.is_none() {
+                hub.emit_agent(AgentEvent::Usage {
+                    session_id: session_id.clone(),
+                    seq: hub.next_seq(&session_id),
+                    message_id: message_id.to_owned(),
+                    tokens: *tokens,
+                    cost_usd: tokens.cost_usd,
+                    running_total_usd: state.usage.cost_usd,
+                    iteration: state.steps_completed + 1,
+                });
+            }
         }
         EngineEvent::StepEnd { stop_reason, message } => {
             *step_stop = Some(stop_reason.clone());
@@ -806,9 +964,10 @@ fn handle_engine_event(
     }
 }
 
-/// Gate + execute one tool call; emits tool_result, persists the v2 tool
-/// part, and returns the user-side ToolResult history part (None when the
-/// call could not be mapped at all).
+/// Gate + execute one plain tool call (the dispatch_agent interception lives
+/// in the step loop). Permission asks park in `emit.emit_id`'s id space —
+/// the ROOT session for children — with the child's private mode cell, so
+/// an escalation answer can never reach the parent turn's mode.
 #[allow(clippy::too_many_arguments)]
 async fn run_gated_tool(
     hub: &ChatHub,
@@ -818,20 +977,17 @@ async fn run_gated_tool(
     tool_ctx: &ToolContext,
     tools: &[Arc<dyn Tool>],
     call: &PendingCall,
-    call_id_map: &Option<HashMap<String, String>>,
+    emit: &EmitCtx,
     message_id: &str,
-    state: &mut TurnState,
-    tracker: &mut TurnTracker,
-    v2: bool,
-) -> Option<HistoryPart> {
-    let session_id = spec.session_id.as_str();
+) -> ToolOutcome {
+    let session_id = emit.emit_id.as_str();
     let mode = turn.mode();
 
     // Escalation + remember rules may have mutated the gate's rule set mid-
     // turn; the check itself is stateless over it.
     let decision = gate.check(mode, &call.tool_name, &call.arguments);
-    let outcome = match decision {
-        Decision::Allow => execute_tool(hub, session_id, tools, tool_ctx, call).await,
+    match decision {
+        Decision::Allow => execute_tool(hub, emit, tools, tool_ctx, call).await,
         Decision::Deny { reason } => ToolOutcome::rejected(reason),
         Decision::Ask {
             risk,
@@ -862,7 +1018,15 @@ async fn run_gated_tool(
                 }],
                 timeout_at: unix_ms_now() + spec.permission_timeout.as_millis() as i64,
             });
-            let rx = hub.register_ask(session_id, &call.tool_call_id);
+            let rx = if emit.parent_tc.is_some() {
+                hub.register_ask_with_mode(
+                    session_id,
+                    &call.tool_call_id,
+                    Some(Arc::clone(&turn.mode)),
+                )
+            } else {
+                hub.register_ask(session_id, &call.tool_call_id)
+            };
             let answer = tokio::time::timeout(spec.permission_timeout, rx).await;
             let answer = match answer {
                 Ok(Ok(answer)) => answer,
@@ -885,7 +1049,7 @@ async fn run_gated_tool(
                         gate.set_rules(rules);
                     }
                 }
-                execute_tool(hub, session_id, tools, tool_ctx, call).await
+                execute_tool(hub, emit, tools, tool_ctx, call).await
             } else {
                 ToolOutcome::rejected(
                     answer
@@ -894,8 +1058,26 @@ async fn run_gated_tool(
                 )
             }
         }
-    };
+    }
+}
 
+/// Post-execution bookkeeping shared by every tool path (plain, denied, and
+/// dispatch): the turn_end tool_calls row, the timeline entry, the
+/// `tool_result` AgentEvent (tagged for children), the v2 tool part, and
+/// the user-side history part (None when the call id could not be mapped).
+#[allow(clippy::too_many_arguments)]
+fn finalize_tool_call(
+    hub: &ChatHub,
+    emit: &EmitCtx,
+    state: &mut TurnState,
+    tracker: &mut TurnTracker,
+    call: &PendingCall,
+    call_id_map: &Option<HashMap<String, String>>,
+    message_id: &str,
+    outcome: ToolOutcome,
+    v2: bool,
+) -> Option<HistoryPart> {
+    let session_id = emit.emit_id.as_str();
     let status_str = serde_json::to_value(outcome.status)
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
@@ -928,6 +1110,7 @@ async fn run_gated_tool(
         display: outcome.display.clone(),
         duration_ms: outcome.duration_ms,
         meta: outcome.meta.clone(),
+        parent_tool_call_id: emit.parent_tc.clone(),
     });
     if v2 {
         for ev in tracker.tool_end(
@@ -957,7 +1140,7 @@ async fn run_gated_tool(
 
 async fn execute_tool(
     hub: &ChatHub,
-    session_id: &str,
+    emit: &EmitCtx,
     tools: &[Arc<dyn Tool>],
     tool_ctx: &ToolContext,
     call: &PendingCall,
@@ -966,9 +1149,10 @@ async fn execute_tool(
         return ToolOutcome::failed(format!("Unknown tool: {}", call.tool_name));
     };
     hub.emit_agent(AgentEvent::ToolExecuting {
-        session_id: session_id.to_owned(),
-        seq: hub.next_seq(session_id),
+        session_id: emit.emit_id.clone(),
+        seq: hub.next_seq(&emit.emit_id),
         tool_call_id: call.tool_call_id.clone(),
+        parent_tool_call_id: emit.parent_tc.clone(),
     });
     let started = Instant::now();
     let tool = Arc::clone(tool);

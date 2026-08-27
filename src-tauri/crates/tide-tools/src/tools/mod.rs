@@ -5,6 +5,7 @@
 pub mod background_shell;
 pub mod bash;
 pub mod directory_tree;
+pub mod dispatch_agent;
 pub mod edit_file;
 pub mod git;
 pub mod git_repo;
@@ -30,6 +31,7 @@ use crate::Tool;
 pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
 pub use directory_tree::DirectoryTreeTool;
+pub use dispatch_agent::DispatchAgentTool;
 pub use edit_file::EditFileTool;
 pub use git::GitTool;
 pub use git_repo::GitRepoTool;
@@ -70,6 +72,7 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(GitRepoTool),
         Box::new(WebFetchTool),
         Box::new(WebSearchTool),
+        Box::new(DispatchAgentTool),
         Box::new(TodoWriteTool),
         Box::new(SlashCommandTool),
         Box::new(MemoryTool::new(None)),
