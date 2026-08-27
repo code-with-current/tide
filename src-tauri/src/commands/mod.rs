@@ -11,6 +11,7 @@
 pub mod boot;
 pub mod bridge;
 pub mod chat;
+pub mod mcp;
 pub mod providers;
 pub mod sessions;
 pub mod settings;

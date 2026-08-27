@@ -5,3 +5,32 @@ edition.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
+rmcp = { version = "3.1", features = [
+    "client",
+    "transport-async-rw",
+    "transport-streamable-http-client-reqwest",
+    "auth",
+] }
+tokio = { version = "1", features = [
+    "process",
+    "net",
+    "io-util",
+    "rt",
+    "sync",
+    "time",
+    "macros",
+] }
+futures = "0.3"
+async-trait = "0.1"
+thiserror = "2"
+base64 = "0.22"
+http = "1"
+reqwest = { version = "0.13", features = ["json"] }
+tide-store = { path = "../tide-store" }
+tide-tools = { path = "../tide-tools" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+base64 = "0.22"

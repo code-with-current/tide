@@ -18,6 +18,7 @@ use tide_tools::{AutonomyMode, Tool};
 
 use crate::agent::events::{AgentEvent, ChatPush, TurnStopReason};
 use crate::agent::hub::{ChatHub, ChatHubCell, PermissionAnswer, TurnHandle};
+use crate::agent::mcp::McpPoolCell;
 use crate::agent::orchestrator::{
     core_tools_shared, execute_turn, persist_user_message, IncomingUserMessage, RigStepStream,
     StepStream, TurnSpec,
@@ -221,6 +222,7 @@ pub(crate) fn create_session(
 pub async fn chat_run_turn(
     state: tauri::State<'_, AppState>,
     hub_cell: tauri::State<'_, ChatHubCell>,
+    mcp_cell: tauri::State<'_, McpPoolCell>,
     args: ChatRunTurnArgs,
 ) -> Result<ChatSendResultWire, CommandError> {
     let hub = hub_cell
@@ -232,7 +234,23 @@ pub async fn chat_run_turn(
         Ok(model) => Arc::new(RigStepStream::new(model)) as Arc<dyn StepStream>,
         Err(error) => return Ok(ChatSendResultWire::rejected(error)),
     };
-    start_turn(&state, &hub, args, engine, core_tools_shared()).await
+    // MCP servers join the turn dynamically: keep the pool warm for this
+    // session's workspace and append its connected tools to the core list.
+    let workspace_root = hub
+        .writer()
+        .lock()
+        .expect("sink writer poisoned")
+        .session_workspace_path(&args.session_id);
+    mcp_cell
+        .ensure_started(
+            state.data_dir().to_path_buf(),
+            state.read_config(|cfg| cfg.clone())?,
+            workspace_root.clone(),
+        )
+        .await;
+    let mut tools = core_tools_shared();
+    tools.extend(mcp_cell.turn_tools().await);
+    start_turn(&state, &hub, args, engine, tools).await
 }
 
 /// The turn pre-flight + spawn, injectable-engine so tests drive a scripted

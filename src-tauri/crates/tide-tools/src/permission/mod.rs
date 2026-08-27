@@ -124,6 +124,10 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
         // sidecar tier is destructive (TS toolMeta). [`risk_tier_for_call`]
         // refines it per subcommand at gate time.
         "git" => RiskTier::Destructive,
+        // Dynamically bridged MCP tools (`mcp__<server>__<tool>`) — the TS
+        // toolMeta `mcp` entry: read-only, auto-approved in all modes (the
+        // TS never wrapped MCP executes in the permission wrapper).
+        name if name.starts_with("mcp__") => RiskTier::ReadOnly,
         _ => RiskTier::Destructive,
     }
 }
@@ -247,6 +251,24 @@ mod tests {
 
     fn gate(rules: RuleSet) -> PermissionGate {
         PermissionGate::new(rules)
+    }
+
+    #[test]
+    fn mcp_bridged_tools_are_read_tier_in_every_mode() {
+        // TS toolMeta `mcp` entry: read_only + auto-approve in ALL modes —
+        // the TS never wrapped MCP executes in the permission wrapper.
+        assert_eq!(risk_tier_for("mcp__context7__resolve-library-id"), RiskTier::ReadOnly);
+        let g = gate(RuleSet::default());
+        let args = json!({"query": "react"});
+        for mode in [AutonomyMode::Plan, AutonomyMode::Ask, AutonomyMode::Edit, AutonomyMode::FullAccess] {
+            assert_eq!(
+                g.check(mode, "mcp__context7__resolve-library-id", &args),
+                Decision::Allow,
+                "{mode:?}"
+            );
+        }
+        // Unknown non-mcp names keep the conservative default.
+        assert_eq!(risk_tier_for("totally_unknown"), RiskTier::Destructive);
     }
 
     #[test]
