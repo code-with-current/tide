@@ -246,6 +246,21 @@ impl ChatHub {
         self.resolve_session_followups(session_id);
     }
 
+    /// `abortAllSessions` (the TS clearAllSessions pre-step): abort every
+    /// active turn before the stores are wiped.
+    pub fn abort_all(&self) {
+        let ids: Vec<String> = self
+            .active
+            .lock()
+            .expect("active turns poisoned")
+            .keys()
+            .cloned()
+            .collect();
+        for id in ids {
+            self.abort_turn(&id);
+        }
+    }
+
     fn resolve_session_asks(
         &self,
         session_id: &str,

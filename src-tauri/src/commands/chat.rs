@@ -453,6 +453,32 @@ fn build_engine(
     EngineModel::from_config(&engine_config).map_err(|e| e.to_string())
 }
 
+/// Shared with the sessions domain (title generation resolves its own
+/// provider + model, then builds the engine exactly this way).
+pub(crate) fn build_engine_for(
+    state: &AppState,
+    provider: &tide_store::config::StoredProvider,
+    model_id: &str,
+) -> Result<EngineModel, String> {
+    let config = state
+        .read_config(|cfg| cfg.clone())
+        .map_err(|e| e.message)?;
+    let api_key = tide_store::secrets::get_api_key(&config, &provider.id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("No API key for {}", provider.name))?;
+    let api_style = match provider.api_style.as_str() {
+        "anthropic" => ProviderApiStyle::Anthropic,
+        _ => ProviderApiStyle::OpenAi,
+    };
+    EngineModel::from_config(&EngineModelConfig {
+        api_style,
+        base_url: provider.base_url.clone(),
+        api_key,
+        model_id: model_id.to_owned(),
+    })
+    .map_err(|e| e.to_string())
+}
+
 fn last_user_message(args: &ChatRunTurnArgs) -> Option<IncomingUserMessage> {
     args.messages
         .iter()

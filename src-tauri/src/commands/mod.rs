@@ -17,6 +17,7 @@ pub mod providers;
 pub mod sessions;
 pub mod settings;
 pub mod shortcuts;
+pub mod worktree;
 pub mod workspaces;
 
 use serde::Serialize;

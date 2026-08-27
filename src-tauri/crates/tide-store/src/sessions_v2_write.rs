@@ -111,6 +111,17 @@ pub const SCHEMA: &str = "
       session_id TEXT PRIMARY KEY,
       todos TEXT NOT NULL,
       time_updated INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS session_worktree (
+      session_id TEXT PRIMARY KEY,
+      worktree TEXT NOT NULL,
+      time_updated INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS session_settings (
+      session_id TEXT PRIMARY KEY,
+      autonomy_mode TEXT,
+      thinking_level TEXT,
+      time_updated INTEGER NOT NULL
     );";
 
 /// better-sqlite3's default `timeout` option — how long a second writer waits
@@ -301,6 +312,12 @@ pub fn new_session_id() -> String {
     format!("s_{}", random_base36(8))
 }
 
+/// `ws_${Math.random().toString(36).slice(2, 10)}` — the configStore's
+/// workspace id (the workspaces-rpc add handler minted it).
+pub fn new_workspace_id() -> String {
+    format!("ws_{}", random_base36(8))
+}
+
 /// `m_${Date.now().toString(36)}_${...}` — chronologically sortable (the
 /// message-window cursor orders by id).
 pub fn new_message_id() -> String {
@@ -482,12 +499,100 @@ impl SessionsV2Writer {
     }
 
     /// `deleteSession`: cascades to messages/parts (FKs are ON). Events carry
-    /// no FK and are left behind, exactly like the TS.
+    /// no FK and are left behind, exactly like the TS; the side tables
+    /// (todos/worktree/settings) carry none either and are cleared here.
     pub fn delete_session(&self, id: &str) -> Result<()> {
         self.conn
             .execute("DELETE FROM session WHERE id = ?1", params![id])
             ?;
+        self.conn
+            .execute("DELETE FROM session_todos WHERE session_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM session_worktree WHERE session_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM session_settings WHERE session_id = ?1", params![id])?;
         Ok(())
+    }
+
+    /// `clearAllSessions`: wipe every row of every table (the TS removed the
+    /// whole sessions directory). The db file + schema survive.
+    pub fn clear_all(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "DELETE FROM event; DELETE FROM part; DELETE FROM message; DELETE FROM session; \
+             DELETE FROM session_todos; DELETE FROM session_worktree; DELETE FROM session_settings;",
+        )?;
+        Ok(())
+    }
+
+    /// The session's existence + archive state — `None` when no such row.
+    /// The command layer's two-step archive→delete flow probes with this.
+    pub fn session_archived(&self, id: &str) -> Option<bool> {
+        self.conn
+            .query_row(
+                "SELECT archived_at IS NOT NULL FROM session WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
+    /// `unarchiveSession`: clear `archived_at` (idempotent; the row keeps its
+    /// list position — time_updated untouched, like the TS).
+    pub fn unarchive_session(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE session SET archived_at = NULL WHERE id = ?1", params![id])
+            ?;
+        Ok(())
+    }
+
+    /// Archive/unarchive every session of a workspace for the workspace-level
+    /// cascades (TS `cascadeOps`). `main_only` matches the TS asymmetry: the
+    /// archive cascade came from `listSessions` (mains only) while the
+    /// unarchive cascade came from `listArchived` (everything archived).
+    pub fn archive_workspace_sessions(&self, workspace_path: &str, now_ms: i64, main_only: bool) -> Result<usize> {
+        let sql = if main_only {
+            "UPDATE session SET archived_at = ?2 WHERE workspace_path = ?1 \
+             AND archived_at IS NULL AND parent_id IS NULL"
+        } else {
+            "UPDATE session SET archived_at = ?2 WHERE workspace_path = ?1 AND archived_at IS NULL"
+        };
+        Ok(self.conn.execute(sql, params![workspace_path, now_ms])?)
+    }
+
+    /// Unarchive every archived session of a workspace (the unarchive
+    /// cascade came from `listArchived` — subagents included).
+    pub fn unarchive_workspace_sessions(&self, workspace_path: &str) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE session SET archived_at = NULL WHERE workspace_path = ?1 AND archived_at IS NOT NULL",
+            params![workspace_path],
+        )?)
+    }
+
+    /// The ids of every session row under a workspace path (any archive
+    /// state) — the workspace-delete cascade iterates them.
+    pub fn session_ids_by_workspace(&self, workspace_path: &str) -> Vec<String> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id FROM session WHERE workspace_path = ?1 ORDER BY time_created ASC, id ASC",
+        ) {
+            Ok(stmt) => stmt,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(params![workspace_path], |row| row.get(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    /// The last text part id of a message (`None` when it has no text part or
+    /// no such message) — the finalize-upsert targets it.
+    pub fn last_text_part_of(&self, message_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT id FROM part WHERE message_id = ?1 AND kind = 'text' \
+                 ORDER BY seq DESC, id DESC LIMIT 1",
+                params![message_id],
+                |row| row.get(0),
+            )
+            .ok()
     }
 
     /// `store.setTodos` twin: the TS persisted the session's todo list on
@@ -517,6 +622,79 @@ impl SessionsV2Writer {
             )
             .ok()?;
         serde_json::from_str::<Vec<Value>>(&raw).ok()
+    }
+
+    /// Persist (or clear with `None`) the session's worktree metadata — the
+    /// twin of the legacy JSON row's `worktree` field, landed in an additive
+    /// side table like `session_todos` (the v2 schema has no column).
+    pub fn set_session_worktree(
+        &self,
+        session_id: &str,
+        worktree: Option<&Value>,
+        now_ms: i64,
+    ) -> Result<()> {
+        match worktree {
+            Some(worktree) => {
+                self.conn.execute(
+                    "INSERT INTO session_worktree (session_id, worktree, time_updated) \
+                     VALUES (?1, ?2, ?3) \
+                     ON CONFLICT(session_id) DO UPDATE SET worktree = ?2, time_updated = ?3",
+                    params![session_id, worktree.to_string(), now_ms],
+                )?;
+            }
+            None => {
+                self.conn
+                    .execute("DELETE FROM session_worktree WHERE session_id = ?1", params![session_id])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The session's persisted worktree metadata (unparsable rows read as
+    /// absent, like [`SessionsV2Writer::session_todos`]).
+    pub fn session_worktree(&self, session_id: &str) -> Option<Value> {
+        let raw: String = self
+            .conn
+            .query_row(
+                "SELECT worktree FROM session_worktree WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    /// Patch the session's per-session settings (autonomy/thinking), the
+    /// twin of the legacy JSON row's fields. Set-or-keep: `None` fields keep
+    /// their stored value (the TS only assigned defined patch fields).
+    pub fn set_session_settings(
+        &self,
+        session_id: &str,
+        autonomy_mode: Option<&str>,
+        thinking_level: Option<&str>,
+        now_ms: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO session_settings (session_id, autonomy_mode, thinking_level, time_updated) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(session_id) DO UPDATE SET \
+               autonomy_mode = COALESCE(?2, autonomy_mode), \
+               thinking_level = COALESCE(?3, thinking_level), \
+               time_updated = ?4",
+            params![session_id, autonomy_mode, thinking_level, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// The session's persisted settings (`None` fields when never written).
+    pub fn session_settings(&self, session_id: &str) -> Option<(Option<String>, Option<String>)> {
+        self.conn
+            .query_row(
+                "SELECT autonomy_mode, thinking_level FROM session_settings WHERE session_id = ?1",
+                params![session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok()
     }
 
     /// `insertMessage`: the assistant (or twin user) message row at turn
@@ -1895,5 +2073,230 @@ mod tests {
         assert_eq!(none_seq.r#type, SinkEventType::TurnEnd);
         assert_eq!(none_seq.seq, None);
         assert_eq!(none_seq.data, None);
+    }
+
+    #[test]
+    fn session_settings_patch_is_set_or_keep() {
+        let (dir, writer) = writer_at("settings");
+        writer
+            .create_session(
+                CreateSessionInput {
+                    id: "s_1",
+                    workspace_path: "/ws",
+                    title: "T",
+                    model_id: "m",
+                    provider_id: None,
+                    parent_id: None,
+                },
+                T0,
+            )
+            .unwrap();
+        assert_eq!(writer.session_settings("s_1"), None);
+
+        writer.set_session_settings("s_1", Some("plan"), None, T0 + 1).unwrap();
+        assert_eq!(
+            writer.session_settings("s_1"),
+            Some((Some("plan".into()), None))
+        );
+        writer.set_session_settings("s_1", None, Some("high"), T0 + 2).unwrap();
+        assert_eq!(
+            writer.session_settings("s_1"),
+            Some((Some("plan".into()), Some("high".into())))
+        );
+        // Ghost sessions have no row to keep — the probe stays None.
+        assert_eq!(writer.session_settings("s_ghost"), None);
+        drop(writer);
+        drop(dir);
+    }
+
+    #[test]
+    fn worktree_round_trips_and_clears() {
+        let (dir, writer) = writer_at("worktree");
+        writer
+            .create_session(
+                CreateSessionInput {
+                    id: "s_1",
+                    workspace_path: "/ws",
+                    title: "T",
+                    model_id: "m",
+                    provider_id: None,
+                    parent_id: None,
+                },
+                T0,
+            )
+            .unwrap();
+        let wt = json!({
+            "branch": "wt-1", "path": "/ws/.agent/worktrees/wt-1",
+            "baseCommit": "abc1234", "baseBranch": "main", "ahead": 0, "behind": 0
+        });
+        writer.set_session_worktree("s_1", Some(&wt), T0 + 1).unwrap();
+        assert_eq!(writer.session_worktree("s_1"), Some(wt.clone()));
+
+        writer.set_session_worktree("s_1", None, T0 + 2).unwrap();
+        assert_eq!(writer.session_worktree("s_1"), None);
+        drop(writer);
+        drop(dir);
+    }
+
+    #[test]
+    fn archive_state_probe_unarchive_and_cascade() {
+        let (dir, writer) = writer_at("archive-state");
+        for (id, parent) in [("s_main", None), ("s_sub", Some("s_main"))] {
+            writer
+                .create_session(
+                    CreateSessionInput {
+                        id,
+                        workspace_path: "/ws",
+                        title: "T",
+                        model_id: "m",
+                        provider_id: None,
+                        parent_id: parent,
+                    },
+                    T0,
+                )
+                .unwrap();
+        }
+        writer.create_session(
+            CreateSessionInput {
+                id: "s_other",
+                workspace_path: "/other",
+                title: "T",
+                model_id: "m",
+                provider_id: None,
+                parent_id: None,
+            },
+            T0,
+        )
+        .unwrap();
+        assert_eq!(writer.session_archived("s_main"), Some(false));
+        assert_eq!(writer.session_archived("s_ghost"), None);
+
+        // The TS archive cascade came from listSessions — mains only.
+        assert_eq!(
+            writer.archive_workspace_sessions("/ws", T0 + 5, true).unwrap(),
+            1
+        );
+        assert_eq!(writer.session_archived("s_main"), Some(true));
+        assert_eq!(writer.session_archived("s_sub"), Some(false));
+
+        // Unarchive cascades from listArchived — everything archived.
+        writer.archive_workspace_sessions("/ws", T0 + 6, false).unwrap();
+        writer.unarchive_session("s_main").unwrap();
+        assert_eq!(writer.session_archived("s_main"), Some(false));
+
+        assert_eq!(
+            writer.session_ids_by_workspace("/ws"),
+            vec!["s_main".to_owned(), "s_sub".to_owned()]
+        );
+
+        // delete_session clears the side tables alongside the row.
+        writer.set_session_todos("s_main", &json!([{ "content": "x" }]), T0 + 7).unwrap();
+        writer.set_session_settings("s_main", Some("ask"), Some("low"), T0 + 8).unwrap();
+        writer.delete_session("s_main").unwrap();
+        assert_eq!(writer.session_archived("s_main"), None);
+        assert_eq!(writer.session_todos("s_main"), None);
+        assert_eq!(writer.session_settings("s_main"), None);
+        drop(writer);
+        drop(dir);
+    }
+
+    #[test]
+    fn clear_all_wipes_every_table() {
+        let (dir, writer) = writer_at("clear-all");
+        writer
+            .create_session(
+                CreateSessionInput {
+                    id: "s_1",
+                    workspace_path: "/ws",
+                    title: "T",
+                    model_id: "m",
+                    provider_id: None,
+                    parent_id: None,
+                },
+                T0,
+            )
+            .unwrap();
+        writer
+            .insert_message(
+                InsertMessageInput { id: "m_1", session_id: "s_1", role: "user", model: None },
+                T0 + 1,
+            )
+            .unwrap();
+        let mut batch = WriteBatch::new();
+        batch.push(text_commit("s_1", "m_1", "p_1", "hi", 0));
+        writer.commit_batch(&mut batch, T0 + 2);
+        writer.set_session_todos("s_1", &json!([]), T0 + 3).unwrap();
+        writer.set_session_settings("s_1", Some("ask"), None, T0 + 4).unwrap();
+
+        writer.clear_all().unwrap();
+        let reader = reader_at(&dir);
+        let page = reader
+            .list_sessions("/ws", SessionListOptsV2::default())
+            .unwrap();
+        assert!(page.sessions.is_empty());
+        let messages = reader
+            .session_messages("s_1", SessionWindowOptsV2::default())
+            .unwrap();
+        assert!(messages.messages.is_empty());
+        drop(reader);
+        assert_eq!(writer.session_settings("s_1"), None);
+        assert_eq!(writer.session_todos("s_1"), None);
+        drop(writer);
+        drop(dir);
+    }
+
+    #[test]
+    fn last_text_part_targets_the_newest_text_part() {
+        let (dir, writer) = writer_at("last-text-part");
+        writer
+            .create_session(
+                CreateSessionInput {
+                    id: "s_1",
+                    workspace_path: "/ws",
+                    title: "T",
+                    model_id: "m",
+                    provider_id: None,
+                    parent_id: None,
+                },
+                T0,
+            )
+            .unwrap();
+        writer
+            .insert_message(
+                InsertMessageInput { id: "m_1", session_id: "s_1", role: "assistant", model: None },
+                T0 + 1,
+            )
+            .unwrap();
+        assert_eq!(writer.last_text_part_of("m_1"), None);
+        writer
+            .insert_part(
+                InsertPartInput { id: "p_t", message_id: "m_1", session_id: "s_1", seq: 0, kind: "thinking", data: &json!({ "text": "hm" }) },
+                T0 + 2,
+            )
+            .unwrap();
+        writer
+            .insert_part(
+                InsertPartInput { id: "p_x", message_id: "m_1", session_id: "s_1", seq: 1, kind: "text", data: &json!({ "text": "one" }) },
+                T0 + 3,
+            )
+            .unwrap();
+        writer
+            .insert_part(
+                InsertPartInput { id: "p_y", message_id: "m_1", session_id: "s_1", seq: 2, kind: "text", data: &json!({ "text": "two" }) },
+                T0 + 4,
+            )
+            .unwrap();
+        assert_eq!(writer.last_text_part_of("m_1").as_deref(), Some("p_y"));
+        assert_eq!(writer.last_text_part_of("m_ghost"), None);
+        drop(writer);
+        drop(dir);
+    }
+
+    #[test]
+    fn workspace_id_matches_the_ts_scheme() {
+        let id = new_workspace_id();
+        assert!(id.starts_with("ws_"), "{id}");
+        assert_eq!(id.len(), 3 + 8);
+        assert!(id[3..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
     }
 }

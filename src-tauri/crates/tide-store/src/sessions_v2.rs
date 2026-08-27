@@ -400,6 +400,164 @@ impl SessionsV2 {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// One session row by id, any archive/subagent state — the `sessionGet`
+    /// base. `None` when no such row.
+    pub fn session_meta_by_id(&self, id: &str) -> Result<Option<SessionMetaV2>> {
+        let sql = format!("SELECT {SESSION_COLUMNS} FROM session WHERE id = ?1");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows = stmt.query_map(rusqlite::params![id], session_from_row)?;
+        Ok(match rows.next() {
+            Some(row) => Some(row?),
+            None => None,
+        })
+    }
+
+    /// Legacy `listDispatches` derived from v2 rows: active subagent children
+    /// of one parent, newest first. `stamp` is the workspaceId the command
+    /// layer resolved for the parent's workspace_path (children share it).
+    pub fn list_dispatch_headers(
+        &self,
+        parent_id: &str,
+        stamp: &str,
+    ) -> Result<Vec<SessionHeaderWire>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.title, s.model_id, s.provider_id, s.time_created, s.time_updated, \
+             (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) \
+             FROM session s \
+             WHERE s.parent_id = ?1 AND s.archived_at IS NULL \
+             ORDER BY s.time_updated DESC, s.id DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![parent_id], |row| {
+            Ok(SessionHeaderWire {
+                id: row.get(0)?,
+                workspace_id: stamp.to_owned(),
+                title: row.get(1)?,
+                model_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                provider_id: row.get(3)?,
+                created_at: iso_from_unix_ms(row.get(4)?),
+                updated_at: iso_from_unix_ms(row.get(5)?),
+                message_count: row.get(6)?,
+                kind: "subagent".to_owned(),
+                parent_id: Some(parent_id.to_owned()),
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// The first user message's text (its text parts concatenated) — the
+    /// title-generation subject source. `None` when the session has no user
+    /// message or it carries no text.
+    pub fn first_user_text(&self, session_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .message_texts(session_id, "user", true)?
+            .into_iter()
+            .next()
+            .flatten())
+    }
+
+    /// The last assistant message's text — the fork transcript seed (`None`
+    /// when no assistant message carries non-empty text).
+    pub fn last_assistant_text(&self, session_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .message_texts(session_id, "assistant", false)?
+            .into_iter()
+            .next()
+            .flatten())
+    }
+
+    /// Role-filtered message texts, newest- or oldest-first. A message with
+    /// no text parts yields `None` in its slot so callers can tell "message
+    /// exists, no text" from "no message" (the fork/title filters differ on
+    /// exactly that).
+    fn message_texts(
+        &self,
+        session_id: &str,
+        role: &str,
+        oldest_first: bool,
+    ) -> Result<Vec<Option<String>>> {
+        let order = if oldest_first { "ASC" } else { "DESC" };
+        let sql = format!(
+            "SELECT id FROM message WHERE session_id = ?1 AND role = ?2 ORDER BY id {order}"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let ids: Vec<String> = stmt
+            .query_map(rusqlite::params![session_id, role], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let mut stmt = self.conn.prepare(
+                "SELECT data FROM part WHERE message_id = ?1 AND kind = 'text' ORDER BY seq",
+            )?;
+            let parts = stmt.query_map(rusqlite::params![id], |row| {
+                row.get::<_, String>(0).map(|raw| {
+                    serde_json::from_str::<Value>(&raw)
+                        .ok()
+                        .and_then(|v| v.get("text").and_then(Value::as_str).map(str::to_owned))
+                        .unwrap_or_default()
+                })
+            })?;
+            let text: Vec<String> = parts.collect::<rusqlite::Result<_>>()?;
+            let joined = text.concat();
+            out.push((!joined.trim().is_empty()).then_some(joined));
+        }
+        Ok(out)
+    }
+
+    /// The session's persisted per-session settings (autonomy, thinking) from
+    /// the additive side table. Old dbs (or never-written sessions) lack the
+    /// row — and a db written before the table existed lacks the table, which
+    /// reads the same as absent.
+    pub fn session_settings_of(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<(Option<String>, Option<String>)>> {
+        if !self.table_exists("session_settings") {
+            return Ok(None);
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT autonomy_mode, thinking_level FROM session_settings WHERE session_id = ?1")?;
+        let mut rows = stmt.query_map(rusqlite::params![session_id], |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        Ok(match rows.next() {
+            Some(row) => Some(row?),
+            None => None,
+        })
+    }
+
+    /// The session's persisted worktree metadata from the additive side table
+    /// (same old-db tolerance as [`SessionsV2::session_settings_of`]).
+    pub fn session_worktree_of(&self, session_id: &str) -> Result<Option<Value>> {
+        if !self.table_exists("session_worktree") {
+            return Ok(None);
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT worktree FROM session_worktree WHERE session_id = ?1")?;
+        let mut rows = stmt.query_map(rusqlite::params![session_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+        Ok(match rows.next() {
+            Some(row) => {
+                let raw = row?;
+                serde_json::from_str(&raw).ok()
+            }
+            None => None,
+        })
+    }
+
+    fn table_exists(&self, name: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                rusqlite::params![name],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    }
+
     fn query_sessions(
         &self,
         sql: &str,
@@ -666,10 +824,14 @@ mod tests {
         .unwrap();
     }
 
+    impl Db {
+        fn db_path(&self) -> std::path::PathBuf {
+            self.dir.join("sessions-v2.db")
+        }
+    }
+
     fn open_at(db: &Db) -> SessionsV2 {
-        let mut path = db.dir.clone();
-        path.push("sessions-v2.db");
-        SessionsV2::open(path).unwrap()
+        SessionsV2::open(db.db_path()).unwrap()
     }
 
     fn ids(sessions: &[SessionMetaV2]) -> Vec<&str> {
@@ -1069,6 +1231,105 @@ mod tests {
             })
         );
         assert!(store.list_archived_headers("/ws/missing", "ws_x").unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_meta_by_id_reads_any_state() {
+        let db = synthetic_db("meta-by-id");
+        let store = open_at(&db);
+        let one = store.session_meta_by_id("s-one").unwrap().unwrap();
+        assert_eq!(one.id, "s-one");
+        assert_eq!(one.parent_id.as_deref(), Some("s-parent"));
+        assert_eq!(one.time_updated, 3_000);
+        let arch = store.session_meta_by_id("s-arch").unwrap().unwrap();
+        assert!(arch.archived_at.is_some());
+        assert_eq!(store.session_meta_by_id("nope").unwrap(), None);
+    }
+
+    #[test]
+    fn dispatch_headers_list_active_children_newest_first() {
+        let db = synthetic_db("dispatch");
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-kid-a", workspace_path: "/ws/alpha", title: "Kid A",
+            parent_id: Some("s-two"), model_id: None, archived_at: None,
+            time_created: 5_000, time_updated: 6_000,
+        });
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-kid-b", workspace_path: "/ws/alpha", title: "Kid B",
+            parent_id: Some("s-two"), model_id: None, archived_at: None,
+            time_created: 6_000, time_updated: 7_000,
+        });
+        insert_session_full(&db.conn, SeedSession {
+            id: "s-kid-arch", workspace_path: "/ws/alpha", title: "Kid Arch",
+            parent_id: Some("s-two"), model_id: None, archived_at: Some(6_500),
+            time_created: 6_000, time_updated: 6_400,
+        });
+        insert_message(&db.conn, "kid-a-m1", "s-kid-a", "assistant", None);
+
+        let store = open_at(&db);
+        let headers = store.list_dispatch_headers("s-two", "ws_1").unwrap();
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["s-kid-b", "s-kid-a"], "archived child excluded");
+        assert_eq!(headers[1].kind, "subagent");
+        assert_eq!(headers[1].parent_id.as_deref(), Some("s-two"));
+        assert_eq!(headers[1].workspace_id, "ws_1");
+        assert_eq!(headers[1].message_count, 1);
+        assert!(store.list_dispatch_headers("s-one", "ws_1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn first_user_and_last_assistant_text_walk_parts() {
+        let db = synthetic_db("texts");
+        // s-beta: a user message with two text parts (out of insert order),
+        // then an assistant message whose only text is empty.
+        insert_message(&db.conn, "b-m1", "s-beta", "user", None);
+        insert_part(&db.conn, "b-m1-p1", "b-m1", "s-beta", 1, "text", r#"{"text":"world"}"#);
+        insert_part(&db.conn, "b-m1-p0", "b-m1", "s-beta", 0, "text", r#"{"text":"hello "}"#);
+        insert_message(&db.conn, "b-m2", "s-beta", "assistant", None);
+        insert_part(&db.conn, "b-m2-p0", "b-m2", "s-beta", 0, "text", r#"{"text":"  "}"#);
+
+        let store = open_at(&db);
+        assert_eq!(
+            store.first_user_text("s-beta").unwrap().as_deref(),
+            Some("hello world"),
+            "text parts concatenate in seq order"
+        );
+        assert_eq!(
+            store.last_assistant_text("s-beta").unwrap(),
+            None,
+            "whitespace-only text reads as absent"
+        );
+        assert_eq!(store.first_user_text("s-long").unwrap(), None);
+    }
+
+    #[test]
+    fn side_table_reads_tolerate_dbs_without_the_tables() {
+        let db = synthetic_db("side-missing");
+        let store = open_at(&db);
+        // The synthetic_db schema predates the side tables.
+        assert_eq!(store.session_settings_of("s-one").unwrap(), None);
+        assert_eq!(store.session_worktree_of("s-one").unwrap(), None);
+
+        // With the tables present (writer opened once), rows read back.
+        drop(store);
+        let writer = crate::sessions_v2_write::SessionsV2Writer::open(db.db_path()).unwrap();
+        writer.set_session_settings("s-one", Some("plan"), Some("high"), 1).unwrap();
+        writer.set_session_worktree(
+            "s-one",
+            Some(&serde_json::json!({ "branch": "b" })),
+            2,
+        )
+        .unwrap();
+        drop(writer);
+        let store = open_at(&db);
+        assert_eq!(
+            store.session_settings_of("s-one").unwrap(),
+            Some((Some("plan".into()), Some("high".into())))
+        );
+        assert_eq!(
+            store.session_worktree_of("s-one").unwrap(),
+            Some(serde_json::json!({ "branch": "b" }))
+        );
     }
 
     #[test]

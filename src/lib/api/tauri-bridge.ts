@@ -21,7 +21,16 @@
  *  Agent/orchestrator pushes arrive on the single `chat_attach_channel`
  *  Channel and fan out through rpc.ts's emit* seams (the on*-registered
  *  single-slot callbacks); every other push channel (terminal output, git
- *  changed…) stays dormant until a later milestone wires it. */
+ *  changed…) stays dormant until a later milestone wires it.
+ *
+ *  M4 T2 adds the session + workspace management domains (27 methods):
+ *  session get/rename/archive/unarchive/delete/updateSettings/fork/
+ *  listDispatches/addMessage/assistant trio/generateTitle/clearAll/
+ *  worktree pair, and workspace get/add/update/archive/unarchive/delete/
+ *  contextGet/fileRead/listBranches/listConfigFiles/workspacesExist.
+ *  All pass their TideRPC params through verbatim — Tauri's camelCase →
+ *  snake_case param mapping covers every one (no reserved words in this
+ *  batch, unlike T1's permissionRequest remap). */
 import {
   activateRpcClient,
   emitAgentEvent,
@@ -47,9 +56,11 @@ import type {
   SessionHeader,
   SessionMessageV2,
   SessionMetaV2,
+  SessionWorktree,
   ShellOpResult,
   TodosUpdatedEvent,
   Workspace,
+  WorkspaceFileReadResult,
 } from '@shared/rpc';
 
 /** Must match BRIDGE_PROTOCOL in src-tauri/src/commands/bridge.rs. */
@@ -74,6 +85,33 @@ type BridgeMethods = Pick<
   | 'settingsUpdateGeneral'
   | 'providerList'
   | 'sessionCreate'
+  | 'sessionGet'
+  | 'sessionRename'
+  | 'sessionArchive'
+  | 'sessionUnarchive'
+  | 'sessionDelete'
+  | 'sessionUpdateSettings'
+  | 'sessionFork'
+  | 'sessionListDispatches'
+  | 'sessionAddMessage'
+  | 'sessionAddAssistantMessage'
+  | 'sessionFinalizeAssistantMessage'
+  | 'sessionAddUsage'
+  | 'sessionGenerateTitle'
+  | 'sessionClearAll'
+  | 'sessionCreateWorktree'
+  | 'sessionRemoveWorktree'
+  | 'workspaceGet'
+  | 'workspaceAdd'
+  | 'workspaceUpdate'
+  | 'workspaceArchive'
+  | 'workspaceUnarchive'
+  | 'workspaceDelete'
+  | 'workspaceContextGet'
+  | 'workspaceFileRead'
+  | 'workspaceListBranches'
+  | 'workspaceListConfigFiles'
+  | 'workspacesExist'
   | 'chatSend'
   | 'chatAbort'
   | 'chatApproveTools'
@@ -140,6 +178,33 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     settingsUpdateGeneral: (params) => invoke<GeneralSettingsWire>('settings_update_general', params),
     providerList: (params) => invoke<Provider[]>('provider_list', params),
     sessionCreate: (params) => invoke<HydratedSession>('session_create', params),
+    sessionGet: (params) => invoke<HydratedSession | null>('session_get', params),
+    sessionRename: (params) => invoke('session_rename', params),
+    sessionArchive: (params) => invoke('session_archive', params),
+    sessionUnarchive: (params) => invoke('session_unarchive', params),
+    sessionDelete: (params) => invoke('session_delete', params),
+    sessionUpdateSettings: (params) => invoke('session_update_settings', params),
+    sessionFork: (params) => invoke<HydratedSession>('session_fork', params),
+    sessionListDispatches: (params) => invoke<SessionHeader[]>('session_list_dispatches', params),
+    sessionAddMessage: (params) => invoke('session_add_message', params),
+    sessionAddAssistantMessage: (params) => invoke('session_add_assistant_message', params),
+    sessionFinalizeAssistantMessage: (params) => invoke('session_finalize_assistant_message', params),
+    sessionAddUsage: (params) => invoke('session_add_usage', params),
+    sessionGenerateTitle: (params) => invoke<{ title: string | null }>('session_generate_title', params),
+    sessionClearAll: (params) => invoke<{ ok: boolean }>('session_clear_all', params),
+    sessionCreateWorktree: (params) => invoke<SessionWorktree>('session_create_worktree', params),
+    sessionRemoveWorktree: (params) => invoke('session_remove_worktree', params),
+    workspaceGet: (params) => invoke<Workspace | null>('workspace_get', params),
+    workspaceAdd: (params) => invoke<Workspace>('workspace_add', params),
+    workspaceUpdate: (params) => invoke<Workspace | null>('workspace_update', params),
+    workspaceArchive: (params) => invoke('workspace_archive', params),
+    workspaceUnarchive: (params) => invoke('workspace_unarchive', params),
+    workspaceDelete: (params) => invoke<{ ok: boolean; error?: string }>('workspace_delete', params),
+    workspaceContextGet: (params) => invoke<string>('workspace_context_get', params),
+    workspaceFileRead: (params) => invoke<WorkspaceFileReadResult>('workspace_file_read', params),
+    workspaceListBranches: (params) => invoke<string[]>('workspace_list_branches', params),
+    workspaceListConfigFiles: (params) => invoke<string[]>('workspace_list_config_files', params),
+    workspacesExist: (params) => invoke<Record<string, boolean>>('workspaces_exist', params),
     chatSend: (params) => invoke<ChatSendResult>('chat_run_turn', { args: params }),
     chatAbort: (params) => invoke('chat_abort', params),
     chatApproveTools: (params) =>

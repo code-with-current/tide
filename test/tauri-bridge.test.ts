@@ -457,6 +457,202 @@ describe("chat request routing", () => {
   });
 });
 
+describe("session + workspace management routing (M4 T2)", () => {
+  it("routes sessionGet / sessionListDispatches with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const hydrated = {
+      id: "s_1",
+      workspaceId: "ws_1",
+      title: "One",
+      modelId: "glm-4.7",
+      messages: [],
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:01:00.000Z",
+      autonomyMode: "ask",
+      thinkingLevel: "medium",
+      status: "idle",
+      usage: {
+        inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0,
+        reasoningTokens: 0, calls: 0, costUsd: 0,
+      },
+      costUsd: 0,
+    };
+    invoke.mockResolvedValueOnce(hydrated);
+    expect(await bridge.request.sessionGet({ sessionId: "s_1" })).toEqual(hydrated);
+    expect(invoke).toHaveBeenLastCalledWith("session_get", { sessionId: "s_1" });
+
+    const dispatches = [{ id: "s_kid", workspaceId: "ws_1", title: "Kid", modelId: "", createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:01.000Z", messageCount: 1, kind: "subagent", parentId: "s_1" }];
+    invoke.mockResolvedValueOnce(dispatches);
+    expect(await bridge.request.sessionListDispatches({ parentId: "s_1" })).toEqual(dispatches);
+    expect(invoke).toHaveBeenLastCalledWith("session_list_dispatches", { parentId: "s_1" });
+
+    invoke.mockResolvedValueOnce(null);
+    expect(await bridge.request.sessionGet({ sessionId: "s_ghost" })).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith("session_get", { sessionId: "s_ghost" });
+  });
+
+  it("routes the session mutation family verbatim", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    await bridge.request.sessionRename({ sessionId: "s_1", title: "Renamed" });
+    expect(invoke).toHaveBeenLastCalledWith("session_rename", { sessionId: "s_1", title: "Renamed" });
+
+    await bridge.request.sessionArchive({ sessionId: "s_1" });
+    expect(invoke).toHaveBeenLastCalledWith("session_archive", { sessionId: "s_1" });
+
+    await bridge.request.sessionUnarchive({ sessionId: "s_1" });
+    expect(invoke).toHaveBeenLastCalledWith("session_unarchive", { sessionId: "s_1" });
+
+    await bridge.request.sessionDelete({ sessionId: "s_1" });
+    expect(invoke).toHaveBeenLastCalledWith("session_delete", { sessionId: "s_1" });
+
+    await bridge.request.sessionUpdateSettings({ sessionId: "s_1", patch: { autonomyMode: "edit" } });
+    expect(invoke).toHaveBeenLastCalledWith("session_update_settings", {
+      sessionId: "s_1",
+      patch: { autonomyMode: "edit" },
+    });
+
+    await bridge.request.sessionAddMessage({ sessionId: "s_1", role: "user", content: "hi" });
+    expect(invoke).toHaveBeenLastCalledWith("session_add_message", {
+      sessionId: "s_1",
+      role: "user",
+      content: "hi",
+    });
+
+    const finalizeMessage = { content: "done", stopReason: "stop" };
+    await bridge.request.sessionFinalizeAssistantMessage({
+      sessionId: "s_1",
+      messageId: "m_1",
+      message: finalizeMessage,
+    });
+    expect(invoke).toHaveBeenLastCalledWith("session_finalize_assistant_message", {
+      sessionId: "s_1",
+      messageId: "m_1",
+      message: finalizeMessage,
+    });
+
+    await bridge.request.sessionAddUsage({ sessionId: "s_1", delta: { inputTokens: 5 } });
+    expect(invoke).toHaveBeenLastCalledWith("session_add_usage", {
+      sessionId: "s_1",
+      delta: { inputTokens: 5 },
+    });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.sessionClearAll({})).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("session_clear_all", {});
+  });
+
+  it("routes sessionFork and the worktree pair", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const forked = {
+      id: "s_fork", workspaceId: "ws_1", title: "Fork of One", modelId: "glm-4.7",
+      messages: [], createdAt: "2026-08-27T00:00:00.000Z", updatedAt: "2026-08-27T00:00:00.000Z",
+      autonomyMode: "ask", thinkingLevel: "medium", status: "idle",
+      usage: { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, calls: 0, costUsd: 0 },
+      costUsd: 0,
+    };
+    invoke.mockResolvedValueOnce(forked);
+    const forkParams = { sourceId: "s_1", newModelId: "glm-4.7", opts: { providerId: "p_1" } };
+    expect(await bridge.request.sessionFork(forkParams)).toEqual(forked);
+    expect(invoke).toHaveBeenLastCalledWith("session_fork", forkParams);
+
+    const worktree = {
+      branch: "wt-1", path: "/repo/.agent/worktrees/wt-1", baseCommit: "1cd734e",
+      baseBranch: "main", ahead: 0, behind: 0,
+    };
+    invoke.mockResolvedValueOnce(worktree);
+    const wtParams = { sessionId: "s_1", opts: { branchName: "wt-1", baseBranch: "main", configFiles: [".env"] } };
+    expect(await bridge.request.sessionCreateWorktree(wtParams)).toEqual(worktree);
+    expect(invoke).toHaveBeenLastCalledWith("session_create_worktree", wtParams);
+
+    await bridge.request.sessionRemoveWorktree({ sessionId: "s_1" });
+    expect(invoke).toHaveBeenLastCalledWith("session_remove_worktree", { sessionId: "s_1" });
+  });
+
+  it("routes workspaceAdd and the workspace family", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const added = {
+      id: "ws_abcd1234", name: "tide", path: "/repo/tide", branch: "main",
+      headCommit: "1cd734e", isDefault: false, fileCount: 448,
+      worktreeLocation: ".agent/worktrees/", scripts: [],
+    };
+    invoke.mockResolvedValueOnce(added);
+    const addParams = { input: { path: "/repo/tide", name: "tide", initGit: true } };
+    expect(await bridge.request.workspaceAdd(addParams)).toEqual(added);
+    expect(invoke).toHaveBeenLastCalledWith("workspace_add", addParams);
+
+    invoke.mockResolvedValueOnce(null);
+    expect(await bridge.request.workspaceGet({ workspaceId: "ws_ghost" })).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith("workspace_get", { workspaceId: "ws_ghost" });
+
+    invoke.mockResolvedValueOnce(added);
+    const updateParams = { workspaceId: "ws_1", patch: { name: "renamed" } };
+    expect(await bridge.request.workspaceUpdate(updateParams)).toEqual(added);
+    expect(invoke).toHaveBeenLastCalledWith("workspace_update", updateParams);
+
+    await bridge.request.workspaceArchive({ workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("workspace_archive", { workspaceId: "ws_1" });
+
+    await bridge.request.workspaceUnarchive({ workspaceId: "ws_1" });
+    expect(invoke).toHaveBeenLastCalledWith("workspace_unarchive", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "Workspace must be archived before deletion" });
+    expect(await bridge.request.workspaceDelete({ workspaceId: "ws_1" })).toEqual({
+      ok: false,
+      error: "Workspace must be archived before deletion",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("workspace_delete", { workspaceId: "ws_1" });
+
+    invoke.mockResolvedValueOnce("/repo/other");
+    expect(await bridge.request.workspaceContextGet({ workspaceId: "ws_2" })).toBe("/repo/other");
+    expect(invoke).toHaveBeenLastCalledWith("workspace_context_get", { workspaceId: "ws_2" });
+
+    invoke.mockResolvedValueOnce({ ok: false, reason: "binary file" });
+    expect(await bridge.request.workspaceFileRead({ workspaceId: "ws_2", relPath: "pic.png" })).toEqual({
+      ok: false,
+      reason: "binary file",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("workspace_file_read", {
+      workspaceId: "ws_2",
+      relPath: "pic.png",
+    });
+
+    invoke.mockResolvedValueOnce(["main", "dev"]);
+    expect(await bridge.request.workspaceListBranches({ workspaceId: "ws_2" })).toEqual(["main", "dev"]);
+    expect(invoke).toHaveBeenLastCalledWith("workspace_list_branches", { workspaceId: "ws_2" });
+
+    invoke.mockResolvedValueOnce([".env"]);
+    expect(await bridge.request.workspaceListConfigFiles({ workspaceId: "ws_2" })).toEqual([".env"]);
+    expect(invoke).toHaveBeenLastCalledWith("workspace_list_config_files", { workspaceId: "ws_2" });
+
+    invoke.mockResolvedValueOnce({ "/repo/tide": true });
+    expect(await bridge.request.workspacesExist({ paths: ["/repo/tide"] })).toEqual({ "/repo/tide": true });
+    expect(invoke).toHaveBeenLastCalledWith("workspaces_exist", { paths: ["/repo/tide"] });
+  });
+
+  it("routes sessionGenerateTitle with the title result shape", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ title: "Auth token refresh" });
+    expect(await bridge.request.sessionGenerateTitle({ sessionId: "s_1" })).toEqual({
+      title: "Auth token refresh",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("session_generate_title", { sessionId: "s_1" });
+
+    invoke.mockResolvedValueOnce({ title: null });
+    expect(await bridge.request.sessionGenerateTitle({ sessionId: "s_ghost" })).toEqual({ title: null });
+    expect(invoke).toHaveBeenLastCalledWith("session_generate_title", { sessionId: "s_ghost" });
+  });
+});
+
 describe("OS/window glue routing (M4 T1)", () => {
   it("routes windowIsFullScreen to the fullscreen-query command", async () => {
     const bridge = await installBridge();
