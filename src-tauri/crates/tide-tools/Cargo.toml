@@ -17,6 +17,8 @@ reqwest = { version = "0.13", features = ["json"] }
 tokio = { version = "1", features = ["rt"] }
 sha1_smol = "1"
 tempfile = "3"
+# ~/.tide resolution for the slash_command catalog (mirrors tide-store::paths)
+dirs = "6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

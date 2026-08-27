@@ -115,7 +115,8 @@ pub enum Decision {
 pub fn risk_tier_for(tool_name: &str) -> RiskTier {
     match tool_name {
         "read_file" | "grep" | "glob" | "list_dir" | "directory_tree" | "read_media_file"
-        | "bash_output" | "git_repo" => RiskTier::ReadOnly,
+        | "bash_output" | "git_repo" | "todo_write" | "slash_command" | "memory" | "init"
+        | "load_skill" => RiskTier::ReadOnly,
         "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell" => {
             RiskTier::Write
         }
@@ -394,6 +395,23 @@ mod tests {
             g.check(AutonomyMode::Ask, "some_mcp_tool", &json!({})),
             Decision::Ask { .. }
         ));
+    }
+
+    #[test]
+    fn state_prompt_skill_tools_are_read_tier_everywhere() {
+        // TS toolMeta: todo_write/slash_command/memory/init/load_skill are
+        // read_only + auto-approved in every mode.
+        let g = gate(RuleSet::default());
+        for name in ["todo_write", "slash_command", "memory", "init", "load_skill"] {
+            assert_eq!(risk_tier_for(name), RiskTier::ReadOnly, "{name}");
+            for mode in [AutonomyMode::Plan, AutonomyMode::Ask, AutonomyMode::Edit, AutonomyMode::FullAccess] {
+                assert_eq!(
+                    g.check(mode, name, &json!({})),
+                    Decision::Allow,
+                    "{name} in {mode:?}"
+                );
+            }
+        }
     }
 
     #[test]

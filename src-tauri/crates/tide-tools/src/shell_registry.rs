@@ -402,7 +402,9 @@ mod tests {
     fn ring_buffer_trims_to_cap_and_cursor_follows() {
         let reg = ShellRegistry::default();
         let tmp = tempfile::tempdir().unwrap();
-        // ~300KB of output — the buffer keeps the last 256KB.
+        // ~300KB of output — the buffer keeps the last 256KB. Wait for the
+        // cap AND the final line: the cap alone is hit mid-stream, before
+        // the tail line has been written.
         reg.spawn(
             "sh_e",
             "seq 1 60000; sleep 5",
@@ -416,7 +418,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .get("sh_e")
-                .map(|h| h.state.buffer.lock().unwrap().text.len() >= MAX_BUFFER)
+                .map(|h| {
+                    let buffer = h.state.buffer.lock().unwrap();
+                    buffer.text.len() >= MAX_BUFFER && buffer.text.contains("60000")
+                })
                 .unwrap_or(false)
         });
         let (out, _) = reg.read_new("sh_e").unwrap();

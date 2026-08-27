@@ -214,6 +214,13 @@ pub enum ChatPush {
     Agent { event: AgentEvent },
     #[serde(rename = "orchestratorEvents")]
     Orchestrator { batch: FlushBatchWire },
+    /// todo_write's live list update — the TS `todosUpdated` RPC push
+    /// (`TodosUpdatedEvent` in shared/rpc.ts). Emitted by the ChatHub's
+    /// TodoState subscription, not the per-turn event stream.
+    #[serde(rename = "todosUpdated")]
+    TodosUpdated {
+        event: tide_tools::TodosUpdated,
+    },
 }
 
 /// Port of `formatArgPreview` for the core five (`app/core/agent/tools/types.ts`

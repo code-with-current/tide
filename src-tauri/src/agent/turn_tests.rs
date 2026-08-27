@@ -295,11 +295,22 @@ impl Fixture {
         self.hub.end_turn(&self.session_id);
     }
 
+    /// Same as [`Fixture::send`], with the turn's tool registry overridden.
+    async fn send_with_tools(
+        &self,
+        autonomy: &str,
+        engine: Arc<dyn StepStream>,
+        tools: Vec<Arc<dyn Tool>>,
+    ) -> Result<ChatSendResultWire, crate::commands::CommandError> {
+        start_turn(&self.state, &self.hub, self.args(autonomy), engine, tools).await
+    }
+
     async fn next_agent_event(&mut self) -> AgentEvent {
         loop {
             match tokio::time::timeout(WAIT, self.push_rx.recv()).await {
                 Ok(Ok(ChatPush::Agent { event })) => return event,
                 Ok(Ok(ChatPush::Orchestrator { .. })) => continue,
+                Ok(Ok(ChatPush::TodosUpdated { .. })) => continue,
                 Ok(Err(e)) => panic!("broadcast ended: {e}"),
                 Err(_) => panic!("timed out waiting for an agent event"),
             }
@@ -934,3 +945,73 @@ async fn pre_flight_rejections() {
 }
 
 
+
+// ── todo_write side-channel ─────────────────────────────────────────────────
+
+/// A todo_write tool call mid-turn must (a) execute through the shared
+/// TodoState, (b) push a ChatPush::TodosUpdated the bridge can route to the
+/// renderer's `todosUpdated` consumers, wire-shaped like the TS
+/// TodosUpdatedEvent.
+#[tokio::test]
+async fn todo_write_turn_pushes_todos_updated() {
+    let mut fx = Fixture::new("todo-push");
+    let todo_args = serde_json::json!({
+        "todos": [
+            { "content": "Port the tool", "status": "completed" },
+            { "content": "Wire the push", "status": "in_progress" }
+        ]
+    });
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_todo".to_owned(),
+                tool_name: "todo_write".to_owned(),
+                arguments: todo_args.clone(),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_todo".to_owned(),
+                    tool_name: "todo_write".to_owned(),
+                    arguments: todo_args,
+                }],
+            ),
+        ],
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+
+    let result = fx
+        .send_with_tools("edit", engine, vec![Arc::new(tide_tools::TodoWriteTool)])
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    // The push side: fish the TodosUpdated push out of the channel.
+    let push = loop {
+        match tokio::time::timeout(WAIT, fx.push_rx.recv()).await {
+            Ok(Ok(push @ ChatPush::TodosUpdated { .. })) => break push,
+            Ok(Ok(_)) => continue,
+            Ok(Err(e)) => panic!("broadcast ended: {e}"),
+            Err(_) => panic!("timed out waiting for the todosUpdated push"),
+        }
+    };
+    let ChatPush::TodosUpdated { event } = push else {
+        unreachable!();
+    };
+    assert_eq!(event.session_id, fx.session_id);
+    assert_eq!(event.todos.len(), 2);
+    assert_eq!(event.todos[1].status, tide_tools::TodoStatus::InProgress);
+
+    // Wire shape matches the TS TodosUpdatedEvent (channel tag + camelCase).
+    let wire = serde_json::to_value(&ChatPush::TodosUpdated { event }).unwrap();
+    assert_eq!(wire["channel"], serde_json::json!("todosUpdated"));
+    assert_eq!(wire["event"]["sessionId"], serde_json::json!(fx.session_id));
+    assert_eq!(wire["event"]["todos"][1]["status"], serde_json::json!("in_progress"));
+
+    // The store side (post-push, so the tool call has landed): the
+    // session's list is the full replacement.
+    assert_eq!(fx.hub.todo_state().todos(&fx.session_id).len(), 2);
+
+    // Drain to turn_end so the sink settles before the fixture drops.
+    let _ = fx.events_until_turn_end().await;
+}

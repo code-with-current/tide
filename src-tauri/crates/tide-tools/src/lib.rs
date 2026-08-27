@@ -5,7 +5,7 @@
 //! BEFORE calling [`Tool::execute`].
 //!
 //! Ports of the TS stack at `91ec558`:
-//! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob,list-dir,directory-tree,read-media-file,multi-edit,notebook-edit,background-shell}.ts`
+//! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob,list-dir,directory-tree,read-media-file,multi-edit,notebook-edit,background-shell,git,git-repo,todo-write,slash-command,init,memory,load-skill}.ts`
 //! - path sandboxing: `app/core/agent/path-safety.ts` → [`path_safety`]
 //! - permission gate: `app/core/agent/permission.ts` + `permissions/rules.ts`
 //!   + `permission-wrapper.ts` → [`permission`]
@@ -30,9 +30,13 @@ use serde::{Deserialize, Serialize};
 pub use permission::{AutonomyMode, Decision, PermissionGate, RiskTier};
 pub use tools::{
     core_tools, BashOutputTool, BashTool, DirectoryTreeTool, EditFileTool, GitRepoTool, GitTool,
-    GlobTool, GrepTool, KillShellTool, ListDirTool, MultiEditTool, NotebookEditTool, ReadFileTool,
-    ReadMediaFileTool, WriteFileTool,
+    GlobTool, GrepTool, InitTool, KillShellTool, ListDirTool, LoadSkillTool, MemoryIndex,
+    MemoryTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool, SlashCommandTool,
+    TodoWriteTool, WriteFileTool,
 };
+pub use tools::load_skill::{build_skill_catalog_md, builtin_skills, SkillSummary};
+pub use tools::memory::{MemoryHit, rrf_fuse};
+pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`
 /// (field-for-field) and the entries in
@@ -69,14 +73,25 @@ impl AbortFlag {
 }
 
 /// Everything a tool needs at execution time. Port of the TS `ToolContext`
-/// fields the five core tools actually consumed: workspace root, session id,
-/// and the parent turn's abort signal. Mutable per-turn state the TS version
-/// carried (autonomy mode escalation) lives in the orchestrator instead —
-/// the gate runs before execute here, not inside it.
+/// fields the built-in tools actually consumed: workspace root, session id,
+/// workspace id (the memory tool's store key), the shared [`TodoState`]
+/// side-channel (todo_write stores + broadcasts through it), and the parent
+/// turn's abort signal. Mutable per-turn state the TS version carried
+/// (autonomy mode escalation) lives in the orchestrator instead — the gate
+/// runs before execute here, not inside it.
 #[derive(Clone, Debug)]
 pub struct ToolContext {
     pub session_id: String,
     pub workspace_root: PathBuf,
+    /// The memory tool's workspace store key; empty until the orchestrator
+    /// wires the active workspace id (memory then reports "no active
+    /// workspace", matching the TS behavior for a missing id).
+    pub workspace_id: String,
+    /// Session-scoped todo store + change bus shared by every turn of the
+    /// app. todo_write REPLACES the session's list and notifies
+    /// subscribers — the orchestrator forwards those as `todosUpdated`
+    /// renderer pushes (see [`TodoState`] docs for the T7 wiring).
+    pub todo_state: Arc<TodoState>,
     pub abort: AbortFlag,
 }
 
@@ -85,6 +100,8 @@ impl ToolContext {
         Self {
             session_id: String::new(),
             workspace_root: workspace_root.into(),
+            workspace_id: String::new(),
+            todo_state: TodoState::shared(),
             abort: AbortFlag::new(),
         }
     }
@@ -160,6 +177,16 @@ pub enum ToolDisplay {
     },
     Text {
         text: String,
+    },
+    /// Compact "loaded <path> · N lines · N bytes" card with the body
+    /// collapsible (slash_command + load_skill).
+    FileLoaded {
+        path: String,
+        lines: u64,
+        bytes: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        body: String,
     },
     Media {
         data_url: String,
@@ -295,6 +322,11 @@ mod tests {
                 "kill_shell",
                 "git",
                 "git_repo",
+                "todo_write",
+                "slash_command",
+                "memory",
+                "init",
+                "load_skill",
             ]
         );
         for t in &tools {
@@ -314,6 +346,10 @@ mod tests {
         assert_eq!(tools[12].risk_tier(), RiskTier::Write);
         assert_eq!(tools[13].risk_tier(), RiskTier::Destructive);
         assert_eq!(tools[14].risk_tier(), RiskTier::ReadOnly);
+        // M3 T3 batch: all read-tier per TS toolMeta.
+        for t in &tools[15..=19] {
+            assert_eq!(t.risk_tier(), RiskTier::ReadOnly);
+        }
     }
 
     /// Guard drift against the frozen tool schemas the TS stack shipped
@@ -498,5 +534,30 @@ mod tests {
         assert_eq!(v["kind"], "media");
         assert_eq!(v["dataUrl"], "data:image/png;base64,AAA");
         assert_eq!(v["mimeType"], "image/png");
+
+        let loaded = ToolDisplay::FileLoaded {
+            path: "commands/x.md".into(),
+            lines: 3,
+            bytes: 46,
+            description: Some("First line".into()),
+            body: "First line\n\nBody".into(),
+        };
+        let v = serde_json::to_value(&loaded).unwrap();
+        assert_eq!(v["kind"], "file_loaded");
+        assert_eq!(v["path"], "commands/x.md");
+        assert_eq!(v["lines"], 3);
+        assert_eq!(v["bytes"], 46);
+        assert_eq!(v["description"], "First line");
+        assert_eq!(v["body"], "First line\n\nBody");
+
+        let bare = ToolDisplay::FileLoaded {
+            path: "builtin:x".into(),
+            lines: 1,
+            bytes: 2,
+            description: None,
+            body: "b".into(),
+        };
+        let v = serde_json::to_value(&bare).unwrap();
+        assert!(v.get("description").is_none());
     }
 }

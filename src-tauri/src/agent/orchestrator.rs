@@ -479,6 +479,10 @@ pub async fn execute_turn(
     let tool_ctx = ToolContext {
         session_id: session_id.to_owned(),
         workspace_root: spec.workspace_root.clone(),
+        // Empty until the TurnSpec grows a workspace binding (T7 memory
+        // index wiring); memory reports "no active workspace" meanwhile.
+        workspace_id: String::new(),
+        todo_state: Arc::clone(hub.todo_state()),
         abort: turn.tool_abort.clone(),
     };
     let started = Instant::now();

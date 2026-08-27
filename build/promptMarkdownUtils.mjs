@@ -32,6 +32,7 @@ const AGENTS_OUTPUT = path.join(ROOT, 'src', 'lib', 'prompts', '_agent-prompts-b
 const TOOLS_OUTPUT = path.join(ROOT, 'src', 'lib', 'prompts', '_tool-descriptions-bundle.ts');
 const SKILLS_DIR = path.join(ROOT, 'src', 'lib', 'prompts', 'skills');
 const SKILLS_OUTPUT = path.join(ROOT, 'src', 'lib', 'prompts', '_skills-bundle.ts');
+const RUST_SKILLS_OUTPUT = path.join(ROOT, 'src-tauri', 'crates', 'tide-tools', 'src', 'tools', 'builtin-skills.json');
 
 function readPromptFiles(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -318,6 +319,15 @@ export const SKILLS_BOOTSTRAP = ${JSON.stringify(bootstrap)};
   fs.writeFileSync(SKILLS_OUTPUT, ts, 'utf-8');
   console.log(`[prompts] bundled ${skills.length} skills → ${path.relative(ROOT, SKILLS_OUTPUT)} (bootstrap ${bootstrap.length} chars)`);
   for (const s of skills) console.log(`  ${s.name} (${s.body.length} chars)`);
+
+  // Rust side (tide-tools load_skill): same array as data-only JSON so the
+  // crate embeds it via include_str! without a TS-shaped import.
+  fs.writeFileSync(
+    RUST_SKILLS_OUTPUT,
+    JSON.stringify(skills, null, 1) + '\n',
+    'utf-8',
+  );
+  console.log(`[prompts] wrote rust skills bundle → ${path.relative(ROOT, RUST_SKILLS_OUTPUT)}`);
 }
 
 buildBundle();

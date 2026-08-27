@@ -10,12 +10,17 @@ pub mod git;
 pub mod git_repo;
 pub mod glob;
 pub mod grep;
+pub mod init;
 pub mod list_dir;
+pub mod load_skill;
+pub mod memory;
 pub mod multi_edit;
 pub mod notebook_edit;
 pub mod proc;
 pub mod read_file;
 pub mod read_media_file;
+pub mod slash_command;
+pub mod todo_write;
 pub mod write_file;
 
 use crate::Tool;
@@ -28,11 +33,16 @@ pub use git::GitTool;
 pub use git_repo::GitRepoTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
+pub use init::InitTool;
 pub use list_dir::ListDirTool;
+pub use load_skill::LoadSkillTool;
+pub use memory::{MemoryIndex, MemoryTool};
 pub use multi_edit::MultiEditTool;
 pub use notebook_edit::NotebookEditTool;
 pub use read_file::ReadFileTool;
 pub use read_media_file::ReadMediaFileTool;
+pub use slash_command::SlashCommandTool;
+pub use todo_write::TodoWriteTool;
 pub use write_file::WriteFileTool;
 
 /// The tool instances the orchestrator registers, in the order the frozen
@@ -54,6 +64,11 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(KillShellTool),
         Box::new(GitTool),
         Box::new(GitRepoTool),
+        Box::new(TodoWriteTool),
+        Box::new(SlashCommandTool),
+        Box::new(MemoryTool::new(None)),
+        Box::new(InitTool),
+        Box::new(LoadSkillTool),
     ]
 }
 

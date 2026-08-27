@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tide_store::sessions_v2_write::SessionsV2Writer;
-use tide_tools::{AbortFlag, AutonomyMode};
+use tide_tools::{AbortFlag, AutonomyMode, TodoState, TodosUpdated};
 use tokio::sync::{broadcast, oneshot, watch};
 
 use super::events::{AgentEvent, ChatPush};
@@ -58,6 +58,11 @@ pub struct ChatHub {
     /// Keyed `session_id + '\u{0}' + tool_call_id`.
     asks: StdMutex<HashMap<String, oneshot::Sender<PermissionAnswer>>>,
     channel_generation: AtomicU64,
+    /// App-wide todo store shared with every turn's ToolContext. The
+    /// subscription wired in [`ChatHub::open`] forwards each store change
+    /// to the renderer as a `todosUpdated` push (the todo_write tool's
+    /// side-channel; T7 adds the renderer bridge routing + persistence).
+    todo_state: Arc<TodoState>,
 }
 
 impl ChatHub {
@@ -69,6 +74,15 @@ impl ChatHub {
         let writer = Arc::new(StdMutex::new(writer));
         let (push_tx, _) = broadcast::channel(1024);
         let sink = EventSink::spawn(Arc::clone(&writer), push_tx.clone());
+        let todo_state = TodoState::shared();
+        todo_state.subscribe({
+            let push_tx = push_tx.clone();
+            move |event: &TodosUpdated| {
+                let _ = push_tx.send(ChatPush::TodosUpdated {
+                    event: event.clone(),
+                });
+            }
+        });
         Ok(Arc::new(Self {
             db_path,
             sink,
@@ -77,6 +91,7 @@ impl ChatHub {
             active: StdMutex::new(HashMap::new()),
             asks: StdMutex::new(HashMap::new()),
             channel_generation: AtomicU64::new(0),
+            todo_state,
         }))
     }
 
@@ -99,6 +114,12 @@ impl ChatHub {
 
     pub fn subscribe_push(&self) -> broadcast::Receiver<ChatPush> {
         self.push_tx.subscribe()
+    }
+
+    /// The app-wide todo store the todo_write tool mutates through the
+    /// per-turn ToolContext.
+    pub fn todo_state(&self) -> &Arc<TodoState> {
+        &self.todo_state
     }
 
     pub fn next_seq(&self, session_id: &str) -> u64 {
