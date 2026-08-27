@@ -817,6 +817,30 @@ pub fn image_file_read(
     read_image_file(workspaces, abs_path, workspace_id, rel_path)
 }
 
+/// `agentList` — the dispatch catalog for the UI's @mention picker, from
+/// the tide-tools parsed AgentDefs (the bundled src/lib/prompts/agents
+/// markdown). Wire shape is the three-field AgentCatalogEntry exactly as
+/// the 91ec558 misc handler returned it.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct AgentCatalogEntryWire {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "whenToUse")]
+    pub when_to_use: String,
+}
+
+#[tauri::command]
+pub fn agent_list() -> Vec<AgentCatalogEntryWire> {
+    tide_tools::builtin_agents()
+        .iter()
+        .map(|a| AgentCatalogEntryWire {
+            name: a.name.clone(),
+            description: a.description.clone(),
+            when_to_use: a.when_to_use.clone(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1156,5 +1180,29 @@ mod tests {
     fn os_release_is_populated_on_unix() {
         #[cfg(unix)]
         assert!(os_release() != "unknown", "uname(2) should resolve on unix");
+    }
+
+    #[test]
+    fn agent_list_exposes_the_dispatch_catalog() {
+        let catalog = agent_list();
+        assert!(catalog.len() >= 5, "bundled agent prompts parsed");
+        for entry in &catalog {
+            assert!(!entry.name.is_empty());
+            assert!(!entry.description.is_empty());
+            assert!(!entry.when_to_use.is_empty());
+        }
+        let wire = serde_json::to_value(&catalog[0]).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "name": catalog[0].name,
+                "description": catalog[0].description,
+                "whenToUse": catalog[0].when_to_use,
+            })
+        );
+        assert!(
+            catalog.iter().any(|a| a.name == "general-purpose"),
+            "the default dispatch target is present"
+        );
     }
 }

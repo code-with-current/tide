@@ -1,15 +1,21 @@
-//! Keychain reads using the exact item naming `app/platform/secrets.ts` @
-//! 91ec558 wrote: service `tide`, account `kcv2-<accountId>` for v2 handles
-//! (or the raw account embedded in a `kcv1:` legacy handle). The stored item
-//! data is a hex envelope of the secret (`-` for the empty string), never the
-//! raw bytes. The config's `encryptedKey` is base64 of the
-//! `kcv2:<accountId>:<salt>:<verifier>` handle; verifier is
-//! sha256(salt || plaintext) hex truncated to 32 chars.
+//! Keychain reads AND writes using the exact item naming
+//! `app/platform/secrets.ts` @ 91ec558 used: service `tide`, account
+//! `kcv2-<accountId>` for v2 handles (or the raw account embedded in a
+//! `kcv1:` legacy handle). The stored item data is a hex envelope of the
+//! secret (`-` for the empty string), never the raw bytes. The config's
+//! `encryptedKey` is base64 of the `kcv2:<accountId>:<salt>:<verifier>`
+//! handle; verifier is sha256(salt || plaintext) hex truncated to 32 chars.
 //!
-//! Reads go through the `security` CLI exactly like the TS did: the items'
-//! ACLs trust the CLI binary, so keys resolve without a per-app macOS
-//! authorization prompt (an in-process read via the keyring crate prompts,
-//! and ad-hoc-signed dev rebuilds would re-trigger it).
+//! Both directions go through the `security` CLI exactly like the TS did:
+//! the items' ACLs trust the CLI binary, so keys resolve without a per-app
+//! macOS authorization prompt (an in-process read via the keyring crate
+//! prompts, and ad-hoc-signed dev rebuilds would re-trigger it). Writes
+//! use the interactive `security -i` session the TS relied on — commands
+//! on stdin, so the secret never appears in argv (`ps`-visible), and a
+//! failed head-of-batch delete (item missing) is harmless because the
+//! session's exit status reflects the last command. `add-generic-password
+//! -X <hex>` must carry the envelope hex-encoded twice and `-X` stays the
+//! LAST option (an empty payload would otherwise swallow the next token).
 
 use std::fmt;
 
@@ -82,6 +88,129 @@ pub fn list_known(config: &Config) -> Vec<String> {
 
 pub fn decrypt_stored(stored: &str) -> SecretsResult<Option<String>> {
     decrypt_with(real_keychain_get, stored)
+}
+
+// ── write side (the kcv2 envelope + keychain item creation) ─────────
+
+/// Stored keychain data for a value: hex of the utf8 bytes, `-` for the
+/// empty string (an empty `-X` payload is not expressible — see header).
+fn to_envelope(value: &str) -> String {
+    if value.is_empty() {
+        EMPTY_ENVELOPE.to_owned()
+    } else {
+        hex_encode(value.as_bytes())
+    }
+}
+
+/// The `-X` argument: the envelope string hex-encoded once more, so the
+/// bytes `security` decodes-and-stores are always printable ASCII hex.
+fn keychain_payload(value: &str) -> String {
+    hex_encode(to_envelope(value).as_bytes())
+}
+
+/// Interactive-mode accounts must be single tokens: the `-i` tokenizer has
+/// no quoting, so whitespace/control characters would split or inject
+/// commands (port of the TS `assertTokenSafe`).
+fn assert_token_safe(account: &str) -> SecretsResult<()> {
+    let ok = (1..=512).contains(&account.len())
+        && account
+            .bytes()
+            .all(|b| (0x21..=0x7e).contains(&b));
+    if ok {
+        Ok(())
+    } else {
+        Err(SecretsError::Malformed(format!(
+            "invalid keychain account name: {:?}",
+            &account[..account.len().min(40)]
+        )))
+    }
+}
+
+/// OS randomness for the per-write account id + salt. /dev/urandom is the
+/// only source this crate needs — the keychain write path runs on macOS.
+fn random_bytes(n: usize) -> SecretsResult<Vec<u8>> {
+    use std::io::Read;
+    let mut buf = vec![0u8; n];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .map_err(|e| SecretsError::Access(format!("reading /dev/urandom failed: {e}")))?;
+    Ok(buf)
+}
+
+/// The kcv2 handle math + keychain item creation, with the randomness and
+/// the keychain write injected so tests verify the envelope without
+/// touching the real keychain. Returns the base64 `encryptedKey` to store
+/// in config.json.
+fn encrypt_handle_with(
+    random: impl Fn(usize) -> SecretsResult<Vec<u8>>,
+    mut keychain_set: impl FnMut(&str, &str) -> SecretsResult<()>,
+    value: &str,
+) -> SecretsResult<String> {
+    let account_id = hex_encode(&random(16)?);
+    let salt = random(16)?;
+    let verifier = verification_value(&salt, value);
+    let account = format!("{ACCOUNT_INFIX}{account_id}");
+    keychain_set(&account, &keychain_payload(value))?;
+    let handle = format!("{HANDLE_PREFIX}:{account_id}:{}:{verifier}", hex_encode(&salt));
+    Ok(base64::engine::general_purpose::STANDARD.encode(handle))
+}
+
+/// Port of the TS `keychainSet`: delete-then-add inside one `security -i`
+/// session fed via stdin (secrets never in argv). A missing item on the
+/// delete is harmless — the add still runs and the session's exit status
+/// reflects the add.
+#[cfg(target_os = "macos")]
+fn cli_keychain_set(account: &str, payload: &str) -> SecretsResult<()> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    assert_token_safe(account)?;
+    let script = format!(
+        "delete-generic-password -a {account} -s {KEYCHAIN_SERVICE}\n\
+         add-generic-password -a {account} -s {KEYCHAIN_SERVICE} -U -X {payload}\n"
+    );
+    let mut child = Command::new("security")
+        .arg("-i")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| SecretsError::Access(format!("failed to launch security: {e}")))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(script.as_bytes())
+            .map_err(|e| SecretsError::Access(format!("keychain write failed: {e}")))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| SecretsError::Access(format!("keychain write failed: {e}")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(SecretsError::Access(format!(
+        "keychain write failed for account {account}: {stderr}"
+    )))
+}
+
+/// Encrypt an API key for storage in config.json (the TS store.ts
+/// `crypto.encrypt`). Empty string → empty string (no item written); on
+/// macOS the key lands in the keychain under a fresh `kcv2-<accountId>`
+/// item and the return value is the base64 handle; on other platforms —
+/// where the TS backend was an honest null stub that stored plaintext —
+/// this stores base64(plaintext) so this crate's read path (which always
+/// base64-decodes before its plaintext passthrough) round-trips.
+pub fn encrypt_stored(value: &str) -> SecretsResult<String> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Ok(base64::engine::general_purpose::STANDARD.encode(value));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        encrypt_handle_with(random_bytes, cli_keychain_set, value)
+    }
 }
 
 fn decrypt_with(
@@ -359,6 +488,128 @@ mod tests {
             serde_json::from_str(r#"{"secrets":{"web_search":"enc","github":"enc2"}}"#).unwrap();
         assert_eq!(list_known(&cfg), vec!["github".to_string(), "web_search".to_string()]);
         assert!(list_known(&Config::default()).is_empty());
+    }
+
+    // ── write side ──────────────────────────────────────────────────
+
+    /// Deterministic randomness: 0x00.. for the first call, 0xff.. for the
+    /// second (account id then salt), so handle math is assertable.
+    fn fake_random(n: usize, salt: u8) -> SecretsResult<Vec<u8>> {
+        Ok(vec![salt; n])
+    }
+
+    #[test]
+    fn encrypt_builds_a_verifiable_kcv2_handle_and_double_hex_envelope() {
+        let mut written: Vec<(String, String)> = Vec::new();
+        let handle = encrypt_handle_with(
+            |n| fake_random(n, 0xab),
+            |account, payload| {
+                written.push((account.to_owned(), payload.to_owned()));
+                Ok(())
+            },
+            "sk-live-key",
+        )
+        .unwrap();
+        // Item account is kcv2-<accountId>; payload is hex(hex(plain)).
+        assert_eq!(written.len(), 1);
+        assert_eq!(
+            written[0].0,
+            format!("{}{}", "kcv2-", "ab".repeat(16)),
+            "account id is hex of the 16 random bytes"
+        );
+        assert_eq!(written[0].1, hex_encode(hex_encode(b"sk-live-key").as_bytes()));
+        // The handle round-trips through the read side.
+        assert_eq!(decrypt_with(|a| Ok(written_first(&written, a)), &handle).unwrap(), Some("sk-live-key".to_owned()));
+    }
+
+    /// Invert the `-X` double-hex to recover the item data a later
+    /// `find-generic-password -w` would echo (the envelope string).
+    fn written_first(written: &[(String, String)], account: &str) -> Option<String> {
+        written
+            .iter()
+            .find(|(a, _)| a == account)
+            .map(|(_, payload)| String::from_utf8(hex_decode(payload).unwrap()).unwrap())
+    }
+
+    #[test]
+    fn encrypt_empty_value_stores_empty() {
+        assert_eq!(encrypt_stored("").unwrap(), "");
+        // The raw handle path (TS encryptString) still writes an item — the
+        // EMPTY_ENVELOPE placeholder, since an empty -X payload is not
+        // expressible.
+        let mut written: Vec<(String, String)> = Vec::new();
+        let handle = encrypt_handle_with(
+            |n| fake_random(n, 0x01),
+            |account, payload| {
+                written.push((account.to_owned(), payload.to_owned()));
+                Ok(())
+            },
+            "",
+        )
+        .unwrap();
+        assert_eq!(written[0].1, keychain_payload(""));
+        assert_eq!(written[0].1, hex_encode(b"-"));
+        assert_eq!(
+            decrypt_with(|a| Ok(written_first(&written, a)), &handle).unwrap(),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn random_account_and_salt_make_handles_unique_per_write() {
+        let make = |seed: u8| {
+            encrypt_handle_with(
+                move |n| fake_random(n, seed),
+                |_, _| Ok(()),
+                "same-plain",
+            )
+            .unwrap()
+        };
+        assert_ne!(make(0x11), make(0x22), "salt differs → verifier differs");
+    }
+
+    #[test]
+    fn keychain_write_failure_surfaces_as_access_error() {
+        let err = encrypt_handle_with(
+            |n| fake_random(n, 0x00),
+            |_, _| Err(SecretsError::Access("denied".into())),
+            "sk-x",
+        )
+        .unwrap_err();
+        assert!(matches!(err, SecretsError::Access(_)));
+    }
+
+    #[test]
+    fn token_safety_rejects_whitespace_accounts() {
+        assert!(assert_token_safe("kcv2-abc123").is_ok());
+        assert!(assert_token_safe("bad account").is_err());
+        assert!(assert_token_safe("").is_err());
+    }
+
+    // Writes then reads then deletes a REAL keychain item under a random
+    // kcv2- account; run explicitly: cargo test -p tide-store -- --ignored
+    #[test]
+    #[ignore = "writes to the real macOS keychain (M4 T4 write-path homecoming check)"]
+    fn live_keychain_write_round_trips() {
+        let plain = "tide-live-write-check";
+        let stored = encrypt_stored(plain).unwrap();
+        assert_ne!(stored, plain);
+        assert_eq!(decrypt_stored(&stored).unwrap(), Some(plain.to_owned()));
+        // Cleanup: recover the account from the handle and delete the item.
+        let text = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(&stored)
+                .unwrap(),
+        )
+        .unwrap();
+        let account_id = text.split(':').nth(1).unwrap();
+        let account = format!("{ACCOUNT_INFIX}{account_id}");
+        let out = std::process::Command::new("security")
+            .args(["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", &account])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "cleanup delete failed: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(decrypt_stored(&stored).unwrap(), None, "item gone after delete");
     }
 
     // Reads the user's REAL ~/.tide/config.json and keychain; run explicitly:

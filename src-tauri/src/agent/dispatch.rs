@@ -273,6 +273,7 @@ async fn run_dispatch(
         workspace_id: parent_spec.workspace_id.clone(),
         compaction: parent_spec.compaction.clone(),
         system: Some(agent.system_prompt.clone()),
+        provider_id: parent_spec.provider_id.clone(),
         mirror: Some(MirrorTarget {
             parent_session_id: emit_id.clone(),
             parent_tool_call_id: call.tool_call_id.clone(),

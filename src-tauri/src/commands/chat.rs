@@ -367,6 +367,7 @@ pub(crate) async fn start_turn(
         workspace_id,
         compaction,
         system: None,
+        provider_id: provider.id.clone(),
         mirror: None,
     };
 
@@ -390,7 +391,34 @@ async fn turn_task(
     turn_handle: TurnHandle,
 ) {
     let session_id = spec.session_id.clone();
-    if let Err(message) = execute_turn(&hub, &spec, engine, tools, turn_handle).await {
+    // The usage.db metering runs on the RESOLVED provider id (TS
+    // emitTurnEnd's recordProviderUsage) — a spec without one (tests,
+    // legacy callers) records nothing.
+    let metering_provider = (!spec.provider_id.is_empty()).then(|| spec.provider_id.clone());
+    let result = execute_turn(&hub, &spec, engine, tools, turn_handle).await;
+    if let Some(provider_id) = metering_provider {
+        if let Ok(summary) = &result {
+            let delta = tide_store::usage::UsageDelta {
+                input_tokens: summary.usage.input_tokens as i64,
+                output_tokens: summary.usage.output_tokens as i64,
+                cache_read: summary.usage.cache_read as i64,
+                cache_write: summary.usage.cache_write as i64,
+                cost_usd: summary.usage.cost_usd,
+            };
+            let data_dir = hub
+                .db_path()
+                .parent()
+                .map(std::path::Path::to_owned)
+                .unwrap_or_default();
+            let _ = tide_store::usage::record_provider_usage(
+                &data_dir,
+                &provider_id,
+                &delta,
+                tide_store::usage::unix_ms_now(),
+            );
+        }
+    }
+    if let Err(message) = result {
         hub.emit_agent(AgentEvent::Error {
             session_id: session_id.clone(),
             seq: hub.next_seq(&session_id),

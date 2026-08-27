@@ -39,7 +39,18 @@
  *  mergeBranch/conflictFiles/resolveFile/fetch/pull/push — all git2 in the
  *  backend — plus gitRepoDetect (the workspaces-rpc detection entry). Every
  *  method passes its GitSessionScope params through verbatim; the gitChanged
- *  watcher push stays dormant (no bridge channel yet — the panel polls). */
+ *  watcher push stays dormant (no bridge channel yet — the panel polls).
+ *
+ *  M4 T4 adds the provider + model catalog domain (11 methods): the CRUD trio
+ *  (providerAdd/Update/Delete — apiKey lands in the macOS keychain behind a
+ *  kcv2 handle), the probes (providerProbeModels / providerDetectProtocol /
+ *  providerTestConnection against the OpenAI-vs-Anthropic endpoint
+ *  conventions), the usage pair (providerUsageWindows off the local usage.db
+ *  rollups, providerUsageReport off the provider quota APIs), the models.dev
+ *  catalog pair (modelCatalogRefresh fire-and-forget / modelCatalogResolve
+ *  with its flat catalogId/modelId/contextWindow params), and agentList (the
+ *  dispatch catalog for the @mention picker). All params pass through
+ *  verbatim under Tauri's camelCase → snake_case mapping. */
 import {
   activateRpcClient,
   emitAgentEvent,
@@ -49,6 +60,7 @@ import {
 } from './rpc';
 import type { AgentEvent } from '@/lib/agent/events';
 import type {
+  AgentCatalogEntry,
   AgentSettingsWire,
   ArchivedSessionHeader,
   ChatSendResult,
@@ -73,7 +85,13 @@ import type {
   ImageFileContent,
   MacPermissionStatus,
   MermaidRepairResult,
+  ModelCatalogResolveResult,
   Provider,
+  ProviderDetectResult,
+  ProviderProbeResult,
+  ProviderTestResult,
+  ProviderUsageReportWire,
+  ProviderUsageWindowsResult,
   SessionHeader,
   SessionMessageV2,
   SessionMetaV2,
@@ -88,10 +106,11 @@ import type { DiffHunk } from '@/types';
 /** Must match BRIDGE_PROTOCOL in src-tauri/src/commands/bridge.rs. */
 const BRIDGE_PROTOCOL = 1;
 
-/** GitSessionScope is an interface (no implicit index signature), so the
- *  invoke args need this widening cast — the payload still passes through
- *  verbatim, like every other domain. */
-const gitArgs = (params: object): Record<string, unknown> => params as Record<string, unknown>;
+/** Named interfaces (GitSessionScope, ModelCatalogResolveInput) carry no
+ * implicit index signature, so the invoke args need this widening cast —
+ * the payload still passes through verbatim, like every other domain. */
+const passthroughArgs = (params: object): Record<string, unknown> =>
+  params as Record<string, unknown>;
 
 const NOT_PORTED = '[tide] RPC method not ported yet (Tauri rewrite M2+)';
 
@@ -201,6 +220,17 @@ type BridgeMethods = Pick<
   | 'gitPull'
   | 'gitPush'
   | 'gitRepoDetect'
+  | 'providerAdd'
+  | 'providerUpdate'
+  | 'providerDelete'
+  | 'providerProbeModels'
+  | 'providerDetectProtocol'
+  | 'providerTestConnection'
+  | 'modelCatalogResolve'
+  | 'modelCatalogRefresh'
+  | 'providerUsageWindows'
+  | 'providerUsageReport'
+  | 'agentList'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
@@ -318,38 +348,56 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
       invoke<{ overrides: Record<string, string[]> }>('settings_set_shortcut', params),
     settingsResetShortcuts: (params) =>
       invoke<{ overrides: Record<string, string[]> }>('settings_reset_shortcuts', params),
-    gitStatus: (params) => invoke<GitFileChange[]>('git_status', gitArgs(params)),
-    gitDiff: (params) => invoke<DiffHunk[]>('git_diff', gitArgs(params)),
-    gitStagedDiff: (params) => invoke<{ text: string }>('git_staged_diff', gitArgs(params)),
-    gitLog: (params) => invoke<GitCommit[]>('git_log', gitArgs(params)),
-    gitCommitFiles: (params) => invoke<GitFileChange[]>('git_commit_files', gitArgs(params)),
-    gitCommitFileDiff: (params) => invoke<DiffHunk[]>('git_commit_file_diff', gitArgs(params)),
-    gitCommitMessage: (params) => invoke<{ text: string }>('git_commit_message', gitArgs(params)),
-    gitBulk: (params) => invoke<GitOpResult>('git_bulk', gitArgs(params)),
-    gitStashList: (params) => invoke<GitStash[]>('git_stash_list', gitArgs(params)),
-    gitStage: (params) => invoke<GitOpResult>('git_stage', gitArgs(params)),
-    gitRestoreFile: (params) => invoke<GitOpResult>('git_restore_file', gitArgs(params)),
-    gitDiscardFile: (params) => invoke<GitOpResult>('git_discard_file', gitArgs(params)),
-    gitCommit: (params) => invoke<GitCommitResult>('git_commit', gitArgs(params)),
-    gitAmend: (params) => invoke<GitCommitResult>('git_amend', gitArgs(params)),
-    gitRevert: (params) => invoke<GitRevertResult>('git_revert', gitArgs(params)),
+    gitStatus: (params) => invoke<GitFileChange[]>('git_status', passthroughArgs(params)),
+    gitDiff: (params) => invoke<DiffHunk[]>('git_diff', passthroughArgs(params)),
+    gitStagedDiff: (params) => invoke<{ text: string }>('git_staged_diff', passthroughArgs(params)),
+    gitLog: (params) => invoke<GitCommit[]>('git_log', passthroughArgs(params)),
+    gitCommitFiles: (params) => invoke<GitFileChange[]>('git_commit_files', passthroughArgs(params)),
+    gitCommitFileDiff: (params) => invoke<DiffHunk[]>('git_commit_file_diff', passthroughArgs(params)),
+    gitCommitMessage: (params) => invoke<{ text: string }>('git_commit_message', passthroughArgs(params)),
+    gitBulk: (params) => invoke<GitOpResult>('git_bulk', passthroughArgs(params)),
+    gitStashList: (params) => invoke<GitStash[]>('git_stash_list', passthroughArgs(params)),
+    gitStage: (params) => invoke<GitOpResult>('git_stage', passthroughArgs(params)),
+    gitRestoreFile: (params) => invoke<GitOpResult>('git_restore_file', passthroughArgs(params)),
+    gitDiscardFile: (params) => invoke<GitOpResult>('git_discard_file', passthroughArgs(params)),
+    gitCommit: (params) => invoke<GitCommitResult>('git_commit', passthroughArgs(params)),
+    gitAmend: (params) => invoke<GitCommitResult>('git_amend', passthroughArgs(params)),
+    gitRevert: (params) => invoke<GitRevertResult>('git_revert', passthroughArgs(params)),
     gitAheadBehind: (params) =>
-      invoke<GitAheadBehindResult | null>('git_ahead_behind', gitArgs(params)),
-    gitHeadSha: (params) => invoke<{ sha: string | null }>('git_head_sha', gitArgs(params)),
-    gitBranchInfo: (params) => invoke<GitBranchInfoResult>('git_branch_info', gitArgs(params)),
+      invoke<GitAheadBehindResult | null>('git_ahead_behind', passthroughArgs(params)),
+    gitHeadSha: (params) => invoke<{ sha: string | null }>('git_head_sha', passthroughArgs(params)),
+    gitBranchInfo: (params) => invoke<GitBranchInfoResult>('git_branch_info', passthroughArgs(params)),
     gitBranchesDetailed: (params) =>
-      invoke<GitBranchDetailed[]>('git_branches_detailed', gitArgs(params)),
-    gitCreateBranch: (params) => invoke<GitOpResult>('git_create_branch', gitArgs(params)),
-    gitDeleteBranch: (params) => invoke<GitOpResult>('git_delete_branch', gitArgs(params)),
-    gitCheckout: (params) => invoke<GitOpResult>('git_checkout', gitArgs(params)),
-    gitRecentBranches: (params) => invoke<string[]>('git_recent_branches', gitArgs(params)),
-    gitMergeBranch: (params) => invoke<GitMergeResult>('git_merge_branch', gitArgs(params)),
-    gitConflictFiles: (params) => invoke<GitConflictEntry[]>('git_conflict_files', gitArgs(params)),
-    gitResolveFile: (params) => invoke<GitOpResult>('git_resolve_file', gitArgs(params)),
-    gitFetch: (params) => invoke<GitOpResult>('git_fetch', gitArgs(params)),
-    gitPull: (params) => invoke<GitOpResult>('git_pull', gitArgs(params)),
-    gitPush: (params) => invoke<GitOpResult>('git_push', gitArgs(params)),
-    gitRepoDetect: (params) => invoke<GitRepoInfo | null>('git_repo_detect', gitArgs(params)),
+      invoke<GitBranchDetailed[]>('git_branches_detailed', passthroughArgs(params)),
+    gitCreateBranch: (params) => invoke<GitOpResult>('git_create_branch', passthroughArgs(params)),
+    gitDeleteBranch: (params) => invoke<GitOpResult>('git_delete_branch', passthroughArgs(params)),
+    gitCheckout: (params) => invoke<GitOpResult>('git_checkout', passthroughArgs(params)),
+    gitRecentBranches: (params) => invoke<string[]>('git_recent_branches', passthroughArgs(params)),
+    gitMergeBranch: (params) => invoke<GitMergeResult>('git_merge_branch', passthroughArgs(params)),
+    gitConflictFiles: (params) => invoke<GitConflictEntry[]>('git_conflict_files', passthroughArgs(params)),
+    gitResolveFile: (params) => invoke<GitOpResult>('git_resolve_file', passthroughArgs(params)),
+    gitFetch: (params) => invoke<GitOpResult>('git_fetch', passthroughArgs(params)),
+    gitPull: (params) => invoke<GitOpResult>('git_pull', passthroughArgs(params)),
+    gitPush: (params) => invoke<GitOpResult>('git_push', passthroughArgs(params)),
+    gitRepoDetect: (params) => invoke<GitRepoInfo | null>('git_repo_detect', passthroughArgs(params)),
+    providerAdd: (params) => invoke<Provider>('provider_add', params),
+    providerUpdate: (params) => invoke<Provider | null>('provider_update', params),
+    providerDelete: (params) => invoke<{ ok: boolean }>('provider_delete', params),
+    providerProbeModels: (params) => invoke<ProviderProbeResult>('provider_probe_models', params),
+    providerDetectProtocol: (params) =>
+      invoke<ProviderDetectResult>('provider_detect_protocol', params),
+    providerTestConnection: (params) =>
+      invoke<ProviderTestResult>('provider_test_connection', params),
+    // ModelCatalogResolveInput is a named interface — same widening as the
+    // git family, payload passes through verbatim.
+    modelCatalogResolve: (params) =>
+      invoke<ModelCatalogResolveResult>('model_catalog_resolve', passthroughArgs(params)),
+    modelCatalogRefresh: (params) => invoke<{ ok: boolean }>('model_catalog_refresh', params),
+    providerUsageWindows: (params) =>
+      invoke<ProviderUsageWindowsResult>('provider_usage_windows', params),
+    providerUsageReport: (params) =>
+      invoke<ProviderUsageReportWire | null>('provider_usage_report', params),
+    agentList: (params) => invoke<AgentCatalogEntry[]>('agent_list', params),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {

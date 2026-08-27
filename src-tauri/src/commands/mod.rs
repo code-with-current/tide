@@ -14,12 +14,15 @@ pub mod chat;
 pub mod git;
 pub mod mcp;
 pub mod misc;
+pub mod model_catalog;
+pub mod or_catalog;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
 pub mod shortcuts;
-pub mod worktree;
+pub mod usage_report;
 pub mod workspaces;
+pub mod worktree;
 
 use serde::Serialize;
 use tide_store::config::ConfigError;

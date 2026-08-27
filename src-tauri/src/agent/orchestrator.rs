@@ -151,6 +151,10 @@ pub struct TurnSpec {
     /// System prompt override — `None` = the Tide default. Dispatch children
     /// run their catalog agent's prompt.
     pub system: Option<String>,
+    /// Provider whose usage windows this turn's tokens meter against (the
+    /// TS turn.providerId). Children inherit the parent's provider id, but
+    /// only the root turn records — child usage folds into the root rollup.
+    pub provider_id: String,
     /// Set for dispatch children: event mirroring + recursion metadata.
     pub mirror: Option<MirrorTarget>,
 }
@@ -169,6 +173,7 @@ impl Default for TurnSpec {
             workspace_id: String::new(),
             compaction: None,
             system: None,
+            provider_id: String::new(),
             mirror: None,
         }
     }

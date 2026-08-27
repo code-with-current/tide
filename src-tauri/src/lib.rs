@@ -2,6 +2,8 @@ mod agent;
 mod commands;
 mod state;
 
+use tauri::Manager;
+
 use agent::hub::ChatHubCell;
 use agent::mcp::McpPoolCell;
 use state::AppState;
@@ -27,6 +29,16 @@ pub fn run() {
         .manage(app_state)
         .manage(hub_cell)
         .manage(mcp_cell)
+        .setup(|app| {
+            // models.dev catalog boot init (TS initModelCatalog): load the
+            // bundled/cache baseline, refresh in the background when stale.
+            let handle = app.handle().clone();
+            let data_dir = tide_store::paths::data_dir();
+            tauri::async_runtime::spawn(async move {
+                commands::model_catalog::init(&handle.state::<AppState>(), &data_dir).await;
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::boot::consent_should_show,
             commands::boot::last_session_get,
@@ -92,6 +104,17 @@ pub fn run() {
             commands::shortcuts::settings_set_shortcut,
             commands::shortcuts::settings_reset_shortcuts,
             commands::providers::provider_list,
+            commands::providers::provider_add,
+            commands::providers::provider_update,
+            commands::providers::provider_delete,
+            commands::providers::provider_probe_models,
+            commands::providers::provider_detect_protocol,
+            commands::providers::provider_test_connection,
+            commands::providers::provider_usage_windows,
+            commands::providers::provider_usage_report,
+            commands::providers::model_catalog_refresh,
+            commands::providers::model_catalog_resolve,
+            commands::misc::agent_list,
             commands::chat::session_create,
             commands::chat::chat_run_turn,
             commands::chat::chat_abort,

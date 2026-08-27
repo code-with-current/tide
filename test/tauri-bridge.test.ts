@@ -918,3 +918,158 @@ describe("git panel routing (M4 T3)", () => {
     expect(invoke).toHaveBeenLastCalledWith("git_repo_detect", { dirPath: "/repo/tide" });
   });
 });
+
+describe("providers + model catalog routing (M4 T4)", () => {
+  it("routes the provider CRUD trio with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const added = {
+      id: "p_ab12cd34",
+      name: "z.ai",
+      apiStyle: "anthropic",
+      baseUrl: "https://api.z.ai/api/anthropic",
+      enabled: true,
+      models: [],
+      apiKey: "sk-live",
+    };
+    invoke.mockResolvedValueOnce(added);
+    const addParams = {
+      input: {
+        name: "z.ai",
+        apiStyle: "anthropic" as const,
+        baseUrl: "https://api.z.ai/api/anthropic",
+        apiKey: "sk-live",
+      },
+    };
+    expect(await bridge.request.providerAdd(addParams)).toEqual(added);
+    expect(invoke).toHaveBeenLastCalledWith("provider_add", addParams);
+
+    invoke.mockResolvedValueOnce({ ...added, name: "z.ai pro" });
+    const updateParams = { providerId: "p_ab12cd34", patch: { name: "z.ai pro" } };
+    expect(await bridge.request.providerUpdate(updateParams)).toEqual({ ...added, name: "z.ai pro" });
+    expect(invoke).toHaveBeenLastCalledWith("provider_update", updateParams);
+
+    invoke.mockResolvedValueOnce(null);
+    expect(await bridge.request.providerUpdate({ providerId: "p_ghost", patch: {} })).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith("provider_update", { providerId: "p_ghost", patch: {} });
+
+    invoke.mockResolvedValueOnce({ ok: false });
+    expect(await bridge.request.providerDelete({ providerId: "p_ghost" })).toEqual({ ok: false });
+    expect(invoke).toHaveBeenLastCalledWith("provider_delete", { providerId: "p_ghost" });
+  });
+
+  it("routes the probe/detect/test trio with the input wrappers", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const probed = {
+      ok: true,
+      models: [{ id: "glm-4.6", context_length: 200000 }],
+    };
+    invoke.mockResolvedValueOnce(probed);
+    const probeParams = {
+      input: {
+        apiStyle: "openai" as const,
+        baseUrl: "https://openrouter.ai/api/v1",
+        apiKey: "sk-probe",
+      },
+    };
+    expect(await bridge.request.providerProbeModels(probeParams)).toEqual(probed);
+    expect(invoke).toHaveBeenLastCalledWith("provider_probe_models", probeParams);
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "HTTP 401" });
+    expect(
+      await bridge.request.providerTestConnection({
+        input: { apiStyle: "openai", baseUrl: "http://x", apiKey: "k", modelId: "gpt-5" },
+      }),
+    ).toEqual({ ok: false, error: "HTTP 401" });
+    expect(invoke).toHaveBeenLastCalledWith(
+      "provider_test_connection",
+      {
+        input: { apiStyle: "openai", baseUrl: "http://x", apiKey: "k", modelId: "gpt-5" },
+      },
+    );
+
+    const detected = { apiStyle: "anthropic" as const, models: [] };
+    invoke.mockResolvedValueOnce(detected);
+    expect(
+      await bridge.request.providerDetectProtocol({ baseUrl: "https://api.z.ai/api/anthropic", apiKey: "k" }),
+    ).toEqual(detected);
+    expect(invoke).toHaveBeenLastCalledWith("provider_detect_protocol", {
+      baseUrl: "https://api.z.ai/api/anthropic",
+      apiKey: "k",
+    });
+  });
+
+  it("routes the usage pair and the models.dev catalog pair", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const windows = {
+      fiveHour: { tokens: 5_000, oldestAt: 1756000000000, newestAt: 1756000600000 },
+      weekly: { tokens: 10_000, oldestAt: 1755400000000, newestAt: 1756000600000 },
+    };
+    invoke.mockResolvedValueOnce(windows);
+    expect(await bridge.request.providerUsageWindows({ providerId: "p_1" })).toEqual(windows);
+    expect(invoke).toHaveBeenLastCalledWith("provider_usage_windows", { providerId: "p_1" });
+
+    const report = {
+      source: "zai" as const,
+      planName: "Max",
+      windows: [{ label: "5 hours", percent: 40, used: 400, limit: 1000, unit: "tokens" as const }],
+    };
+    invoke.mockResolvedValueOnce(report);
+    expect(await bridge.request.providerUsageReport({ providerId: "p_1" })).toEqual(report);
+    expect(invoke).toHaveBeenLastCalledWith("provider_usage_report", { providerId: "p_1" });
+
+    invoke.mockResolvedValueOnce(null);
+    expect(await bridge.request.providerUsageReport({ providerId: "p_local" })).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith("provider_usage_report", { providerId: "p_local" });
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.modelCatalogRefresh({})).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("model_catalog_refresh", {});
+
+    const resolved = {
+      meta: {
+        contextWindow: 200000,
+        maxInputTokens: 200000,
+        maxOutputTokens: 64000,
+        supportsReasoning: true,
+        supportsFunctionCalling: true,
+        supportsPromptCaching: true,
+        supportsVision: false,
+        mode: "chat",
+        isValidForMainRole: true,
+        pricing: { inputPerToken: 3e-6, outputPerToken: 1.5e-5 },
+        resolvedCatalogId: "anthropic/claude-sonnet-4-5",
+      },
+      match: { state: "matched" as const, matches: [] },
+    };
+    invoke.mockResolvedValueOnce(resolved);
+    const resolveParams = {
+      catalogId: "anthropic/claude-sonnet-4-5",
+      modelId: "claude-sonnet-4-5",
+      contextWindow: 0,
+    };
+    expect(await bridge.request.modelCatalogResolve(resolveParams)).toEqual(resolved);
+    expect(invoke).toHaveBeenLastCalledWith("model_catalog_resolve", resolveParams);
+  });
+
+  it("routes agentList, the dispatch catalog for the mention picker", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const agents = [
+      {
+        name: "general-purpose",
+        description: "Concrete, multi-step tasks delegated from a parent session.",
+        whenToUse: "Complex tasks needing independent context.",
+      },
+    ];
+    invoke.mockResolvedValueOnce(agents);
+    expect(await bridge.request.agentList({})).toEqual(agents);
+    expect(invoke).toHaveBeenLastCalledWith("agent_list", {});
+  });
+});
