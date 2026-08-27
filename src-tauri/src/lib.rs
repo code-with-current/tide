@@ -67,6 +67,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::boot::consent_should_show,
+            commands::updater::updater_status,
+            commands::updater::updater_check_now,
+            commands::updater::updater_download,
+            commands::updater::updater_apply,
+            commands::updater::updater_release_notes,
             commands::boot::last_session_get,
             commands::boot::last_session_set,
             commands::bridge::tide_ping,

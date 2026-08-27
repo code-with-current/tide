@@ -170,6 +170,7 @@ import type {
   TerminalPort,
   TerminalScrollbackResult,
   TodoItemWire,
+  UpdateStatusWire,
   TodosUpdatedEvent,
   Workspace,
   WorkspaceFileReadResult,
@@ -243,6 +244,11 @@ type BridgeMethods = Pick<
   | 'lastSessionGet'
   | 'lastSessionSet'
   | 'consentShouldShow'
+  | 'updaterStatus'
+  | 'updaterCheckNow'
+  | 'updaterReleaseNotes'
+  | 'updaterDownload'
+  | 'updaterApply'
   | 'windowClose'
   | 'windowMinimize'
   | 'windowToggleMaximize'
@@ -464,6 +470,11 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     lastSessionGet: (params) => invoke<{ sessionId: string | null; workspaceId: string | null }>('last_session_get', params),
     lastSessionSet: (params) => invoke('last_session_set', params),
     consentShouldShow: (params) => invoke<{ shouldShow: boolean }>('consent_should_show', params),
+    updaterStatus: (params) => invoke<{ status: UpdateStatusWire | null }>('updater_status', params),
+    updaterCheckNow: (params) => invoke<{ ok: boolean; error?: string }>('updater_check_now', params),
+    updaterReleaseNotes: (params) => invoke<{ markdown: string | null }>('updater_release_notes', params),
+    updaterDownload: (params) => invoke<{ ok: boolean; error?: string }>('updater_download', params),
+    updaterApply: (params) => invoke<{ ok: boolean; error?: string }>('updater_apply', params),
     windowClose: (params) => invoke('window_close', params),
     windowMinimize: (params) => invoke('window_minimize', params),
     windowToggleMaximize: (params) => invoke<{ maximized: boolean }>('window_toggle_maximize', params),

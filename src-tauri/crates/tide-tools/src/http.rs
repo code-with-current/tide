@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum HttpError {
+pub enum HttpError {
     Timeout,
     Network(String),
 }
@@ -30,7 +30,7 @@ impl std::fmt::Display for HttpError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HttpReply {
+pub struct HttpReply {
     pub status: u16,
     /// Response `Content-Type` header, `""` when absent — web_fetch's
     /// HTML-detection branch keys off it.
@@ -39,7 +39,7 @@ pub(crate) struct HttpReply {
 }
 
 impl HttpReply {
-    pub(crate) fn is_ok(&self) -> bool {
+    pub fn is_ok(&self) -> bool {
         (200..300).contains(&self.status)
     }
 }
@@ -111,7 +111,7 @@ fn map_reqwest_err(e: reqwest::Error) -> HttpError {
 
 /// Blocking GET returning the status and body regardless of status code —
 /// callers decide how non-2xx maps to their error surface.
-pub(crate) fn get(
+pub fn get(
     url: &str,
     headers: &[(&str, &str)],
     timeout: Duration,

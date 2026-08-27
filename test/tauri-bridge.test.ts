@@ -185,8 +185,8 @@ describe("installTauriBridge", () => {
     await installBridge();
 
     const bridge = installedBridge();
-    // updaterStatus is T8 — still unported, unlike ragStatus (ported in T7).
-    const pending = bridge.request.updaterStatus({});
+    // A name no milestone will ever port — the mechanism is the point.
+    const pending = (bridge.request as Record<string, (p: unknown) => Promise<unknown>>).definitelyNotPorted({});
     expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow(/not ported/);
     expect(invoke).toHaveBeenCalledTimes(2);

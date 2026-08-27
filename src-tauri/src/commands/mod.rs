@@ -27,6 +27,7 @@ pub mod settings;
 pub mod shortcuts;
 pub mod terminal;
 pub mod usage_report;
+pub mod updater;
 pub mod workspaces;
 pub mod worktree;
 
