@@ -270,6 +270,32 @@ describe("chat Channel push routing", () => {
     expect(seen).toEqual([batch]);
   });
 
+  it("delivers ChatPush todosUpdated to the onTodosUpdated seam", async () => {
+    await installBridge();
+    const rpcModule = await import("@/lib/api/rpc");
+
+    const seen: unknown[] = [];
+    rpcModule.onTodosUpdated((event) => seen.push(event));
+
+    const event = {
+      sessionId: "s_1",
+      todos: [
+        { content: "Port the tool", status: "completed" },
+        { content: "Wire the push", status: "in_progress", priority: "high" },
+      ],
+    };
+    channel().onmessage?.({ channel: "todosUpdated", event });
+    expect(seen).toEqual([event]);
+
+    // Slot semantics like the other on* registries: a replaced consumer
+    // owns the slot.
+    const second: unknown[] = [];
+    rpcModule.onTodosUpdated((e) => second.push(e));
+    channel().onmessage?.({ channel: "todosUpdated", event });
+    expect(seen).toEqual([event]);
+    expect(second).toEqual([event]);
+  });
+
   it("drops unknown channel tags without touching the seams", async () => {
     await installBridge();
     const rpcModule = await import("@/lib/api/rpc");
@@ -346,6 +372,15 @@ describe("chat request routing", () => {
         reason: "not that file",
       },
     });
+  });
+
+  it("routes chatSubmitFollowup verbatim under the args key", async () => {
+    const bridge = await installBridge();
+    invoke.mockResolvedValueOnce({ resolved: true });
+
+    const params = { sessionId: "s_1", toolCallId: "t_f", answer: "Approach A" };
+    expect(await bridge.request.chatSubmitFollowup(params)).toEqual({ resolved: true });
+    expect(invoke).toHaveBeenLastCalledWith("chat_submit_followup", { args: params });
   });
 
   it("routes sessionCreate with the hydrated-session response", async () => {

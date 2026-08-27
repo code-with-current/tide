@@ -6,15 +6,18 @@
 //! - [`events`] — the AgentEvent wire union + the Channel push envelope.
 //! - [`sink`] — batched (~50ms) event persistence + live FlushBatch pushes.
 //! - [`history`] — sessions-v2 parts → engine history mapping.
-//! - [`hub`] — process-wide chat state: active turns, permission registry,
-//!   push broadcast, seq counters.
+//! - [`hub`] — process-wide chat state: active turns, permission +
+//!   followup registries, push broadcast, seq counters.
 //! - [`mcp`] — the MCP pool cell (user servers boot-connected, project
 //!   servers per workspace) feeding MCP tools into each turn's tool list.
 //! - [`orchestrator`] — the turn loop (stream → events → tools → repeat).
+//! - [`auto_compact`] — the multi-layer context compaction subsystem +
+//!   summarizer seam the orchestrator drives between steps.
 //! - [`dispatch`] — the sub-agent runner `dispatch_agent` spawns (child
 //!   turn, catalog agent prompt/toolset, mirrored events, permission
 //!   inheritance, abort propagation).
 
+pub mod auto_compact;
 pub mod dispatch;
 pub mod events;
 pub mod history;

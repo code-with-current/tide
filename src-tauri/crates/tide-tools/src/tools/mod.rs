@@ -2,11 +2,14 @@
 //! Each module exposes a unit struct implementing [`crate::Tool`];
 //! [`core_tools`] returns the full set for the orchestrator's toolset.
 
+pub mod ask_followup;
 pub mod background_shell;
 pub mod bash;
+pub mod compact;
 pub mod directory_tree;
 pub mod dispatch_agent;
 pub mod edit_file;
+pub mod exit_plan_mode;
 pub mod git;
 pub mod git_repo;
 pub mod glob;
@@ -28,11 +31,17 @@ pub mod write_file;
 
 use crate::Tool;
 
+pub use ask_followup::{
+    followup_pick_outcome, normalize_followup_args, render_followup_text, AskFollowupTool,
+    FollowupAsk, FollowupOption,
+};
 pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
+pub use compact::{CompactTool, DEFAULT_KEEP_LAST};
 pub use directory_tree::DirectoryTreeTool;
 pub use dispatch_agent::DispatchAgentTool;
 pub use edit_file::EditFileTool;
+pub use exit_plan_mode::ExitPlanModeTool;
 pub use git::GitTool;
 pub use git_repo::GitRepoTool;
 pub use glob::GlobTool;
@@ -74,6 +83,9 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(WebSearchTool),
         Box::new(DispatchAgentTool),
         Box::new(TodoWriteTool),
+        Box::new(AskFollowupTool),
+        Box::new(ExitPlanModeTool),
+        Box::new(CompactTool),
         Box::new(SlashCommandTool),
         Box::new(MemoryTool::new(None)),
         Box::new(InitTool),

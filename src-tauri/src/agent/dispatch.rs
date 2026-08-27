@@ -270,6 +270,8 @@ async fn run_dispatch(
         permission_timeout: parent_spec.permission_timeout,
         retry_delay: parent_spec.retry_delay,
         workspace_root: parent_spec.workspace_root.clone(),
+        workspace_id: parent_spec.workspace_id.clone(),
+        compaction: parent_spec.compaction.clone(),
         system: Some(agent.system_prompt.clone()),
         mirror: Some(MirrorTarget {
             parent_session_id: emit_id.clone(),

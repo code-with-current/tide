@@ -308,11 +308,50 @@ pub(crate) async fn start_turn(
         .read_config(|cfg| cfg.agent_settings.clone())?
         .map(|s| s.effective())
         .unwrap_or_default();
-    let model_max_output_tokens = config
+    let model_entry = config
         .provider(&provider.id)
-        .and_then(|p| p.models.iter().find(|m| m.model_id == args.model_id))
+        .and_then(|p| {
+            p.models
+                .iter()
+                .find(|m| m.model_id == args.model_id)
+                .cloned()
+        });
+    let model_max_output_tokens = model_entry
+        .as_ref()
         .and_then(|m| m.extra.get("maxOutputTokens"))
         .and_then(|v| v.as_u64());
+    // Auto-compact config (TS orchestrator pre-flight): a known context
+    // window enables it — with the user's clamped settings when enabled, a
+    // 0.99 last-resort threshold when disabled.
+    let compaction = model_entry
+        .as_ref()
+        .map(|m| m.context_window)
+        .filter(|w| *w > 0)
+        .map(|context_window| {
+            crate::agent::auto_compact::AutoCompactConfig::from_settings(
+                context_window,
+                model_entry
+                    .as_ref()
+                    .and_then(|m| m.extra.get("maxInputTokens"))
+                    .and_then(|v| v.as_u64()),
+                model_max_output_tokens,
+                settings.compaction_enabled,
+                settings.compaction_threshold,
+                settings.compaction_keep_turns,
+            )
+        });
+    // The memory tool's workspace key: the session's workspace path matched
+    // back against the configured workspaces (empty when unmatched).
+    let workspace_id = state
+        .read_config(|cfg| {
+            cfg.workspaces
+                .iter()
+                .find(|ws| ws.path == workspace_path)
+                .map(|ws| ws.id.clone())
+        })
+        .ok()
+        .flatten()
+        .unwrap_or_default();
 
     let spec = TurnSpec {
         session_id: args.session_id.clone(),
@@ -325,6 +364,8 @@ pub(crate) async fn start_turn(
         )),
         retry_delay: crate::agent::orchestrator::RETRY_DELAY,
         workspace_root: std::path::PathBuf::from(workspace_path),
+        workspace_id,
+        compaction,
         system: None,
         mirror: None,
     };
@@ -422,7 +463,7 @@ fn last_user_message(args: &ChatRunTurnArgs) -> Option<IncomingUserMessage> {
         })
 }
 
-// ── chat_abort / permission_respond ─────────────────────────────────────────
+// ── chat_abort / permission_respond / chat_submit_followup ─────────────────
 
 #[tauri::command]
 pub async fn chat_abort(
@@ -485,6 +526,46 @@ fn parse_mode(value: &str) -> Option<AutonomyMode> {
         "edit" => Some(AutonomyMode::Edit),
         "full" => Some(AutonomyMode::FullAccess),
         _ => None,
+    }
+}
+
+/// `chatSubmitFollowup` — the renderer's followup popup answer. Resolves
+/// the parked ask_followup_question call (TS `submitFollowup` IPC →
+/// `resolveFollowup`); `{ resolved: false }` for a stale/duplicate card.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSubmitFollowupArgs {
+    pub session_id: String,
+    pub tool_call_id: String,
+    pub answer: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSubmitFollowupResult {
+    pub resolved: bool,
+}
+
+#[tauri::command]
+pub async fn chat_submit_followup(
+    state: tauri::State<'_, AppState>,
+    hub_cell: tauri::State<'_, ChatHubCell>,
+    args: ChatSubmitFollowupArgs,
+) -> Result<ChatSubmitFollowupResult, CommandError> {
+    let hub = hub_cell
+        .get(state.data_dir())
+        .await
+        .map_err(|e| CommandError::with_code(e, "DB_OPEN"))?;
+    Ok(resolve_followup_core(&hub, &args))
+}
+
+/// The injectable core tests drive (same shape as [`respond_permission`]).
+pub(crate) fn resolve_followup_core(
+    hub: &ChatHub,
+    args: &ChatSubmitFollowupArgs,
+) -> ChatSubmitFollowupResult {
+    ChatSubmitFollowupResult {
+        resolved: hub.resolve_followup(&args.session_id, &args.tool_call_id, &args.answer),
     }
 }
 

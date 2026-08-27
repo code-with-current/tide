@@ -176,6 +176,36 @@ pub enum AgentEvent {
         tool_calls: Vec<ToolCallWire>,
         timeout_at: i64,
     },
+    /// Tool is asking the user to pick between options — TS
+    /// `followup_required`. The turn is PARKED on this tool call until the
+    /// renderer answers via `chat_submit_followup` (or abort resolves
+    /// null). Mirrors permission_required's pattern.
+    FollowupRequired {
+        session_id: String,
+        seq: u64,
+        tool_call_id: String,
+        question: String,
+        /// Concrete option labels; empty = open-ended (renderer shows the
+        /// composer instead of a picker).
+        options: Vec<String>,
+        /// Optional one-line description per option, parallel to `options`.
+        option_descriptions: Vec<Option<String>>,
+        /// True if the user can pick multiple options.
+        multiple: bool,
+    },
+    /// Context compaction started/finished — TS `compacting`. The first
+    /// event per compaction carries no `tokens_after`; the completion
+    /// event does.
+    Compacting {
+        session_id: String,
+        seq: u64,
+        message_id: String,
+        tokens_before: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tokens_after: Option<u64>,
+        /// Whether the user triggered it via /compact (vs auto threshold).
+        forced: bool,
+    },
     /// Between retry attempts — TS `retry`.
     Retry {
         session_id: String,

@@ -34,6 +34,14 @@ struct PendingAsk {
     mode: Option<Arc<StdMutex<AutonomyMode>>>,
 }
 
+/// One parked ask_followup_question call (TS followup-resolver.ts): the
+/// orchestrator awaits the oneshot; `chat_submit_followup` resolves it with
+/// the user's answer, abort/end-of-turn with `None` (the tool result then
+/// reports "User did not answer the question").
+struct PendingFollowup {
+    tx: oneshot::Sender<Option<String>>,
+}
+
 struct ActiveTurn {
     abort: watch::Sender<bool>,
     tool_abort: AbortFlag,
@@ -68,11 +76,15 @@ pub struct ChatHub {
     active: StdMutex<HashMap<String, ActiveTurn>>,
     /// Keyed `session_id + '\u{0}' + tool_call_id`.
     asks: StdMutex<HashMap<String, PendingAsk>>,
+    /// Same keying for parked followups (TS: keyed by toolCallId alone;
+    /// the session prefix scopes aborts and prevents cross-session ids
+    /// from colliding).
+    followups: StdMutex<HashMap<String, PendingFollowup>>,
     channel_generation: AtomicU64,
     /// App-wide todo store shared with every turn's ToolContext. The
     /// subscription wired in [`ChatHub::open`] forwards each store change
-    /// to the renderer as a `todosUpdated` push (the todo_write tool's
-    /// side-channel; T7 adds the renderer bridge routing + persistence).
+    /// to the renderer as a `todosUpdated` push and mirrors it into the
+    /// sessions store's todo side table (the TS `store.setTodos` twin).
     todo_state: Arc<TodoState>,
 }
 
@@ -88,7 +100,20 @@ impl ChatHub {
         let todo_state = TodoState::shared();
         todo_state.subscribe({
             let push_tx = push_tx.clone();
+            let persist_writer = Arc::clone(&writer);
             move |event: &TodosUpdated| {
+                // TS todo-write.ts pushed the renderer event AND mirrored
+                // the list into the session store (`store.setTodos`); the
+                // v2 schema has no todos column, so it persists into the
+                // side table. Best-effort: a store failure still pushes.
+                let _ = persist_writer
+                    .lock()
+                    .expect("sink writer poisoned")
+                    .set_session_todos(
+                        &event.session_id,
+                        &serde_json::to_value(&event.todos).unwrap_or(serde_json::Value::Null),
+                        super::sink::unix_ms_now(),
+                    );
                 let _ = push_tx.send(ChatPush::TodosUpdated {
                     event: event.clone(),
                 });
@@ -101,6 +126,7 @@ impl ChatHub {
             seq: SeqCounters::default(),
             active: StdMutex::new(HashMap::new()),
             asks: StdMutex::new(HashMap::new()),
+            followups: StdMutex::new(HashMap::new()),
             channel_generation: AtomicU64::new(0),
             todo_state,
         }))
@@ -188,6 +214,7 @@ impl ChatHub {
 
     /// Deregister the turn and resolve any still-pending asks as denied —
     /// a card left behind by an ended turn must never hang the renderer.
+    /// Pending followups resolve unanswered the same way.
     pub fn end_turn(&self, session_id: &str) {
         self.active
             .lock()
@@ -198,10 +225,12 @@ impl ChatHub {
             remember: false,
             reason: Some(format!("Turn ended before {tool_call_id} was answered")),
         });
+        self.resolve_session_followups(session_id);
     }
 
-    /// `chat_abort`: cancel the stream + tools, and reject pending asks with
-    /// 'aborted' (the TS `abortPermission(sessionId, 'aborted')`).
+    /// `chat_abort`: cancel the stream + tools, reject pending asks with
+    /// 'aborted' (the TS `abortPermission(sessionId, 'aborted')`), and
+    /// resolve pending followups unanswered (`abortFollowup`).
     pub fn abort_turn(&self, session_id: &str) {
         let active = self.active.lock().expect("active turns poisoned");
         if let Some(turn) = active.get(session_id) {
@@ -214,6 +243,7 @@ impl ChatHub {
             remember: false,
             reason: Some("aborted".to_owned()),
         });
+        self.resolve_session_followups(session_id);
     }
 
     fn resolve_session_asks(
@@ -294,6 +324,54 @@ impl ChatHub {
                 pending.tx.send(answer).is_ok()
             }
             None => false,
+        }
+    }
+
+    // ── followup registry (TS followup-resolver.ts) ──────────────────────
+
+    /// Park an ask_followup_question call: the orchestrator awaits the
+    /// matching oneshot until [`ChatHub::resolve_followup`] (the user's
+    /// pick) or a session abort/end (None).
+    pub fn register_followup(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+    ) -> oneshot::Receiver<Option<String>> {
+        let (tx, rx) = oneshot::channel();
+        self.followups
+            .lock()
+            .expect("followups poisoned")
+            .insert(
+                format!("{session_id}\u{0}{tool_call_id}"),
+                PendingFollowup { tx },
+            );
+        rx
+    }
+
+    /// `chat_submit_followup`: resolve the pending ask with the user's
+    /// answer. Returns whether a pending ask was actually resolved (the
+    /// TS `resolved` flag — false for a stale/duplicate card).
+    pub fn resolve_followup(&self, session_id: &str, tool_call_id: &str, answer: &str) -> bool {
+        let key = format!("{session_id}\u{0}{tool_call_id}");
+        match self.followups.lock().expect("followups poisoned").remove(&key) {
+            Some(pending) => pending.tx.send(Some(answer.to_owned())).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Resolve every pending followup for a session with None — abort and
+    /// turn-end both unblock the parked tool result as unanswered.
+    fn resolve_session_followups(&self, session_id: &str) {
+        let mut followups = self.followups.lock().expect("followups poisoned");
+        let keys: Vec<String> = followups
+            .keys()
+            .filter(|k| k.starts_with(&format!("{session_id}\u{0}")))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(pending) = followups.remove(&key) {
+                let _ = pending.tx.send(None);
+            }
         }
     }
 

@@ -981,6 +981,8 @@ fn kind(event: &AgentEvent) -> &'static str {
         AgentEvent::ToolResult { .. } => "tool_result",
         AgentEvent::Usage { .. } => "usage",
         AgentEvent::PermissionRequired { .. } => "permission_required",
+        AgentEvent::FollowupRequired { .. } => "followup_required",
+        AgentEvent::Compacting { .. } => "compacting",
         AgentEvent::Retry { .. } => "retry",
         AgentEvent::Error { .. } => "error",
         AgentEvent::TurnEnd { .. } => "turn_end",
@@ -998,6 +1000,8 @@ fn event_session(event: &AgentEvent) -> &str {
         | AgentEvent::ToolResult { session_id, .. }
         | AgentEvent::Usage { session_id, .. }
         | AgentEvent::PermissionRequired { session_id, .. }
+        | AgentEvent::FollowupRequired { session_id, .. }
+        | AgentEvent::Compacting { session_id, .. }
         | AgentEvent::Retry { session_id, .. }
         | AgentEvent::Error { session_id, .. }
         | AgentEvent::TurnEnd { session_id, .. } => session_id,

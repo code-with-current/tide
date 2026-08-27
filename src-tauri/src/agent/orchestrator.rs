@@ -49,6 +49,9 @@ use tide_tools::permission::risk_tier_for;
 use tide_tools::{AutonomyMode, OutcomeStatus, Tool, ToolContext, ToolOutcome};
 use tokio::sync::watch;
 
+use super::auto_compact::{
+    self, AutoCompactConfig, StepStreamSummarizer, MAX_OVERFLOW_COMPACTIONS,
+};
 use super::dispatch;
 use super::events::{
     format_arg_preview, AgentEvent, TimelineEntry, ToolCallWire, TurnStopReason,
@@ -138,6 +141,13 @@ pub struct TurnSpec {
     /// tests shrink it instead of sleeping through the real thing.
     pub retry_delay: Duration,
     pub workspace_root: PathBuf,
+    /// The memory tool's workspace store key, resolved from the session's
+    /// workspace path against the config's workspace list (empty when the
+    /// path matches no workspace — memory reports "no active workspace").
+    pub workspace_id: String,
+    /// Auto-compact config; `None` = no known context window, compaction
+    /// off (the TS left `compactionConfig` unset in that case).
+    pub compaction: Option<AutoCompactConfig>,
     /// System prompt override — `None` = the Tide default. Dispatch children
     /// run their catalog agent's prompt.
     pub system: Option<String>,
@@ -156,6 +166,8 @@ impl Default for TurnSpec {
             permission_timeout: PERMISSION_TIMEOUT_DEFAULT,
             retry_delay: RETRY_DELAY,
             workspace_root: PathBuf::new(),
+            workspace_id: String::new(),
+            compaction: None,
             system: None,
             mirror: None,
         }
@@ -546,18 +558,48 @@ pub async fn execute_turn(
     let tool_ctx = ToolContext {
         session_id: session_id.to_owned(),
         workspace_root: spec.workspace_root.clone(),
-        // Empty until the TurnSpec grows a workspace binding (T7 memory
-        // index wiring); memory reports "no active workspace" meanwhile.
-        workspace_id: String::new(),
+        workspace_id: spec.workspace_id.clone(),
         todo_state: Arc::clone(hub.todo_state()),
         abort: turn.tool_abort.clone(),
     };
     let started = Instant::now();
     let mut retry_count = 0u32;
     let mut last_error: Option<String> = None;
+    // /compact marker: the renderer rewrites `/compact` into a
+    // `[[FORCE_COMPACT]]` user message; strip the prefix and force one
+    // compaction before the model ever responds.
+    let mut force_compact = auto_compact::consume_force_compact_marker(&mut history);
+    let mut overflow_compactions = 0u32;
 
     let mut abort_rx = turn.abort_rx.clone();
     let outcome = loop {
+        if turn.is_aborted() {
+            break LoopOutcome::Aborted;
+        }
+
+        // Compact between steps if near the context window (TS loop top).
+        let last_step_tokens = state.last_step_usage.map(|u| u.input_tokens);
+        let over_budget = spec
+            .compaction
+            .as_ref()
+            .is_some_and(|config| auto_compact::should_compact(&history, config, 0, last_step_tokens));
+        if force_compact || over_budget {
+            if let Some(config) = spec.compaction.clone() {
+                run_compaction(
+                    hub,
+                    &emit,
+                    &message_id,
+                    &mut history,
+                    &config,
+                    &engine,
+                    &turn,
+                    last_step_tokens.unwrap_or(0),
+                    force_compact,
+                )
+                .await;
+            }
+            force_compact = false;
+        }
         if turn.is_aborted() {
             break LoopOutcome::Aborted;
         }
@@ -606,6 +648,47 @@ pub async fn execute_turn(
         }
 
         if let Some(error) = step_error {
+            // Context overflow → force compaction then retry (max 3 forced
+            // compactions per turn). NOT a transient error: retrying with
+            // the same payload fails identically, so shrink instead.
+            if is_context_overflow(&error.to_lowercase())
+                && spec.compaction.is_some()
+                && overflow_compactions < MAX_OVERFLOW_COMPACTIONS
+                && !turn.is_aborted()
+            {
+                overflow_compactions += 1;
+                last_error = None;
+                // The failed attempt's partial assistant message must not
+                // ride into the compacted request.
+                history.truncate(history_len_before_step);
+                if let Some(config) = spec.compaction.clone() {
+                    let replay = run_compaction(
+                        hub,
+                        &emit,
+                        &message_id,
+                        &mut history,
+                        &config,
+                        &engine,
+                        &turn,
+                        state.last_step_usage.map(|u| u.input_tokens).unwrap_or(0),
+                        true,
+                    )
+                    .await;
+                    // Layer 5: replay the last user message after overflow
+                    // compaction so the model doesn't lose the request —
+                    // unless the tail already ends with a real user message
+                    // (markers and tool-result carriers don't count).
+                    if let Some(replay) = replay {
+                        if !auto_compact::ends_with_real_user_request(&history) {
+                            history.push(replay);
+                        }
+                    }
+                }
+                if turn.is_aborted() {
+                    break LoopOutcome::Aborted;
+                }
+                continue;
+            }
             // The TS sub-agent loop ran with retries off (streamText
             // maxRetries: 0) — children fail straight into the dispatch
             // result instead of retry events in the root stream.
@@ -691,6 +774,66 @@ pub async fn execute_turn(
                         ));
                     }
                 }
+                continue;
+            }
+            // Turn-flow tools (T7): read-tier + auto-approve everywhere per
+            // the TS toolMeta, so only a deny rule short-circuits them.
+            // Their parking/escalation bodies are orchestrator-driven and
+            // live below; plain `Tool::execute` is the non-turn fallback.
+            if matches!(
+                call.tool_name.as_str(),
+                "compact" | "ask_followup_question" | "exit_plan_mode"
+            ) {
+                let denied = match gate.check(turn.mode(), &call.tool_name, &call.arguments) {
+                    Decision::Deny { reason } => Some(ToolOutcome::rejected(reason)),
+                    Decision::Allow | Decision::Ask { .. } => None,
+                };
+                let outcome = match denied {
+                    Some(outcome) => outcome,
+                    None => match call.tool_name.as_str() {
+                        "compact" => {
+                            hub.emit_agent(AgentEvent::ToolExecuting {
+                                session_id: emit.emit_id.clone(),
+                                seq: hub.next_seq(&emit.emit_id),
+                                tool_call_id: call.tool_call_id.clone(),
+                                parent_tool_call_id: emit.parent_tc.clone(),
+                            });
+                            // The TS stub result, after the orchestrator
+                            // runs the shared compaction path on the
+                            // in-flight history.
+                            if let Some(config) = spec.compaction.clone() {
+                                run_compaction(
+                                    hub,
+                                    &emit,
+                                    &message_id,
+                                    &mut history,
+                                    &config,
+                                    &engine,
+                                    &turn,
+                                    state.last_step_usage.map(|u| u.input_tokens).unwrap_or(0),
+                                    false,
+                                )
+                                .await;
+                            }
+                            tide_tools::run_compact(
+                                call.arguments
+                                    .get("keep_last")
+                                    .and_then(serde_json::Value::as_u64)
+                                    .unwrap_or(tide_tools::DEFAULT_KEEP_LAST),
+                            )
+                        }
+                        "ask_followup_question" => {
+                            run_followup_tool(hub, &turn, &emit, call).await
+                        }
+                        _ => {
+                            run_exit_plan_tool(hub, spec, &turn, &emit, call, &message_id).await
+                        }
+                    },
+                };
+                step_results[index] = finalize_tool_call(
+                    hub, &emit, &mut state, &mut tracker, call, &call_id_map, &message_id,
+                    outcome, v2,
+                );
                 continue;
             }
             let outcome = run_gated_tool(
@@ -1058,6 +1201,187 @@ async fn run_gated_tool(
                 )
             }
         }
+    }
+}
+
+/// The shared compaction path (TS compactConversation call sites): emit
+/// the starting `compacting` event, compact, swap the in-memory history,
+/// emit the completion event. A failure keeps the history untouched (the
+/// TS caught + logged between steps). Returns the Layer-5 replay message
+/// when compaction ran (the overflow path replays it).
+#[allow(clippy::too_many_arguments)]
+async fn run_compaction(
+    hub: &ChatHub,
+    emit: &EmitCtx,
+    message_id: &str,
+    history: &mut Vec<HistoryMessage>,
+    config: &AutoCompactConfig,
+    engine: &Arc<dyn StepStream>,
+    turn: &TurnHandle,
+    last_step_tokens: u64,
+    forced: bool,
+) -> Option<HistoryMessage> {
+    hub.emit_agent(AgentEvent::Compacting {
+        session_id: emit.emit_id.clone(),
+        seq: hub.next_seq(&emit.emit_id),
+        message_id: message_id.to_owned(),
+        tokens_before: last_step_tokens,
+        tokens_after: None,
+        forced,
+    });
+    let summarizer = StepStreamSummarizer::new(Arc::clone(engine), turn.abort_rx.clone());
+    let compacted =
+        auto_compact::compact_conversation(history.clone(), config, &summarizer).await;
+    match compacted {
+        Ok(result) => {
+            hub.emit_agent(AgentEvent::Compacting {
+                session_id: emit.emit_id.clone(),
+                seq: hub.next_seq(&emit.emit_id),
+                message_id: message_id.to_owned(),
+                tokens_before: result.pre_compact_tokens,
+                tokens_after: Some(result.post_compact_tokens),
+                forced,
+            });
+            let replay = result.replay_message.clone();
+            *history = result.post_compact_messages;
+            replay
+        }
+        Err(_) => None,
+    }
+}
+
+/// ask_followup_question body (the TS Phase-3 SDK factory): normalize the
+/// args, surface the picker event, park on the hub's followup registry
+/// until the renderer answers (chat_submit_followup) or the turn
+/// aborts/ends (answer None → the rejected "did not answer" result).
+async fn run_followup_tool(
+    hub: &ChatHub,
+    turn: &TurnHandle,
+    emit: &EmitCtx,
+    call: &PendingCall,
+) -> ToolOutcome {
+    hub.emit_agent(AgentEvent::ToolExecuting {
+        session_id: emit.emit_id.clone(),
+        seq: hub.next_seq(&emit.emit_id),
+        tool_call_id: call.tool_call_id.clone(),
+        parent_tool_call_id: emit.parent_tc.clone(),
+    });
+    let Some(ask) = tide_tools::normalize_followup_args(&call.arguments) else {
+        return ToolOutcome::failed("Missing required arg: question");
+    };
+    if ask.options.len() > 4 {
+        return ToolOutcome::failed(format!(
+            "Too many options ({}). Max 4 \u{2014} narrow it down.",
+            ask.options.len()
+        ));
+    }
+    hub.emit_agent(AgentEvent::FollowupRequired {
+        session_id: emit.emit_id.clone(),
+        seq: hub.next_seq(&emit.emit_id),
+        tool_call_id: call.tool_call_id.clone(),
+        question: ask.question.clone(),
+        options: ask.options.iter().map(|o| o.label.clone()).collect(),
+        option_descriptions: ask.options.iter().map(|o| o.description.clone()).collect(),
+        multiple: ask.multiple,
+    });
+    let rx = hub.register_followup(&emit.emit_id, &call.tool_call_id);
+    // TS waited indefinitely — no timeout; abort and turn-end resolve
+    // None through the hub, and the abort watch unblocks immediately even
+    // when no one resolved the registry entry.
+    let mut abort_rx = turn.abort_rx.clone();
+    let answer = tokio::select! {
+        answer = rx => answer.unwrap_or(None),
+        _ = turn_is_aborted(&mut abort_rx) => None,
+    };
+    tide_tools::followup_pick_outcome(answer.as_deref())
+}
+
+async fn turn_is_aborted(abort_rx: &mut watch::Receiver<bool>) {
+    let _ = abort_rx.wait_for(|aborted| *aborted).await;
+}
+
+/// exit_plan_mode body: present the plan for approval. In plan mode the
+/// call rides the permission hub's ask machinery — approve (optionally
+/// with `new_mode`) escalates the turn out of read-only; deny/timeout
+/// returns the reason. Elsewhere it's the TS no-op presentation.
+async fn run_exit_plan_tool(
+    hub: &ChatHub,
+    spec: &TurnSpec,
+    turn: &TurnHandle,
+    emit: &EmitCtx,
+    call: &PendingCall,
+    message_id: &str,
+) -> ToolOutcome {
+    hub.emit_agent(AgentEvent::ToolExecuting {
+        session_id: emit.emit_id.clone(),
+        seq: hub.next_seq(&emit.emit_id),
+        tool_call_id: call.tool_call_id.clone(),
+        parent_tool_call_id: emit.parent_tc.clone(),
+    });
+    let plan = call
+        .arguments
+        .get("plan")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if plan.is_empty() {
+        return ToolOutcome::failed("Missing required arg: plan");
+    }
+    if turn.mode() != AutonomyMode::Plan {
+        return tide_tools::run_exit_plan_mode(plan);
+    }
+
+    let session_id = emit.emit_id.as_str();
+    hub.emit_agent(AgentEvent::PermissionRequired {
+        session_id: session_id.to_owned(),
+        seq: hub.next_seq(session_id),
+        tool_calls: vec![ToolCallWire {
+            id: call.tool_call_id.clone(),
+            message_id: message_id.to_owned(),
+            tool_name: call.tool_name.clone(),
+            arguments: call.arguments.clone(),
+            arg_preview: format_arg_preview(&call.tool_name, &call.arguments),
+            status: "pending".to_owned(),
+            risk_tier: tide_tools::RiskTier::ReadOnly,
+            gate_decision: Some("ask"),
+            allow_rule: None,
+            output: None,
+            display: None,
+            duration_ms: None,
+            meta: None,
+        }],
+        timeout_at: unix_ms_now() + spec.permission_timeout.as_millis() as i64,
+    });
+    let rx = if emit.parent_tc.is_some() {
+        hub.register_ask_with_mode(
+            session_id,
+            &call.tool_call_id,
+            Some(Arc::clone(&turn.mode)),
+        )
+    } else {
+        hub.register_ask(session_id, &call.tool_call_id)
+    };
+    let answer = tokio::time::timeout(spec.permission_timeout, rx).await;
+    let answer = match answer {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(_)) => super::hub::PermissionAnswer {
+            approve: false,
+            remember: false,
+            reason: Some("permission resolver dropped".to_owned()),
+        },
+        Err(_) => super::hub::PermissionAnswer {
+            approve: false,
+            remember: false,
+            reason: Some("Permission request timed out".to_owned()),
+        },
+    };
+    if answer.approve {
+        tide_tools::run_exit_plan_mode(plan)
+    } else {
+        ToolOutcome::rejected(
+            answer
+                .reason
+                .unwrap_or_else(|| "rejected by user".to_owned()),
+        )
     }
 }
 

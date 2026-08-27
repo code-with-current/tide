@@ -45,6 +45,7 @@ pub fn run() {
             commands::chat::chat_run_turn,
             commands::chat::chat_abort,
             commands::chat::permission_respond,
+            commands::chat::chat_submit_followup,
             commands::chat::chat_attach_channel,
             commands::chat::events_subscribe,
             commands::chat::events_unsubscribe,

@@ -21,6 +21,7 @@ import {
   activateRpcClient,
   emitAgentEvent,
   emitOrchestratorEvents,
+  emitTodosUpdated,
   type TideRpcClient,
 } from './rpc';
 import type { AgentEvent } from '@/lib/agent/events';
@@ -35,6 +36,7 @@ import type {
   SessionHeader,
   SessionMessageV2,
   SessionMetaV2,
+  TodosUpdatedEvent,
   Workspace,
 } from '@shared/rpc';
 
@@ -64,6 +66,7 @@ type BridgeMethods = Pick<
   | 'chatAbort'
   | 'chatApproveTools'
   | 'chatRejectTools'
+  | 'chatSubmitFollowup'
   | 'eventsSubscribe'
   | 'eventsUnsubscribe'
   | 'lastSessionGet'
@@ -72,12 +75,13 @@ type BridgeMethods = Pick<
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
- *  tag mirrors the two webview message names in shared/rpc.ts so routing uses
+ *  tag mirrors the webview message names in shared/rpc.ts so routing uses
  *  the same discriminator the Electrobun push did. Payload shapes are the
- *  shared/rpc.ts AgentEvent / FlushBatch verbatim. */
+ *  shared/rpc.ts AgentEvent / FlushBatch / TodosUpdatedEvent verbatim. */
 type ChatPush =
   | { channel: 'agentEvents'; event: AgentEvent }
-  | { channel: 'orchestratorEvents'; batch: FlushBatch };
+  | { channel: 'orchestratorEvents'; batch: FlushBatch }
+  | { channel: 'todosUpdated'; event: TodosUpdatedEvent };
 
 /** Params pass through verbatim: Tauri v2 maps camelCase JSON keys onto the
  *  snake_case Rust command params (workspacePath → workspace_path), which is
@@ -123,6 +127,8 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
           reason: params.reason,
         },
       }),
+    chatSubmitFollowup: (params) =>
+      invoke<{ resolved: boolean }>('chat_submit_followup', { args: params }),
     eventsSubscribe: (params) => invoke<{ batches: FlushBatch[] }>('events_subscribe', params),
     eventsUnsubscribe: (params) => invoke('events_unsubscribe', params),
     lastSessionGet: (params) => invoke<{ sessionId: string | null; workspaceId: string | null }>('last_session_get', params),
@@ -150,6 +156,7 @@ async function attachChatChannel(invoke: InvokeFn, Channel: ChannelCtor): Promis
   channel.onmessage = (push) => {
     if (push.channel === 'agentEvents') emitAgentEvent(push.event);
     else if (push.channel === 'orchestratorEvents') emitOrchestratorEvents(push.batch);
+    else if (push.channel === 'todosUpdated') emitTodosUpdated(push.event);
     else console.warn('[tide] unknown ChatPush channel tag — dropped:', push);
   };
   await invoke('chat_attach_channel', { channel });

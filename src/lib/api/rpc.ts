@@ -215,6 +215,12 @@ export function emitOrchestratorEvents(batch: FlushBatch): void {
   orchestratorEventsCallback?.(batch);
 }
 
+/** Deliver one todo-list update to the onTodosUpdated consumer (ChatPush
+ *  `todosUpdated` — the todo_write tool's side-channel). */
+export function emitTodosUpdated(event: TodosUpdatedEvent): void {
+  todosUpdatedCallback?.(event);
+}
+
 /** Register the update-status consumer (the updater store). Same single-slot
  *  shape as the other push channels. */
 export function onUpdateStatus(cb: UpdateStatusCallback): () => void {

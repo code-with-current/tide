@@ -106,7 +106,12 @@ pub const SCHEMA: &str = "
       type TEXT NOT NULL,
       data TEXT NOT NULL, time_created INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS event_replay ON event(session_id, seq);";
+    CREATE INDEX IF NOT EXISTS event_replay ON event(session_id, seq);
+    CREATE TABLE IF NOT EXISTS session_todos (
+      session_id TEXT PRIMARY KEY,
+      todos TEXT NOT NULL,
+      time_updated INTEGER NOT NULL
+    );";
 
 /// better-sqlite3's default `timeout` option — how long a second writer waits
 /// for the lock before SQLITE_BUSY. WAL never blocks readers.
@@ -483,6 +488,35 @@ impl SessionsV2Writer {
             .execute("DELETE FROM session WHERE id = ?1", params![id])
             ?;
         Ok(())
+    }
+
+    /// `store.setTodos` twin: the TS persisted the session's todo list on
+    /// the legacy JSON session row; the v2 schema has no todos column, so
+    /// it lands in the `session_todos` side table (additive — created by
+    /// the schema batch, `user_version` stays 2). Full replacement per
+    /// call, like the TS assignment.
+    pub fn set_session_todos(&self, session_id: &str, todos: &Value, now_ms: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO session_todos (session_id, todos, time_updated) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(session_id) DO UPDATE SET todos = ?2, time_updated = ?3",
+            params![session_id, todos.to_string(), now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// The session's persisted todo list (`null`-free: `None` when never
+    /// written or unparsable) — the reader twin of
+    /// [`SessionsV2Writer::set_session_todos`].
+    pub fn session_todos(&self, session_id: &str) -> Option<Vec<Value>> {
+        let raw: String = self
+            .conn
+            .query_row(
+                "SELECT todos FROM session_todos WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .ok()?;
+        serde_json::from_str::<Vec<Value>>(&raw).ok()
     }
 
     /// `insertMessage`: the assistant (or twin user) message row at turn

@@ -34,11 +34,18 @@ pub use agents::{
 };
 pub use permission::{AutonomyMode, Decision, PermissionGate, RiskTier};
 pub use tools::{
-    core_tools, BashOutputTool, BashTool, DirectoryTreeTool, DispatchAgentTool, EditFileTool,
-    GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, KillShellTool, ListDirTool, LoadSkillTool,
-    MemoryIndex, MemoryTool, MultiEditTool, NotebookEditTool, ReadFileTool, ReadMediaFileTool,
-    SlashCommandTool, TodoWriteTool, WebFetchTool, WebSearchTool, WriteFileTool,
+    core_tools, AskFollowupTool, BashOutputTool, BashTool, CompactTool, DirectoryTreeTool,
+    DispatchAgentTool, EditFileTool, ExitPlanModeTool, GitRepoTool, GitTool, GlobTool, GrepTool,
+    InitTool, KillShellTool, ListDirTool, LoadSkillTool, MemoryIndex, MemoryTool, MultiEditTool,
+    NotebookEditTool, ReadFileTool, ReadMediaFileTool, SlashCommandTool, TodoWriteTool,
+    WebFetchTool, WebSearchTool, WriteFileTool,
 };
+pub use tools::ask_followup::{
+    followup_pick_outcome, normalize_followup_args, render_followup_text, FollowupAsk,
+    FollowupOption,
+};
+pub use tools::compact::{run_compact, DEFAULT_KEEP_LAST};
+pub use tools::exit_plan_mode::run_exit_plan_mode;
 pub use tools::load_skill::{build_skill_catalog_md, builtin_skills, SkillSummary};
 pub use tools::memory::{MemoryHit, rrf_fuse};
 pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
@@ -346,6 +353,9 @@ mod tests {
                 "web_search",
                 "dispatch_agent",
                 "todo_write",
+                "ask_followup_question",
+                "exit_plan_mode",
+                "compact",
                 "slash_command",
                 "memory",
                 "init",
@@ -377,6 +387,11 @@ mod tests {
         assert_eq!(tools[17].risk_tier(), RiskTier::ReadOnly);
         // M3 T3 batch: all read-tier per TS toolMeta.
         for t in &tools[18..=22] {
+            assert_eq!(t.risk_tier(), RiskTier::ReadOnly);
+        }
+        // M3 T7 turn-flow tools: read-tier per TS toolMeta (auto-approved in
+        // every mode; the parking/approval flow is orchestrator-driven).
+        for t in &tools[19..=21] {
             assert_eq!(t.risk_tier(), RiskTier::ReadOnly);
         }
     }

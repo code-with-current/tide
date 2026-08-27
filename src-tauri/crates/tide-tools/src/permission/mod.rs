@@ -116,7 +116,8 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
     match tool_name {
         "read_file" | "grep" | "glob" | "list_dir" | "directory_tree" | "read_media_file"
         | "bash_output" | "git_repo" | "web_fetch" | "web_search" | "todo_write"
-        | "slash_command" | "memory" | "init" | "load_skill" | "dispatch_agent" => {
+        | "slash_command" | "memory" | "init" | "load_skill" | "dispatch_agent"
+        | "ask_followup_question" | "exit_plan_mode" | "compact" => {
             RiskTier::ReadOnly
         }
         "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell" => {

@@ -178,6 +178,47 @@ fn auth_failure() -> EngineError {
     EngineError::Config("401 Unauthorized: invalid API key".to_owned())
 }
 
+/// Persist one fully-committed history message (role + text part) straight
+/// through the writer + sink — pre-turn context for compaction tests.
+fn seed_history_message(fx: &Fixture, role: &str, text: &str) {
+    use tide_store::sessions_v2_write::{
+        InsertMessageInput, SinkEventType, SinkEventWire,
+    };
+    let (message_id, message_ms) = {
+        let writer = fx.hub.writer().lock().unwrap();
+        let slot = writer.next_message_slot();
+        writer
+            .insert_message(
+                InsertMessageInput {
+                    id: &slot.0,
+                    session_id: &fx.session_id,
+                    role,
+                    model: None,
+                },
+                slot.1,
+            )
+            .unwrap();
+        slot
+    };
+    fx.hub.sink().emit(SinkEventWire {
+        r#type: SinkEventType::PartCommit,
+        session_id: fx.session_id.clone(),
+        message_id: Some(message_id),
+        part_id: Some(tide_store::sessions_v2_write::new_part_id()),
+        data: Some(serde_json::json!({
+            "kind": "text",
+            "data": { "text": text, "seq": 0 },
+        })),
+        seq: None,
+    });
+    let _ = message_ms;
+}
+
+/// A ~4K-token text body (bigger than the clamped 2K-token tail budget).
+fn bulky_text(seed: &str) -> String {
+    format!("{seed}{}", "b".repeat(14_000))
+}
+
 // ── fixture ─────────────────────────────────────────────────────────────────
 
 struct Fixture {
@@ -376,6 +417,8 @@ impl Fixture {
             AgentEvent::ToolResult { .. } => "tool_result",
             AgentEvent::Usage { .. } => "usage",
             AgentEvent::PermissionRequired { .. } => "permission_required",
+            AgentEvent::FollowupRequired { .. } => "followup_required",
+            AgentEvent::Compacting { .. } => "compacting",
             AgentEvent::Retry { .. } => "retry",
             AgentEvent::Error { .. } => "error",
             AgentEvent::TurnEnd { .. } => "turn_end",
@@ -1014,4 +1057,869 @@ async fn todo_write_turn_pushes_todos_updated() {
 
     // Drain to turn_end so the sink settles before the fixture drops.
     let _ = fx.events_until_turn_end().await;
+}
+
+// ── T7: turn-flow tools ─────────────────────────────────────────────────────
+
+/// The followup popup path end-to-end: model calls ask_followup_question →
+/// `followup_required` event (wire-shaped) → the turn parks →
+/// chat_submit_followup resolves the pick → the tool result carries the
+/// answer → the turn continues to turn_end.
+#[tokio::test]
+async fn followup_happy_path_parks_and_resumes_on_answer() {
+    let mut fx = Fixture::new("followup");
+    let args = serde_json::json!({
+        "question": "Which approach?",
+        "options": [
+            { "label": "SQLite", "description": "local" },
+            { "label": "Postgres" }
+        ]
+    });
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_f".to_owned(),
+                tool_name: "ask_followup_question".to_owned(),
+                arguments: args.clone(),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_f".to_owned(),
+                    tool_name: "ask_followup_question".to_owned(),
+                    arguments: args,
+                }],
+            ),
+        ],
+        vec![delta("Proceeding."), step_end(EngineStopReason::EndTurn, vec![text_part("Proceeding.")])],
+    ]);
+    let result = fx
+        .send_with_tools("edit", engine, vec![Arc::new(tide_tools::AskFollowupTool)])
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    // tool_executing, then the picker event with the TS wire shape.
+    let followup = loop {
+        match fx.next_agent_event().await {
+            event @ AgentEvent::FollowupRequired { .. } => break event,
+            AgentEvent::ToolCall { .. } | AgentEvent::ToolExecuting { .. } => continue,
+            other => panic!("unexpected {}", Fixture::kind(&other)),
+        }
+    };
+    let AgentEvent::FollowupRequired {
+        tool_call_id,
+        question,
+        options,
+        option_descriptions,
+        multiple,
+        ..
+    } = followup
+    else {
+        panic!("followup_required, got {}", Fixture::kind(&followup));
+    };
+    assert_eq!(tool_call_id, "call_f");
+    assert_eq!(question, "Which approach?");
+    assert_eq!(options, vec!["SQLite".to_owned(), "Postgres".to_owned()]);
+    assert_eq!(
+        option_descriptions,
+        vec![Some("local".to_owned()), None]
+    );
+    assert!(!multiple);
+    let wire = serde_json::to_value(&AgentEvent::FollowupRequired {
+        session_id: fx.session_id.clone(),
+        seq: 0,
+        tool_call_id,
+        question,
+        options,
+        option_descriptions,
+        multiple,
+    })
+    .unwrap();
+    assert_eq!(wire["type"], serde_json::json!("followup_required"));
+    assert_eq!(wire["optionDescriptions"][0], serde_json::json!("local"));
+    assert_eq!(wire["optionDescriptions"][1], serde_json::json!(null));
+
+    // The turn is parked: nothing flows until the answer arrives.
+    assert!(fx.push_rx.is_empty());
+
+    // The renderer's popup resolves via the command core.
+    let answered = crate::commands::chat::resolve_followup_core(
+        &fx.hub,
+        &crate::commands::chat::ChatSubmitFollowupArgs {
+            session_id: fx.session_id.clone(),
+            tool_call_id: "call_f".to_owned(),
+            answer: "SQLite".to_owned(),
+        },
+    );
+    assert!(answered.resolved);
+
+    let events = fx.events_until_turn_end().await;
+    let tool_result = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { .. }))
+        .expect("tool_result");
+    let AgentEvent::ToolResult { status, output, display, .. } = tool_result else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Executed);
+    assert_eq!(output.as_deref(), Some("User picked: SQLite"));
+    let Some(tide_tools::ToolDisplay::Text { text }) = display else {
+        panic!("text display");
+    };
+    assert_eq!(text, "**SQLite**");
+
+    // A duplicate submit for the same (now resolved) ask reports stale.
+    let stale = crate::commands::chat::resolve_followup_core(
+        &fx.hub,
+        &crate::commands::chat::ChatSubmitFollowupArgs {
+            session_id: fx.session_id.clone(),
+            tool_call_id: "call_f".to_owned(),
+            answer: "SQLite".to_owned(),
+        },
+    );
+    assert!(!stale.resolved);
+}
+
+/// Aborting a parked followup resolves it unanswered: the tool result is
+/// the rejected "did not answer" fallback and the turn closes aborted.
+#[tokio::test]
+async fn followup_abort_resolves_unanswered() {
+    let mut fx = Fixture::new("followup-abort");
+    let engine = ScriptedEngine::new(vec![vec![
+        Ok(EngineEvent::ToolCall {
+            tool_call_id: "call_f".to_owned(),
+            tool_name: "ask_followup_question".to_owned(),
+            arguments: serde_json::json!({ "question": "Q?" }),
+        }),
+        step_end(
+            EngineStopReason::ToolUse,
+            vec![HistoryPart::ToolCall {
+                id: "call_f".to_owned(),
+                tool_name: "ask_followup_question".to_owned(),
+                arguments: serde_json::json!({ "question": "Q?" }),
+            }],
+        ),
+    ]]);
+    let result = fx
+        .send_with_tools("edit", engine, vec![Arc::new(tide_tools::AskFollowupTool)])
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    loop {
+        match fx.next_agent_event().await {
+            AgentEvent::FollowupRequired { .. } => break,
+            AgentEvent::ToolCall { .. } | AgentEvent::ToolExecuting { .. } => continue,
+            other => panic!("unexpected {}", Fixture::kind(&other)),
+        }
+    }
+    fx.hub.abort_turn(&fx.session_id);
+
+    let events = fx.events_until_turn_end().await;
+    let tool_result = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { .. }))
+        .expect("tool_result");
+    let AgentEvent::ToolResult { status, output, .. } = tool_result else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Rejected);
+    assert_eq!(output.as_deref(), Some("User did not answer the question."));
+}
+
+/// exit_plan_mode in plan mode: a permission card carries the plan for
+/// approval; approving with `new_mode` escalates the turn out of plan mode
+/// (the next write-tier call runs un-gated) and the tool result uses the
+/// TS presentation.
+#[tokio::test]
+async fn exit_plan_mode_approval_escalates_the_turn() {
+    let mut fx = Fixture::new("plan-exit");
+    let plan_args = serde_json::json!({ "plan": "1. Do the thing\n2. Verify" });
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_p".to_owned(),
+                tool_name: "exit_plan_mode".to_owned(),
+                arguments: plan_args.clone(),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_p".to_owned(),
+                    tool_name: "exit_plan_mode".to_owned(),
+                    arguments: plan_args,
+                }],
+            ),
+        ],
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_w".to_owned(),
+                tool_name: "write_file".to_owned(),
+                arguments: serde_json::json!({ "path": "a.txt", "content": "x" }),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_w".to_owned(),
+                    tool_name: "write_file".to_owned(),
+                    arguments: serde_json::json!({ "path": "a.txt", "content": "x" }),
+                }],
+            ),
+        ],
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    let result = fx
+        .send_with_tools(
+            "plan",
+            engine,
+            vec![Arc::new(tide_tools::ExitPlanModeTool), Arc::new(FakeWriteTool)],
+        )
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    // The plan-approval card.
+    let card = loop {
+        match fx.next_agent_event().await {
+            card @ AgentEvent::PermissionRequired { .. } => break card,
+            AgentEvent::ToolCall { .. } | AgentEvent::ToolExecuting { .. } => continue,
+            other => panic!("unexpected {}", Fixture::kind(&other)),
+        }
+    };
+    let AgentEvent::PermissionRequired { tool_calls, timeout_at, .. } = card else {
+        unreachable!();
+    };
+    assert_eq!(tool_calls[0].id, "call_p");
+    assert_eq!(tool_calls[0].tool_name, "exit_plan_mode");
+    assert_eq!(tool_calls[0].status, "pending");
+    assert_eq!(tool_calls[0].gate_decision, Some("ask"));
+    assert!(timeout_at > 0);
+
+    // Approve WITH the mode escalation — the plan-mode write gate opens.
+    respond_permission(
+        &fx.hub,
+        PermissionRespondArgs {
+            session_id: fx.session_id.clone(),
+            tool_call_ids: vec!["call_p".to_owned()],
+            approve: true,
+            remember: None,
+            new_mode: Some("edit".to_owned()),
+            reason: None,
+        },
+    );
+
+    let events = fx.events_until_turn_end().await;
+    let plan_result = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { tool_call_id, .. } if tool_call_id == "call_p"))
+        .expect("plan tool_result");
+    let AgentEvent::ToolResult { status, output, display, meta, .. } = plan_result else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Executed);
+    assert_eq!(
+        output.as_deref(),
+        Some("Plan submitted. Waiting for user approval — if approved, switch to a write-enabled mode and proceed.")
+    );
+    assert_eq!(meta.as_deref(), Some("plan ready"));
+    let Some(tide_tools::ToolDisplay::Text { text }) = display else {
+        panic!("text display");
+    };
+    assert_eq!(text, "1. Do the thing\n2. Verify");
+
+    // The escalated write-tier call ran WITHOUT a second permission card
+    // (plan mode would have blocked it outright).
+    let write_result = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { tool_call_id, .. } if tool_call_id == "call_w"))
+        .expect("write tool_result");
+    let AgentEvent::ToolResult { status, output, .. } = write_result else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Executed);
+    assert_eq!(output.as_deref(), Some("fake write done"));
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::PermissionRequired { .. })), "no second card");
+}
+
+/// Denying the plan card rejects the tool result with the user's reason.
+#[tokio::test]
+async fn exit_plan_mode_denial_rejects_with_reason() {
+    let mut fx = Fixture::new("plan-deny");
+    let plan_args = serde_json::json!({ "plan": "Risky plan" });
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_p".to_owned(),
+                tool_name: "exit_plan_mode".to_owned(),
+                arguments: plan_args.clone(),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_p".to_owned(),
+                    tool_name: "exit_plan_mode".to_owned(),
+                    arguments: plan_args,
+                }],
+            ),
+        ],
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    let result = fx
+        .send_with_tools("plan", engine, vec![Arc::new(tide_tools::ExitPlanModeTool)])
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    loop {
+        match fx.next_agent_event().await {
+            AgentEvent::PermissionRequired { .. } => break,
+            AgentEvent::ToolCall { .. } | AgentEvent::ToolExecuting { .. } => continue,
+            other => panic!("unexpected {}", Fixture::kind(&other)),
+        }
+    }
+    respond_permission(
+        &fx.hub,
+        PermissionRespondArgs {
+            session_id: fx.session_id.clone(),
+            tool_call_ids: vec!["call_p".to_owned()],
+            approve: false,
+            remember: None,
+            new_mode: None,
+            reason: Some("plan is too risky".to_owned()),
+        },
+    );
+
+    let events = fx.events_until_turn_end().await;
+    let AgentEvent::ToolResult { status, output, .. } = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { .. }))
+        .expect("tool_result")
+    else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Rejected);
+    assert_eq!(output.as_deref(), Some("plan is too risky"));
+}
+
+/// Outside plan mode the call is the TS no-op: direct presentation, no card.
+#[tokio::test]
+async fn exit_plan_mode_outside_plan_mode_is_a_no_op() {
+    let mut fx = Fixture::new("plan-noop");
+    let plan_args = serde_json::json!({ "plan": "Already editing" });
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_p".to_owned(),
+                tool_name: "exit_plan_mode".to_owned(),
+                arguments: plan_args.clone(),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_p".to_owned(),
+                    tool_name: "exit_plan_mode".to_owned(),
+                    arguments: plan_args,
+                }],
+            ),
+        ],
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    let result = fx
+        .send_with_tools("edit", engine, vec![Arc::new(tide_tools::ExitPlanModeTool)])
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    let events = fx.events_until_turn_end().await;
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::PermissionRequired { .. })));
+    let AgentEvent::ToolResult { status, .. } = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { .. }))
+        .expect("tool_result")
+    else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Executed);
+}
+
+// ── T7: compact / auto-compact ──────────────────────────────────────────────
+
+fn tiny_compaction() -> crate::agent::auto_compact::AutoCompactConfig {
+    use crate::agent::auto_compact::AutoCompactConfig;
+    AutoCompactConfig {
+        context_window: 900,
+        max_input_tokens: 0,
+        max_output_tokens: 100,
+        threshold: 0.1,
+        keep_recent_turns: 3,
+        on_failure_truncate: true,
+    }
+}
+
+/// One scripted summary step (what StepStreamSummarizer drives).
+fn summary_step(text: &str) -> StepScript {
+    vec![
+        delta(text),
+        step_end(EngineStopReason::EndTurn, vec![text_part(text)]),
+    ]
+}
+
+/// The manual `compact` tool: the orchestrator intercepts the call, runs
+/// the shared compaction path (Compacting start+finish events, the
+/// engine's follow-up request carrying the summary message), and returns
+/// the TS stub result.
+#[tokio::test]
+async fn compact_tool_runs_the_shared_compaction_path() {
+    let mut fx = Fixture::new("compact-tool");
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_c".to_owned(),
+                tool_name: "compact".to_owned(),
+                arguments: serde_json::json!({ "keep_last": 2 }),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_c".to_owned(),
+                    tool_name: "compact".to_owned(),
+                    arguments: serde_json::json!({ "keep_last": 2 }),
+                }],
+            ),
+        ],
+        summary_step("## Goal\n- done"),
+        vec![delta("ok"), step_end(EngineStopReason::EndTurn, vec![text_part("ok")])],
+    ]);
+    // High threshold so the loop-top estimate check stays quiet — the TOOL
+    // call drives the compaction, not the auto path.
+    let spec = TurnSpec {
+        compaction: Some(crate::agent::auto_compact::AutoCompactConfig {
+            context_window: 500_000,
+            max_input_tokens: 0,
+            max_output_tokens: 8_192,
+            threshold: 0.99,
+            ..tiny_compaction()
+        }),
+        ..Default::default()
+    };
+    seed_history_message(&fx, "user", &bulky_text("first "));
+    seed_history_message(&fx, "assistant", &bulky_text("old "));
+    fx.send_with_spec(spec, engine.clone()).await;
+
+    let events = fx.events_until_turn_end().await;
+    // Two compacting events: start (no tokensAfter) then completion.
+    let compacting: Vec<&AgentEvent> = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::Compacting { .. }))
+        .collect();
+    assert_eq!(compacting.len(), 2, "{:?}", Fixture::kinds(&events));
+    let AgentEvent::Compacting { tokens_after, forced, .. } = compacting[0] else {
+        unreachable!();
+    };
+    assert!(tokens_after.is_none());
+    assert!(!forced);
+    let AgentEvent::Compacting { tokens_after, forced, .. } = compacting[1] else {
+        unreachable!();
+    };
+    assert!(tokens_after.is_some());
+    assert!(!forced);
+
+    // The stub result the TS tool returned.
+    let AgentEvent::ToolResult { status, output, meta, .. } = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { .. }))
+        .expect("tool_result")
+    else {
+        unreachable!();
+    };
+    assert_eq!(*status, OutcomeStatus::Executed);
+    assert_eq!(output.as_deref(), Some("Done. Continue with your current task."));
+    assert_eq!(meta.as_deref(), Some("keep last 2"));
+
+    // Engine calls: model step, summarizer (tools-free), final model step
+    // whose history now leads with the summary marker message.
+    let requests = engine.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].tools.is_empty(), "summarizer offers no tools");
+    let Some(system) = requests[1].params.system.as_deref() else {
+        panic!("summarizer system prompt");
+    };
+    assert!(system.contains("conversation summarizer"));
+    let last_messages = &requests[2].messages;
+    let HistoryPart::Text { text } = &last_messages[0].parts[0] else {
+        panic!("text part");
+    };
+    assert!(text.starts_with("[Compacted context — structured summary of"));
+    assert!(text.contains("## Goal\n- done"));
+    assert_eq!(last_messages[0].role, HistoryRole::User);
+}
+
+/// Loop-top auto-compact: once the last step's reported input tokens cross
+/// the threshold, the next engine request carries the compacted history.
+#[tokio::test]
+async fn auto_compact_fires_between_steps_on_usage_tokens() {
+    let mut fx = Fixture::new("auto-compact");
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_1".to_owned(),
+                tool_name: "write_file".to_owned(),
+                arguments: serde_json::json!({ "path": "a.txt", "content": "x" }),
+            }),
+            usage(90_000),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_1".to_owned(),
+                    tool_name: "write_file".to_owned(),
+                    arguments: serde_json::json!({ "path": "a.txt", "content": "x" }),
+                }],
+            ),
+        ],
+        summary_step("## Goal\n- smaller"),
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    let spec = TurnSpec {
+        compaction: Some(crate::agent::auto_compact::AutoCompactConfig {
+            context_window: 100_000,
+            max_input_tokens: 0,
+            max_output_tokens: 8_192,
+            threshold: 0.75,
+            ..tiny_compaction()
+        }),
+        ..Default::default()
+    };
+    seed_history_message(&fx, "user", &bulky_text("early "));
+    seed_history_message(&fx, "assistant", &bulky_text("older "));
+    fx.send_with_spec(spec, engine.clone()).await;
+
+    let events = fx.events_until_turn_end().await;
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::Compacting { forced: false, .. })));
+
+    let requests = engine.requests();
+    assert_eq!(requests.len(), 3);
+    // The post-compaction model request leads with the summary message.
+    let HistoryPart::Text { text } = &requests[2].messages[0].parts[0] else {
+        panic!("text part");
+    };
+    assert!(text.starts_with("[Compacted context"));
+}
+
+/// The /compact path: the renderer's `[[FORCE_COMPACT]]` marker is stripped
+/// and compaction runs (forced) before the model ever responds.
+#[tokio::test]
+async fn force_compact_marker_compacts_before_the_first_step() {
+    let mut fx = Fixture::new("force-compact");
+    let mut args = fx.args("edit");
+    args.messages = vec![ChatTurnMessageWire {
+        role: "user".to_owned(),
+        content: "[[FORCE_COMPACT]]Summarize our conversation so far.".to_owned(),
+    }];
+    let engine = ScriptedEngine::new(vec![
+        summary_step("## Goal\n- forced"),
+        vec![delta("done"), step_end(EngineStopReason::EndTurn, vec![text_part("done")])],
+    ]);
+    seed_history_message(&fx, "user", &bulky_text("early "));
+    seed_history_message(&fx, "assistant", &bulky_text("older "));
+    let result = fx.send_with_args(args, engine.clone()).await.unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    let events = fx.events_until_turn_end().await;
+    let compacting: Vec<&AgentEvent> = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::Compacting { .. }))
+        .collect();
+    assert_eq!(compacting.len(), 2);
+    assert!(matches!(compacting[0], AgentEvent::Compacting { forced: true, .. }));
+
+    // The model's first request: marker stripped from the user message,
+    // summary message leading.
+    let requests = engine.requests();
+    assert_eq!(requests.len(), 2);
+    let model_request = &requests[1];
+    let HistoryPart::Text { text } = &model_request.messages[0].parts[0] else {
+        panic!("text part");
+    };
+    assert!(text.starts_with("[Compacted context"));
+    let HistoryPart::Text { text } = model_request.messages.last().unwrap().parts.last().unwrap()
+    else {
+        panic!("text part");
+    };
+    assert_eq!(text, "Summarize our conversation so far.");
+    assert!(!text.contains("FORCE_COMPACT"));
+}
+
+/// A context-overflow error forces compaction (max 3 per turn), replays the
+/// user's request, and retries instead of failing the turn.
+#[tokio::test]
+async fn overflow_error_forces_compaction_and_replays_the_request() {
+    let mut fx = Fixture::new("overflow");
+    // Step 1 succeeds with a bulky tool result; step 2 overflows.
+    let bulky = "x".repeat(120_000);
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_b".to_owned(),
+                tool_name: "write_file".to_owned(),
+                arguments: serde_json::json!({ "path": "a.txt", "content": &bulky[..20] }),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_b".to_owned(),
+                    tool_name: "write_file".to_owned(),
+                    arguments: serde_json::json!({ "path": "a.txt", "content": &bulky[..20] }),
+                }],
+            ),
+        ],
+        vec![Err(EngineError::Config(
+            "prompt too long: 200000 tokens > 128000 limit".to_owned(),
+        ))],
+        summary_step("## Goal\n- shrunk"),
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    // Tool output big enough to prune; threshold high enough that the
+    // loop-top estimate check stays quiet (the overflow drives this).
+    let spec = TurnSpec {
+        session_id: fx.session_id.clone(),
+        compaction: Some(crate::agent::auto_compact::AutoCompactConfig {
+            context_window: 500_000,
+            max_input_tokens: 0,
+            max_output_tokens: 8_192,
+            threshold: 0.99,
+            ..tiny_compaction()
+        }),
+        ..Default::default()
+    };
+    let echo_bulk = Arc::new(BulkyEchoTool);
+    orchestrator::persist_user_message(
+        fx.hub.writer(),
+        fx.hub.sink(),
+        &fx.session_id,
+        &orchestrator::IncomingUserMessage { content: "please".to_owned() },
+    )
+    .unwrap();
+    let handle = fx.hub.begin_turn(&fx.session_id, AutonomyMode::Edit).unwrap();
+    orchestrator::execute_turn(&fx.hub, &spec, engine.clone(), vec![echo_bulk], handle)
+        .await
+        .unwrap();
+    fx.hub.end_turn(&fx.session_id);
+
+    let events = fx.events_until_turn_end().await;
+    // Forced compaction events, then a clean turn end — no error/turn_end
+    // refusal pair.
+    assert!(events.iter().any(|e| matches!(
+        e, AgentEvent::Compacting { forced: true, .. }
+    )));
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+    let AgentEvent::TurnEnd { stop_reason, .. } = events.last().unwrap() else {
+        panic!("turn_end");
+    };
+    assert_eq!(*stop_reason, TurnStopReason::EndTurn);
+
+    // Requests: step 1, overflowed step 2 (rolled back), summarizer, retry.
+    let requests = engine.requests();
+    assert_eq!(requests.len(), 4);
+    let retry = requests.last().unwrap();
+    let HistoryPart::Text { text } = &retry.messages[0].parts[0] else {
+        panic!("text part");
+    };
+    assert!(text.starts_with("[Compacted context"), "summary leads the retry");
+    // The replayed user request closes the history (the bulky tool result
+    // was pruned to a marker).
+    let HistoryPart::Text { text } = retry.messages.last().unwrap().parts.last().unwrap() else {
+        panic!("text part");
+    };
+    assert_eq!(text, "please");
+}
+
+/// A write_file-named no-op fake — the static tier table keys by NAME, so
+/// this exercises the Edit-mode write gate without touching the disk.
+struct FakeWriteTool;
+
+impl Tool for FakeWriteTool {
+    fn spec(&self) -> tide_tools::ToolSpec {
+        tide_tools::ToolSpec {
+            name: "write_file".to_owned(),
+            description: "Fake write.".to_owned(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"],
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(
+        &self,
+        _ctx: &ToolContext,
+        _args: serde_json::Value,
+    ) -> Result<ToolOutcome, tide_tools::ToolError> {
+        Ok(ToolOutcome::executed("fake write done"))
+    }
+}
+
+/// A write_file-named tool whose output is bulky (drives Layer-1 pruning);
+/// named for the static tier table so edit mode auto-runs it.
+struct BulkyEchoTool;
+
+impl Tool for BulkyEchoTool {
+    fn spec(&self) -> tide_tools::ToolSpec {
+        tide_tools::ToolSpec {
+            name: "write_file".to_owned(),
+            description: "Echoes bulkily.".to_owned(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"],
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(
+        &self,
+        _ctx: &ToolContext,
+        args: serde_json::Value,
+    ) -> Result<ToolOutcome, tide_tools::ToolError> {
+        let mut text = args
+            .get("content")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        text.push_str(&"x".repeat(120_000));
+        Ok(ToolOutcome::executed(format!("echo: {text}")))
+    }
+}
+
+// ── T7: T3 wiring ───────────────────────────────────────────────────────────
+
+/// Todo persistence: the hub's TodoBus subscription mirrors every
+/// todo_write replacement into the sessions store's side table.
+#[tokio::test]
+async fn todo_write_persists_to_the_sessions_store() {
+    let mut fx = Fixture::new("todo-persist");
+    let todo_args = serde_json::json!({
+        "todos": [{ "content": "Persist me", "status": "in_progress", "priority": "high" }]
+    });
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_todo".to_owned(),
+                tool_name: "todo_write".to_owned(),
+                arguments: todo_args.clone(),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_todo".to_owned(),
+                    tool_name: "todo_write".to_owned(),
+                    arguments: todo_args,
+                }],
+            ),
+        ],
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    let result = fx
+        .send_with_tools("edit", engine, vec![Arc::new(tide_tools::TodoWriteTool)])
+        .await
+        .unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    fx.wait_idle().await;
+    let persisted = fx
+        .hub
+        .writer()
+        .lock()
+        .unwrap()
+        .session_todos(&fx.session_id)
+        .expect("todos row");
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0]["content"], serde_json::json!("Persist me"));
+    assert_eq!(persisted[0]["status"], serde_json::json!("in_progress"));
+    assert_eq!(persisted[0]["priority"], serde_json::json!("high"));
+
+    let _ = fx.events_until_turn_end().await;
+}
+
+/// TurnSpec.workspace_id resolution: the start_turn path matches the
+/// session's workspace path back to the configured workspace, and the
+/// ToolContext carries it (the memory tool's store key).
+#[tokio::test]
+async fn tool_context_carries_the_resolved_workspace_id() {
+    let mut fx = Fixture::new("workspace-id");
+    // write_file-named so the static tier table auto-runs it in edit mode.
+    struct ProbeTool;
+    impl Tool for ProbeTool {
+        fn spec(&self) -> tide_tools::ToolSpec {
+            tide_tools::ToolSpec {
+                name: "write_file".to_owned(),
+                description: "Probes the ctx.".to_owned(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "content": { "type": "string" }
+                    },
+                    "required": ["path", "content"],
+                }),
+            }
+        }
+        fn risk_tier(&self) -> RiskTier {
+            RiskTier::Write
+        }
+        fn execute(
+            &self,
+            ctx: &ToolContext,
+            _args: serde_json::Value,
+        ) -> Result<ToolOutcome, tide_tools::ToolError> {
+            Ok(ToolOutcome::executed(format!("ws={}", ctx.workspace_id)))
+        }
+    }
+    let engine = ScriptedEngine::new(vec![
+        vec![
+            Ok(EngineEvent::ToolCall {
+                tool_call_id: "call_1".to_owned(),
+                tool_name: "write_file".to_owned(),
+                arguments: serde_json::json!({ "path": "a.txt", "content": "x" }),
+            }),
+            step_end(
+                EngineStopReason::ToolUse,
+                vec![HistoryPart::ToolCall {
+                    id: "call_1".to_owned(),
+                    tool_name: "write_file".to_owned(),
+                    arguments: serde_json::json!({ "path": "a.txt", "content": "x" }),
+                }],
+            ),
+        ],
+        vec![step_end(EngineStopReason::EndTurn, vec![])],
+    ]);
+    let result = fx.send_with_tools("edit", engine, vec![Arc::new(ProbeTool)]).await.unwrap();
+    assert!(result.accepted, "{:?}", result.error);
+
+    let events = fx.events_until_turn_end().await;
+    let AgentEvent::ToolResult { output, .. } = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolResult { .. }))
+        .expect("tool_result")
+    else {
+        unreachable!();
+    };
+    assert_eq!(output.as_deref(), Some("ws=ws_1"));
 }
