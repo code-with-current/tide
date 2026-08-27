@@ -92,6 +92,10 @@ pub struct HydratedSessionWire {
     pub status: &'static str,
     pub usage: serde_json::Value,
     pub cost_usd: f64,
+    pub context_files: Vec<serde_json::Value>,
+    pub activity: Vec<serde_json::Value>,
+    pub mcp_servers: Vec<serde_json::Value>,
+    pub exposed_ports: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -213,6 +217,10 @@ pub(crate) fn create_session(
             "reasoningTokens": 0, "calls": 0, "costUsd": 0.0,
         }),
         cost_usd: 0.0,
+        context_files: Vec::new(),
+        activity: Vec::new(),
+        mcp_servers: Vec::new(),
+        exposed_ports: Vec::new(),
     })
 }
 
@@ -794,12 +802,17 @@ mod tests {
                 "reasoningTokens": 0, "calls": 0, "costUsd": 0.0,
             }),
             cost_usd: 0.0,
+            context_files: Vec::new(),
+            activity: Vec::new(),
+            mcp_servers: Vec::new(),
+            exposed_ports: Vec::new(),
         };
         let v = serde_json::to_value(&wire).unwrap();
         assert_eq!(v["id"], serde_json::json!("s_x"));
         assert_eq!(v["createdAt"], serde_json::json!("1970-01-01T00:00:04.000Z"));
         assert_eq!(v["status"], serde_json::json!("idle"));
         assert_eq!(v["usage"]["inputTokens"], serde_json::json!(0));
+        assert_eq!(v["exposedPorts"], serde_json::json!([]));
         assert!(v.get("parent_id").is_none());
     }
 }

@@ -226,6 +226,10 @@ pub struct HydratedSessionWire {
     pub parent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    pub context_files: Vec<serde_json::Value>,
+    pub activity: Vec<serde_json::Value>,
+    pub mcp_servers: Vec<serde_json::Value>,
+    pub exposed_ports: Vec<serde_json::Value>,
 }
 
 impl HydratedSessionWire {
@@ -348,6 +352,10 @@ fn get_session(state: &AppState, session_id: &str) -> Result<Option<HydratedSess
         archived_at: meta.archived_at.map(iso_ms),
         kind: meta.parent_id.as_ref().map(|_| "subagent".to_owned()),
         parent_id: meta.parent_id,
+        context_files: Vec::new(),
+        activity: Vec::new(),
+        mcp_servers: Vec::new(),
+        exposed_ports: Vec::new(),
     }))
 }
 
@@ -899,6 +907,10 @@ fn fork_session(
         archived_at: None,
         parent_id: None,
         kind: None,
+        context_files: Vec::new(),
+        activity: Vec::new(),
+        mcp_servers: Vec::new(),
+        exposed_ports: Vec::new(),
     })
 }
 
