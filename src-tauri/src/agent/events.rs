@@ -288,6 +288,25 @@ pub enum ChatPush {
         terminal_id: String,
         ports: Vec<crate::terminal::ports::TerminalPortWire>,
     },
+    /// MCP pool status ping (M4 T6) — the TS `mcpEvents` push: payload is
+    /// just `{ kind: 'statusChanged' }`, the panel re-fetches via `mcpList`.
+    #[serde(rename = "mcpEvents")]
+    McpStatus { event: McpStatusEvent },
+}
+
+/// The `McpEvent` wire shape (`shared/rpc.ts`) — a discriminated `kind` so
+/// future pushes can join the same message without a schema break.
+#[derive(Debug, Clone, Serialize)]
+pub struct McpStatusEvent {
+    pub kind: String,
+}
+
+impl McpStatusEvent {
+    pub fn status_changed() -> Self {
+        Self {
+            kind: "statusChanged".to_owned(),
+        }
+    }
 }
 
 /// Port of `formatArgPreview` for the core five (`app/core/agent/tools/types.ts`

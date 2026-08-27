@@ -8,20 +8,31 @@
 //! [`McpPool::mcp_tools`] to `core_tools()`, so MCP tools join each turn
 //! with zero orchestrator special-casing (name-keyed dispatch + the
 //! read-only `mcp__` permission tier do the rest).
+//!
+//! M4 T6 additions: a generation counter in the pool key so
+//! `mcpReinitialize` can force a rebuild on an unchanged workspace; an
+//! active-workspace tracker (the TS `mcpWorkspaceActivated` slot); a
+//! status-change broadcast the chat push channel forwards to the renderer
+//! as `mcpEvents`; and a pluggable OAuth URL opener (the opener plugin's
+//! browser launch, installed at app setup).
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 
 use tide_mcp::McpPool;
 use tide_store::config::Config;
 use tide_tools::Tool;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 
 /// Identifies the pool instance: project servers come from the active
-/// workspace's `.mcp.json`, so a workspace change must rebuild it.
+/// workspace's `.mcp.json`, so a workspace change must rebuild it. The
+/// generation separates same-workspace rebuilds (mcpReinitialize) from
+/// no-op re-ensures.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct PoolKey {
     workspace_root: String,
+    generation: u64,
 }
 
 enum PoolSlot {
@@ -37,16 +48,41 @@ impl PoolSlot {
     }
 }
 
-#[derive(Default, Clone)]
+/// The shared authorization-URL opener hook (the opener plugin's browser
+/// launch), swappable after construction.
+type SharedUrlOpener = Arc<dyn Fn(&str) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct McpPoolCell {
     inner: Arc<RwLock<Option<PoolSlot>>>,
+    generation: Arc<AtomicU64>,
+    active_workspace: Arc<StdMutex<Option<(String, String)>>>,
+    status_tx: broadcast::Sender<()>,
+    url_opener: Arc<StdMutex<SharedUrlOpener>>,
+}
+
+impl Default for McpPoolCell {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl McpPoolCell {
     pub fn new() -> Self {
+        let (status_tx, _) = broadcast::channel(64);
         Self {
             inner: Arc::new(RwLock::new(None)),
+            generation: Arc::new(AtomicU64::new(0)),
+            active_workspace: Arc::new(StdMutex::new(None)),
+            status_tx,
+            url_opener: Arc::new(StdMutex::new(Arc::new(|_url: &str| {}))),
         }
+    }
+
+    /// Install the OAuth authorization-URL opener (the opener plugin's
+    /// system-browser launch). Applied to every pool built afterwards.
+    pub fn set_url_opener(&self, opener: Arc<dyn Fn(&str) + Send + Sync>) {
+        *self.url_opener.lock().expect("opener slot poisoned") = opener;
     }
 
     /// The live pool, if one has finished initializing.
@@ -56,6 +92,29 @@ impl McpPoolCell {
             Some(PoolSlot::Ready(_, pool)) => Some(Arc::clone(pool)),
             _ => None,
         }
+    }
+
+    /// Subscribe to pool status-change pings (forwarded to the renderer as
+    /// `mcpEvents` — the payload is a ping, the panel re-fetches via
+    /// `mcpList`; a lagged receiver just skips pings).
+    pub fn subscribe_status(&self) -> broadcast::Receiver<()> {
+        self.status_tx.subscribe()
+    }
+
+    /// The workspace the panel activated (TS `activeWorkspace` tracker),
+    /// set by `mcpWorkspaceActivated`.
+    pub fn set_active_workspace(&self, workspace_id: &str, workspace_root: &str) {
+        *self.active_workspace.lock().expect("workspace slot poisoned") = Some((
+            workspace_id.to_owned(),
+            workspace_root.to_owned(),
+        ));
+    }
+
+    pub fn active_workspace(&self) -> Option<(String, String)> {
+        self.active_workspace
+            .lock()
+            .expect("workspace slot poisoned")
+            .clone()
     }
 
     /// Make sure a pool for this workspace exists — spawn-and-return (the
@@ -72,6 +131,7 @@ impl McpPoolCell {
     ) {
         let key = PoolKey {
             workspace_root: workspace_root.clone().unwrap_or_default(),
+            generation: self.generation.load(Ordering::SeqCst),
         };
         {
             let guard = self.inner.read().await;
@@ -99,6 +159,8 @@ impl McpPoolCell {
             pool.shutdown().await;
         }
         let inner = Arc::clone(&self.inner);
+        let status_tx = self.status_tx.clone();
+        let url_opener = Arc::clone(&self.url_opener.lock().expect("opener slot poisoned"));
         tokio::spawn(async move {
             let workspace_id = workspace_root
                 .as_deref()
@@ -106,9 +168,40 @@ impl McpPoolCell {
             let root_path = workspace_root.as_deref().map(PathBuf::from);
             let workspace_pair = workspace_id.as_deref().zip(root_path.as_deref());
             let pool = McpPool::from_config(data_dir, &config, workspace_pair).await;
+            // Status transitions feed the renderer's mcpEvents push; boot
+            // transitions before this point are dropped exactly like the
+            // TS shell's zero-window broadcast was.
+            let tx = status_tx.clone();
+            pool.set_status_notifier(Box::new(move || {
+                let _ = tx.send(());
+            }));
+            let opener = Arc::clone(&url_opener);
+            pool.set_url_opener(Box::new(move |url| opener(url)));
             let mut guard = inner.write().await;
+            // A newer key superseded this build while it ran — discard it
+            // instead of clobbering the newer slot.
+            let superseded = matches!(guard.as_ref(), Some(slot) if *slot.key() != key);
+            if superseded {
+                drop(guard);
+                pool.shutdown().await;
+                return;
+            }
             *guard = Some(PoolSlot::Ready(key, pool));
         });
+    }
+
+    /// Force a full rebuild (TS `reinitializeAll`): disconnect everything,
+    /// re-read config, reconnect — even when the workspace is unchanged.
+    /// Bumping the generation makes the pool key differ, so
+    /// [`McpPoolCell::ensure_started`] treats it as a workspace change.
+    pub async fn restart(
+        &self,
+        data_dir: PathBuf,
+        config: Config,
+        workspace_root: Option<String>,
+    ) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.ensure_started(data_dir, config, workspace_root).await;
     }
 
     /// Connected MCP tools for the turn's tool list.
@@ -186,5 +279,45 @@ mod tests {
         let second = wait_for_pool(&cell).await;
         assert!(!Arc::ptr_eq(&first, &second));
         assert!(second.status_list().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn restart_rebuilds_even_for_the_same_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let cell = McpPoolCell::new();
+        cell.ensure_started(dir.path().to_path_buf(), Config::default(), None)
+            .await;
+        let first = wait_for_pool(&cell).await;
+        cell.restart(dir.path().to_path_buf(), Config::default(), None)
+            .await;
+        let second = wait_for_pool(&cell).await;
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[tokio::test]
+    async fn status_pings_flow_from_pool_transitions() {
+        let dir = tempfile::tempdir().unwrap();
+        let cell = McpPoolCell::new();
+        cell.ensure_started(dir.path().to_path_buf(), Config::default(), None)
+            .await;
+        let pool = wait_for_pool(&cell).await;
+        let mut rx = cell.subscribe_status();
+        // reset_connection pings immediately on the connecting transition —
+        // connect_entry drives one even for an invalid config (error row).
+        pool.connect_entry(tide_mcp::ResolvedServer {
+            name: "bad".to_owned(),
+            config: tide_mcp::McpServerConfig {
+                r#type: Some(tide_mcp::McpTransportType::Http),
+                ..Default::default()
+            },
+            scope: tide_mcp::McpScope::User,
+            workspace_id: None,
+            workspace_root: None,
+        })
+        .await;
+        match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+            Ok(Ok(())) => {}
+            other => panic!("expected a status ping, got {other:?}"),
+        }
     }
 }

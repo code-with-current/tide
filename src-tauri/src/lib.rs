@@ -4,6 +4,7 @@ mod state;
 mod terminal;
 
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 
 use agent::hub::ChatHubCell;
 use agent::mcp::McpPoolCell;
@@ -41,6 +42,19 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 commands::model_catalog::init(&handle.state::<AppState>(), &data_dir).await;
             });
+            // OAuth browser launch: MCP authorization URLs open in the
+            // system browser via the opener plugin (M4 T6) — installed on
+            // the cell so every pool the app builds carries it.
+            let opener_handle = app.handle().clone();
+            app.state::<McpPoolCell>().set_url_opener(std::sync::Arc::new(
+                move |url: &str| {
+                    if let Err(error) =
+                        opener_handle.opener().open_url(url.to_owned(), None::<&str>)
+                    {
+                        eprintln!("[tide] mcp could not open authorization URL: {error}");
+                    }
+                },
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -128,6 +142,23 @@ pub fn run() {
             commands::chat::events_subscribe,
             commands::chat::events_unsubscribe,
             commands::mcp::mcp_list,
+            commands::mcp::mcp_add,
+            commands::mcp::mcp_update,
+            commands::mcp::mcp_remove,
+            commands::mcp::mcp_approve,
+            commands::mcp::mcp_retry,
+            commands::mcp::mcp_authenticate,
+            commands::mcp::mcp_reinitialize,
+            commands::mcp::mcp_set_secret,
+            commands::mcp::mcp_has_secret,
+            commands::mcp::mcp_clear_secret,
+            commands::mcp::mcp_reauthorize,
+            commands::mcp::mcp_scan,
+            commands::mcp::mcp_import,
+            commands::mcp::mcp_set_enabled,
+            commands::mcp::mcp_read_raw,
+            commands::mcp::mcp_write_raw,
+            commands::mcp::mcp_workspace_activated,
             commands::terminal::terminal_create,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

@@ -185,7 +185,8 @@ describe("installTauriBridge", () => {
     await installBridge();
 
     const bridge = installedBridge();
-    const pending = bridge.request.mcpScan({ root: "/repo" });
+    // ragStatus is T7 — still unported, unlike mcpScan (ported in T6).
+    const pending = bridge.request.ragStatus({ workspaceId: "ws_1" });
     expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow(/not ported/);
     expect(invoke).toHaveBeenCalledTimes(2);
@@ -1160,5 +1161,114 @@ describe("terminal routing (M4 T5)", () => {
     rpcModule.setTerminalOutputCallback(null);
     channel().onmessage?.({ channel: "terminalOutput", terminalId: "t_1", data: "x", seq: 8 });
     expect(outputs).toEqual([{ terminalId: "t_1", data: "hi", seq: 7 }]);
+  });
+});
+
+describe("MCP panel routing (M4 T6)", () => {
+  function channel(): FakeChannel {
+    const channels = globals().__tideChannels as FakeChannel[];
+    expect(channels.length).toBe(1);
+    return channels[0];
+  }
+
+  it("routes the management command family with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    const rows = [
+      {
+        name: "context7",
+        scope: "user",
+        status: "connected",
+        toolCount: 2,
+        toolNames: ["resolve-library-id"],
+        transport: "http",
+        enabled: true,
+        config: { type: "http", url: "https://mcp.context7.dev/mcp" },
+      },
+    ];
+    invoke.mockResolvedValueOnce(rows);
+    expect(await bridge.request.mcpList({ workspaceId: "ws_1" })).toEqual(rows);
+    expect(invoke).toHaveBeenLastCalledWith("mcp_list", { workspaceId: "ws_1" });
+
+    const server = { name: "fs", config: { type: "stdio", command: "npx" }, scope: "user" };
+    await bridge.request.mcpAdd(server);
+    expect(invoke).toHaveBeenLastCalledWith("mcp_add", server);
+    await bridge.request.mcpUpdate(server);
+    expect(invoke).toHaveBeenLastCalledWith("mcp_update", server);
+    await bridge.request.mcpRemove({ name: "fs", scope: "user" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_remove", { name: "fs", scope: "user" });
+
+    await bridge.request.mcpApprove({ name: "fs" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_approve", { name: "fs" });
+    await bridge.request.mcpRetry({ name: "fs", scope: "user" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_retry", { name: "fs", scope: "user" });
+    await bridge.request.mcpReinitialize({});
+    expect(invoke).toHaveBeenLastCalledWith("mcp_reinitialize", {});
+
+    invoke.mockResolvedValueOnce({ ok: true, url: "https://idp/authorize?code_challenge=x" });
+    expect(await bridge.request.mcpAuthenticate({ name: "c7", scope: "user" })).toEqual({
+      ok: true,
+      url: "https://idp/authorize?code_challenge=x",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_authenticate", { name: "c7", scope: "user" });
+    await bridge.request.mcpReauthorize({ name: "c7", scope: "user" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_reauthorize", { name: "c7", scope: "user" });
+
+    await bridge.request.mcpSetSecret({ name: "API_KEY", value: "sk" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_set_secret", { name: "API_KEY", value: "sk" });
+    invoke.mockResolvedValueOnce({ has: true });
+    expect(await bridge.request.mcpHasSecret({ name: "API_KEY" })).toEqual({ has: true });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_has_secret", { name: "API_KEY" });
+    await bridge.request.mcpClearSecret({ name: "API_KEY" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_clear_secret", { name: "API_KEY" });
+
+    const scan = { servers: [], alreadyImported: ["fs"] };
+    invoke.mockResolvedValueOnce(scan);
+    expect(await bridge.request.mcpScan({})).toEqual(scan);
+    expect(invoke).toHaveBeenLastCalledWith("mcp_scan", {});
+    const importParams = { servers: [{ name: "c7", config: { type: "http", url: "https://x" } }], scope: "user" };
+    invoke.mockResolvedValueOnce({ ok: true, imported: 1 });
+    expect(await bridge.request.mcpImport(importParams)).toEqual({ ok: true, imported: 1 });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_import", importParams);
+
+    await bridge.request.mcpSetEnabled({ name: "fs", enabled: false, scope: "user" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_set_enabled", {
+      name: "fs",
+      enabled: false,
+      scope: "user",
+    });
+
+    invoke.mockResolvedValueOnce({ ok: true, config: { fs: { type: "stdio", command: "npx" } } });
+    expect(await bridge.request.mcpReadRaw({ scope: "user" })).toEqual({
+      ok: true,
+      config: { fs: { type: "stdio", command: "npx" } },
+    });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_read_raw", { scope: "user" });
+    const rawWrite = { config: { fs: { type: "stdio", command: "npx" } }, scope: "user" };
+    await bridge.request.mcpWriteRaw(rawWrite);
+    expect(invoke).toHaveBeenLastCalledWith("mcp_write_raw", rawWrite);
+
+    await bridge.request.mcpWorkspaceActivated({ workspaceId: "ws_1", workspaceRoot: "/repo/tide" });
+    expect(invoke).toHaveBeenLastCalledWith("mcp_workspace_activated", {
+      workspaceId: "ws_1",
+      workspaceRoot: "/repo/tide",
+    });
+  });
+
+  it("delivers mcpEvents pushes to the onMcpEvent seam", async () => {
+    await installBridge();
+    const rpcModule = await import("@/lib/api/rpc");
+
+    const events: unknown[] = [];
+    const unsubscribe = rpcModule.onMcpEvent((event) => events.push(event));
+
+    channel().onmessage?.({ channel: "mcpEvents", event: { kind: "statusChanged" } });
+    expect(events).toEqual([{ kind: "statusChanged" }]);
+
+    // Unsubscribe clears the single slot — no further delivery.
+    unsubscribe();
+    channel().onmessage?.({ channel: "mcpEvents", event: { kind: "statusChanged" } });
+    expect(events).toEqual([{ kind: "statusChanged" }]);
   });
 });

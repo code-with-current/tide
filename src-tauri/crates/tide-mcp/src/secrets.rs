@@ -24,6 +24,46 @@ fn read_secrets(data_dir: &Path) -> BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
+fn write_secrets(data_dir: &Path, secrets: &BTreeMap<String, String>) {
+    let path = secrets_path(data_dir);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Atomic tmp+rename like the TS writer — a half-written secrets file
+    // must not knock every server into needs_credentials.
+    let tmp = path.with_extension("json.tmp");
+    let Ok(json) = serde_json::to_string_pretty(secrets) else {
+        return;
+    };
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Store a secret value (the TS `setSecret` — the panel's credential editor).
+pub fn set_secret(data_dir: &Path, name: &str, value: &str) {
+    let mut secrets = read_secrets(data_dir);
+    secrets.insert(name.to_owned(), value.to_owned());
+    write_secrets(data_dir, &secrets);
+}
+
+/// Retrieve a stored secret (undefined → None when absent).
+pub fn get_secret(data_dir: &Path, name: &str) -> Option<String> {
+    read_secrets(data_dir).get(name).cloned()
+}
+
+/// Delete a stored secret.
+pub fn clear_secret(data_dir: &Path, name: &str) {
+    let mut secrets = read_secrets(data_dir);
+    secrets.remove(name);
+    write_secrets(data_dir, &secrets);
+}
+
+/// Whether a secret is stored under this name.
+pub fn has_secret(data_dir: &Path, name: &str) -> bool {
+    read_secrets(data_dir).contains_key(name)
+}
+
 /// Resolve `{{secret:name}}` placeholders in an env map. Inline values pass
 /// through; missing secrets are reported by name (the pool turns those into
 /// a `needs_credentials` row).

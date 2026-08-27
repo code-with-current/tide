@@ -221,6 +221,12 @@ export function emitTodosUpdated(event: TodosUpdatedEvent): void {
   todosUpdatedCallback?.(event);
 }
 
+/** Deliver one MCP pool status event to the onMcpEvent consumer (ChatPush
+ *  `mcpEvents` — the panel re-fetches via mcpList on statusChanged). */
+export function emitMcpEvent(event: McpEvent): void {
+  mcpEventsCallback?.(event);
+}
+
 /** Register the update-status consumer (the updater store). Same single-slot
  *  shape as the other push channels. */
 export function onUpdateStatus(cb: UpdateStatusCallback): () => void {

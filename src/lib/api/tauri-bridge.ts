@@ -58,10 +58,27 @@
  *  chat Channel now carries ChatPush tagged terminalOutput/terminalExit/
  *  terminalPorts (the old webview message names, flat payloads), fanned out
  *  through rpc.ts's emitTerminal* seams into the setTerminal*Callback slots
- *  client.ts's subscribeTerminalEvents installs. */
+ *  client.ts's subscribeTerminalEvents installs.
+ *
+ *  M4 T6 adds the MCP panel domain (18 methods): the status list (mcpList —
+ *  rows now carry the `enabled` flag), config CRUD (mcpAdd/Update/Remove —
+ *  user scope writes config.json's mcpServers, project scope the workspace
+ *  .mcp.json), the lifecycle ops (mcpReinitialize → full pool rebuild,
+ *  mcpRetry with fresh disk config, mcpApprove as the vestigial no-op the
+ *  TS kept), the import pair (mcpScan/mcpImport), the toggle
+ *  (mcpSetEnabled), the raw-config editor pair (mcpReadRaw/WriteRaw), the
+ *  secrets trio (mcpSetSecret/HasSecret/ClearSecret over
+ *  mcp-secrets.json), the OAuth pair (mcpAuthenticate returns the
+ *  authorization URL — the backend opens the system browser via the opener
+ *  plugin — and mcpReauthorize forces a clean re-flow), and
+ *  mcpWorkspaceActivated (the pool-rebuild hook on workspace switch). The
+ *  mcpEvents status ping joins the chat Channel here too, fanned out
+ *  through rpc.ts's emitMcpEvent into the onMcpEvent slot
+ *  client.ts's subscribeMcpStatus installs. */
 import {
   activateRpcClient,
   emitAgentEvent,
+  emitMcpEvent,
   emitOrchestratorEvents,
   emitTerminalExit,
   emitTerminalOutput,
@@ -95,6 +112,12 @@ import type {
   HydratedSession,
   ImageFileContent,
   MacPermissionStatus,
+  McpEvent,
+  McpImportResult,
+  McpOpResult,
+  McpRawConfigResult,
+  McpScanResult,
+  McpServerStatus,
   MermaidRepairResult,
   ModelCatalogResolveResult,
   Provider,
@@ -252,6 +275,24 @@ type BridgeMethods = Pick<
   | 'terminalDispose'
   | 'terminalScrollback'
   | 'terminalGetPid'
+  | 'mcpList'
+  | 'mcpAdd'
+  | 'mcpUpdate'
+  | 'mcpRemove'
+  | 'mcpApprove'
+  | 'mcpRetry'
+  | 'mcpAuthenticate'
+  | 'mcpReinitialize'
+  | 'mcpSetSecret'
+  | 'mcpHasSecret'
+  | 'mcpClearSecret'
+  | 'mcpReauthorize'
+  | 'mcpScan'
+  | 'mcpImport'
+  | 'mcpSetEnabled'
+  | 'mcpReadRaw'
+  | 'mcpWriteRaw'
+  | 'mcpWorkspaceActivated'
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
@@ -259,7 +300,8 @@ type BridgeMethods = Pick<
  *  same discriminator the Electrobun push did. Payload shapes are the
  *  shared/rpc.ts AgentEvent / FlushBatch / TodosUpdatedEvent verbatim; the
  *  terminal tags carry their old ipc payload shapes flat (terminalId/data/seq,
- *  terminalId/code, terminalId/ports). */
+ *  terminalId/code, terminalId/ports); mcpEvents carries the discriminated
+ *  McpEvent ({ kind: 'statusChanged' }). */
 type ChatPush =
   | { channel: 'agentEvents'; event: AgentEvent }
   | { channel: 'orchestratorEvents'; batch: FlushBatch }
@@ -271,7 +313,8 @@ type ChatPush =
       seq: number;
     }
   | { channel: 'terminalExit'; terminalId: string; code: number | null }
-  | { channel: 'terminalPorts'; terminalId: string; ports: TerminalPort[] };
+  | { channel: 'terminalPorts'; terminalId: string; ports: TerminalPort[] }
+  | { channel: 'mcpEvents'; event: McpEvent };
 
 /** Params pass through verbatim: Tauri v2 maps camelCase JSON keys onto the
  *  snake_case Rust command params (workspacePath → workspace_path), which is
@@ -438,6 +481,29 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     terminalScrollback: (params) =>
       invoke<TerminalScrollbackResult>('terminal_scrollback', params),
     terminalGetPid: (params) => invoke<{ pid: number | null }>('terminal_get_pid', params),
+    // MCP panel (M4 T6) — params verbatim under the camelCase → snake_case
+    // mapping; McpServerConfig's field names already match the Rust struct.
+    mcpList: (params) => invoke<McpServerStatus[]>('mcp_list', params),
+    mcpAdd: (params) => invoke<McpOpResult>('mcp_add', params),
+    mcpUpdate: (params) => invoke<McpOpResult>('mcp_update', params),
+    mcpRemove: (params) => invoke<McpOpResult>('mcp_remove', params),
+    mcpApprove: (params) => invoke<{ ok: boolean }>('mcp_approve', params),
+    mcpRetry: (params) => invoke<{ ok: boolean }>('mcp_retry', params),
+    // The wire shape is { ok }; the backend's URL is additive — the renderer
+    // can surface the sign-in link while the system browser opens.
+    mcpAuthenticate: (params) =>
+      invoke<{ ok: boolean; url?: string }>('mcp_authenticate', params),
+    mcpReinitialize: (params) => invoke<{ ok: boolean }>('mcp_reinitialize', params),
+    mcpSetSecret: (params) => invoke<{ ok: boolean }>('mcp_set_secret', params),
+    mcpHasSecret: (params) => invoke<{ has: boolean }>('mcp_has_secret', params),
+    mcpClearSecret: (params) => invoke<{ ok: boolean }>('mcp_clear_secret', params),
+    mcpReauthorize: (params) => invoke<{ ok: boolean }>('mcp_reauthorize', params),
+    mcpScan: (params) => invoke<McpScanResult>('mcp_scan', params),
+    mcpImport: (params) => invoke<McpImportResult>('mcp_import', params),
+    mcpSetEnabled: (params) => invoke<{ ok: boolean }>('mcp_set_enabled', params),
+    mcpReadRaw: (params) => invoke<McpRawConfigResult>('mcp_read_raw', params),
+    mcpWriteRaw: (params) => invoke<McpOpResult>('mcp_write_raw', params),
+    mcpWorkspaceActivated: (params) => invoke<{ ok: boolean }>('mcp_workspace_activated', params),
   };
   return {
     request: new Proxy(methods as TideRpcClient['request'], {
@@ -467,6 +533,7 @@ async function attachChatChannel(invoke: InvokeFn, Channel: ChannelCtor): Promis
       emitTerminalExit({ terminalId: push.terminalId, code: push.code });
     else if (push.channel === 'terminalPorts')
       emitTerminalPorts({ terminalId: push.terminalId, ports: push.ports });
+    else if (push.channel === 'mcpEvents') emitMcpEvent(push.event);
     else console.warn('[tide] unknown ChatPush channel tag — dropped:', push);
   };
   await invoke('chat_attach_channel', { channel });

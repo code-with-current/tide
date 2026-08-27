@@ -250,6 +250,18 @@ pub async fn chat_run_turn(
         .await;
     let mut tools = core_tools_shared();
     tools.extend(mcp_cell.turn_tools().await);
+    // TS getToolsForWorkspace skipped disabled servers (the extensions
+    // allowlist) — the pool connects them for visibility, but a disabled
+    // server's tools never join a turn.
+    let disabled: std::collections::HashSet<String> = state
+        .read_config(|cfg| crate::commands::mcp::disabled_mcp_names(cfg).into_iter().collect())?;
+    if !disabled.is_empty() {
+        tools.retain(|tool| {
+            tide_mcp::split_namespaced_tool_name(&tool.spec().name)
+                .map(|(server, _)| !disabled.contains(&server))
+                .unwrap_or(true)
+        });
+    }
     start_turn(&state, &hub, args, engine, tools).await
 }
 
@@ -629,10 +641,13 @@ pub(crate) fn resolve_followup_core(
 /// after the handshake; a re-attach replaces the previous forwarder (the
 /// generation counter retires the old task). Every AgentEvent and every
 /// live-session FlushBatch rides this single Channel, tagged by `kind`.
+/// MCP status pings (M4 T6) join here too — the pool's transitions
+/// broadcast on the McpPoolCell and forward as `mcpEvents` pushes.
 #[tauri::command]
 pub async fn chat_attach_channel(
     state: tauri::State<'_, AppState>,
     hub_cell: tauri::State<'_, ChatHubCell>,
+    mcp_cell: tauri::State<'_, crate::agent::mcp::McpPoolCell>,
     channel: tauri::ipc::Channel<ChatPush>,
 ) -> Result<(), CommandError> {
     let hub = hub_cell
@@ -642,6 +657,7 @@ pub async fn chat_attach_channel(
     let generation = hub.next_channel_generation();
     let mut push_rx = hub.subscribe_push();
     let forward_hub = Arc::clone(&hub);
+    let status_channel = channel.clone();
     tokio::spawn(async move {
         while let Ok(push) = push_rx.recv().await {
             if forward_hub.channel_generation() != generation {
@@ -649,6 +665,25 @@ pub async fn chat_attach_channel(
             }
             if channel.send(push).is_err() {
                 break;
+            }
+        }
+    });
+    let mut status_rx = mcp_cell.subscribe_status();
+    tokio::spawn(async move {
+        loop {
+            match status_rx.recv().await {
+                Ok(()) => {
+                    if status_channel
+                        .send(ChatPush::McpStatus {
+                            event: crate::agent::events::McpStatusEvent::status_changed(),
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });

@@ -135,16 +135,23 @@ enum ConnectFailure {
     Error(String),
 }
 
+/// The authorization-URL opener slot (the browser launch). Interior-
+/// mutable so the app shell can install the opener-plugin hook on an
+/// already-built pool; the default is a no-op (the URL is returned to the
+/// caller instead). Replaces the TS `openInBrowser` call.
+type UrlOpener = Box<dyn Fn(&str) + Send + Sync>;
+/// The status-transition listener slot (the TS `notifyStatusChange` → the
+/// panel's `mcpEvents` push). Default no-op.
+type StatusNotifier = Box<dyn Fn() + Send + Sync>;
+
 pub struct McpPool {
     data_dir: PathBuf,
     config_path: PathBuf,
     servers: Mutex<HashMap<String, Connection>>,
     pending_flows: StdMutex<HashMap<String, PendingFlow>>,
     restart_backoff_base: Duration,
-    /// Invoked with the authorization URL when a flow starts. M3 default:
-    /// no-op — the URL is returned to the caller (the renderer opens the
-    /// browser in M4). Replaces the TS `openInBrowser` call.
-    pub url_opener: Box<dyn Fn(&str) + Send + Sync>,
+    url_opener: StdMutex<UrlOpener>,
+    status_notifier: StdMutex<StatusNotifier>,
 }
 
 impl McpPool {
@@ -156,8 +163,30 @@ impl McpPool {
             servers: Mutex::new(HashMap::new()),
             pending_flows: StdMutex::new(HashMap::new()),
             restart_backoff_base: RESTART_BACKOFF_BASE,
-            url_opener: Box::new(|_url| {}),
+            url_opener: StdMutex::new(Box::new(|_url| {})),
+            status_notifier: StdMutex::new(Box::new(|| {})),
         }
+    }
+
+    /// Install the browser opener for OAuth authorization URLs (the app
+    /// shell passes the opener plugin here).
+    pub fn set_url_opener(&self, opener: Box<dyn Fn(&str) + Send + Sync>) {
+        *self.url_opener.lock().unwrap() = opener;
+    }
+
+    /// Install the status-transition listener (the app shell forwards it to
+    /// the renderer as an `mcpEvents` push). Called outside the servers
+    /// lock wherever the TS pool called `notifyStatusChange`.
+    pub fn set_status_notifier(&self, notifier: Box<dyn Fn() + Send + Sync>) {
+        *self.status_notifier.lock().unwrap() = notifier;
+    }
+
+    fn open_url(&self, url: &str) {
+        (self.url_opener.lock().unwrap())(url);
+    }
+
+    fn notify_status(&self) {
+        (self.status_notifier.lock().unwrap())();
     }
 
     /// Shrink the crash-recovery backoff for tests.
@@ -238,9 +267,23 @@ impl McpPool {
     /// re-reading edited config from disk is the app layer's reload job).
     /// A MANUAL retry earns a fresh crash-recovery budget.
     pub async fn retry_server(self: &Arc<Self>, name: &str) -> bool {
-        let Some(server) = self.stored_server(name).await else {
+        self.reload_server(name, None).await
+    }
+
+    /// Retry with an optional fresh config (the app layer re-reads the
+    /// config source first so external edits are picked up, TS `retryServer`
+    /// semantics); `None` reuses the stored config.
+    pub async fn reload_server(
+        self: &Arc<Self>,
+        name: &str,
+        fresh_config: Option<McpServerConfig>,
+    ) -> bool {
+        let Some(mut server) = self.stored_server(name).await else {
             return false;
         };
+        if let Some(config) = fresh_config {
+            server.config = config;
+        }
         {
             let mut servers = self.servers.lock().await;
             if let Some(conn) = servers.get_mut(name) {
@@ -302,6 +345,7 @@ impl McpPool {
             }
             drop_service(old.service).await;
         }
+        self.notify_status();
     }
 
     async fn run_connect(
@@ -337,6 +381,8 @@ impl McpPool {
                         drop_service(Some(service)).await;
                     }
                 }
+                drop(servers);
+                self.notify_status();
                 return;
             }
             Err(failure) => failure,
@@ -359,6 +405,8 @@ impl McpPool {
                 conn.error = Some(explain_connect_error(&message, &name));
             }
         }
+        drop(servers);
+        self.notify_status();
     }
 
     async fn connect_stdio(
@@ -549,6 +597,8 @@ impl McpPool {
                     "Server crashed {MAX_RESTARTS}× — check its configuration.{}",
                     detail_suffix(&stderr_tail, exit_ok)
                 ));
+                drop(servers);
+                pool.notify_status();
                 return;
             }
             conn.restart_count += 1;
@@ -561,6 +611,7 @@ impl McpPool {
                 .saturating_mul(1 << (conn.restart_count - 1).min(4))
                 .min(RESTART_BACKOFF_MAX)
         };
+        pool.notify_status();
         tokio::time::sleep(backoff).await;
         if let Some(server) = pool.stored_server(&name).await {
             pool.connect_entry(server).await;
@@ -588,6 +639,21 @@ impl McpPool {
             let _ = kill.send(());
         }
         drop_service(service).await;
+        self.notify_status();
+    }
+
+    /// Remove a server from the pool entirely — disconnect + drop the row
+    /// (the TS `unloadServer`, called after a config remove; contrast
+    /// [`McpPool::disconnect`], which keeps a greyed-out row for toggling).
+    pub async fn unload(&self, name: &str) {
+        self.disconnect(name).await;
+        let removed = {
+            let mut servers = self.servers.lock().await;
+            servers.remove(name).is_some()
+        };
+        if removed {
+            self.notify_status();
+        }
     }
 
     /// Disconnect everything (TS `disconnectAll`).
@@ -621,6 +687,8 @@ impl McpPool {
         if let Some(conn) = servers.get_mut(name) {
             conn.tools = defs;
         }
+        drop(servers);
+        self.notify_status();
         Some(count)
     }
 
@@ -768,7 +836,7 @@ impl McpPool {
                 loopback,
             },
         );
-        (self.url_opener)(&auth_url);
+        self.open_url(&auth_url);
         Ok(auth_url)
     }
 
