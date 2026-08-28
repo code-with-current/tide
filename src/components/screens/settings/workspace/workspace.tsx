@@ -20,7 +20,6 @@ import { RagColumn } from "./workspace-rag";
 
 const STORAGE_KEY = "tide-ws-settings-selected";
 
-
 export function WorkspaceSettingsSection() {
   const { data: workspaces, isLoading } = useWorkspaces();
   const activeWorkspaceId = useUi((s) => s.activeWorkspaceId);

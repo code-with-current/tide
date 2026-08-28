@@ -1,9 +1,7 @@
-//! Open-in-app commands (M4 T7) — port of `app/rpc/open-in-app.ts` @
-//! 91ec558: detects external apps (Finder/Files, Terminal, VSCode, Zed)
-//! and opens a session's resolved folder in one. Icons are not
-//! extractable without a devkit file-icon API — always null (the renderer
-//! falls back to its lucide icons, a documented 4.x gap kept from the
-//! Electrobun shell).
+//! Open-in-app commands — port of `app/rpc/open-in-app.ts`: detects
+//! external apps (Finder/Files, Terminal, VSCode, Zed) and opens a
+//! session's resolved folder in one. Icons are not extractable here —
+//! always null (the renderer falls back to its lucide icons).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,6 +18,7 @@ pub struct ExternalAppWire {
     pub id: &'static str,
     pub label: String,
     pub available: bool,
+    #[serde(rename = "iconDataUrl")]
     pub icon_data_url: Option<String>,
 }
 

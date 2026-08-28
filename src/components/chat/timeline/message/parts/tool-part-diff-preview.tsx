@@ -1,16 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/ToolPartDiffPreview.tsx.
- *  Adaptations:
- *  - Theme seam (same as T3's tool-output-dialog.tsx): upstream's
- *    `useOptionalThemeSystem`/`ensurePierreThemeRegistered`/`getDefaultTheme`
- *    registry is replaced by Task 2's registered CSS-variable Shiki theme
- *    (`tide-md` via `ensureMarkdownShikiTheme`) plus a next-themes
- *    `resolveDark` for `themeType` — both theme ids point at the same
- *    CSS-variable theme so it follows Tide's light/dark toggle.
- *  - `DiffViewMode` comes from `../diff-view-toggle`; `PlainDiffFallback` from
- *    the T3 port. Re-indented 4-space → 2-space; named export added for the
- *    lazy import site (default export kept).
- */
-
 import React from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import { useTheme } from 'next-themes';

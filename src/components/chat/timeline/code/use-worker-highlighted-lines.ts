@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/code/useWorkerHighlightedLines.ts.
- *  Adaptation: worker import points at Task 2's ported
- *  `../markdown/markdown-worker` (upstream: `@/components/chat/markdown/markdown-worker`).
- *  Logic unchanged. */
-
 import React from 'react';
 import {
   getCachedHighlightedLines,

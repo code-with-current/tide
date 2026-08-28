@@ -1,6 +1,6 @@
 //! Shared subprocess plumbing for tools: bounded readers, deadline-wrapped
 //! runs, and process-group kills. Ported from the TS `tool-env.ts` +
-//! `bash.ts` subprocess handling (91ec558).
+//! `bash.ts` subprocess handling ().
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -101,10 +101,6 @@ pub(crate) struct RunResult {
     // result.stderr for spawn failures).
     #[allow(dead_code)]
     pub stderr: String,
-    #[allow(dead_code)]
-    pub timed_out: bool,
-    #[allow(dead_code)]
-    pub truncated: bool,
 }
 
 #[derive(Debug)]
@@ -135,12 +131,9 @@ pub(crate) fn run_with_deadline(
     let err_reader = child.stderr.take().map(|p| spawn_reader(p, cap, start));
 
     let deadline = Instant::now() + timeout;
-    let mut timed_out = false;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                return Ok(finish_run(status.code(), out_reader, err_reader, timed_out))
-            }
+            Ok(Some(status)) => return Ok(finish_run(status.code(), out_reader, err_reader)),
             Ok(None) => {}
             Err(e) => {
                 kill_and_reap(&mut child);
@@ -148,9 +141,8 @@ pub(crate) fn run_with_deadline(
             }
         }
         if Instant::now() >= deadline {
-            timed_out = true;
             kill_and_reap(&mut child);
-            return Ok(finish_run(None, out_reader, err_reader, timed_out));
+            return Ok(finish_run(None, out_reader, err_reader));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -160,30 +152,20 @@ fn finish_run(
     exit: Option<i32>,
     out: Option<StreamReader>,
     err: Option<StreamReader>,
-    timed_out: bool,
 ) -> RunResult {
     let mut stdout = String::new();
     let mut stderr = String::new();
-    let mut truncated = false;
     if let Some(r) = out {
         if let Ok(t) = r.text.lock() {
             stdout = t.clone();
         }
-        truncated |= r.truncated.load(Ordering::SeqCst);
     }
     if let Some(r) = err {
         if let Ok(t) = r.text.lock() {
             stderr = t.clone();
         }
-        truncated |= r.truncated.load(Ordering::SeqCst);
     }
-    RunResult {
-        exit,
-        stdout,
-        stderr,
-        timed_out,
-        truncated,
-    }
+    RunResult { exit, stdout, stderr }
 }
 
 #[cfg(unix)]

@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/lib/typography.ts.
- *  Pure token table — ported verbatim except `VSCODE_TYPOGRAPHY`, dropped per
- *  the standing VSCode-branch deletion rule (no T3 consumer references it;
- *  Tide has no VS Code webview shell). */
 export const SEMANTIC_TYPOGRAPHY = {
   markdown: '0.9375rem',
   code: '0.8125rem',

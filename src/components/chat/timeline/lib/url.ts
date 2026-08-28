@@ -1,11 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/lib/url.ts.
- *  PURE SUBSET: only the classification/favicon/loopback helpers are ported.
- *  Dropped per task ruling: `openExternalUrl`, `openConfirmedAppLinkUrl`,
- *  `isAppLinkUrl` and the scheme allow/block sets — they exist only to drive
- *  upstream's desktop-bridge/VSCode app-link confirmation flows, which Tide
- *  does not port. T3 consumers that need to open a URL use `window.open`
- *  directly. Locale is resolved from `Intl` (no i18n runtime). */
-
 const parseUrlSafely = (value: string): URL | null => {
   try {
     return new URL(value);

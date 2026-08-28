@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/MarkdownRenderer.tsx.
- *  Adaptation: `lazyWithChunkRecovery` (the upstream's retrying lazy loader) is
- *  replaced with plain `React.lazy` — Tide has no chunk-recovery helper; the
- *  mobile-surface fallback branch is dropped (desktop-only app). The lazy
- *  module-loading shape (loader indirection + gallery split) is preserved. */
 import React from 'react';
 import { loadMarkdownRendererModule } from './markdown-renderer-loader';
 

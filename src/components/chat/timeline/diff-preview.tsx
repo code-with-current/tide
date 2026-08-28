@@ -1,15 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/DiffPreview.tsx.
- *  Adaptations:
- *  - Theme seam: `useThemeSystem()` → next-themes `useTheme().resolvedTheme` +
- *    `resolveDark` (same pattern as code/worker-highlighted-code.tsx); palettes via
- *    the ported markdown/markdown-syntax-vars module.
- *  - `parseDiffToUnified` and `getLanguageFromExtension` come from the ported
- *    message/tool-renderers + lib/tool-helpers modules.
- *  - Upstream styles in styles/components/views/DiffView.tsx are already covered by
- *    the --tools-edit-* / --md-syntax-* tokens Task 2 ported into chat-timeline.css;
- *    no extra style port needed.
- *  - Logic otherwise unchanged. */
-
 import React from 'react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';

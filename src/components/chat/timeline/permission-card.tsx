@@ -1,22 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/PermissionCard.tsx — HEAVILY ADAPTED (Ruling 1).
- *  Upstream renders an OpenCode `PermissionRequest` (patterns/always/sessionID, answered
- *  via sessionActions.respondToPermission). Tide has no permission-request objects — the
- *  card renders the PENDING TOOL PART (`arguments`, `metadata.argPreview`, `metadata.riskTier`,
- *  `toolCallId`) and buttons call the timeline's exact callback names:
- *  `onApproveToolCalls(ids, newMode?, remember?)` / `onRejectToolCalls(ids, reason?)`
- *  (threaded from ChatTimeline/main-screen; T6/T8 wire them into the timeline).
- *  Other adaptations:
- *  - Renders only for Tide `ToolCallStatus` 'pending' | 'awaiting_input'.
- *  - Tool branches re-keyed to Tide tool names (bash, edit_file, multi_edit, write_file,
- *    web_fetch) and read the part's `arguments` (pending calls carry no display payload):
- *    bash → input.command (or argPreview fallback); edit/multi_edit → DiffPreview over a
- *    synthesized unified diff from input old_string/new_string; write → WritePreview over
- *    input.content; web_fetch → url/method/headers/body.
- *  - Dropped (no Tide equivalent): permission.patterns section, `isFromSubagent` badge
- *    (sync-store coupling), session-store responders, i18n (literal English).
- *  - `ScrollableOverlay` → local overflow-auto div (task-3-brief R5 mapping).
- *  - Remember-decision mapping via ./permission-auto-accept (Ruling 2). */
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 import type { AutonomyMode } from '@/types';

@@ -1,5 +1,5 @@
 //! Permission gate — port of `app/core/agent/permission.ts` +
-//! `permission-wrapper.ts` (91ec558), adapted to the Rust architecture:
+//! `permission-wrapper.ts` (), adapted to the Rust architecture:
 //! instead of wrapping tool execution, the orchestrator consults
 //! [`PermissionGate::check`] BEFORE executing a tool call. `Ask` outcomes
 //! become a renderer `permission_required` event (FloatingPermissionCard)

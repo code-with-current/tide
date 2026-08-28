@@ -30,7 +30,6 @@ import type { Workspace, WorkspaceScript } from "@/types";
 import { Card, SettingsGroup, SettingsRow } from "../shared";
 import { cn } from "@/lib/utils";
 
-
 const SCRIPT_META: Record<
   WorkspaceScript["kind"],
   {
@@ -57,10 +56,7 @@ const SCRIPT_META: Record<
   },
 };
 
-
-// =============================================================
-// LEFT COLUMN: Workspace properties + RAG toggle + Scripts
-// =============================================================
+// ── LEFT COLUMN: Workspace properties + RAG toggle + Scripts ──
 
 export function WorkspaceColumn({
   workspace,

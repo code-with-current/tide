@@ -1,25 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/ToolOutputDialog.tsx.
- *  Adaptations:
- *  - Theme seam: upstream's `useOptionalThemeSystem`/`ensurePierreThemeRegistered`/
- *    `getDefaultTheme` registry is replaced by Task 2's registered CSS-variable
- *    theme (`tide-md`, via `ensureMarkdownShikiTheme`) + a next-themes
- *    `resolveDark` for `themeType` — same pattern as markdown-renderer-impl.
- *  - Task 4: the specialized todo/list/grep/glob/web-search renderers,
- *    `parseReadToolOutput` and `formatInputForDisplay` are imported from
- *    `./tool-renderers`; the tool key is passed through
- *    `resolveRendererToolName` so Tide tool names resolve onto the upstream
- *    renderer keys the dialog branches on.
- *  - `JsonTreeView` (ruling 5): upstream app component, not ported — a
- *    minimal recursive disclosure tree is defined locally and exported.
- *  - Mermaid `file://` loading via `runtimeFetch` dropped (runtime-API path);
- *    data: URLs and http(s) fetch are kept.
- *  - i18n (`useI18n`) → literal English; `Icon` from the lucide shim;
- *    SDK/`@/components/*` imports repointed at Tide modules.
- *  - `LazyToolOutputDialog` uses plain `React.lazy` (upstream wrapped it in
- *    `lazyWithChunkRecovery`, not ported) so Task 6's ChatMessage port has the
- *    lazy entry point upstream had.
- */
-
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
@@ -940,11 +918,9 @@ const MermaidPreviewDialog: React.FC<{
   return createPortal(content, document.body);
 };
 
-// ---------------------------------------------------------------------------
-// Ruling-5 seam: minimal recursive disclosure tree replacing the upstream's
-// `@/components/ui/JsonTreeView` app component. Collapsible objects/arrays,
-// expandable down to `initiallyExpandedDepth`; leaves render as scalar chips.
-// ---------------------------------------------------------------------------
+// Minimal recursive disclosure tree (no upstream JsonTreeView): collapsible
+// objects/arrays, expandable down to `initiallyExpandedDepth`; leaves render
+// as scalar chips.
 
 const JSON_SCALAR_COLORS: Record<string, string> = {
   string: '#7ee787',
@@ -1297,6 +1273,3 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 };
 
 export default ToolOutputDialog;
-
-/** Plain `React.lazy` entry point (replaces upstream's `lazyWithChunkRecovery` wrapper). */
-export const LazyToolOutputDialog = React.lazy(async () => ({ default: (await import('./tool-output-dialog')).default }));

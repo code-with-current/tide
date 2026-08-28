@@ -1,4 +1,4 @@
-//! web_search — port of `app/core/agent/tools/web-search.ts` (91ec558):
+//! web_search — port of `app/core/agent/tools/web-search.ts` ():
 //! proxies through the Tide search Cloudflare Worker (→ DuckDuckGo
 //! scrape) so server-side IP/anti-bot handling, markup fixes, and ad
 //! filtering stay in one place; returns up to 10 results.

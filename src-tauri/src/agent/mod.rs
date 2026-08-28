@@ -1,4 +1,4 @@
-//! The orchestrator domain (M2): turn loop, EventSink, and the chat command
+//! The orchestrator domain: turn loop, EventSink, and the chat command
 //! surface. Sits above the churn firewall — talks to tide-engine
 //! abstractions ([`orchestrator::StepStream`]) and tide-tools' `Tool` +
 //! permission gate; never touches rig directly.

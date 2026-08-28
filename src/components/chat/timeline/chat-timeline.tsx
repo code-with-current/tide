@@ -1,22 +1,8 @@
-/** ChatTimeline — drop-in replacement for ChatTimeline ported from
- *  upstream project (MIT, see THIRD_PARTY_NOTICES.md): `MessageList.tsx` + `useChatAutoFollow.ts`,
- *  adapted to Tide's Message/ChatMessage model.
- *
- *  Task 8: rows are now the upstream turn model. Tide `Message[]` is
- *  projected via `toChatMessageEntry` (lib/tide-adapter) into
- *  `ChatMessageEntry[]`, folded into turns by `useChatTimelineController`
- *  (T6), and rendered as `TimelineRow[]` (divider | turn | streaming tail)
- *  inside `VirtualizedMessageList`. Row content is `TurnItemMemoized` +
- *  `ChatMessage` — the chat entry renderer.
- *
- *  Differences from the previous ChatTimeline implementation:
- *  - Bottom anchoring lives in @tanstack/virtual-core (`anchorTo: 'end'`),
- *    so there is no pin spacer, no sentinel, no eased chase — one instant
- *    scrollTop writer (the ResizeObserver) instead of three racing ones.
- *  - Session switches restore real row measurements from a per-session
- *    snapshot cache instead of re-estimating.
- *  - Send behavior follows the tail (upstream model), not the previous
- *    pin-user-message-to-top choreography.
+/**
+ * Messages are projected to turn rows (lib/tide-adapter → useChatTimelineController
+ * → VirtualizedMessageList). Bottom anchoring lives in @tanstack/virtual-core
+ * (`anchorTo: 'end'`) — keep exactly one scrollTop writer (the ResizeObserver);
+ * a second writer reintroduces the old racing-scroll bug.
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -47,10 +33,8 @@ export interface ChatTimelineProps {
   streamingMessage: Message | null;
   isStreaming: boolean;
   pendingToolCallIds?: string[];
-  /** Accepted for ChatTimeline prop parity but unconsumed by the turn model:
-   *  ChatMessage derives finish state from parts. Still threaded
-   *  into the streaming entry conversion below (finish override once the turn
-   *  ends), so it is NOT dead — task-8 seam note. */
+  /** Accepted for prop parity but only consumed by the streaming entry
+   *  conversion (finish override once the turn ends). */
   stopReason?: string | null;
   sessionId?: string | null;
   sessionLoading?: boolean;
@@ -127,8 +111,8 @@ function ChatTimelineImpl({
     // turnUiStates/toggleTurnGroup: controller-owned per-turn group state.
     turnUiStates,
     toggleTurnGroup,
-    // `turnWindowModel` is intentionally unconsumed: upstream uses it for
-    // pagination; Tide's list virtualizes on its own (task-8 seam note).
+    // `turnWindowModel` is intentionally unconsumed: the list virtualizes on
+    // its own.
   } = useChatTimelineController({
     messages: controllerMessages,
     streamingMessage: streamingEntry,
@@ -202,10 +186,10 @@ function ChatTimelineImpl({
     return result;
   }, [staticTurns, streamingTailEntry, turnRecords.turns, dividerRowForTurn, sessionId]);
 
-  // ── Row content (task 8) ────────────────────────────────────────────────
-  // Static turn rows: group state from the controller; NO streaming-only
-  // props (isStreamingRow/pendingToolCallIds/onApprove/onReject/
-  // onAnswerFollowup are tail-row-only per the task-8 brief).
+  // ── Row content ──
+  // Static turn rows: group state from the controller; streaming-only props
+  // (isStreamingRow/pendingToolCallIds/onApprove/onReject/onAnswerFollowup)
+  // are tail-row-only.
   // Compact mode reuses the SAME single render path — it only feeds the
   // effective expansion into the existing activity group (ProgressiveGroup),
   // which is the collapsible container around the tool blocks. User message

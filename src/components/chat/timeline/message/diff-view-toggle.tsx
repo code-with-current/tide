@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/DiffViewToggle.tsx.
- *  Ported faithfully (re-indented 4-space to 2-space). Tide's shadcn `Button`
- *  replaces upstream's; `Icon` comes from the lucide shim (`../icon`), where
- *  `align-justify`/`layout-column` map to AlignJustify/Columns2. */
-
 import React from 'react';
 
 import { Button } from '@/components/ui/button';

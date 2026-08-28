@@ -1,4 +1,4 @@
-//! grep — port of `app/core/agent/tools/grep.ts` (91ec558). Content search
+//! grep — port of `app/core/agent/tools/grep.ts` (). Content search
 //! using ripgrep when installed, falling back to a built-in walker. Caps
 //! at maxResults (default 100) matching lines.
 //!

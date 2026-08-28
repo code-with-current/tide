@@ -6,9 +6,7 @@
 // without waiting on the re-export at the bottom of the file.
 import type { Block } from './block';
 
-// ============================================================
-// Providers & models
-// ============================================================
+// ── Providers & models ──
 
 export type ApiStyle = 'openai' | 'anthropic';
 
@@ -133,9 +131,7 @@ export interface ProviderModelMeta {
   input_modalities?: string[];
 }
 
-// ============================================================
-// Workspaces & sessions
-// ============================================================
+// ── Workspaces & sessions ──
 
 /** A user-defined shell command bound to a workspace lifecycle. */
 export interface WorkspaceScript {
@@ -264,9 +260,7 @@ export interface ActivityEvent {
   tone: 'ok' | 'warn' | 'bad' | 'accent' | 'muted';
 }
 
-// ============================================================
-// Messages & tool calls
-// ============================================================
+// ── Messages & tool calls ──
 
 export type MessageRole = 'user' | 'assistant';
 
@@ -565,9 +559,7 @@ export interface DiffLine {
   text: string;
 }
 
-// ============================================================
-// Usage & cost
-// ============================================================
+// ── Usage & cost ──
 
 export interface Usage {
   inputTokens: number;
@@ -580,9 +572,7 @@ export interface Usage {
   costUsd: number;
 }
 
-// ============================================================
-// Right-panel tabs
-// ============================================================
+// ── Right-panel tabs ──
 
 export type RightTabKind = 'home' | 'git' | 'files' | 'agents' | 'terminal' | 'browser';
 
@@ -592,9 +582,7 @@ export interface RightTab {
   locked?: boolean;
 }
 
-// ============================================================
-// File tree (mocked)
-// ============================================================
+// ── File tree (mocked) ──
 
 export type FileNodeKind = 'dir' | 'file';
 
@@ -608,9 +596,7 @@ export interface FileNode {
   expanded?: boolean;
 }
 
-// ============================================================
-// MCP servers
-// ============================================================
+// ── MCP servers ──
 
 export interface McpServer {
   id: string;
@@ -619,9 +605,7 @@ export interface McpServer {
   status: 'connected' | 'restarting' | 'error';
 }
 
-// ============================================================
-// RAG embedder (Memory & RAG panel)
-// ============================================================
+// ── RAG embedder (Memory & RAG panel) ──
 
 /** Which embedder variant built an index; the two are NOT cross-compatible despite matching dimensions, so query dispatch must never mix them. */
 export type EmbedderId = 'local-code-512' | 'cloud-base';

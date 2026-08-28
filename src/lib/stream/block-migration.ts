@@ -103,7 +103,6 @@ export function migrateMessageToBlocks(message: Message): Message {
     return redetermineAnswerFlag(message);
   }
 
-
   const blocks: Block[] = [];
 
   // 1. Reasoning block first (matches live emission order).

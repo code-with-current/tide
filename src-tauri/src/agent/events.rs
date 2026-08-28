@@ -7,8 +7,11 @@
 //! The engine's streaming subset arrives here wrapped by the orchestrator;
 //! tool-result / permission / retry / error / turn_end are orchestrator-only
 //! and defined here directly. Optional renderer extras the orchestrator
-//! does not produce at the top level (`blocks` on turn_end — the renderer's
-//! reducer builds blocks from the streamed deltas) are deliberately absent;
+//! does not produce at the top level (`blocks` on turn_end — the TS backend
+//! computed them main-side via finalizeBlocks; the Rust orchestrator streams
+//! the same deltas instead, and the renderer's turn_end handler falls back
+//! to its live reducer-built block list when the event omits `blocks`) are
+//! deliberately absent;
 //! `parentToolCallId` IS produced — dispatch children mirror their stream
 //! into the parent's session tagged with the dispatch tool call id.
 
@@ -268,7 +271,7 @@ pub enum ChatPush {
     TodosUpdated {
         event: tide_tools::TodosUpdated,
     },
-    /// Terminal domain pushes (M4 T5): one coalesced output batch with its
+    /// Terminal domain pushes: one coalesced output batch with its
     /// scrollback seq, the child's exit, and dev-server port-set changes.
     /// Flat payloads — the bridge hands them straight to the renderer's
     /// setTerminal*Callback seams.
@@ -288,18 +291,18 @@ pub enum ChatPush {
         terminal_id: String,
         ports: Vec<crate::terminal::ports::TerminalPortWire>,
     },
-    /// MCP pool status ping (M4 T6) — the TS `mcpEvents` push: payload is
+    /// MCP pool status ping — the TS `mcpEvents` push: payload is
     /// just `{ kind: 'statusChanged' }`, the panel re-fetches via `mcpList`.
     #[serde(rename = "mcpEvents")]
     McpStatus { event: McpStatusEvent },
-    /// RAG domain pushes (M4 T7): one message carrying both TS progress
+    /// RAG domain pushes: one message carrying both TS progress
     /// channels (init + download), discriminated by `kind`.
     #[serde(rename = "ragProgress")]
     RagProgress { message: RagProgressMessage },
-    /// Knowledge-sources ingestion progress (M4 T7).
+    /// Knowledge-sources ingestion progress.
     #[serde(rename = "sourcesProgress")]
     SourcesProgress { event: tide_rag::SourceProgressEvent },
-    /// Workspace-scripts pushes (M4 T7) — streamed output lines, exit, and
+    /// Workspace-scripts pushes — streamed output lines, exit, and
     /// detected dev-server ports (payload = the old tide:script:* shapes).
     #[serde(rename = "scriptOutput")]
     ScriptOutput { event: ScriptOutputEvent },
@@ -307,10 +310,18 @@ pub enum ChatPush {
     ScriptExit { event: ScriptExitEvent },
     #[serde(rename = "scriptPorts")]
     ScriptPorts { event: ScriptPortsEvent },
+    /// Updater status snapshot — the TS `updateStatus` RPC push: payload is
+    /// the reduced `UpdateStatusWire` snapshot (shared/rpc.ts), pushed by
+    /// the updater's consent state machine on every phase transition and
+    /// forwarded from `chat_attach_channel`'s updater subscription.
+    #[serde(rename = "updateStatus")]
+    UpdateStatus {
+        status: crate::commands::updater::UpdateStatusWire,
+    },
 }
 
 /// `RagProgressMessage` (shared/rpc.ts) — the discriminated wrapper for
-/// the two Electron progress channels.
+/// the two progress channels.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum RagProgressMessage {
@@ -403,8 +414,9 @@ impl McpStatusEvent {
     }
 }
 
-/// Port of `formatArgPreview` for the core five (`app/core/agent/tools/types.ts`
-/// @ 91ec558) — the short human preview on tool_call events and cards.
+/// Port of `formatArgPreview` for the core five
+/// (`app/core/agent/tools/types.ts`) — the short human preview on tool_call
+/// events and cards.
 pub fn format_arg_preview(tool_name: &str, args: &Value) -> String {
     let arg = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default();
     let in_path = || {
@@ -531,6 +543,12 @@ mod tests {
         assert_eq!(wire["timeline"][1]["toolIndex"], serde_json::json!(0));
         assert_eq!(wire["usage"]["calls"], serde_json::json!(1));
         assert!(wire.get("reasoning").is_none());
+        // Contract pin: the Rust turn_end never carries `blocks` — the
+        // renderer freezes its live reducer-built block list instead (see
+        // the module header). A partial re-introduction here would split
+        // the freeze path in two; add the field + the renderer precedence
+        // together or not at all.
+        assert!(wire.get("blocks").is_none());
     }
 
     #[test]

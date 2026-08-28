@@ -1,4 +1,4 @@
-//! glob — port of `app/core/agent/tools/glob.ts` (91ec558). Find files by
+//! glob — port of `app/core/agent/tools/glob.ts` (). Find files by
 //! pattern (`*`, `**`, `?`, `[abc]`), capped at 200 results, ignoring the
 //! common build/dependency dirs. Returns workspace-relative, forward-slash
 //! paths.

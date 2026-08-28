@@ -1,25 +1,14 @@
 /** Auto-follow scroll hook for the chat timeline.
  *
- *  Adapted from an MIT-licensed upstream (see THIRD_PARTY_NOTICES.md): `packages/ui/src/hooks/useChatAutoFollow.ts`
- *  (MIT), adapted to Tide: the viewport-anchor store, Capacitor keyboard
- *  choreography, freshness detector, and turn scroll-spy don't apply here.
- *
- *  The model is deliberately simple, which is what makes it flicker-free:
- *
  *  - Auto-follow is on unless the user scrolled up (`released`), AND passive
  *    following only acts while the session is active (streaming, plus a short
- *    settle window). When idle, content-size changes are layout churn
- *    (virtualizer re-measurement, async tool/code rendering) rather than live
- *    growth, so the hook leaves scroll alone — re-pinning then would fight the
- *    virtualizer and twitch the viewport.
+ *    settle window). When idle, content-size changes are layout churn rather
+ *    than live growth — re-pinning then would fight the virtualizer.
  *  - Following the bottom is INSTANT — `scrollTop` write inside the content
- *    ResizeObserver, which fires after layout and before paint. There is NO
- *    easing loop and NO settle burst, so there are never two writers racing
- *    for scrollTop (the root cause of the up-down bob).
+ *    ResizeObserver (after layout, before paint). No easing loop, no settle
+ *    burst: never two writers racing for scrollTop.
  *  - A short-lived "auto" marker (position + TTL) lets the scroll handler
- *    distinguish our own programmatic writes from genuine user scrolling, so
- *    a scroll event that lands at our just-written bottom never trips a false
- *    release.
+ *    distinguish our own programmatic writes from genuine user scrolling.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';

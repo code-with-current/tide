@@ -1,5 +1,5 @@
 //! Background shell registry — port of `app/core/agent/tools/background-shell.ts`
-//! (91ec558). Long-running commands (dev servers, watchers) spawned by the
+//! (). Long-running commands (dev servers, watchers) spawned by the
 //! bash tool with `background:true` live here, keyed by shell id. Output is a
 //! capped ring buffer (256 KB) with a per-shell read cursor so `bash_output`
 //! returns incremental stdout+stderr; `kill_shell` SIGTERMs the process group

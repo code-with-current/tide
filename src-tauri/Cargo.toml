@@ -23,8 +23,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-window-state = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
 serde.workspace = true
 serde_json.workspace = true
 tide-store = { path = "crates/tide-store" }
@@ -40,9 +43,12 @@ git2 = { version = "0.21", features = ["https"] }
 portable-pty = "0.9"
 regex = "1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+url = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+tauri = { version = "2", features = ["test"] }
+minisign = "0.7"

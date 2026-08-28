@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/GeneratedJsonResultCard.tsx.
- *  Adaptations: i18n (`useI18n`) → literal English; `copyTextToClipboard`
- *  (`@/lib/clipboard`) → `navigator.clipboard`; `Icon` from the lucide shim.
- *  Structure otherwise ported verbatim. */
-
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '../../icon';

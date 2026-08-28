@@ -1,0 +1,14 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "",
+        "width": 1200,
+        "height": 800,
+        "titleBarStyle": "Overlay",
+        "decorations": true,
+        "trafficLightPosition": { "x": 19, "y": 24 }
+      }
+    ]
+  }
+}

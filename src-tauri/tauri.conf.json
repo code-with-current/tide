@@ -10,14 +10,41 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Tide", "width": 1440, "height": 900, "minWidth": 960, "minHeight": 600 }],
+    "windows": [
+      {
+        "title": "Tide",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "visible": false,
+        "decorations": false,
+        "backgroundColor": "#171717"
+      }
+    ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0NkY1N0I3QjQ5NDc1NDkKUldSSmRaUzB0MWR2SkttTllHZ29sTng4ZVRWc2x3WDhTZStRaDJJOTd0RXRaYWoxVXloN1ZVRUcK",
+      "endpoints": [
+        "https://github.com/code-with-current/tide/releases/download/beta/beta.json",
+        "https://github.com/code-with-current/tide/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
   }
 }

@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { useUi } from '@/lib/stores/ui';
 import { qk, useRagDownloadProgress, useRagInitProgress } from '@/lib/queries';
 import { phaseLabel as phaseLabelLocal } from '@/components/rag/rag-index-progress';
-import { cn } from '@/lib/utils';
+import { cn, isMac } from '@/lib/utils';
 import * as api from '@/lib/api/client';
 import { toast } from '@/lib/toast';
 import type { GitRepoInfo } from '@/lib/api/client';
@@ -72,11 +72,9 @@ export function OnboardingScreen() {
           <img src={tideLogoPng} alt="" style={{ height: '500%', objectFit: 'contain' }} />
         </div>
 
-
         {/* Content */}
         <div className="relative z-10 flex flex-col h-full p-12">
           {/* Brand */}
-
 
           {/* Hero — center */}
           <div
@@ -146,9 +144,7 @@ export function OnboardingScreen() {
   );
 }
 
-// =============================================================
-// STEP 1: Provider
-// =============================================================
+// ── STEP 1: Provider ──
 
 function ProviderStep({
   onNext, setSelectedModel,
@@ -156,8 +152,12 @@ function ProviderStep({
   onNext: () => void;
   setSelectedModel: (providerId: string, modelId: string) => void;
 }) {
+  const isFullScreen = useUi((s) => s.isFullScreen);
   return (
     <div className="flex flex-col h-full" style={{ animation: 'fadeIn 0.3s ease-out' }}>
+      {/* Spacer clearing the native macOS traffic lights (top-left, 12,12).
+          Collapses to zero while fullscreen — the buttons hide there. */}
+      {isMac && !isFullScreen && <div className="flex-shrink-0 h-7" />}
       <div className="md:hidden flex items-center gap-2 px-6 pt-4">
         <LogoText size={35} />
       </div>
@@ -177,9 +177,7 @@ function ProviderStep({
   );
 }
 
-// =============================================================
-// STEP 2: Workspace
-// =============================================================
+// ── STEP 2: Workspace ──
 
 function WorkspaceStep({
   onBack, onSkip, onComplete, qc,
@@ -693,15 +691,11 @@ function WorkspaceStep({
         />
       </div>
 
-
-
     </div>
   );
 }
 
-// =============================================================
-// Shared components
-// =============================================================
+// ── Shared components ──
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

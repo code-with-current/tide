@@ -1,5 +1,5 @@
 //! `dispatch_agent` — port of `app/core/agent/tools/dispatch-agent.ts`
-//! @ 91ec558. The tool's *spec* lives here (schema byte-matches the
+//!. The tool's *spec* lives here (schema byte-matches the
 //! fixtures entry, name enum from the catalog); the *body* cannot —
 //! spawning a child turn needs the orchestrator (engine stream, hub,
 //! permission inheritance). The orchestrator intercepts the call by name

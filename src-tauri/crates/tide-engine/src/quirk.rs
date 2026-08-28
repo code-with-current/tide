@@ -1,5 +1,5 @@
 //! Provider quirk layer — param computation ported verbatim from the TS
-//! adapter stack (`git show 91ec558:app/core/agent/protocols/`:
+//! adapter stack (`app/core/agent/protocols/`:
 //! `reasoning.ts` + `anthropic.ts` + `openai.ts` + `tool-input-repair.ts`)
 //! and validated against the M0 SSE fixtures (`fixtures/sse/`).
 //!

@@ -3,7 +3,6 @@ import { cn } from '@/lib/utils';
 import tideLogoUrl from '@/assets/tide-logo.png';
 import tideTextUrl from '@/assets/tide-text.png';
 
-
 export type ChipTone = 'default' | 'accent' | 'ok' | 'warn' | 'bad' | 'info' | 'reason' | 'openai' | 'anthropic';
 
 const chipToneClass: Record<ChipTone, string> = {
@@ -116,7 +115,6 @@ export function Logo({ size = 24 }: { size?: number }) {
     />
   );
 }
-
 
 export function LogoText({ size = 24 }: { size?: number }) {
   return (

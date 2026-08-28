@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdown-worker.ts.
- *  Adaptation: worker instantiation uses the Vite URL pattern
- *  (`new Worker(new URL('./markdown-shiki.worker.ts', import.meta.url), { type: 'module' })`)
- *  instead of upstream's `?worker&url` import — Tide's Vite build resolves the
- *  worker from the module graph that way. The worker/protocol contract itself
- *  is unchanged. */
 import {
   contentFingerprint,
   estimateTokenRunsBytes,

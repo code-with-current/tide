@@ -1,5 +1,5 @@
-//! Workspace-scripts commands (M4 T7) — port of `app/rpc/scripts.ts` @
-//! 91ec558: spawns scripts through `/bin/sh -c` in the workspace root,
+//! Workspace-scripts commands — port of `app/rpc/scripts.ts`:
+//! spawns scripts through `/bin/sh -c` in the workspace root,
 //! streams stdout/stderr lines and detected dev-server ports via the
 //! scriptOutput/scriptExit/scriptPorts pushes, keeps a 500-line scrollback
 //! buffer per process, and SIGTERMs the process group on stop (SIGKILL

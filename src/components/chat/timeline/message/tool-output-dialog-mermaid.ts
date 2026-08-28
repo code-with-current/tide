@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/toolOutputDialogMermaid.ts.
- *  Adaptation: i18n types (`I18nKey`/`I18nParams`) are stripped —
- *  `MermaidLoadFailure.key` now carries the literal English message (upstream
- *  key `chat.toolOutputDialog.mermaid.dataUrlMalformed` → same text). Logic
- *  otherwise ported verbatim (re-indented 4-space to 2-space). */
-
 export class MermaidLoadFailure extends Error {
   key: string;
 

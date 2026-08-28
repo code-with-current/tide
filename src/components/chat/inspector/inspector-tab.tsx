@@ -267,15 +267,9 @@ function autonomyLabel(mode: Session['autonomyMode']) {
   );
 }
 
-// =============================================================
-// Review section removed — permission prompts now render as a floating card
-// above the composer (FloatingPermissionCard in MainScreen).
-// =============================================================
+// ── Review section removed — permission prompts now render as a floating card above the composer (FloatingPermissionCard in MainScreen). ──
 
-// =============================================================
-// "Open Changes" header button — switches to the Git Panel tab.
-// addTab is idempotent: creates the tab if absent, then activates it.
-// =============================================================
+// ── "Open Changes" header button — switches to the Git Panel tab. addTab is idempotent: creates the tab if absent, then activates it. ──
 
 /** Brand tile for the session's provider — same treatment as the model
  *  picker's rail tiles (preset accent bg when branded, neutral otherwise). */
@@ -337,10 +331,7 @@ function OpenChangesButton({ sessionId, changed }: { sessionId: string; changed:
   );
 }
 
-// =============================================================
-// Context window detail section — the per-class breakdown. Collapsed by
-// default; the hero carries the summary meter.
-// =============================================================
+// ── Context window detail section — the per-class breakdown. Collapsed by default; the hero carries the summary meter. ──
 
 const CONTEXT_WARN_PCT = 80;
 
@@ -520,9 +511,7 @@ function ContextWindowDetailSection({ session }: { session: Session }) {
   );
 }
 
-// =============================================================
-// Memory & RAG section — with Re-Index header action.
-// =============================================================
+// ── Memory & RAG section — with Re-Index header action. ──
 
 function MemoryRagSection({ session }: { session: Session }) {
   const { data, isLoading: statusLoading } = useRagStatus(session.workspaceId ?? null);

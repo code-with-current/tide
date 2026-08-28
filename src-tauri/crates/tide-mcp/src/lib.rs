@@ -1,5 +1,5 @@
 //! tide-mcp — MCP client pool, lifecycle, OAuth and dynamic tool bridging
-//! on rmcp 3. Port of `app/core/agent/mcp/` @ 91ec558:
+//! on rmcp 3. Port of `app/core/agent/mcp/`:
 //! - pool/lifecycle: [`pool::McpPool`]
 //! - OAuth loopback + credential storage: [`oauth`]
 //! - dynamic tool bridging (`mcp__<server>__<tool>`): [`tools`]

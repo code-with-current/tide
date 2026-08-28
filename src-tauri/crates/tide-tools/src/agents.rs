@@ -1,4 +1,4 @@
-//! Built-in sub-agent catalog — port of `app/core/agent/agents/` @ 91ec558
+//! Built-in sub-agent catalog — port of `app/core/agent/agents/`
 //! (registry + prompts). The agent definitions ARE the renderer's prompt
 //! files (`src/lib/prompts/agents/*.md`, HTML-comment frontmatter + body),
 //! include_str!'d straight from the renderer tree so the catalog can never

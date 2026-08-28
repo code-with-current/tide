@@ -1,4 +1,4 @@
-//! read_file — port of `app/core/agent/tools/read-file.ts` (91ec558).
+//! read_file — port of `app/core/agent/tools/read-file.ts` ().
 //! Reads a file from the workspace (sandboxed; skill-root fallback for
 //! `~/.claude`/`~/.agent`/`~/.zcode` entries), capped at 256 KB / 2000
 //! lines (maxLines overridable).

@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/assistantTextVisibility.ts.
- *  Pure predicates — ported verbatim (re-indented 4-space to 2-space). */
-
 export const resolveAssistantDisplayText = (input: {
   textContent: string;
   throttledTextContent: string;

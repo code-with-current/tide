@@ -1,5 +1,5 @@
 //! Knowledge sources — port of `app/core/knowledge/{types,store,ingest,
-//! fetchers/*}.ts` @ 91ec558: the registry CRUD on the shared global index
+//! fetchers/*}.ts`: the registry CRUD on the shared global index
 //! (`<data>/knowledge/index.db`, sibling `sources` table on the same
 //! RagStore schema), the prose chunker (~1200-char paragraphs with a
 //! 100-char tail overlap), and the four fetchers (url / local docs /

@@ -1,4 +1,4 @@
-//! Path sandboxing — port of `app/core/agent/path-safety.ts` (91ec558).
+//! Path sandboxing — port of `app/core/agent/path-safety.ts` ().
 //! Resolve tool target paths against the workspace root and refuse escapes
 //! using component-wise checks (string-prefix matching is unsafe).
 //!

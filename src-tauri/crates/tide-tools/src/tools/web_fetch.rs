@@ -1,4 +1,4 @@
-//! web_fetch — port of `app/core/agent/tools/web-fetch.ts` (91ec558):
+//! web_fetch — port of `app/core/agent/tools/web-fetch.ts` ():
 //! fetch a URL and return its content as text, capped at 64 KB to bound
 //! token cost.
 //!

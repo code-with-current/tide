@@ -241,9 +241,9 @@ export function WindowTopBar() {
   return (
     <div
       ref={barRef}
+      data-tauri-drag-region
       className={cn(
-        'drag-region flex items-center gap-2 border-b border-border flex-shrink-0 overflow-hidden',
-        isMac && 'pl-[84px]',
+        'drag-region relative z-40 flex items-center gap-2 border-b border-border flex-shrink-0 overflow-hidden p-2',
       )}
       style={{ height: 40 }}
     >
@@ -281,12 +281,11 @@ export function WindowTopBar() {
 
       {/* ══ Center: drag region + git branch (centered) ══ */}
 
-
       {/* ══ Right-mid: ports + merged run/stop + scripts button group ══
           Collapses (slides left + fades) in compact mode so the essential
           right-side buttons stay visible on narrow windows. */}
       {showSessionContent && (
-        <div className="flex flex-1 min-w-0 items-center gap-1 overflow-hidden">
+        <div data-tauri-drag-region className="flex flex-1 min-w-0 items-center gap-1 overflow-hidden">
           {/* Port chips — compact glowing pills; collapse in compact mode */}
           <div
             className={cn(
@@ -431,10 +430,8 @@ export function WindowTopBar() {
       )}
 
       {/* ══ Far right: open-in-app + terminal + right panel ══ */}
-      <div className="flex items-center gap-1.5 flex-shrink-0 mr-2  z-50" style={{ paddingRight: CAPTION_PAD }}>
+      <div className="flex items-center gap-1.5 flex-shrink-0  z-50" style={{ paddingRight: CAPTION_PAD }}>
         <OpenInAppMenu />
-
-
 
         {/* Right Panel Switcher — click to switch the right panel content */}
         <ButtonGroup>

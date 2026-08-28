@@ -1,38 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/MessageBody.tsx.
- *  Largest adaptation in the port. Kept faithfully: contain-layout constants,
- *  changed-file chips, subtask/shell-action user parts, tool-reveal cache +
- *  animated-tool bookkeeping, sorted-render activity grouping, the renderedParts
- *  loop (text/reasoning/tool ordering, static-vs-expandable tool rows), and the
- *  turn footer (model/variant/agent/duration/timestamp).
- *
- *  Adaptations (each per brief ruling or the judgment rubric):
- *  - Placeholder seams (rulings 2/3) all resolved: `ToolPart` arrived in Task 4
- *    (`./parts/tool-part`, memoized export), `TurnChangedFilesDropdown` in Task 5
- *    (`../turn-changed-files-dropdown`), and `TurnActivity` in Task 6
- *    (`../components/turn-activity`, memoized export).
- *  - Permanently dropped branches (ruling 2): MessageFilesDisplay/FileAttachment,
- *    SaveProjectPlanDialog, ForkSessionDialog, useMessageTTS, useProviderLogo
- *    (footer always renders the Icon fallback), useChatSurfaceMode (surface is
- *    always 'full'), contextPanelEmbeddedChat, TTS/mobile-app/VSCode/Capacitor.
- *  - Also dropped (rubric a — OpenCode-server/app-shell features with no Tide
- *    equivalent or dep): reviewFlow transfer button + `reviewTransferDirection`
- *    prop, multirun fork launcher + ArrowsMerge, loopback message-preview button
- *    (`messagePreviewUrl` + openContextPreview), share-as-image (html-to-image is
- *    not a Tide dep), interactive changed-file pills (navigateToDiff/
- *    openContextDiff) — pills render statically until Task 8 wires navigation,
- *    and `assistantPlanText`/`suggestPlanTitleFromText` (only fed dropped
- *    features).
- *  - Store seams (ruling 6): `useEffectiveDirectory`/`useUIStore` reads become
- *    props — `directory?`, `chatRenderMode?` (default 'sorted'),
- *    `collapsibleThinkingBlocks?` (true), `showSplitAssistantMessageActions?`
- *    (true), `timeFormatPreference?` ('system').
- *  - Callback seams: `onOpenSession?` (subtask session navigation) and
- *    `onAddSelectionToChat?` (threaded to TextSelectionMenu) — later tasks wire.
- *  - `copyTextToClipboard` → `navigator.clipboard`; i18n (`useI18n`) → literal
- *    English; `Part`/`ToolPart` SDK types → Tide's `TimelinePart`/`TimelineToolPart`.
- *  - `FileTypeIcon` + `Icon` come from the lucide shim (../icon).
- */
-
 import React from 'react';
 
 import { UserTextPart } from './parts/user-text-part';
@@ -72,8 +37,8 @@ const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translate
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
 
-/** Upstream reads this from its UI store; Tide threads it as a prop (ruling 6).
- *  Upstream's AssistantTextPart prop defaults to 'live'. */
+/** Threaded as a prop; upstream read it from its UI store. AssistantTextPart
+ *  prop defaults to 'live'. */
 type ChatRenderMode = 'sorted' | 'live';
 
 /** True when a part carries visible content — stops the thinking-row dots
@@ -360,7 +325,7 @@ interface MessageBodyProps {
   footerVariant?: string;
   isDarkTheme?: boolean;
 
-  /** Store seams (ruling 6) — upstream reads these from its app stores. */
+  /** Threaded as props; upstream read these from its app stores. */
   directory?: string;
   chatRenderMode?: ChatRenderMode;
   collapsibleThinkingBlocks?: boolean;
@@ -488,7 +453,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     [hasCopyableText, isTouchContext, onCopyMessage, revealCopyHint],
   );
 
-  // Seam: upstream's `useChatSurfaceMode` is dropped (ruling 2) — surface is 'full'.
+  // Surface is always 'full' (upstream's `useChatSurfaceMode` is dropped).
   const effectiveOnFork = onFork;
   const timestamp = React.useMemo(() => {
     if (typeof messageCreatedAt !== 'number' || messageCreatedAt <= 0) return null;
@@ -1011,7 +976,7 @@ const AssistantMessageBody = React.memo(({
       : []
   ), [assistantTextParts, isMessageCompleted]);
 
-  // Seam: upstream's `useChatSurfaceMode` is dropped (ruling 2) — surface is 'full'.
+  // Surface is always 'full' (upstream's `useChatSurfaceMode` is dropped).
   const isMiniChatSurface = false;
   const canUseProjectPlanActions = !isMiniChatSurface && !isMobile;
   void canUseProjectPlanActions; // Retained for layout parity; plan actions themselves are dropped (see header).

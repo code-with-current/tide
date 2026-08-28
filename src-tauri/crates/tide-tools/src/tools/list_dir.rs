@@ -1,4 +1,4 @@
-//! list_dir — port of `app/core/agent/tools/list-dir.ts` (91ec558).
+//! list_dir — port of `app/core/agent/tools/list-dir.ts` ().
 //! Non-recursive directory listing (dirs first, alphabetical), capped at
 //! 500 entries, surfaced to the renderer as a `file_list` display.
 

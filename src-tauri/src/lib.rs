@@ -1,4 +1,5 @@
 mod agent;
+mod autostart;
 mod commands;
 mod state;
 mod terminal;
@@ -18,7 +19,7 @@ pub fn run() {
     let hub_cell = ChatHubCell::new();
     let mcp_cell = McpPoolCell::new();
     let terminal_cell = TerminalCell::new();
-    // RAG memory-tool seam (M4 T7): the process-wide index backend the
+    // RAG memory-tool seam: the process-wide index backend the
     // memory tool consults — queries resolve per-workspace against the
     // rag/ + knowledge/ indexes under the data dir.
     commands::rag::install_memory_index(app_state.data_dir());
@@ -34,15 +35,62 @@ pub fn run() {
         });
     }
     tauri::Builder::default()
+        .setup(|app| {
+            // The window starts hidden (no white flash before the splash
+            // paints); the renderer shows it on mount. This is the safety
+            // net for a renderer that never boots — never a black hole.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2500));
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // LaunchAgent over AppleScript: a plist under ~/Library/LaunchAgents
+        // is deterministic (plain file write/remove) and needs no System
+        // Events automation consent — the closest durable match to the old
+        // Electron setLoginItemSettings registration.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(app_state)
         .manage(hub_cell)
         .manage(mcp_cell)
         .manage(terminal_cell)
         .manage(SourcesState::new())
         .manage(std::sync::Arc::new(ScriptRegistry::default()))
+        .manage(std::sync::Arc::new(
+            commands::updater::UpdaterShared::new(env!("CARGO_PKG_VERSION")),
+        ))
         .setup(|app| {
+            // Apply startAtLogin from the stored config on boot (TS main.ts
+            // boot sync): the Settings toggle applies it immediately, but a
+            // reinstall or hand-edited config.json can drift the OS login
+            // item — the stored preference is authoritative. Skipped when
+            // config.json is unreadable (the settings commands surface that
+            // error); apply failures only warn.
+            {
+                let autostart = autostart::PluginAutostart::new(app.handle());
+                let desired = app.state::<AppState>().read_config(|cfg| {
+                    cfg.general_settings
+                        .clone()
+                        .unwrap_or_default()
+                        .effective()
+                        .start_at_login
+                });
+                if let Ok(desired) = desired {
+                    if let Err(e) = autostart::reconcile(&autostart, desired) {
+                        eprintln!("[tide] failed to apply startAtLogin on boot: {e}");
+                    }
+                }
+            }
             // models.dev catalog boot init (TS initModelCatalog): load the
             // bundled/cache baseline, refresh in the background when stale.
             let handle = app.handle().clone();
@@ -51,7 +99,7 @@ pub fn run() {
                 commands::model_catalog::init(&handle.state::<AppState>(), &data_dir).await;
             });
             // OAuth browser launch: MCP authorization URLs open in the
-            // system browser via the opener plugin (M4 T6) — installed on
+            // system browser via the opener plugin — installed on
             // the cell so every pool the app builds carries it.
             let opener_handle = app.handle().clone();
             app.state::<McpPoolCell>().set_url_opener(std::sync::Arc::new(
@@ -63,6 +111,9 @@ pub fn run() {
                     }
                 },
             ));
+            // Update auto-check schedule (TS CHECK_DELAY_MS + 4h interval),
+            // gated on the general autoUpdateCheck setting.
+            commands::updater::spawn_auto_check(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

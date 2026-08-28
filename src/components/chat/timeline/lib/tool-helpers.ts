@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/lib/toolHelpers.ts.
- *  Pure module — ported verbatim (tool metadata registry, language/extension
- *  maps, binary detection heuristics, input formatting). */
 export interface ToolMetadata {
   displayName: string;
   icon?: string;
@@ -189,9 +186,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
         { key: 'query', label: 'Query', type: 'text' }
       ]
     },
-
-
-
 
     plan_enter: {
       displayName: 'Plan Mode',
@@ -643,8 +637,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'diff': 'diff',
     'patch': 'diff',
 
-
-
     // Prisma
     'prisma': 'prisma',
 
@@ -657,8 +649,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     // WASM
     'wat': 'wasm',
     'wast': 'wasm',
-
-
 
     // GLSL/Shaders
     'glsl': 'glsl',

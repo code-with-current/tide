@@ -1,5 +1,5 @@
 //! Sub-agent dispatch — port of `app/core/agent/tools/dispatch-agent.ts`
-//! and `app/core/agent/agents/runtime.ts` @ 91ec558, restructured onto the
+//! and `app/core/agent/agents/runtime.ts`, restructured onto the
 //! orchestrator's own turn loop: a dispatch spawns a CHILD TURN (own v2
 //! session row with `parent_id` = the root session, own transcript) running
 //! the catalog agent's system prompt with the agent's tool subset, and
@@ -142,7 +142,7 @@ async fn run_dispatch(
         if let Some(title) = &title {
             card_args["title"] = serde_json::json!(title);
         }
-        hub.emit_agent(AgentEvent::PermissionRequired {
+        let ask_event = AgentEvent::PermissionRequired {
             session_id: emit_id.clone(),
             seq: hub.next_seq(&emit_id),
             tool_calls: vec![ToolCallWire {
@@ -162,12 +162,14 @@ async fn run_dispatch(
             }],
             timeout_at: unix_ms_now()
                 + parent_spec.permission_timeout.as_millis() as i64,
-        });
+        };
         let rx = hub.register_ask_with_mode(
             &emit_id,
             &call.tool_call_id,
             Some(Arc::clone(&parent_turn.mode)),
+            ask_event.clone(),
         );
+        hub.emit_agent(ask_event);
         let answer = tokio::time::timeout(parent_spec.permission_timeout, rx).await;
         let answer = match answer {
             Ok(Ok(answer)) => answer,

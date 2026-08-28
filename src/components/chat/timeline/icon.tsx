@@ -1,13 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/icon/Icon.tsx
- *  + icons.ts + sprite.ts. Adaptation: upstream's Icon resolves names to a
- *  global SVG sprite injected into <body> (Remixicon symbols under `#oc-<name>`).
- *  Tide has no sprite layer, so the shim maps the (small) set of icon names the
- *  ported chat/markdown files use to `lucide-react` components; unknown names
- *  render a neutral `Circle` icon instead of a broken `<use>` reference.
- *  `iconToSvgString` renders the same registry to a plain SVG string for
- *  DOM-string call sites (markdown decorate toolbar buttons), replacing
- *  upstream's sprite `<use href="#oc-...">` references.
- */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
@@ -85,7 +75,6 @@ export type IconName =
   | 'refresh'
   | 'text-wrap'
   | 'file-image'
-  // Task 3 additions (tool presentation + file-type icons):
   | 'pencil'
   | 'file-edit'
   | 'file-text'
@@ -128,18 +117,16 @@ export type IconName =
   | 'arrow-up-s'
   | 'arrow-down-s'
   | 'stack'
-  // ToolPart (Task 4) additions — nearest lucide equivalents for upstream Remixicons:
+  // Nearest lucide equivalents for upstream Remixicons:
   | 'list-unordered'
   | 'node-tree'
   | 'code-box'
-  // Cards/status rows (Task 5) additions:
   | 'question'
   | 'edit'
   | 'close-circle'
   | 'record-circle'
   | 'checkbox-circle'
   | 'arrow-up-double'
-  // ChatErrorBoundary (Task 6) additions:
   | 'chat-3'
   | 'restart';
 
@@ -152,7 +139,7 @@ const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   refresh: RefreshCw,
   'text-wrap': WrapText,
   'file-image': FileImage,
-  // Task 3 additions — nearest lucide equivalents for upstream Remixicons:
+  // Nearest lucide equivalents for upstream Remixicons:
   pencil: Pencil,
   'file-edit': FilePen,
   'file-text': FileText,
@@ -195,18 +182,15 @@ const ICON_REGISTRY: Record<IconName, React.ComponentType<LucideProps>> = {
   'arrow-up-s': ChevronUp,
   'arrow-down-s': ChevronDown,
   stack: Layers,
-  // ToolPart (Task 4) additions:
   'list-unordered': List,
   'node-tree': ListTree,
   'code-box': SquareCode,
-  // Cards/status rows (Task 5) additions:
   question: CircleHelp,
   edit: Pencil,
   'close-circle': CircleX,
   'record-circle': CircleDot,
   'checkbox-circle': CircleCheckBig,
   'arrow-up-double': ChevronsUp,
-  // ChatErrorBoundary (Task 6) additions:
   'chat-3': MessageCircle,
   restart: RotateCcw,
 };
@@ -221,11 +205,6 @@ export function Icon({ name, className, size, ...props }: IconProps) {
   return <Component aria-hidden="true" className={cn(className)} size={size} {...props} />;
 }
 
-/**
- * Ruling-5 seam: upstream `@/components/icons/FileTypeIcon` is an upstream
- * app component (not staged). This minimal replacement maps common file
- * extensions to lucide file-type icons; everything else falls back to File.
- */
 const FILE_TYPE_ICON_BY_EXTENSION: Record<string, React.ComponentType<LucideProps>> = {
   ts: FileCode,
   tsx: FileCode,

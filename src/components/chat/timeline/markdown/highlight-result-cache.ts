@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/highlightResultCache.ts.
- *  Verbatim port. */
-
 // Bounded LRU for rendered markdown / Shiki highlight results.
 //
 // Used by `markdownCore` (per-block HTML) and by the main-thread markdown

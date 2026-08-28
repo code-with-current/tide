@@ -9,7 +9,7 @@
 //! with zero orchestrator special-casing (name-keyed dispatch + the
 //! read-only `mcp__` permission tier do the rest).
 //!
-//! M4 T6 additions: a generation counter in the pool key so
+//! Additions: a generation counter in the pool key so
 //! `mcpReinitialize` can force a rebuild on an unchanged workspace; an
 //! active-workspace tracker (the TS `mcpWorkspaceActivated` slot); a
 //! status-change broadcast the chat push channel forwards to the renderer

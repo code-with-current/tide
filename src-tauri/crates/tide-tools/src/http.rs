@@ -7,7 +7,7 @@
 //! panic when called from inside any tokio context, and the orchestrator
 //! invokes tools on `spawn_blocking` threads, which carry the runtime
 //! context. Owning the runtime on a plain thread sidesteps the guard
-//! entirely. Shared by `git_repo`'s REST fast path and (M3 T4) web_fetch
+//! entirely. Shared by `git_repo`'s REST fast path and web_fetch
 //! + web_search.
 
 use std::sync::mpsc::{channel, Sender};

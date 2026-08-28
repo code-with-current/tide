@@ -1,4 +1,4 @@
-//! MCP connection pool — port of `app/core/agent/mcp/pool.ts` @ 91ec558 on
+//! MCP connection pool — port of `app/core/agent/mcp/pool.ts` on
 //! rmcp 3. User servers are app-lifetime; project servers are
 //! workspace-lifetime (the caller swaps pools on workspace switch).
 //!

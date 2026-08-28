@@ -1,5 +1,5 @@
 //! Rule-based permission rules — port of `app/core/agent/permissions/rules.ts`
-//! (91ec558). Spec format: `"ToolName(argPattern)"` — bare tool name matches
+//! (). Spec format: `"ToolName(argPattern)"` — bare tool name matches
 //! any args; `prefix`, glob (`*`/`?`/`[`) patterns match the tool's primary
 //! arg. Precedence: deny wins; allow upgrades ask→auto (never bypasses plan
 //! mode). Project rules persist in `.agents/settings.json`.

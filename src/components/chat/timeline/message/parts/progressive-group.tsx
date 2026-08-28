@@ -1,21 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/ProgressiveGroup.tsx.
- *  Adaptations:
- *  - Ruling 3: `ToolPart` comes from `./tool-part` (Task 4's port, memoized
- *    export).
- *  - Ruling 5: upstream's `Text` app component (`variant="generate-effect"`)
- *    becomes a plain `<span>` with the same classes; `stack` icon via the shim.
- *  - Store seams (ruling 6): `useDirectoryStore`/`useDirectoryStore.currentDirectory`
- *    → `directory?` prop; `useSkillsStore` skills → dropped (skill rows resolve
- *    paths from tool metadata only); `useUIStore.showToolFileIcons` → always on.
- *  - Dropped navigation branches (rubric a — OpenCode app-shell/runtime with no
- *    Tide equivalent): `RuntimeAPIContext` editor open, mobile app actions,
- *    `ensureOutsideFileGrantForDesktop`, and the UI-store openContextFile*
- *    actions. File/skill rows become plain text unless an `onOpenFile?`
- *    callback prop is provided (later tasks wire editor navigation).
- *  - SDK types → Tide's `TimelineToolPart`; i18n already literal upstream ("Activity").
- *  Aggregation, preview-window slicing, row memo comparators, and the
- *  collapsed/expanded tree structure port verbatim. */
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
@@ -58,7 +40,7 @@ interface ProgressiveGroupProps {
   animateRows?: boolean;
   animatedToolIds?: Set<string>;
   renderJustificationActions?: (activity: TurnActivityPart) => React.ReactNode;
-  /** Store seam (ruling 6) — upstream reads the working directory from its directory store. */
+  /** Working directory; upstream read it from its directory store. */
   directory?: string;
   /** Callback seam — opens a file in the editor; rows render as plain text when absent. */
   onOpenFile?: (absolutePath: string, offset?: number) => void;
@@ -575,9 +557,9 @@ const StaticToolRowInner: React.FC<{
   activities: TurnActivityPart[];
   animateTailText: boolean;
 }> = ({ toolName, activities, animateTailText }) => {
-  // Seam: upstream reads the working directory from its directory store (ruling 6);
-  // without it paths display absolute and rows are non-clickable until Task 8 wires
-  // an onOpenFile handler through StaticToolRowProps (see file header).
+  // Without a working directory paths display absolute and rows are
+  // non-clickable until an onOpenFile handler is wired through
+  // StaticToolRowProps.
   const currentDirectory: string | undefined = undefined;
   const onOpenFile = undefined as ((absolutePath: string, offset?: number) => void) | undefined;
   const showToolFileIcons = true;

@@ -1,29 +1,19 @@
-/** Virtualized history list for the chat timeline.
+/** Virtualized history list for the chat timeline. Owns ONLY virtualization
+ *  mechanics; the timeline owns row construction and content (via
+ *  `renderRowContent`).
  *
- *  Adapted from an MIT-licensed upstream (see THIRD_PARTY_NOTICES.md): `packages/ui/src/components/chat/MessageList.tsx`
- *  (MIT). Task-8 seam: the row model is rewritten from Tide's flat `Message[]`
- *  to a generic `TimelineRow[]` (divider | turn | streaming tail) computed by
- *  `chat-timeline.tsx` from the controller's turn projection. This is a
- *  Tide-side adaptation of upstream MessageList — upstream inlines turn
- *  rendering inside the list; we keep the split: this component owns ONLY
- *  virtualization mechanics, the timeline owns row construction and content
- *  (via `renderRowContent`).
- *
- *  What makes this scroll smoothly where the previous implementation didn't:
- *
- *  - `anchorTo: 'end'` — bottom anchoring lives in @tanstack/virtual-core.
- *    Prepending/remeasuring rows above the viewport does not move what the
- *    user is reading; the core owns anchor corrections, so no manual
- *    compensate-and-chase logic (and no second scrollTop writer).
+ *  What makes this scroll smoothly:
+ *  - `anchorTo: 'end'` — bottom anchoring lives in @tanstack/virtual-core;
+ *    the core owns anchor corrections, so no manual compensate-and-chase
+ *    logic (and no second scrollTop writer).
  *  - `initialOffset: Number.MAX_SAFE_INTEGER` — a freshly mounted list
- *    initializes at the bottom instead of the top, so session switches don't
- *    flash the top of history before the first pin.
- *  - Padding-based window offset (not per-row absolute positioning) keeps
- *    every row in normal flow — sticky elements and margin boxes behave like
- *    plain DOM.
+ *    initializes at the bottom, so session switches don't flash the top of
+ *    history.
+ *  - Padding-based window offset keeps every row in normal flow — sticky
+ *    elements and margin boxes behave like plain DOM.
  *  - Measurement snapshots per session (`takeSnapshot` +
  *    `initialMeasurementsCache`) restore real row heights instantly on
- *    session switch instead of re-estimating, killing estimate-flash jumps.
+ *    session switch, killing estimate-flash jumps.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';

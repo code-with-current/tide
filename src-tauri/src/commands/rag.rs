@@ -1,6 +1,6 @@
-//! RAG commands (M4 T7) — port of `app/rpc/rag.ts` @ 91ec558: status /
-//! download / enable / disable / init for the Memory & RAG panel. The two
-//! Electron progress channels ride one `ragProgress` message discriminated
+//! RAG commands — port of `app/rpc/rag.ts`: status / download / enable /
+//! disable / init for the Memory & RAG panel. The two
+//! progress channels ride one `ragProgress` message discriminated
 //! by `kind`; `ragInitWorkspace` keeps the job pattern — `{ok, startedAt}`
 //! returns immediately, ingest runs detached, `running_inits` guards
 //! re-entry, and progress/failed events arrive via the push bus.
@@ -46,6 +46,7 @@ pub struct RagOpResultWire {
 pub struct RagInitResultWire {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "startedAt")]
     pub started_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

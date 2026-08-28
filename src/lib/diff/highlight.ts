@@ -1,8 +1,8 @@
 /** Synchronous per-line syntax highlighting for diff previews.
  *
- *  Tide has no synchronous Prism/Shiki registry in the chat path — Streamdown
- *  (markdown) and the Pierre worker pool are both async and scoped to their
- *  surfaces. This tokenizer mirrors the token→palette roles of the Pierre
+ *  Tide has no synchronous Prism/Shiki registry in the chat path — the
+ *  markdown worker and the Pierre worker pool are both async and scoped to
+ *  their surfaces. This tokenizer mirrors the token→palette roles of the Pierre
  *  theme bridge (pierre-bridge.ts tokenColors) so diff previews and the file
  *  viewer agree on what each token kind looks like. */
 

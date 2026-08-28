@@ -1,4 +1,4 @@
-/** API client — the single swap point between mock data and real IPC. Uses the Electrobun RPC bridge when inside a webview, otherwise falls back to the in-memory mock store (plain browser dev). */
+/** API client — the single swap point between mock data and real IPC. Uses the Tauri RPC bridge when inside a webview, otherwise falls back to the in-memory mock store (plain browser dev). */
 
 import { rpc, setTerminalOutputCallback, setTerminalExitCallback, setTerminalPortsCallback, onMcpEvent, onRagProgress, onSourcesProgress, onWorkspaceProgress, onGitChanged as onGitChangedRpc, onTodosUpdated as onTodosUpdatedRpc, setScriptOutputCallback, setScriptExitCallback, setScriptPortsCallback } from './rpc';
 import type {
@@ -49,11 +49,7 @@ const clone = <T>(v: T): T =>
     ? structuredClone(v)
     : JSON.parse(JSON.stringify(v));
 
-// ============================================================
-// Settings (settings.json — shortcut overrides)
-// Electrobun RPC bridge; null in browser dev so the caller keeps
-// hardcoded defaults.
-// ============================================================
+// ── Settings (settings.json — shortcut overrides); null in browser dev so the caller keeps hardcoded defaults. ──
 
 export async function getSettings(): Promise<{
   overrides: Record<string, string[]>;
@@ -76,10 +72,7 @@ export async function resetShortcuts(): Promise<Record<string, string[]> | null>
   return null;
 }
 
-// ============================================================
-// File dialog + git detection (native dialogs via the Electrobun RPC
-// bridge — devkit Utils.openFileDialog; browser returns null/empty)
-// ============================================================
+// ── File dialog + git detection (native dialogs via the RPC bridge; browser returns null/empty) ──
 
 export async function pickDirectory(): Promise<string | null> {
   if (rpc) return (await rpc.request.dialogPickDirectory({})).path;
@@ -163,9 +156,7 @@ export async function addWorkspace(input: {
   };
 }
 
-// ============================================================
-// Workspaces
-// ============================================================
+// ── Workspaces ──
 
 export async function listWorkspaces(): Promise<Workspace[]> {
   if (rpc) return rpc.request.workspaceList({});
@@ -204,9 +195,7 @@ export function subscribeWorkspaceProgress(cb: (e: WorkspaceProgressEvent) => vo
   return () => {};
 }
 
-// ============================================================
-// Sessions
-// ============================================================
+// ── Sessions ──
 
 export async function listSessions(workspaceId: string): Promise<any[]> {
   if (rpc) return rpc.request.sessionList({ workspaceId });
@@ -532,16 +521,12 @@ export function subscribeEvents(_cb: (batch: FlushBatchV2) => void): () => void 
   return () => {};
 }
 
-// ============================================================
-// Chat — the turn loop (send/abort + permission & followup commands).
-// Electrobun RPC tier; no-op mock in browser dev.
-// ============================================================
+// ── Chat — the turn loop (send/abort + permission & followup commands); no-op mock in browser dev. ──
 
 export type ChatSendResult = { accepted: true } | { accepted: false; error: string };
 
-/** Start a turn. The Electrobun RPC bridge follows the job pattern: the
- *  request returns as soon as the main process accepts (or pre-flight
- *  rejects) — all streaming arrives as events. */
+/** Start a turn. The request returns as soon as the main process accepts
+ *  (or pre-flight rejects) — all streaming arrives as events. */
 export async function chatSend(payload: RunTurnPayload): Promise<ChatSendResult> {
   if (rpc) return rpc.request.chatSend(payload);
   return { accepted: true };
@@ -597,10 +582,7 @@ export function chatUpdateMode(sessionId: string, mode: 'plan' | 'ask' | 'edit' 
   }
 }
 
-// ============================================================
-// Terminals — the bottom-panel PTYs. Electrobun RPC tier; browser dev
-// has no real terminals.
-// ============================================================
+// ── Terminals — the bottom-panel PTYs; browser dev has no real terminals. ──
 
 export interface TerminalPort {
   port: number;
@@ -612,8 +594,8 @@ export type TerminalSnapshot =
   | { alive: true; data: string; seq: number }
   | { alive: false };
 
-/** True when a real terminal backend exists (Electrobun RPC) — terminal
- *  components gate instance creation on this. */
+/** True when a real terminal backend exists — terminal components gate
+ *  instance creation on this. */
 export function hasTerminalBackend(): boolean {
   return Boolean(rpc);
 }
@@ -689,11 +671,7 @@ export function subscribeTerminalEvents(handlers: TerminalEventHandlers): void {
   }
 }
 
-// ============================================================
-// MCP (mcp.json / .mcp.json) — server management + connection status.
-// Electrobun RPC first, browser mock last (empty pool — the settings
-// panel renders its empty state).
-// ============================================================
+// ── MCP (mcp.json / .mcp.json) — server management + connection status; browser mock last (empty pool — the settings panel renders its empty state). ──
 
 export async function mcpList(workspaceId?: string): Promise<McpServerStatus[]> {
   if (rpc) return rpc.request.mcpList({ workspaceId });
@@ -806,9 +784,7 @@ export function subscribeMcpStatus(callback: () => void): () => void {
   return () => {};
 }
 
-// ============================================================
-// Providers & models — Electrobun RPC first, browser mock last.
-// ============================================================
+// ── Providers & models — RPC first, browser mock last. ──
 
 export async function listProviders(): Promise<Provider[]> {
   if (rpc) return rpc.request.providerList({});
@@ -925,9 +901,7 @@ export async function providerUsageReport(providerId: string): Promise<ProviderU
   return null;
 }
 
-// ============================================================
-// File explorer
-// ============================================================
+// ── File explorer ──
 
 export async function getFileTree(_workspaceId: string): Promise<typeof fileTree> {
   if (rpc) return rpc.request.fileTreeGet({ workspaceId: _workspaceId });
@@ -935,9 +909,7 @@ export async function getFileTree(_workspaceId: string): Promise<typeof fileTree
   return clone(fileTree);
 }
 
-// ============================================================
-// Workspace context (for system prompt)
-// ============================================================
+// ── Workspace context (for system prompt) ──
 
 export async function getWorkspaceContext(workspaceId: string): Promise<string> {
   if (rpc) return rpc.request.workspaceContextGet({ workspaceId });
@@ -952,7 +924,7 @@ export interface EnvInfo {
   /** Login shell the bash tool wraps commands in ($SHELL on Unix, ComSpec on Windows). */
   shell: string;
   /** True while saved provider keys await migration off the legacy Electron
-   *  safeStorage encryption (carried over from pre-Electrobun installs). */
+   *  safeStorage encryption. */
   keysNeedMigration?: boolean;
 }
 
@@ -991,9 +963,7 @@ export async function readFileInWorkspace(
   return null;
 }
 
-// ============================================================
-// Terminal seed (mock)
-// ============================================================
+// ── Terminal seed (mock) ──
 
 export async function getTerminalLines(_sessionId: string): Promise<typeof terminalLines> {
   if (rpc) return [];
@@ -1001,10 +971,7 @@ export async function getTerminalLines(_sessionId: string): Promise<typeof termi
   return clone(terminalLines);
 }
 
-// ============================================================
-// Workspace scripts — output/exit/ports pushes ride the RPC
-// scriptOutput/scriptExit/scriptPorts messages.
-// ============================================================
+// ── Workspace scripts — output/exit/ports pushes ride the RPC scriptOutput/scriptExit/scriptPorts messages. ──
 
 export async function runScript(workspaceId: string, command: string): Promise<{ ok: boolean; pid?: number; reason?: string }> {
   if (rpc) return rpc.request.scriptRun({ workspaceId, command });
@@ -1079,9 +1046,7 @@ export async function deleteWorkspace(id: string): Promise<{ ok: boolean; error?
   return { ok: false, error: 'no backend' };
 }
 
-// ============================================================
-// Git
-// ============================================================
+// ── Git ──
 
 export interface GitFileChange {
   path: string;
@@ -1264,9 +1229,7 @@ export async function gitDiscardFile(workspaceId: string, filePath: string, sess
   return { ok: false, error: 'IPC unavailable' };
 }
 
-// ============================================================
-// RAG status (Memory & RAG panel)
-// ============================================================
+// ── RAG status (Memory & RAG panel) ──
 
 /** Read-only RAG status snapshot. Returns {error} on main-process failure
  *  or when IPC isn't available (browser dev mode). */
@@ -1316,9 +1279,7 @@ export function subscribeRagDownloadProgress(cb: (e: RagDownloadProgressEvent) =
   return () => {};
 }
 
-// ============================================================
-// Knowledge sources (settings → Knowledge)
-// ============================================================
+// ── Knowledge sources (settings → Knowledge) ──
 
 export interface SourcesListResult {
   sources: KnowledgeSource[];
@@ -1374,9 +1335,7 @@ export function subscribeSourcesProgress(cb: (e: SourceProgressEvent) => void): 
   return () => {};
 }
 
-// ============================================================
-// macOS permissions (consent screen) — no-op on non-mac.
-// ============================================================
+// ── macOS permissions (consent screen) — no-op on non-mac. ──
 
 export type PermissionStatus = {
   platform: 'mac' | 'other';
@@ -1402,10 +1361,7 @@ export async function shouldShowConsent(): Promise<boolean> {
   return false;
 }
 
-// ============================================================
-// Settings (agent + general), shell ops, extensions, open-in-app,
-// window queries — the 3.7 catch-all surface.
-// ============================================================
+// ── Settings (agent + general), shell ops, extensions, open-in-app, window queries — the 3.7 catch-all surface. ──
 
 export interface AgentSettings {
   defaultAutonomy: string;
@@ -1451,11 +1407,7 @@ export async function updateGeneralSettings(patch: Partial<GeneralSettings>): Pr
   return null;
 }
 
-// ============================================================
-// Updater (Electrobun Updater behind the RPC bridge — 3.7 residue
-// migration. Browser fallbacks are inert so the pill/settings keep
-// their idle renderings.)
-// ============================================================
+// ── Updater (behind the RPC bridge; browser fallbacks are inert so the pill/settings keep their idle renderings) ──
 
 export async function getUpdaterStatus(): Promise<UpdateStatusWire | null> {
   if (rpc) return (await rpc.request.updaterStatus({})).status;
@@ -1546,8 +1498,8 @@ export async function openInApp(
   return { ok: false, error: 'IPC unavailable' };
 }
 
-/** Query the native fullscreen state (initial value only — the devkit has
- *  no fullscreen-transition push, so the renderer keeps the queried value
+/** Query the native fullscreen state (initial value only — there is no
+ *  fullscreen-transition push, so the renderer keeps the queried value
  *  until the next query). */
 export function minimizeWindow(): void {
   void rpc?.request.windowMinimize({});

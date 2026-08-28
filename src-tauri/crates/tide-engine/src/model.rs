@@ -1,4 +1,4 @@
-//! Provider construction — TS `resolveModel` (`91ec558:provider-factory.ts`)
+//! Provider construction — TS `resolveModel` (`provider-factory.ts`)
 //! ported onto rig's clients.
 //!
 //! Anthropic-protocol: rig posts to `{base_url}/v1/messages` and strips any

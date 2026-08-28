@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/PlainDiffFallback.tsx.
- *  Pure presentational — ported verbatim (re-indented 4-space to 2-space). */
-
 import React from 'react';
 
 /**

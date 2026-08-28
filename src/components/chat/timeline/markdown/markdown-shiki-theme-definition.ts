@@ -1,17 +1,8 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdownShikiThemeDefinition.ts.
- *  Verbatim port. */
-
-// Static, CSS-variable-driven Shiki theme definition.
-//
 // Token colors reference CSS custom properties (`--md-syntax-*`) instead of
-// concrete colors, so a highlighted code block does NOT need to be re-tokenized
-// when the app theme changes — only the CSS variables on the markdown container
-// update, and the browser repaints. This mirrors OpenCode's `var(--syntax-*)`
-// theme approach and keeps highlighting results cacheable across theme switches.
-//
-// This module is intentionally dependency-free (no `@pierre/diffs`, no React) so
-// it can be imported from inside the Shiki Web Worker bundle without dragging in
-// main-thread-only modules.
+// concrete colors, so highlighted blocks are NOT re-tokenized on theme change —
+// only the CSS variables update, keeping results cacheable across theme switches.
+// Dependency-free (no `@pierre/diffs`, no React) so the Shiki Web Worker can
+// import it without dragging in main-thread-only modules.
 
 export const MARKDOWN_SHIKI_THEME = 'tide-md';
 

@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/hooks/useStreamingTextThrottle.ts.
- *  Self-contained React hook, pulled forward from Task 6. Ported faithfully
- *  (only re-indented 4-space → 2-space per Tide convention). */
-
 import React from 'react';
 
 interface UseStreamingTextThrottleInput {

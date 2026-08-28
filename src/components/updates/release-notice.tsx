@@ -90,7 +90,7 @@ function ChangelogArea({ version, fill }: { version: string; fill?: boolean }) {
 
 /** Compact phase-driven progress strip (settings inline + progress dialog
  *  reuse the same shape). Determinate via the shadcn Progress primitive
- *  when the devkit reports bytes; indeterminate pulse otherwise. */
+ *  when the backend reports bytes; indeterminate pulse otherwise. */
 function DownloadProgress({ status }: { status: UpdateStatusWire }) {
   const percent = status.percent;
   const determinate = typeof percent === 'number';

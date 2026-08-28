@@ -1,4 +1,4 @@
-//! MCP commands — the management-panel surface (M4 T6, the TS
+//! MCP commands — the management-panel surface (the TS
 //! `app/rpc/mcp.ts` port): status rows, config CRUD (user scope in
 //! config.json's top-level `mcpServers`, project scope in the workspace's
 //! `.mcp.json`), the import scanner, the `mcp-secrets.json` store, the

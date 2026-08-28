@@ -1,4 +1,4 @@
-//! multi_edit — port of `app/core/agent/tools/multi-edit.ts` (91ec558).
+//! multi_edit — port of `app/core/agent/tools/multi-edit.ts` ().
 //! Applies an ordered batch of string-replacement edits to one file
 //! atomically: every edit is validated/applied against the in-memory text
 //! and the file is written once at the end, so any failing edit index

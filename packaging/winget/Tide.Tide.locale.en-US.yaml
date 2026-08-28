@@ -20,7 +20,7 @@ Tags:
   - ai
   - agent
   - coding
-  - electron
+  - tauri
 ReleaseNotesUrl: https://github.com/code-with-current/tide/releases/tag/v@@VERSION@@
 ManifestType: defaultLocale
 ManifestVersion: 1.10.0

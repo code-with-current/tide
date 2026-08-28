@@ -1,29 +1,11 @@
-# CI — runs on every push to master and every PR.
-#
-# Why this exists: green main is a P0. Before this workflow the only CI was
-# release.yml, which fires on v* tags — so a broken main could sit for
-# days and only surface at release time. This gates the default branch on the
-# cheap, fast checks so a red main is visible immediately, not at the next
-# release.
-#
-# Two jobs:
-#   verify — renderer: bun install → prompt bundles → tsc -b → oxlint → vitest.
-#   rust   — src-tauri workspace: cargo test + clippy -D warnings on the Linux
-#            webkit deps the workspace links against.
-#
-# Toolchain intentionally mirrors release.yml (bun + stable Rust) so a push
-# build and a release build can never disagree about the environment.
-# setup-bun caches ~/.bun keyed on bun.lock automatically; Swatinem/rust-cache
-# keys on src-tauri/Cargo.lock.
-#
-# `node build/promptMarkdownUtils.mjs` is not optional: it generates the
-# gitignored src/lib/prompts/_*-bundle.ts files that `tsc -b` resolves —
-# without them the typecheck can't even load the prompts project.
+# CI — PRs + pushes to dev/master. verify (renderer) + rust (workspace)
+# + versions (single-source version check). The prompt-bundle step generates
+# the gitignored _*-bundle.ts files tsc resolves.
 name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   pull_request:
 
 permissions:
@@ -34,6 +16,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  versions:
+    name: version files agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: node build/sync-version.mjs --check
+
   verify:
     name: lint · typecheck · test
     runs-on: ubuntu-latest

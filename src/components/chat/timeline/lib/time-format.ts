@@ -1,10 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/lib/timeFormat.ts.
- *  Adaptation per task ruling: i18n (`getCurrentIntlLocale`) and the
- *  `TimeFormatPreference` UI-store setting are stripped — locale resolves from
- *  `Intl` directly and `hour12` stays undefined (host default format). The
- *  `preference` parameter is retained in the signatures so callers port
- *  unchanged and a Tide setting can be threaded through later. */
-
 type TimePrecision = 'minute' | 'second';
 
 /** Upstream store preference type, vendored: Tide has no equivalent store yet. */

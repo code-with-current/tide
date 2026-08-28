@@ -32,10 +32,7 @@ import type { Workspace } from "@/types";
 import { cn } from "@/lib/utils";
 import { Tip } from "@/components/ui/quick-tooltip";
 
-
-// =============================================================
-// SIDEBAR ROW — one workspace in the list with right-click context menu (Archive / Unarchive / Delete). Rename selects the workspace; hooks live here per row.
-// =============================================================
+// ── SIDEBAR ROW — one workspace in the list with right-click context menu (Archive / Unarchive / Delete). Rename selects the workspace; hooks live here per row. ──
 
 export function WorkspaceListRow({
   workspace,

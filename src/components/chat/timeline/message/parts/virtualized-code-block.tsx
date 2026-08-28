@@ -1,18 +1,9 @@
 /**
- * VirtualizedCodeBlock — PERF-007
- *
- * Renders large code/read outputs without mounting one highlighter per line:
- *   1. ONE worker tokenization of the whole block (off the main thread)
- *   2. @tanstack/react-virtual to only render visible rows
- *
- * Tokenizing the whole block at once also preserves cross-line syntax context
- * (multi-line strings/comments) that per-line highlighting loses. Colors resolve
- * through the `--md-syntax-*` CSS variables on the container.
- *
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/VirtualizedCodeBlock.tsx.
- *  Adaptation: `useThemeSystem` → the next-themes `resolveDark` pattern (Task 2
- *  convention); worker hook + syntax vars point at Tide's ported
- *  `../../code/use-worker-highlighted-lines` / `../../markdown/markdown-syntax-vars`.
+ * Renders large code/read outputs with ONE worker tokenization of the whole
+ * block plus @tanstack/react-virtual row windowing. Whole-block tokenization
+ * preserves cross-line syntax context (multi-line strings/comments) that
+ * per-line highlighting loses. Colors resolve through the `--md-syntax-*`
+ * CSS variables on the container.
  */
 
 import React from 'react';

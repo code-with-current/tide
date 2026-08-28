@@ -4,6 +4,7 @@ import { useUi } from '@/lib/stores/ui';
 import { useProviders, useWorkspaces } from '@/lib/queries';
 import * as api from '@/lib/api/client';
 import { getRuntimeInfo, type RuntimeInfo } from '@/lib/api/rpc';
+import { adoptHostPlatform } from '@/lib/utils';
 import { Spinner } from '../ui/spinner';
 import tideLogoUrl from '@/assets/tide-logo.png';
 import { Badge } from '../ui/badge';
@@ -25,11 +26,24 @@ export function SplashScreen() {
   // tide_ping roundtrip through the Rust shell. Null outside the Tauri webview
   // (plain browser dev) — no badge there. Logged once for log-based boot checks.
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
+  // The native window starts hidden (tauri.conf `visible: false`) so the
+  // app never flashes white before the splash paints — show it now.
+  useEffect(() => {
+    if (typeof globalThis.__TAURI_INTERNALS__ === 'undefined') return;
+    import('@tauri-apps/api/window')
+      .then(({ getCurrentWindow }) => getCurrentWindow().show())
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     getRuntimeInfo()
       .then((info) => {
         if (!info) return;
         console.info('[tide] runtime:', info);
+        // The host OS is the platform truth (isMac drives the traffic-light
+        // spacer vs the Windows/Linux controls trio); navigator was the
+        // pre-handshake fallback.
+        adoptHostPlatform(info.os);
         setRuntime(info);
       })
       .catch(() => {});
@@ -139,7 +153,6 @@ export function SplashScreen() {
       <div className="flex flex-col items-center gap-4 mt-4">
         <Spinner className='size-8 text-primary' />
       </div>
-
 
       <Badge variant="outline" className="absolute bottom-8">
         <span>v{version}</span>

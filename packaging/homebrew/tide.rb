@@ -1,28 +1,24 @@
-# Homebrew Cask for Tide.
+# Homebrew Cask for Tide (published to our own tap,
+# code-with-current/homebrew-tap, by .github/workflows/release-pkgs.yml).
 #
-# First-time submission: PR this file to homebrew/homebrew-cask as
-# Casks/t/tide.rb (https://github.com/Homebrew/homebrew-cask). Run
-# `brew audit --cask tide` and `brew style Casks/t/tide.rb` locally first.
-#
-# After the cask is merged, subsequent releases are bumped automatically by
-# .github/workflows/release-pkgs.yml (`brew bump-cask-pr`).
-#
-# Markers filled by packaging/render.mjs: VERSION, SHA256_ARM64.
+# Markers filled by packaging/render.mjs: VERSION, SHA256_ARM64, SHA256_X64.
 
 cask "tide" do
   version "@@VERSION@@"
 
-  sha256 "@@SHA256_ARM64@@"
-
-  url "https://github.com/code-with-current/tide/releases/download/v#{version}/Tide-#{version}-arm64.dmg"
+  on_arm do
+    url "https://github.com/code-with-current/tide/releases/download/v#{version}/Tide_#{version}_aarch64.dmg"
+    sha256 "@@SHA256_ARM64@@"
+  end
+  on_intel do
+    url "https://github.com/code-with-current/tide/releases/download/v#{version}/Tide_#{version}_x64.dmg"
+    sha256 "@@SHA256_X64@@"
+  end
   name "Tide"
   desc "Local-first agentic coding companion"
   homepage "https://tide.codes/"
 
-  # mac builds are arm64-only (no x64 dmg is published), so gate the cask
-  # on Apple Silicon instead of an on_intel fallback.
   depends_on :macos
-  depends_on arch: :arm64
 
   # The .app is ad-hoc signed (no Apple Developer ID), so users see an
   # "unidentified developer" prompt on first launch. homebrew passes

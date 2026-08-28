@@ -1,12 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdownCore.ts.
- *  Adaptation: upstream app-link/agent/skill mention link handling
- *  (`@/lib/messages/inlineMessageLinks`, `@/lib/url` isAppLinkUrl) is dropped —
- *  Tide has no app-link runtime — so the marked `link` renderer emits a plain
- *  sanitized external link for every href; the DOMPurify hook keeps only
- *  local file: URLs as a special case. The VSCode line-limit branch is removed
- *  (desktop-only limit applies). DOMPurify sanitizes with html/mathMl/svg
- *  profiles as upstream. `katex` styles must be loaded by the app shell.
- */
 import { Marked, marked, type Tokens } from 'marked';
 import remend from 'remend';
 import katex from 'katex';

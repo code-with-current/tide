@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/timeFormat.ts.
- *  Adaptation: i18n (`getCurrentIntlLocale`, `useI18nStore` + `formatMessage`)
- *  replaced with literal English ("Yesterday, {time}") and `Intl`-resolved
- *  locale; `TimeFormatPreference` comes from Tide's ported `../lib/time-format`
- *  instead of the upstream UI store. Logic otherwise unchanged. */
-
 import { formatTimeForPreference, type TimeFormatPreference } from '../lib/time-format';
 
 const isSameDay = (left: Date, right: Date): boolean => {

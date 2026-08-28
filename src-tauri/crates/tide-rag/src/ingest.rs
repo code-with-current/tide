@@ -1,5 +1,5 @@
-//! Workspace ingestion pipeline — port of `app/core/rag/ingest.ts` @
-//! 91ec558: walk → chunk (tree-sitter) → embed in batches → write to
+//! Workspace ingestion pipeline — port of `app/core/rag/ingest.ts`:
+//! walk → chunk (tree-sitter) → embed in batches → write to
 //! RagStore. Content-hash dedupe skips unchanged chunks; the walk filters
 //! skip-dirs, hidden dirs (except `.agent`), the worktree subtree, and
 //! nested `.gitignore` rules.

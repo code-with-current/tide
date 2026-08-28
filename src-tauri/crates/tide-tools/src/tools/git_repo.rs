@@ -1,4 +1,4 @@
-//! git_repo — port of `app/core/agent/tools/git-repo.ts` (91ec558):
+//! git_repo — port of `app/core/agent/tools/git-repo.ts` ():
 //! read-only access to any git repository — remote URL or local path —
 //! without cloning into the workspace.
 //!

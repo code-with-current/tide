@@ -40,12 +40,30 @@ function App() {
 
   // Native fullscreen state — collapses the macOS traffic-light spacer in the
   // sidebars/settings. Invoke covers the initial state (relaunch-while-
-  // fullscreen, where no transition event fires). The devkit has no
-  // fullscreen-change push, so the queried value stands until a re-query.
+  // fullscreen, where no transition event fires); the Tauri window's resize
+  // stream covers every later transition.
   useEffect(() => {
     isFullScreen()
       .then((v) => useUi.setState({ isFullScreen: v }))
       .catch(() => { /* bridge unavailable (plain browser dev) */ });
+    if (typeof globalThis.__TAURI_INTERNALS__ === 'undefined') return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    import('@tauri-apps/api/window')
+      .then(async ({ getCurrentWindow }) => {
+        const current = getCurrentWindow();
+        unlisten = await current.onResized(async () => {
+          if (disposed) return;
+          try {
+            useUi.setState({ isFullScreen: await current.isFullscreen() });
+          } catch { /* window gone */ }
+        });
+      })
+      .catch(() => { /* resize stream unavailable — initial query stands */ });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   // Global keyboard shortcuts: on match (user override → platform default → hardcoded fallback), dispatch the action. Reads overrides fresh per-event; field-typed inputs are skipped (Esc/⌘-combos still get through).
@@ -80,6 +98,11 @@ function App() {
               inside MainScreen provides the drag region. */}
 
           <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
+            {/* Permanent top drag band — the window is draggable on every
+                screen (splash/onboarding/consent). z-30 sits BELOW the main
+                screen's TopBar (z-40), which carries its own drag regions
+                and interactive controls. */}
+            <div data-tauri-drag-region className="fixed top-0 inset-x-0 h-7 z-30" />
             {screen === 'splash' && <SplashScreen />}
             {screen === 'onboarding' && <OnboardingScreen />}
             {screen === 'consent' && <ConsentScreen />}
@@ -112,3 +135,5 @@ function App() {
 }
 
 export default App;
+
+/* hmr-probe */

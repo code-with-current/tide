@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdown-shiki.worker.ts.
- *  Adaptation: upstream opened with `/// <reference lib="webworker" />`; Tide's
- *  tsconfig compiles with lib DOM and mixing the webworker lib into the same
- *  program causes duplicate-global errors, so the worker global is typed through
- *  a minimal local `WorkerScope` interface instead. Message handling and the
- *  Shiki tokenization logic are otherwise verbatim. */
 import { bundledLanguages, createHighlighter, type BundledLanguage, type ThemedToken } from 'shiki';
 import { MARKDOWN_SHIKI_THEME, MARKDOWN_SHIKI_THEME_DEFINITION } from './markdown-shiki-theme-definition';
 import type { MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';

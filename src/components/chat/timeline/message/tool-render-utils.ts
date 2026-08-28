@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/toolRenderUtils.ts.
- *  Pure tool-name classification helpers — ported verbatim (no upstream deps). */
 // Keep only tools with a direct in-app navigation destination compact. Every
 // other tool uses ToolPart so custom, plugin, and MCP calls expose their input
 // and output through the common expandable renderer.

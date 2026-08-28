@@ -91,24 +91,12 @@ export function FileExplorerTab() {
     return filterNodes(data);
   }, [data, query]);
 
-  // const fileCount = useMemo(() => {
-  //   if (!data) return 0;
-  //   const count = (nodes: FileNode[]): number =>
-  //     nodes.reduce((sum, n) => sum + (n.kind === 'dir' ? count(n.children ?? []) : 1), 0);
-  //   return count(data);
-  // }, [data]);
-
   const isFiltering = !!query.trim();
 
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden">
       {/* Search / filter bar — matches the VSCode section header style */}
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border flex-shrink-0">
-        {/*<span className="text-[0.7857rem] font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
-        {fileCount > 0 && (
-          <span className="text-[0.7143rem] text-muted-foreground font-mono">{fileCount}</span>
-        )}
-        */}
         <div className="flex-1">
 
         <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-input">

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { AlertCircle, RotateCw } from "lucide-react";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { WorkspacesPanel } from "@/components/sidebar/workspaces-panel";
 import { SessionsPanel } from "@/components/sidebar/sessions-panel";
@@ -11,6 +10,7 @@ import { TimelineSkeleton } from "@/components/chat/turn/turn-skeleton";
 import { NoWorkspaceState } from "@/components/chat/no-workspace-state";
 import { MissingWorkspaceScreen } from "./missing-workspace-screen";
 import { ChatTimeline } from "@/components/chat/timeline/chat-timeline";
+import { TurnErrorBlock } from "@/components/chat/timeline/turn-error-block";
 import { OptionsPopup } from "@/components/chat/options-popup";
 import { TodoFloatingPanel } from "@/components/chat/todo-floating-panel";
 import { RightPanel } from "@/components/right-panel/right-panel";
@@ -36,7 +36,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createLogger } from "@/lib/logger";
 import { toast } from "@/lib/toast";
 import { cn, isMac } from "@/lib/utils";
-import { Button } from "../ui/button";
 
 const log = createLogger("main-screen");
 
@@ -228,6 +227,17 @@ export function MainScreen() {
     string | null | false
   >(false);
   const currentSessionRef = useRef<string | null>(activeSessionId);
+  // Session-load staleness guards. `skipSessionLoadRef` marks a session the
+  // send flow just promoted: the send path owns its history (optimistic user
+  // message + freeze-effect append), and a read now returns an older
+  // snapshot — the turn persists the user message only at chatSend, so the
+  // load would clobber the local append with an empty history.
+  const skipSessionLoadRef = useRef<string | null>(null);
+  // Bumped on every LOCAL chatHistory append. A session read that started
+  // before an append resolves with a snapshot older than what's on screen
+  // (e.g. the frozen assistant message landing while a switch-back read is
+  // in flight) — replacing then would drop the appended message.
+  const localHistoryRevRef = useRef(0);
 
   // Load session messages when activeSessionId changes.
   useEffect(() => {
@@ -240,9 +250,19 @@ export function MainScreen() {
     }
     // Viewing a session clears its unread badge.
     markSessionRead(activeSessionId);
+    // Consumed only by the promotion it was set for — a different session
+    // activating first drops the marker (that later switch needs a real load).
+    const skipLoad = skipSessionLoadRef.current === activeSessionId;
+    skipSessionLoadRef.current = null;
+    if (skipLoad) {
+      setHistorySessionId(activeSessionId);
+      setSessionLoading(false);
+      return;
+    }
     // Show a skeleton while messages load so a session switch doesn't read
     // as an empty chat before the IPC resolves.
     setSessionLoading(true);
+    const historyRev = localHistoryRevRef.current;
     api.getSession(activeSessionId).then((s) => {
       // Stale session id (deleted since last run) — clear so we don't keep
       // trying to load a session that doesn't exist.
@@ -254,28 +274,33 @@ export function MainScreen() {
         return;
       }
       if (currentSessionRef.current === activeSessionId) {
-        setChatHistory(
-          migrateMessagesToBlocks(
-            (s.messages ?? []).map((m: any) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              reasoning: m.reasoning,
-              reasoningTokens: m.reasoningTokens,
-              reasoningMs: m.reasoningMs,
-              totalMs: m.totalMs,
-              createdAt: m.createdAt,
-              toolCalls: m.toolCalls,
-              // Re-hydrate the structured turn fields. Without these, the
-              // TurnBlock collapses to a bare text answer after refresh.
-              timeline: m.timeline,
-              turn: m.turn,
-              blocks: m.blocks,
-              attachments: m.attachments,
-              compactionInfo: m.compactionInfo,
-            })),
-          ),
-        );
+        // A local append (send or freeze) landed while this read was in
+        // flight — the snapshot predates it, so keep the newer local
+        // history. Everything else (ownership, settings) still applies.
+        if (historyRev === localHistoryRevRef.current) {
+          setChatHistory(
+            migrateMessagesToBlocks(
+              (s.messages ?? []).map((m: any) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                reasoning: m.reasoning,
+                reasoningTokens: m.reasoningTokens,
+                reasoningMs: m.reasoningMs,
+                totalMs: m.totalMs,
+                createdAt: m.createdAt,
+                toolCalls: m.toolCalls,
+                // Re-hydrate the structured turn fields. Without these, the
+                // TurnBlock collapses to a bare text answer after refresh.
+                timeline: m.timeline,
+                turn: m.turn,
+                blocks: m.blocks,
+                attachments: m.attachments,
+                compactionInfo: m.compactionInfo,
+              })),
+            ),
+          );
+        }
         setHistorySessionId(activeSessionId);
         // First load of a session (nothing cached): hydrate autonomy/thinking
         // from the persisted record. On re-fetches prefer the cache —
@@ -514,6 +539,10 @@ export function MainScreen() {
         });
         setActiveSession(sessionId);
         currentSessionRef.current = sessionId;
+        // The load effect must not read this session back yet — the turn
+        // persists the user message only at chatSend, so a read now returns
+        // an empty history and clobbers the optimistic append below.
+        skipSessionLoadRef.current = sessionId;
         // Title generation moved below — it must run AFTER addMessage persists
         // the first user message, otherwise the handler finds no user message.
 
@@ -556,6 +585,8 @@ export function MainScreen() {
             ? (payload.mentions as Message["mentions"])
             : undefined,
       };
+      // Local append — newer than any session read already in flight.
+      localHistoryRevRef.current += 1;
       setChatHistory((h) => [...h, userMsg]);
       if (sessionId) {
         // Persist basic shape (sessions.ts handles the StoredMessage projection).
@@ -805,6 +836,8 @@ export function MainScreen() {
       // the session that just finished. Other sessions' histories will refresh
       // from storage on next switch.
       if (sid === activeSessionId) {
+        // Local append — newer than any session read already in flight.
+        localHistoryRevRef.current += 1;
         setChatHistory((h) => [...h, assistantMsg]);
       }
       api.finalizeAssistantMessage(sid, messageId, assistantMsg);
@@ -1033,65 +1066,35 @@ export function MainScreen() {
                         loadingFallback={<TimelineSkeleton />}
                         retryActive={!!retry}
                         errorBlock={error && !isStreaming ? (
-                          <div className="flex flex-col gap-2 px-3.5 py-3 rounded-lg border border-primary/20 bg-primary/[0.06] max-w-[75%]">
-                            <div className="flex items-start gap-2.5">
-                              <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[0.8571rem] font-medium text-destructive">
-                                  Turn Failed
-                                </div>
-                                <div className="text-[0.7857rem] text-muted-foreground/60 mt-0.5 leading-relaxed break-words">
-                                  {error}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center justify-end gap-2">
-
-                              <Button
-                                variant="ghost"
-                                size="xs"
-                                onClick={() => {
-                                  if (activeSessionId) {
-                                    useUi.getState().patchStream(activeSessionId, { error: null });
-                                  }
-                                }}
-                              >
-                                Dismiss
-                              </Button>
-                              <Button
-                                size="xs"
-                                onClick={() => {
-                                  if (!activeSessionId || !modelOption) return;
-                                  setChatHistory((h) => {
-                                    const last = h[h.length - 1];
-                                    if (last && last.role === 'assistant') {
-                                      return h.slice(0, -1);
-                                    }
-                                    return h;
-                                  });
-                                  useUi.getState().patchStream(activeSessionId, { error: null });
-                                  const retryMessages = chatHistory
-                                    .filter((m) => m.role === 'user' || m.role === 'assistant')
-                                    .filter((m) => {
-                                      const arr = chatHistory;
-                                      return m !== arr[arr.length - 1] || m.role !== 'assistant';
-                                    })
-                                    .map((m) => ({ role: m.role, content: m.content }));
-                                  start({
-                                    sessionId: activeSessionId,
-                                    messages: retryMessages as any,
-                                    modelId: selectedModelId ?? modelOption.modelId,
-                                    providerId: selectedProviderId ?? modelOption.providerId,
-                                    autonomyMode,
-                                    thinkingLevel,
-                                  });
-                                }}
-                              >
-                                <RotateCw className="size-3" />
-                                Retry
-                              </Button>
-                            </div>
-                          </div>
+                          <TurnErrorBlock
+                            error={error}
+                            onRetry={() => {
+                              if (!activeSessionId || !modelOption) return;
+                              setChatHistory((h) => {
+                                const last = h[h.length - 1];
+                                if (last && last.role === 'assistant') {
+                                  return h.slice(0, -1);
+                                }
+                                return h;
+                              });
+                              useUi.getState().patchStream(activeSessionId, { error: null });
+                              const retryMessages = chatHistory
+                                .filter((m) => m.role === 'user' || m.role === 'assistant')
+                                .filter((m) => {
+                                  const arr = chatHistory;
+                                  return m !== arr[arr.length - 1] || m.role !== 'assistant';
+                                })
+                                .map((m) => ({ role: m.role, content: m.content }));
+                              start({
+                                sessionId: activeSessionId,
+                                messages: retryMessages as any,
+                                modelId: selectedModelId ?? modelOption.modelId,
+                                providerId: selectedProviderId ?? modelOption.providerId,
+                                autonomyMode,
+                                thinkingLevel,
+                              });
+                            }}
+                          />
                         ) : undefined}
                       />
                     </div>

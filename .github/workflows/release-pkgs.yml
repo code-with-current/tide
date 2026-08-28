@@ -1,39 +1,41 @@
-# Dormant until Tauri-rewrite M5: winget/homebrew manifests must be rewired
-# to tauri-action artifact names/hashes.
+# Active (gated on secrets): winget + homebrew manifests for the Tauri
+# artifacts (Tide_<ver>_<arch>-setup.exe / .dmg / .deb). Requires secrets
+# WINGET_GITHUB_TOKEN + HOMEBREW_GITHUB_API_TOKEN — a missing secret skips
+# that platform's publish job with a notice.
 #
-# Publishes package-manager manifests (winget, homebrew tap) after each
-# Release workflow succeeds. Wakes via workflow_run on the "Release"
-# workflow (name: Release in release.yml), which fires on v* tags.
-#
-# Flow: parse the version from the workflow_run tag → render.mjs hashes the
-# release assets and fills the packaging/ templates → platform jobs submit.
-# Each platform job is gated on (a) its manifest actually being rendered
-# (partial releases skip with a notice) and (b) its secret being configured.
-#
-# One-time setup (see packaging/README.md):
-#   winget   — set WINGET_GITHUB_TOKEN (PAT: public_repo + workflow scopes).
-#   homebrew — set HOMEBREW_GITHUB_API_TOKEN.
-#
-# NOTE: workflow_run always executes the copy of this file from the repo's
-# default branch, so changes here only take effect once merged there.
+# Wakes via workflow_run when the Release workflow succeeds on a v* tag. The
+# Release workflow creates DRAFT releases — until the draft is published the
+# asset URLs don't resolve, so a still-draft release is skipped with a notice;
+# publish it and re-run this workflow (workflow_dispatch, tag defaults to the
+# latest published release) to submit the manifests.
 name: Publish package manifests
 
 on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to render (e.g. v0.4.0-beta.1); empty = latest published release'
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: pkg-manifests-${{ github.event.workflow_run.head_branch }}
+  group: pkg-manifests-${{ github.event.workflow_run.head_branch || 'manual' }}
   cancel-in-progress: false
 
 jobs:
   render:
     # Only act when the Release workflow that woke us up actually succeeded
     # and was cutting a release (its only trigger is v* tags, but guard
-    # anyway in case Release ever grows other triggers).
-    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
+    # anyway in case Release ever grows other triggers). Manual dispatch
+    # bypasses the guard — that is the recovery path for a release that was
+    # still a draft when the automatic run fired.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')) }}
     name: render · manifests
     runs-on: ubuntu-latest
     outputs:
@@ -50,18 +52,42 @@ jobs:
           node-version: 22
 
       # For tag pushes, workflow_run.head_branch is the tag name
-      # (e.g. "v0.3.0-beta.1") — strip the v prefix.
-      - name: Resolve version from release tag
+      # (e.g. "v0.4.0-beta.1"). For dispatch, take the input tag or the
+      # latest published (non-draft) release. Draft releases are skipped
+      # with a notice and empty outputs, which skips everything downstream.
+      - name: Resolve release tag (skip drafts)
         id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event.workflow_run.head_branch }}"
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              TAG="$(gh api "repos/${{ github.repository }}/releases?per_page=10" \
+                --jq '[.[] | select(.draft == false)][0].tag_name')"
+              if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+                echo "no published release found — pass the tag explicitly via the 'tag' input"
+                exit 1
+              fi
+            fi
+          else
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          fi
+          DRAFT="$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq '.draft')"
+          if [ "$DRAFT" = "true" ]; then
+            echo "::notice::$TAG is still a draft release — publish it, then re-run this workflow (workflow_dispatch) to submit manifests."
+            exit 0
+          fi
           VERSION="${TAG#v}"
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$'; then
             echo "tag $TAG does not carry a semver (expected vX.Y.Z)"; exit 1
           fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Render manifests
+        if: ${{ steps.ver.outputs.version != '' }}
         run: |
           node packaging/render.mjs \
             --version "${{ steps.ver.outputs.version }}" \
@@ -69,6 +95,7 @@ jobs:
 
       - name: Expose manifest values to downstream jobs
         id: meta
+        if: ${{ steps.ver.outputs.version != '' }}
         run: |
           M=packaging/out/meta.json
           echo "version=$(jq -r .version "$M")" >> "$GITHUB_OUTPUT"
@@ -78,6 +105,7 @@ jobs:
           echo "winget=$(jq -r .platforms.winget "$M")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
+        if: ${{ steps.ver.outputs.version != '' }}
         with:
           name: manifests
           path: packaging/out/

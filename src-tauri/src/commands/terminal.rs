@@ -1,4 +1,4 @@
-//! M4 T5 terminal commands — the 8-method domain over the portable-pty
+//! Terminal commands — the 8-method domain over the portable-pty
 //! registry (`crate::terminal`). Rust names stay the snake_case of the
 //! TideRPC methods, same convention as the other domains. Output/exit/ports
 //! pushes ride the ChatHub bus via the registry; see `crate::terminal`.

@@ -1,5 +1,5 @@
 //! directory_tree — port of `app/core/agent/tools/directory-tree.ts`
-//! (91ec558). Recursive tree view formatted like the `tree` command
+//! (). Recursive tree view formatted like the `tree` command
 //! (dirs-first ordering, `├──`/`└──` connectors, dirs suffixed `/`),
 //! bounded at depth 10 / 2000 entries. No display payload — the TS emitted
 //! plain text output only.

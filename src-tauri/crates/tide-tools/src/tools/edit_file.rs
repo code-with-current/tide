@@ -1,4 +1,4 @@
-//! edit_file — port of `app/core/agent/tools/edit-file.ts` (91ec558).
+//! edit_file — port of `app/core/agent/tools/edit-file.ts` ().
 //! Replace a unique exact string match in a file; refuses (with all match
 //! line numbers) when old_string isn't unique. Returns a minimal unified
 //! diff for the UI card.

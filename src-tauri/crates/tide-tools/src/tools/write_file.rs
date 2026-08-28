@@ -1,4 +1,4 @@
-//! write_file — port of `app/core/agent/tools/write-file.ts` (91ec558).
+//! write_file — port of `app/core/agent/tools/write-file.ts` ().
 //! Create or fully replace a file (edit_file targets a unique match in an
 //! existing file instead). Parent directories are created; a missing
 //! workspace root fails loudly rather than resurrecting a deleted folder.

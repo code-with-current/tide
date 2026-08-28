@@ -52,10 +52,7 @@ import {
 } from "@/lib/fetch-models";
 import { SettingsHeader } from "../shared";
 
-// =============================================================
-// ProvidersSection — LLM provider management, master/detail.
-// Sidebar lists added providers (+ "New"); selecting one drives the main pane's inline edit form. Add and edit share the same ProviderDetail component — the sidebar IS the navigation between them.
-// =============================================================
+// ── ProvidersSection — LLM provider management, master/detail. Sidebar lists added providers (+ "New"); selecting one drives the main pane's inline edit form. Add and edit share the same ProviderDetail component — the sidebar IS the navigation between them. ──
 
 import {
   ModelsTable, appendFetchedModels, rowsToModels,
@@ -250,9 +247,7 @@ export function ProvidersSection() {
   );
 }
 
-// =============================================================
-// ProviderListItem — one row in the sidebar. Active row uses primary tint + left accent bar (the "you are here" cue). Keyboard-selectable.
-// =============================================================
+// ── ProviderListItem — one row in the sidebar. Active row uses primary tint + left accent bar (the "you are here" cue). Keyboard-selectable. ──
 
 function ProviderListItem({
   provider,
@@ -355,9 +350,7 @@ function EmptyDetail() {
   );
 }
 
-// =============================================================
-// ProviderDetail — the inline edit form (auto-save). Selecting a provider in the sidebar renders this; edits persist ~600ms after the last change. Add is handled by the AddProviderWizard.
-// =============================================================
+// ── ProviderDetail — the inline edit form (auto-save). Selecting a provider in the sidebar renders this; edits persist ~600ms after the last change. Add is handled by the AddProviderWizard. ──
 
 function ProviderDetail({
   provider,
@@ -581,9 +574,7 @@ function ProviderDetail({
   );
 }
 
-// =============================================================
-// Sub-components
-// =============================================================
+// ── Sub-components ──
 
 /**
  * Debounced catalog enrichment for model rows. Watches for rows with a

@@ -2,7 +2,7 @@
 //! projection model): the renderer can re-attach with a snapshot after a
 //! reload while the PTY keeps running. Chunks keep their coalescer-flush
 //! boundaries — trimming whole chunks is inherently UTF-8-safe. Port of
-//! `91ec558:app/platform/terminal-scrollback.ts`.
+//! `app/platform/terminal-scrollback.ts`.
 
 pub struct ScrollbackSnapshot {
     pub data: String,

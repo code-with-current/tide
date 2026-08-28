@@ -1435,6 +1435,79 @@ describe("RAG + sources routing (M4 T7)", () => {
   });
 });
 
+describe("updater routing + push (M5 T1)", () => {
+  function channel(): FakeChannel {
+    const channels = globals().__tideChannels as FakeChannel[];
+    expect(channels.length).toBe(1);
+    return channels[0];
+  }
+
+  it("routes the updater command quartet with their passthrough params", async () => {
+    const bridge = await installBridge();
+    invoke.mockReset();
+
+    invoke.mockResolvedValueOnce({ status: null });
+    expect(await bridge.request.updaterStatus({})).toEqual({ status: null });
+    expect(invoke).toHaveBeenLastCalledWith("updater_status", {});
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "offline" });
+    expect(await bridge.request.updaterCheckNow({})).toEqual({ ok: false, error: "offline" });
+    expect(invoke).toHaveBeenLastCalledWith("updater_check_now", {});
+
+    invoke.mockResolvedValueOnce({ ok: true });
+    expect(await bridge.request.updaterDownload({})).toEqual({ ok: true });
+    expect(invoke).toHaveBeenLastCalledWith("updater_download", {});
+
+    invoke.mockResolvedValueOnce({ ok: false, error: "update not downloaded" });
+    expect(await bridge.request.updaterApply({})).toEqual({ ok: false, error: "update not downloaded" });
+    expect(invoke).toHaveBeenLastCalledWith("updater_apply", {});
+
+    invoke.mockResolvedValueOnce({ markdown: "## Notes" });
+    expect(await bridge.request.updaterReleaseNotes({ version: "0.4.0" })).toEqual({ markdown: "## Notes" });
+    expect(invoke).toHaveBeenLastCalledWith("updater_release_notes", { version: "0.4.0" });
+  });
+
+  it("delivers ChatPush updateStatus to the onUpdateStatus seam", async () => {
+    await installBridge();
+    const rpcModule = await import("@/lib/api/rpc");
+
+    const seen: unknown[] = [];
+    rpcModule.onUpdateStatus((status) => seen.push(status));
+
+    const available = {
+      phase: "available" as const,
+      message: "Version 0.4.1 is available",
+      currentVersion: "0.4.0",
+      version: "0.4.1",
+      percent: null,
+      error: null,
+      lastCheckedAt: null,
+    };
+    channel().onmessage?.({ channel: "updateStatus", status: available });
+    expect(seen).toEqual([available]);
+
+    const downloaded = {
+      phase: "downloaded" as const,
+      message: "Version 0.4.1 ready to install",
+      currentVersion: "0.4.0",
+      version: "0.4.1",
+      percent: 100,
+      error: null,
+      lastCheckedAt: null,
+    };
+    channel().onmessage?.({ channel: "updateStatus", status: downloaded });
+    expect(seen).toEqual([available, downloaded]);
+
+    // Slot semantics like the other on* registries: a replaced consumer
+    // owns the slot.
+    const second: unknown[] = [];
+    rpcModule.onUpdateStatus((status) => second.push(status));
+    channel().onmessage?.({ channel: "updateStatus", status: available });
+    expect(seen).toEqual([available, downloaded]);
+    expect(second).toEqual([available]);
+  });
+});
+
 describe("scripts + extensions + open-in-app + misc routing (M4 T7)", () => {
   function channel(): FakeChannel {
     const channels = globals().__tideChannels as FakeChannel[];

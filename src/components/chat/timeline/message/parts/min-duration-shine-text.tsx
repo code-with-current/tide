@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/MinDurationShineText.tsx.
- *  Ported faithfully (re-indented 4-space to 2-space); no upstream deps beyond `cn`.
- *  (Upstream's "shine" class is unused — the component only fades opacity.) */
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 

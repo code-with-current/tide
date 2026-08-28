@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/types.ts.
- *  Pure types — ported verbatim. `ContentChangeReason` is defined locally here
- *  (upstream imports it from its useChatAutoFollow hook, which is not staged
- *  and whose full union is unknown); MessageBody only ever emits 'structural',
- *  and Task 6 can narrow this when it wires Tide's auto-follow hook. */
-
 export type StreamPhase = 'streaming' | 'cooldown' | 'completed';
 
 export type DiffViewMode = 'side-by-side' | 'unified';

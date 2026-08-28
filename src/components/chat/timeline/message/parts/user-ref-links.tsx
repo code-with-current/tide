@@ -1,13 +1,9 @@
-/** Ported from Tide's legacy src/components/chat/chat-message.tsx (removed in
- *  965417c when the legacy timeline was removed) — restores
- *  user-bubble chip rendering the port dropped along with upstream's
- *  MessageFilesDisplay/FileAttachment branches.
- *
- *  Contract (matches the composer): attachments & @file mentions persist in
- *  message content as `[/label/](target)` markdown links; parseRefLinks lifts
- *  them out of the body into a chip row so they render as chips again instead
- *  of raw markdown links. Clicking a chip opens the referenced file — or the
- *  paste's inline content — in the right-panel viewer. */
+/**
+ * Contract (matches the composer): attachments & @file mentions persist in
+ * message content as `[/label/](target)` markdown links; parseRefLinks lifts
+ * them into a chip row. Clicking a chip opens the file (or paste content) in
+ * the right-panel viewer.
+ */
 
 import React from 'react';
 import { ClipboardPaste, FileCode2, FileText, Image as ImageIcon } from 'lucide-react';

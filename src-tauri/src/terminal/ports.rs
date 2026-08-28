@@ -1,5 +1,5 @@
 //! Dev-server port detection + liveness — port of the scanning/reaping half
-//! of `91ec558:app/rpc/terminal.ts`. Output is scanned for `host:port`
+//! of `app/rpc/terminal.ts`. Output is scanned for `host:port`
 //! patterns; each detected port is resolved to its owning pid (lsof/netstat,
 //! best-effort) and periodically reaped when the owner dies or nothing
 //! accepts connections anymore.

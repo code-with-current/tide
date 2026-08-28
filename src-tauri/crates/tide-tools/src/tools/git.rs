@@ -1,4 +1,4 @@
-//! git — port of `app/core/agent/tools/git.ts` (91ec558), re-implemented
+//! git — port of `app/core/agent/tools/git.ts` (), re-implemented
 //! natively on git2 instead of spawning the git CLI. The TS tool passed an
 //! arbitrary argv to `git`; this port keeps the same `args: string[]`
 //! interface (fixture-locked) but executes the subcommands git2 can do

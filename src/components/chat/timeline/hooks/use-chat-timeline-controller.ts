@@ -1,24 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/hooks/useChatTimelineController.ts — REDUCED (ruling R2).
- * The two exported pure functions are verbatim upstream. The hook is trimmed to
- * what Tide's timeline needs: upstream's ~985 lines manage OpenCode-server
- * pagination (load-earlier, prepend commits, underfilled-viewport auto-load,
- * pendingRevealWork, scroll/anchor plumbing) that Tide's
- * `virtualized-message-list` (own windowing + auto-follow) does not consume.
- *
- * upstream port seams:
- *  - Dropped from the hook: session subscription, `loadEarlier` callbacks,
- *    reveal-work plumbing, `MessageListHandle` ref, scroll/anchor state.
- *  - Input is props (`{ messages, streamingMessage, isStreaming }`), not stores.
- *  - `turnUiStates`/`toggleTurnGroup` are NEW Tide code (not ported): upstream
- *    keeps per-turn expand/collapse state in MessageList keyed by
- *    `activityRenderMode === 'summary'`; Tide has no such setting and defaults
- *    activity groups to COLLAPSED (task-6 handoff correction 4).
- *  - Projection options default to constants (no UI store): justification
- *    activity and turn changed files off, plan mode off — Task 8 may pass
- *    through real values.
- */
-
 import React from 'react';
 
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';

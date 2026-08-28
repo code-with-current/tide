@@ -1,21 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/UserTextPart.tsx.
- *  Adaptations:
- *  - Store seams (ruling 6): `useUIStore` reads (`userMessageRenderingMode`,
- *    `collapsibleUserMessages`) become props `renderingMode` (default 'markdown')
- *    and `collapsible` (default true); `useSkillsStore` becomes a `skills`
- *    name-set prop (default empty); `useEffectiveDirectory` becomes `directory?`.
- *    Skill open (`openContextFile` UI-store action) becomes an optional
- *    `onOpenSkill` callback — skill tokens render as plain text when absent.
- *  - `@/lib/messages/inlineMessageLinks` (`buildAgentMentionUrl`,
- *    `parseSkillHref`) is an upstream app-link helper on the delete-on-sight
- *    list: agent mentions render as plain text (the markdown path already drops
- *    mention/skill link injection in user-text-part-content).
- *  - `@/lib/messages/terminalContext` (`extractTerminalContexts`) dropped — a
- *    synthetic OpenCode-server helper whose shapes Tide's adapter never emits.
- *  - i18n (`useI18n`) → literal English; `Icon` from the lucide shim
- *    (`arrow-up-s` → ArrowUp).
- *  Truncation/expand measurement logic ported verbatim. */
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 import type { MessageAttachment } from '@/types';

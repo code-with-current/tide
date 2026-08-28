@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/streamingTailEntry.ts. Tide adaptation: upstream's `getNormalizedMessageForDisplay` (lib/messageDisplayNormalization.ts) is stubbed as an identity function — it depends on synthetic-part display filtering that is not ported yet; the stub boundary is noted in the port report. */
-
 import type { TimelinePart } from '../../types/message-parts';
 
 import { projectTurnRecords } from './project-turn-records';

@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/FadeInOnReveal.tsx.
- *  Ported faithfully (re-indented 4-space to 2-space); no upstream deps beyond
- *  `cn`. Note upstream ships with `FADE_ANIMATION_ENABLED = false` (fade is
- *  opt-in per call site via `forceAnimation`). */
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 

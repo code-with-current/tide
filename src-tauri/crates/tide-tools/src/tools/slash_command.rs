@@ -1,5 +1,5 @@
 //! slash_command — port of `app/core/agent/tools/slash-command.ts`
-//! (91ec558). User-defined slash commands are prompt-prefix macros in
+//! (). User-defined slash commands are prompt-prefix macros in
 //! `<userData>/commands/*.md` (first non-empty line = description); the
 //! tool returns the body as instructions to apply to the task at hand.
 

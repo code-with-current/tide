@@ -1,5 +1,5 @@
 //! OAuth for remote MCP servers — port of `app/core/agent/mcp/oauth.ts` +
-//! `app/platform/oauth-loopback.ts` @ 91ec558, rebuilt on rmcp 3's
+//! `app/platform/oauth-loopback.ts`, rebuilt on rmcp 3's
 //! [`AuthorizationManager`].
 //!
 //! Flow shape (RFC 8252 loopback, MCP spec authorization):

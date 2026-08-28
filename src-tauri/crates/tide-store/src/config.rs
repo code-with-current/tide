@@ -1,8 +1,8 @@
-//! config.json model ported from `app/core/configStore.ts` @ 91ec558.
+//! config.json model ported from `app/core/configStore.ts`.
 //!
 //! Every modeled level carries `#[serde(flatten)] extra` so fields the Rust
-//! app doesn't know about yet survive a load→save round-trip: the still
-//! installed Electrobun build re-reads this same file.
+//! app doesn't know about yet survive a load→save round-trip: older
+//! installed builds re-read this same file.
 
 use std::fmt;
 use std::fs;

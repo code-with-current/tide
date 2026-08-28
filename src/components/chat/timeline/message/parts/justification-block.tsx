@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/JustificationBlock.tsx.
- *  Adaptation: upstream reads `chatRenderMode` from its UI store; per ruling 6
- *  that becomes a prop (default 'sorted', matching MessageBody's seam).
- *  `Part` becomes `TimelinePart`; `ContentChangeReason` comes from ../types.
- *  Otherwise ported faithfully (re-indented 4-space to 2-space). */
-
 import React from 'react';
 import type { TimelinePart } from '../../types/message-parts';
 import type { ContentChangeReason } from '../types';

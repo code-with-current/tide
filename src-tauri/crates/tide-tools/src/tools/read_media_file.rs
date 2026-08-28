@@ -1,5 +1,5 @@
 //! read_media_file — port of `app/core/agent/tools/read-media-file.ts`
-//! (91ec558). Reads a binary/media file as a base64 data URL (extension-
+//! (). Reads a binary/media file as a base64 data URL (extension-
 //! based MIME detection, 10MB cap) and surfaces it as a `media` display
 //! for the renderer's image block.
 

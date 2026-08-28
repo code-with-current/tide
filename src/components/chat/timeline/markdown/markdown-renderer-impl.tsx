@@ -1,25 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/MarkdownRendererImpl.tsx.
- *  Adaptations (each documented in task-2-report.md):
- *  - Theme seam: the upstream's runtime theme registry (`useOptionalThemeSystem`,
- *    `getDefaultTheme`, `Theme`) is replaced by a next-themes-based hook that
- *    resolves dark/light from `useTheme()` and reads live token values via
- *    `getComputedStyle(document.documentElement)` — mermaid colors and syntax
- *    vars therefore track Tide's static CSS tokens in both themes.
- *  - i18n (`useI18n`) replaced with literal English strings.
- *  - The UI-store settings seams (`codeBlockLineWrap`, `mermaidRenderingMode`)
- *    become per-renderer React state (default off / 'svg') — Tide has no
- *    equivalent store; wrap toggling works within a renderer instance.
- *  - Deleted subsystems with no Tide equivalent: file-reference annotation
- *    (`fileReferenceParser`/`fileReferenceStat`/fs stat probes/editor APIs),
- *    app-link confirmation interactions, loopback preview, and stream perf
- *    probes. (The FadeInOnReveal wrapper omission from Task 2 was reverted to
- *    upstream in Task 3 — see `fadeKey` below.)
- *  - `part?: Part` from `@opencode-ai/sdk/v2` becomes `part?: TimelinePart` from
- *    Tide's ported structural types (../types/message-parts).
- *  - `ToolPopupContent` from ./message/types (out of port scope) becomes a
- *    minimal structural local type covering the popup payloads this module
- *    emits (mermaid + image previews).
- */
 import React from 'react';
 import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';

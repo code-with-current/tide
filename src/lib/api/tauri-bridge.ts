@@ -6,90 +6,17 @@
  *  console.warn and the app stays on the mock store — never a crash, never a
  *  half-installed bridge.
  *
- *  Command coverage is M1 (workspaces / sessions — the legacy sidebar list
- *  pair + the v2 readers — / settings / providers) plus the M2 chat domain
- *  (`sessionCreate`, `chatSend`→`chat_run_turn`, `chatAbort`,
- *  `chatApproveTools`/`chatRejectTools`→`permission_respond`, the
- *  `eventsSubscribe` replay pair), and the M4 T1 OS/window glue (window
- *  controls, dialogs, shell opener, clipboard persistence, log/env/
- *  diagnostics, macOS permission consent, pid liveness, mermaid repair,
- *  external/image reads, and the settings.json shortcut trio —
- *  `permissionRequest`'s `type` param remaps onto `permission_type` since
- *  `type` can't be a Rust identifier). Every OTHER TideRPC method resolves
- *  to an async rejection via the request Proxy — never a sync throw, so
- *  fire-and-forget `void` calls in client.ts can't escape a React commit.
- *  Agent/orchestrator pushes arrive on the single `chat_attach_channel`
- *  Channel and fan out through rpc.ts's emit* seams (the on*-registered
- *  single-slot callbacks); every other push channel (terminal output, git
- *  changed…) stays dormant until a later milestone wires it.
+ *  TideRPC params pass through verbatim — Tauri's camelCase → snake_case
+ *  param mapping covers nearly everything. Reserved-word exceptions:
+ *  `permissionRequest`'s `type` param remaps onto `permission_type`, and
+ *  `sourcesSetEnabled`'s `id` rides `sourceId` (`type`/`id` can't be Rust
+ *  identifiers). Methods without a bridge entry resolve to an ASYNC
+ *  rejection via the request Proxy — never a sync throw, so fire-and-forget
+ *  `void` calls in client.ts can't escape a React commit.
  *
- *  M4 T2 adds the session + workspace management domains (27 methods):
- *  session get/rename/archive/unarchive/delete/updateSettings/fork/
- *  listDispatches/addMessage/assistant trio/generateTitle/clearAll/
- *  worktree pair, and workspace get/add/update/archive/unarchive/delete/
- *  contextGet/fileRead/listBranches/listConfigFiles/workspacesExist.
- *  All pass their TideRPC params through verbatim — Tauri's camelCase →
- *  snake_case param mapping covers every one (no reserved words in this
- *  batch, unlike T1's permissionRequest remap).
- *
- *  M4 T3 adds the git panel domain (30 methods): status/diff/stagedDiff/log/
- *  commitFiles/commitFileDiff/commitMessage/bulk/stashList/stage/restoreFile/
- *  discardFile/commit/amend/revert/aheadBehind/headSha/branchInfo/
- *  branchesDetailed/createBranch/deleteBranch/checkout/recentBranches/
- *  mergeBranch/conflictFiles/resolveFile/fetch/pull/push — all git2 in the
- *  backend — plus gitRepoDetect (the workspaces-rpc detection entry). Every
- *  method passes its GitSessionScope params through verbatim; the gitChanged
- *  watcher push stays dormant (no bridge channel yet — the panel polls).
- *
- *  M4 T4 adds the provider + model catalog domain (11 methods): the CRUD trio
- *  (providerAdd/Update/Delete — apiKey lands in the macOS keychain behind a
- *  kcv2 handle), the probes (providerProbeModels / providerDetectProtocol /
- *  providerTestConnection against the OpenAI-vs-Anthropic endpoint
- *  conventions), the usage pair (providerUsageWindows off the local usage.db
- *  rollups, providerUsageReport off the provider quota APIs), the models.dev
- *  catalog pair (modelCatalogRefresh fire-and-forget / modelCatalogResolve
- *  with its flat catalogId/modelId/contextWindow params), and agentList (the
- *  dispatch catalog for the @mention picker). All params pass through
- *  verbatim under Tauri's camelCase → snake_case mapping.
- *
- *  M4 T5 adds the terminal domain (8 methods) over portable-pty:
- *  terminalCreate/Write/Resize/Stop/Kill/Dispose/GetPid/Scrollback, all
- *  passthrough. The terminal push channels also come online here — the same
- *  chat Channel now carries ChatPush tagged terminalOutput/terminalExit/
- *  terminalPorts (the old webview message names, flat payloads), fanned out
- *  through rpc.ts's emitTerminal* seams into the setTerminal*Callback slots
- *  client.ts's subscribeTerminalEvents installs.
- *
- *  M4 T6 adds the MCP panel domain (18 methods): the status list (mcpList —
- *  rows now carry the `enabled` flag), config CRUD (mcpAdd/Update/Remove —
- *  user scope writes config.json's mcpServers, project scope the workspace
- *  .mcp.json), the lifecycle ops (mcpReinitialize → full pool rebuild,
- *  mcpRetry with fresh disk config, mcpApprove as the vestigial no-op the
- *  TS kept), the import pair (mcpScan/mcpImport), the toggle
- *  (mcpSetEnabled), the raw-config editor pair (mcpReadRaw/WriteRaw), the
- *  secrets trio (mcpSetSecret/HasSecret/ClearSecret over
- *  mcp-secrets.json), the OAuth pair (mcpAuthenticate returns the
- *  authorization URL — the backend opens the system browser via the opener
- *  plugin — and mcpReauthorize forces a clean re-flow), and
- *  mcpWorkspaceActivated (the pool-rebuild hook on workspace switch). The
- *  mcpEvents status ping joins the chat Channel here too, fanned out
- *  through rpc.ts's emitMcpEvent into the onMcpEvent slot
- *  client.ts's subscribeMcpStatus installs.
- *
- *  M4 T7 adds the RAG + knowledge-sources domain (12 methods): the status
- *  snapshot + model download gate + per-workspace enablement + init
- *  (ragStatus/ragModelExists/ragDownloadModel/ragEnableWorkspace/
- *  ragDisableWorkspace/ragInitWorkspace) and the sources CRUD family
- *  (sourcesList/Add/Update/Remove/SetEnabled/Reindex — sourcesSetEnabled's
- *  id param rides sourceId since `id` can't be a Rust identifier). The
- *  ragProgress/sourcesProgress pushes join the chat Channel, fanned out
- *  through rpc.ts's emitRagProgress/emitSourcesProgress. The scripts
- *  domain (scriptRun/Stop/Lines/Ports over /bin/sh + port detection) and
- *  its scriptOutput/scriptExit/scriptPorts pushes, the extensions quartet
- *  (extensionsList/SetEnabled/ListAgents/ListSkills off config.json's
- *  disabled set + the .claude/.agent scan), openInAppDetect/Open (the
- *  external-app surface), chatUpdateMode (mid-turn autonomy switch),
- *  todosList, projectEntriesList, and fileTreeGet round out the family. */
+ *  All pushes (agent events, terminal output/exit/ports, mcp status,
+ *  rag/sources/script progress) multiplex over the single `chat_attach_channel`
+ *  Channel and fan out through rpc.ts's emit* seams. */
 import {
   activateRpcClient,
   emitAgentEvent,
@@ -104,6 +31,7 @@ import {
   emitTerminalOutput,
   emitTerminalPorts,
   emitTodosUpdated,
+  emitUpdateStatus,
   type TideRpcClient,
 } from './rpc';
 import type { AgentEvent } from '@/lib/agent/events';
@@ -188,7 +116,7 @@ const BRIDGE_PROTOCOL = 1;
 const passthroughArgs = (params: object): Record<string, unknown> =>
   params as Record<string, unknown>;
 
-const NOT_PORTED = '[tide] RPC method not ported yet (Tauri rewrite M2+)';
+const NOT_PORTED = '[tide] RPC method not ported yet';
 
 type CoreModule = typeof import('@tauri-apps/api/core');
 type InvokeFn = CoreModule['invoke'];
@@ -367,12 +295,10 @@ type BridgeMethods = Pick<
 >;
 
 /** One message off the Rust ChatPush stream (`agent/events.rs`): the `channel`
- *  tag mirrors the webview message names in shared/rpc.ts so routing uses the
- *  same discriminator the Electrobun push did. Payload shapes are the
- *  shared/rpc.ts AgentEvent / FlushBatch / TodosUpdatedEvent verbatim; the
- *  terminal tags carry their old ipc payload shapes flat (terminalId/data/seq,
- *  terminalId/code, terminalId/ports); mcpEvents carries the discriminated
- *  McpEvent ({ kind: 'statusChanged' }). */
+ *  tag mirrors the webview message names in shared/rpc.ts (the shared wire
+ *  contract). Terminal tags carry their ipc payload shapes flat
+ *  (terminalId/data/seq, terminalId/code, terminalId/ports); mcpEvents carries
+ *  the discriminated McpEvent ({ kind: 'statusChanged' }). */
 type ChatPush =
   | { channel: 'agentEvents'; event: AgentEvent }
   | { channel: 'orchestratorEvents'; batch: FlushBatch }
@@ -390,15 +316,15 @@ type ChatPush =
   | { channel: 'sourcesProgress'; event: SourceProgressEvent }
   | { channel: 'scriptOutput'; event: ScriptOutputEvent }
   | { channel: 'scriptExit'; event: ScriptExitEvent }
-  | { channel: 'scriptPorts'; event: ScriptPortsEvent };
+  | { channel: 'scriptPorts'; event: ScriptPortsEvent }
+  | { channel: 'updateStatus'; status: UpdateStatusWire };
 
 /** Params pass through verbatim: Tauri v2 maps camelCase JSON keys onto the
  *  snake_case Rust command params (workspacePath → workspace_path), which is
  *  exactly the TideRPC wire shape client.ts already sends. The chat commands
  *  that take a single Rust `args` struct (`chat_run_turn`,
- *  `permission_respond`) get it wrapped under the `args` key, and the two
- *  Electrobun approve/reject methods collapse onto `permission_respond`'s
- *  approve flag. */
+ *  `permission_respond`) get it wrapped under the `args` key;
+ *  approve/reject collapse onto `permission_respond`'s approve flag. */
 function createBridgeClient(invoke: InvokeFn): TideRpcClient {
   const methods: BridgeMethods = {
     workspaceList: (params) => invoke<Workspace[]>('workspace_list', params),
@@ -562,8 +488,7 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     terminalScrollback: (params) =>
       invoke<TerminalScrollbackResult>('terminal_scrollback', params),
     terminalGetPid: (params) => invoke<{ pid: number | null }>('terminal_get_pid', params),
-    // MCP panel (M4 T6) — params verbatim under the camelCase → snake_case
-    // mapping; McpServerConfig's field names already match the Rust struct.
+    // McpServerConfig's field names already match the Rust struct.
     mcpList: (params) => invoke<McpServerStatus[]>('mcp_list', params),
     mcpAdd: (params) => invoke<McpOpResult>('mcp_add', params),
     mcpUpdate: (params) => invoke<McpOpResult>('mcp_update', params),
@@ -585,7 +510,7 @@ function createBridgeClient(invoke: InvokeFn): TideRpcClient {
     mcpReadRaw: (params) => invoke<McpRawConfigResult>('mcp_read_raw', params),
     mcpWriteRaw: (params) => invoke<McpOpResult>('mcp_write_raw', params),
     mcpWorkspaceActivated: (params) => invoke<{ ok: boolean }>('mcp_workspace_activated', params),
-    // RAG domain (M4 T7) — ragStatus returns the RagStatus | {error} union.
+    // ragStatus returns the RagStatus | {error} union.
     ragStatus: (params) => invoke<RagStatus | { error: string }>('rag_status', params),
     ragModelExists: (params) => invoke<boolean>('rag_model_exists', params),
     ragDownloadModel: (params) => invoke<RagWorkspaceOpResult>('rag_download_model', params),
@@ -659,6 +584,7 @@ async function attachChatChannel(invoke: InvokeFn, Channel: ChannelCtor): Promis
     else if (push.channel === 'scriptOutput') emitScriptOutput(push.event);
     else if (push.channel === 'scriptExit') emitScriptExit(push.event);
     else if (push.channel === 'scriptPorts') emitScriptPorts(push.event);
+    else if (push.channel === 'updateStatus') emitUpdateStatus(push.status);
     else console.warn('[tide] unknown ChatPush channel tag — dropped:', push);
   };
   await invoke('chat_attach_channel', { channel });

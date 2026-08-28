@@ -1,8 +1,7 @@
 //! sessions-v2.db write path + EventSink persistence, ported from
-//! `app/core/ipc-adjacent/session-store-v2.ts` and `app/core/agent/event-sink.ts`
-//! @ 91ec558.
+//! `app/core/ipc-adjacent/session-store-v2.ts` and `app/core/agent/event-sink.ts`.
 //!
-//! # Division of labor with the app crate (T4)
+//! # Division of labor with the app crate
 //!
 //! The TS EventSink owned three things: a ~50ms flush timer + buffer, the
 //! single WAL transaction per flush, and the live-consumer floor map. Here the
@@ -18,7 +17,7 @@
 //! - [`mark_live`] / [`replay_events`] — the reconnect path. The TS
 //!   sync-atomicity contract (replay → markLive with no await between; an
 //!   interleaved flush could prune past a read-but-unregistered cursor) maps
-//!   to: hold the same lock around both calls in T4.
+//!   to: hold the same lock around both calls.
 //!
 //! # Semantics ported verbatim
 //!
@@ -42,7 +41,7 @@
 //!   while the direct [`add_usage`] takes the store's `UsageDeltaV2` shape
 //!   (`tokensReasoning`/`tokensCacheRead`) — the two TS interfaces genuinely
 //!   differed; both are kept.
-//! - **Ids**: same formats as 91ec558 (`s_` + 8 base36, `m_`/`p_` +
+//! - **Ids**: same formats as the TS impl (`s_` + 8 base36, `m_`/`p_` +
 //!   time-base36 + `_` + 6 base36 random). Message-window cursors order by id,
 //!   so message ids must stay time-sortable.
 //! - **better-sqlite3 parity**: 5s busy timeout (its default), WAL,
@@ -110,6 +109,11 @@ pub const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS session_todos (
       session_id TEXT PRIMARY KEY,
       todos TEXT NOT NULL,
+      time_updated INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS message_payload (
+      message_id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
       time_updated INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS session_worktree (
@@ -402,7 +406,7 @@ impl SessionsV2Writer {
     }
 
     /// The session's `workspace_path` — None when no such session row exists.
-    /// The T4 command layer uses this as both the existence check and the
+    /// The command layer uses this as both the existence check and the
     /// turn's workspace root source.
     pub fn session_workspace_path(&self, id: &str) -> Option<String> {
         self.conn
@@ -727,6 +731,19 @@ impl SessionsV2Writer {
         Ok(())
     }
 
+    /// Freeze-payload store: the renderer's finalize call sends the FULL
+    /// frozen message JSON (blocks, turn, toolCalls, timeline — everything
+    /// the streamed view showed). Persisted verbatim so reloads render the
+    /// structured turn byte-identically instead of re-deriving a flat one.
+    pub fn upsert_message_payload(&self, message_id: &str, payload: &serde_json::Value, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO message_payload (message_id, payload, time_updated) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(message_id) DO UPDATE SET payload = excluded.payload, time_updated = excluded.time_updated",
+            params![message_id, payload.to_string(), now],
+        )?;
+        Ok(())
+    }
+
     /// `bumpMessageCompleted` (the sink's `message.end` side effect): stamps
     /// `time_completed`.
     pub fn complete_message(&self, message_id: &str, now_ms: i64) -> Result<()> {
@@ -761,7 +778,7 @@ impl SessionsV2Writer {
 
     /// Rewrite a committed part's `data` in place. The TS never updated part
     /// rows — tool parts landed complete at `part.commit` and re-commits were
-    /// ignored — so nothing at 91ec558 called this; it exists for an
+    /// ignored — so nothing in the TS called this; it exists for an
     /// orchestrator that streams evolving tool part data. Returns the affected
     /// row count (0 = no such part).
     pub fn update_part_data(&self, part_id: &str, data: &Value, now_ms: i64) -> Result<usize> {
@@ -1322,7 +1339,7 @@ mod tests {
         assert_eq!(to_base36(0), "0");
         assert_eq!(to_base36(35), "z");
         assert_eq!(to_base36(36), "10");
-        // Date.now() at 91ec558-era values is 8 base36 digits — fixed width,
+        // Date.now()-era values are 8 base36 digits — fixed width,
         // so equal-era ids always compare by their time prefixes correctly.
         assert_eq!(to_base36(1_759_000_000_000).len(), 8);
     }

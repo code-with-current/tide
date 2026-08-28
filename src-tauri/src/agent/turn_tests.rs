@@ -361,6 +361,7 @@ impl Fixture {
                 Ok(Ok(ChatPush::ScriptOutput { .. })) => continue,
                 Ok(Ok(ChatPush::ScriptExit { .. })) => continue,
                 Ok(Ok(ChatPush::ScriptPorts { .. })) => continue,
+                Ok(Ok(ChatPush::UpdateStatus { .. })) => continue,
                 Ok(Err(e)) => panic!("broadcast ended: {e}"),
                 Err(_) => panic!("timed out waiting for an agent event"),
             }
@@ -524,6 +525,21 @@ async fn happy_turn_persists_and_streams() {
     assert_eq!(usage.as_ref().unwrap().output_tokens, 50);
     assert_eq!(tool_calls.as_ref().unwrap().len(), 1);
     assert_eq!(timeline.as_ref().unwrap().len(), 3, "text + tool + trailing text");
+
+    // The wire the renderer freezes on success: non-empty `content`
+    // (final_text feeds it — the freeze effect's isEmpty guard drops a
+    // text-less, tool-less, block-less turn), the interleaved `timeline`,
+    // and NO `blocks` — the renderer falls back to its live reducer-built
+    // block list for those (contract pin, see events.rs).
+    {
+        let wire = serde_json::to_value(&events[8]).unwrap();
+        assert!(
+            wire["content"].as_str().is_some_and(|c| !c.trim().is_empty()),
+            "turn_end.content must carry the accumulated final text"
+        );
+        assert_eq!(wire["timeline"].as_array().map(Vec::len), Some(3));
+        assert!(wire.get("blocks").is_none());
+    }
 
     fx.wait_idle().await;
     fx.hub.sink().flush().await;
@@ -1068,7 +1084,7 @@ async fn todo_write_turn_pushes_todos_updated() {
     let _ = fx.events_until_turn_end().await;
 }
 
-// ── T7: turn-flow tools ─────────────────────────────────────────────────────
+// ── Turn-flow tools ─────────────────────────────────────────────────────────
 
 /// The followup popup path end-to-end: model calls ask_followup_question →
 /// `followup_required` event (wire-shaped) → the turn parks →
@@ -1454,7 +1470,7 @@ async fn exit_plan_mode_outside_plan_mode_is_a_no_op() {
     assert_eq!(*status, OutcomeStatus::Executed);
 }
 
-// ── T7: compact / auto-compact ──────────────────────────────────────────────
+// ── Compact / auto-compact ──────────────────────────────────────────────────
 
 fn tiny_compaction() -> crate::agent::auto_compact::AutoCompactConfig {
     use crate::agent::auto_compact::AutoCompactConfig;
@@ -1817,7 +1833,7 @@ impl Tool for BulkyEchoTool {
     }
 }
 
-// ── T7: T3 wiring ───────────────────────────────────────────────────────────
+// ── T3 wiring ───────────────────────────────────────────────────────────────
 
 /// Todo persistence: the hub's TodoBus subscription mirrors every
 /// todo_write replacement into the sessions store's side table.

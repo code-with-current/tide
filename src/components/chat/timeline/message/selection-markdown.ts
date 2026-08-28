@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/selectionMarkdown.ts.
- *  Pure DOM/markdown selection serializer — ported verbatim (no upstream deps). */
 type SelectionNode =
   | { type: 'text'; value: string }
   | {

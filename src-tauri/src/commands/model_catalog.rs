@@ -2,7 +2,7 @@
 //! (loader) + `model-catalog.ts` (resolve/match) + the active-catalog half of
 //! `model-capabilities.ts` (init / session-deduped refresh / post-refresh
 //! enrichment). Source of truth: https://models.dev/api.json; the bundled
-//! baseline vendored at `src-tauri/data/model-prices.json` (the 91ec558
+//! baseline vendored at `src-tauri/data/model-prices.json` (the
 //! `app/core/data/model-prices.json` snapshot, 2958 models) and the runtime
 //! cache `<dataDir>/model-prices.json` share the flattened on-disk shape
 //! `{ fetchedAt, source, count, models: { catalogId: slim } }`; costs are

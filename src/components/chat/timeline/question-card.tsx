@@ -1,20 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/QuestionCard.tsx — ADAPTED (Ruling 3).
- *  Upstream renders OpenCode's multi-question `QuestionRequest` (tabs + summary view,
- *  sessionActions responders, sync/UI stores). Tide's followup surface is ONE question
- *  from the `ask_followup_question` tool part — `{ question, options: [{label, description?}],
- *  multiple }` — so the multi-question tabs/summary machinery is dropped. Adaptations:
- *  - Props: toolCallId + question fields parsed from the pending tool part (option
- *    descriptions live in the part's input; the followup part's `mode` is passed through).
- *    Answer submission calls `onAnswerFollowup(toolCallId, answer, mode)` — plain prop
- *    now, threaded by Task 8 into submitFollowup.
- *  - Dismiss submits an empty answer (Tide's IPC has no reject path for followups).
- *  - Checkbox/Radio (upstream ui) → shadcn adapters; RadioGroup uses index values so
- *    duplicate labels stay legal.
- *  - Dropped: session-store responders, isFromSubagent badge, isMobile, i18n (literal
- *    English), toast on copy (clipboard result is silent).
- *  - `@/lib/ime` isIMECompositionEvent → local isComposing check.
- *  - CustomAnswerTextarea + sizing logic ported verbatim. */
-
 import React from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';

@@ -1,34 +1,43 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
 #
-# The Windows release artifact is a zip (win-x64-Tide-Setup.zip) wrapping
-# Electrobun's setup bootstrapper at the archive root, so the installer is
-# declared as a zip with a nested exe:
-#   win-x64-Tide-Setup.zip
-#   ├── Tide-Setup.exe            ← nested installer (RelativeFilePath below)
-#   └── .installer\*.tar.zst      ← payload the bootstrapper extracts
-# The bootstrapper registers an HKCU uninstall entry (identifier
-# com.tide.code) and supports --quiet (verified via strings on the 0.3.0-beta.1
-# bootstrapper: --bootstrap-install / --quiet / --uninstall --quiet).
+# The Windows release artifact is Tauri's NSIS installer
+# (Tide_<version>_<arch>-setup.exe) — a real installer, so winget consumes it
+# directly: InstallerType nullsoft, /S for silent. The old Electrobun flow
+# shipped a zip wrapping a setup bootstrapper (InstallerType zip +
+# NestedInstallerType exe); that pattern is gone — the Tide_<version>_<arch>
+# -portable.zip published beside the setup wraps the bare app exe (not an
+# installer) and is not winget-consumable.
+#
+# Tauri's NSIS install mode is currentUser (Scope: user) and registers an
+# ARP entry under HKCU with DisplayName "Tide" and DisplayVersion
+# <version> (identifier com.tide.code).
 
 PackageIdentifier: Tide.Tide
 PackageVersion: @@VERSION_WINGET@@
 Installers:
   - Architecture: x64
-    InstallerType: zip
-    NestedInstallerType: exe
-    NestedInstallerFiles:
-      - RelativeFilePath: Tide-Setup.exe
+    InstallerType: nullsoft
     Scope: user
-    InstallerUrl: https://github.com/code-with-current/tide/releases/download/v@@VERSION@@/win-x64-Tide-Setup.zip
-    InstallerSha256: @@SHA256_WINZIP@@
+    InstallerUrl: https://github.com/code-with-current/tide/releases/download/v@@VERSION@@/Tide_@@VERSION@@_x64-setup.exe
+    InstallerSha256: @@SHA256_WIN_X64@@
     InstallerSwitches:
-      Silent: --quiet
-      SilentWithProgress: --quiet
-    ProductCode: com.tide.code
+      Silent: /S
+      SilentWithProgress: /S
     AppsAndFeaturesEntries:
       - DisplayName: Tide
         Publisher: Tide
         DisplayVersion: "@@VERSION@@"
-        ProductCode: com.tide.code
+  - Architecture: arm64
+    InstallerType: nullsoft
+    Scope: user
+    InstallerUrl: https://github.com/code-with-current/tide/releases/download/v@@VERSION@@/Tide_@@VERSION@@_arm64-setup.exe
+    InstallerSha256: @@SHA256_WIN_ARM64@@
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+    AppsAndFeaturesEntries:
+      - DisplayName: Tide
+        Publisher: Tide
+        DisplayVersion: "@@VERSION@@"
 ManifestType: installer
 ManifestVersion: 1.10.0

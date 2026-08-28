@@ -1,4 +1,4 @@
-/** Singleton update-status store (Electrobun Updater model, 4.1).
+/** Singleton update-status store.
  *  Registers ONE updateStatus subscription on init and shares the latest
  *  reduced snapshot across all consumers (sidebar pill, release dialogs,
  *  settings page); the seed fetch (updaterStatus request) covers the

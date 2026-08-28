@@ -1,13 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/questionSerializers.ts — ADAPTED (Ruling 3).
- *  Upstream parses OpenCode's multi-question `QuestionRequest` shape
- *  (`{ id, sessionID, questions: [{ header, question, multiple, options }] }`).
- *  Tide's `ask_followup_question` tool emits ONE question:
- *  `{ question: string, options: [{ label, description? }] (max 4), multiple: boolean }`
- *  (electron/agent/tools/ask-followup.ts). The serializers are rewritten for that
- *  shape — output contract (markdown + stable JSON strings for the card's copy
- *  buttons) is preserved; `header` no longer exists so the question text is the
- *  markdown heading, and the JSON envelope is flat. */
-
 export interface FollowupQuestionOption {
   label: string;
   description?: string;

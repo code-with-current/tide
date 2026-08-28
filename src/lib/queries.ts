@@ -33,17 +33,13 @@ export const qk = {
   agentSettings: ['agentSettings'] as const,
 };
 
-// ============================================================
-// Workspaces
-// ============================================================
+// ── Workspaces ──
 
 export function useWorkspaces() {
   return useQuery({ queryKey: qk.workspaces, queryFn: api.listWorkspaces });
 }
 
-// ============================================================
-// Agent settings (Settings → Permissions & Caps)
-// ============================================================
+// ── Agent settings (Settings → Permissions & Caps) ──
 
 /** Cached agentSettings (maxSteps, defaultAutonomy, etc.). Used by UI that
  *  needs the configured iteration cap (SessionHero, InspectorTab) instead of
@@ -67,9 +63,7 @@ export function useUpdateAgentSettings() {
   });
 }
 
-// ============================================================
-// Sessions
-// ============================================================
+// ── Sessions ──
 
 export function useSessions(workspaceId: string | null) {
   return useQuery({
@@ -116,9 +110,7 @@ export function useDispatches(sessionId: string | null) {
   });
 }
 
-// ============================================================
-// Providers & Models
-// ============================================================
+// ── Providers & Models ──
 
 export function useProviders() {
   return useQuery({ queryKey: qk.providers, queryFn: api.listProviders });
@@ -250,9 +242,7 @@ export function useModelOption(providerId: string | null, modelId: string | null
   );
 }
 
-// ============================================================
-// Mutations
-// ============================================================
+// ── Mutations ──
 
 export function useAddProvider() {
   const qc = useQueryClient();
@@ -430,9 +420,7 @@ export function useDeleteWorkspace(workspaceId: string) {
   });
 }
 
-// ============================================================
-// File tree + terminal
-// ============================================================
+// ── File tree + terminal ──
 
 export function useFileTree(workspaceId: string | null) {
   return useQuery({
@@ -450,9 +438,7 @@ export function useTerminalLines(sessionId: string | null) {
   });
 }
 
-// ============================================================
-// Git
-// ============================================================
+// ── Git ──
 
 export function useGitStatus(workspaceId: string | null, sessionId?: string | null) {
   // Include sessionId in the key so a workspace + worktree session don't
@@ -740,9 +726,7 @@ export function useGitDiscardFile(workspaceId: string, sessionId?: string | null
   });
 }
 
-// ============================================================
-// RAG status (Memory & RAG panel)
-// ============================================================
+// ── RAG status (Memory & RAG panel) ──
 
 /** Read-only RAG status snapshot for the active workspace. Refetch on
  *  invalidation (after a ragConfig patch) — staleTime:0 so the panel always
@@ -895,9 +879,7 @@ export function useRagDownloadProgress(): RagDownloadProgressEvent | null {
   return event;
 }
 
-// ============================================================
-// Knowledge sources
-// ============================================================
+// ── Knowledge sources ──
 
 export function useSources(workspaceId?: string | null) {
   return useQuery({

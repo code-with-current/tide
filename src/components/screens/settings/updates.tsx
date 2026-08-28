@@ -1,5 +1,4 @@
-/** UpdatesSection — in-app updater UI backed by the Electrobun Updater
- *  (patch-chain updates from the release bucket; GitHub Releases stays the
+/** UpdatesSection — in-app updater UI (GitHub Releases stays the
  *  manual-download page). Consent-driven: checks run automatically, the
  *  Release notice's Download button stages the bundle (progress dialog),
  *  and Restart Now applies + relaunches. "Later" collapses the notice —

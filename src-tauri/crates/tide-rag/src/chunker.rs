@@ -1,5 +1,5 @@
-//! AST-aware source chunker — port of `app/core/rag/chunker/index.ts` @
-//! 91ec558. Parses a file with native tree-sitter grammars and emits one
+//! AST-aware source chunker — port of `app/core/rag/chunker/index.ts`
+//! Parses a file with native tree-sitter grammars and emits one
 //! chunk per top-level symbol (whole-file fallback otherwise); boundaries
 //! never split a function body.
 //!

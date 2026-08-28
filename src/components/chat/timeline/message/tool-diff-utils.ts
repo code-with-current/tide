@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/toolDiffUtils.ts.
- *  Pure diff-text normalization/entry splitting — ported faithfully
- *  (re-indented 4-space to 2-space); `@pierre/diffs` import stays as-is. */
 import { parsePatchFiles } from '@pierre/diffs';
 
 export type DiffPatchEntry = {

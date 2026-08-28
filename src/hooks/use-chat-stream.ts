@@ -216,7 +216,6 @@ export function useChatStream(): {
       }, FLUSH_MS));
     };
 
-    // Electrobun webview: the agentEvents RPC message.
     const unregister = onAgentEvent(onEvent);
 
     return () => {
@@ -231,8 +230,8 @@ export function useChatStream(): {
 }
 
 // ─── Legacy-field back-compat bridge ─────────────────────────────────────
-// Keeps the legacy text/toolCalls/timeline/turn/reasoning/finalMessage fields in sync with events until Tasks 12-14 rewire components to read from `blocks`. Runs in the same setState as the reducer; returns a new SessionStream.
-function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStream {
+// Keeps the legacy text/toolCalls/timeline/turn/reasoning/finalMessage fields in sync with events until Tasks 12-14 rewire components to read from `blocks`. Runs in the same setState as the reducer; returns a new SessionStream. Exported for the node tests (pure over its arguments).
+export function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStream {
   switch (event.type) {
     case 'delta': {
       // Parented deltas are sub-agent narration (Agents panel) — the
@@ -394,7 +393,11 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
     case 'turn_end': {
       // Freeze the final message — the freeze effect watches this field.
       // The orchestrator's `blocks` is the canonical truth; legacy fields
-      // mirror it for back-compat with existing components.
+      // mirror it for back-compat with existing components. The TS backend
+      // always sent `blocks`; the Rust orchestrator omits them, so fall
+      // back to the reducer's live block list — the same flush above just
+      // ran applyTurnEnd over it, making it exactly what finalizeBlocks
+      // would have computed main-side.
       return {
         ...state,
         isStreaming: false,
@@ -406,7 +409,7 @@ function applyLegacyEvent(state: SessionStream, event: AgentEvent): SessionStrea
           messageId: event.messageId,
           content: event.content ?? '',
           timeline: event.timeline,
-          blocks: event.blocks,
+          blocks: event.blocks ?? state.blocks,
           reasoning: event.reasoning,
           reasoningTokens: event.reasoningTokens,
           totalMs: event.totalMs,

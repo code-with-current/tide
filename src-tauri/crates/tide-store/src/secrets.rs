@@ -1,5 +1,5 @@
 //! Keychain reads AND writes using the exact item naming
-//! `app/platform/secrets.ts` @ 91ec558 used: service `tide`, account
+//! `app/platform/secrets.ts` used: service `tide`, account
 //! `kcv2-<accountId>` for v2 handles (or the raw account embedded in a
 //! `kcv1:` legacy handle). The stored item data is a hex envelope of the
 //! secret (`-` for the empty string), never the raw bytes. The config's
@@ -589,7 +589,7 @@ mod tests {
     // Writes then reads then deletes a REAL keychain item under a random
     // kcv2- account; run explicitly: cargo test -p tide-store -- --ignored
     #[test]
-    #[ignore = "writes to the real macOS keychain (M4 T4 write-path homecoming check)"]
+    #[ignore = "writes to the real macOS keychain"]
     fn live_keychain_write_round_trips() {
         let plain = "tide-live-write-check";
         let stored = encrypt_stored(plain).unwrap();

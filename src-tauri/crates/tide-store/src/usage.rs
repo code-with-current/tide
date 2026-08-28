@@ -1,5 +1,5 @@
 //! Provider token-window tracking — the port of
-//! `app/core/agent/usage-windows.ts` @ 91ec558. Claude-style rolling usage
+//! `app/core/agent/usage-windows.ts`. Claude-style rolling usage
 //! windows (5-hour, weekly) per provider: one `usage_event` row per turn
 //! (time, provider_id, tokens, cost), summed over the window for metering
 //! against user-configured limits. WAL sqlite in the app data dir

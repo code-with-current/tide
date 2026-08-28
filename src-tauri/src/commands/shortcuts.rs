@@ -1,5 +1,5 @@
 //! settings.json shortcut overrides — the port of `app/rpc/settings.ts` +
-//! `app/core/settingsStore.ts` (91ec558): `settingsGet` returns
+//! `app/core/settingsStore.ts` (): `settingsGet` returns
 //! `{overrides, platform-aware defaults}`, `settingsSetShortcut` sets/clears
 //! one binding (null/[] deletes), `settingsResetShortcuts` clears all
 //! overrides. Kept in settings.json — separate from config.json so a

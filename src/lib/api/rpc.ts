@@ -1,8 +1,7 @@
-/** RPC bridge seam for the renderer. The Electrobun view client is gone with
- *  the backend (Tauri rewrite): `rpc` is null everywhere — including inside a
- *  Tauri webview — until the M1+ bridge module installs `window.__TIDE_BRIDGE__`
- *  over a real invoke channel, so every data call in client.ts takes its
- *  existing mock-store fallback until then. */
+/** RPC bridge seam for the renderer. `rpc` is null everywhere — including
+ *  inside a Tauri webview — until the bridge module installs
+ *  `window.__TIDE_BRIDGE__` over a real invoke channel, so every data call in
+ *  client.ts takes its mock-store fallback until then. */
 import type {
   FlushBatch,
   McpEvent,
@@ -23,7 +22,7 @@ import type { AgentEvent } from '@/lib/agent/events';
  *  make every client.ts data call take the RPC path inside an unwired Tauri
  *  webview, and the first synchronous throw (splash's refreshModelCatalog,
  *  non-async) escapes React commit with no ErrorBoundary → white screen.
- *  The M1+ bridge module (tauri-bridge.ts) activates the real client itself
+ *  The bridge module (tauri-bridge.ts) activates the real client itself
  *  via activateRpcClient once the bridge_version handshake validates; until
  *  then the app runs on the mock store even inside the webview. */
 declare global {
@@ -58,8 +57,8 @@ type ScriptPortsCallback = (event: ScriptPortsEvent) => void;
 type UpdateStatusCallback = (status: UpdateStatusWire) => void;
 
 // Single-slot registries (replace-on-set): the active consumer owns the
-// callback, and re-subscribing on session switch swaps it in. The M1 bridge
-// will fan incoming Tauri Channel messages out through these same slots.
+// callback, and re-subscribing on session switch swaps it in. The bridge
+// fans incoming Tauri Channel messages out through these same slots.
 let orchestratorEventsCallback: OrchestratorEventsCallback | null = null;
 let agentEventsCallback: AgentEventsCallback | null = null;
 let terminalOutputCallback: TerminalOutputCallback | null = null;
@@ -172,8 +171,7 @@ export function setScriptPortsCallback(cb: ScriptPortsCallback | null): void {
 }
 
 // Push-channel fan-out for the setter-registered slots (the on*-registered
-// ones are consumed via their own closures). These replace the Electrobun
-// message handlers as the slots' read side — the M1 bridge forwards incoming
+// ones are consumed via their own closures) — the bridge forwards incoming
 // Tauri Channel messages through them.
 
 export function emitTerminalOutput(event: TerminalOutputEvent): void {
@@ -201,7 +199,7 @@ export function emitScriptPorts(event: ScriptPortsEvent): void {
 }
 
 // The two chat push channels ride the on*-registered slots above — these
-// emitters are their read side, fed by the M2 Tauri bridge's single
+// emitters are their read side, fed by the Tauri bridge's single
 // chat_attach_channel Channel (ChatPush tagged `agentEvents`/`orchestratorEvents`).
 
 /** Deliver one AgentEvent to the onAgentEvent consumer (ChatPush `agentEvents`). */
@@ -248,6 +246,12 @@ export function onUpdateStatus(cb: UpdateStatusCallback): () => void {
   };
 }
 
+/** Deliver one update-status snapshot to the onUpdateStatus consumer
+ *  (ChatPush `updateStatus` — the updater's consent state machine). */
+export function emitUpdateStatus(status: UpdateStatusWire): void {
+  updateStatusCallback?.(status);
+}
+
 /** Request surface derived from the wire schema: one async fn per bun-side
  *  request — `(params) => Promise<response>`, the shape client.ts consumes. */
 export type TideRpcClient = {
@@ -259,7 +263,7 @@ export type TideRpcClient = {
 };
 
 function bridgeNotPorted(): never {
-  throw new Error('[tide] RPC bridge not yet ported (Tauri rewrite M1)');
+  throw new Error('[tide] RPC bridge not installed');
 }
 
 /** The bridge client — a LIVE binding, not an import-time snapshot. This
@@ -291,7 +295,7 @@ export type RuntimeInfo = { version: string; os: string; arch: string };
 let runtimeInfoCache: RuntimeInfo | null = null;
 
 /** Direct-to-invoke probe — deliberately independent of the rpc/__TIDE_BRIDGE__
- *  mechanism: works from the first M0 boot inside the Tauri webview while all
+ *  mechanism: works from first boot inside the Tauri webview even while all
  *  data calls still run on the mock store. */
 export async function getRuntimeInfo(): Promise<RuntimeInfo | null> {
   if (typeof globalThis.__TAURI_INTERNALS__ === 'undefined') return null;

@@ -126,12 +126,7 @@ export function SettingsScreen() {
         {/* Spacer clearing the native macOS traffic lights (top-left, 12,12).
             Collapses to zero while fullscreen — the buttons hide there. */}
         {isMac && (
-          <div
-            className={cn(
-              "flex-shrink-0 drag-region",
-              isFullScreen ? "h-0" : "h-6",
-            )}
-          />
+          <div className={cn('flex-shrink-0 drag-region', isFullScreen ? '-mt-3' : 'mt-6')} />
         )}
 <div className={cn("px-3 py-4 flex items-center justify-between border-foreground flex-shrink-0 border-b ", !isMac && "drag-region")}>
           <div className="text-[1rem] uppercase tracking-wider text-sidebar-foreground font-bold font-stretch-semi-expanded">
@@ -150,7 +145,6 @@ export function SettingsScreen() {
 
             </Button>
           </Tip>
-
 
         </div>
 

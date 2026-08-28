@@ -1,4 +1,4 @@
-//! todo_write — port of `app/core/agent/tools/todo-write.ts` (91ec558).
+//! todo_write — port of `app/core/agent/tools/todo-write.ts` ().
 //! Single flat per-session todo list with a full-replacement model (the
 //! COMPLETE list replaces the previous on every call). State lives in
 //! [`TodoState`] — the port of the TS module-level `sessionTodos` map +

@@ -1,19 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/changedFiles.ts — ADAPTED (Ruling 5).
- *  Upstream derives changed files from OpenCode tool-part metadata shapes Tide's adapter
- *  never emits (metadata.files / metadata.filediff / metadata.results[].filediff /
- *  metadata.patch). Tide's edit_file + multi_edit pack the diff in
- *  `metadata.display = { kind: 'diff', path, hunks: DiffHunk[], additions, deletions }`
- *  (via lib/tide-adapter.ts buildToolMetadata; electron/agent/tools/edit-file.ts:77,
- *  multi-edit.ts:86) — verified, so NO adapter change was needed. Adaptations:
- *  - Primary read: metadata.display (kind 'diff') → path/additions/deletions + a unified
- *    patch text synthesized from the structured hunks (kept on the entry for diff views).
- *  - Fallback: the part's `input.path` (write_file carries a text display, not a diff).
- *  - Status filter uses Tide vocabulary: only 'executed' tool parts count.
- *  - FILE_EDIT_TOOLS re-keyed to Tide names: edit_file, multi_edit, write_file.
- *  - Dropped: GitChangedFile/extractGitChangedFiles/isGitFile (git-status derivation fed
- *    the global PendingChangesBar, which is excluded from the port) and `messageID`
- *    (TimelinePart carries no message coupling; the turn record owns that). */
-
 import type { DiffHunk, DiffLine, ToolName } from '@/types';
 import type { FileChangeEntry } from '@/lib/stream/block-state';
 import type { TimelinePart } from './types/message-parts';

@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdownSecurity.ts.
- *  Verbatim port. */
-
 /** Raw HTML in assistant markdown is untrusted and must stay inert text. */
 export const escapeRawMarkdownHtml = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

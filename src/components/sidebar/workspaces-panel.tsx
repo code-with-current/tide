@@ -214,7 +214,6 @@ export function WorkspacesPanel() {
           ))}
         </div>
 
-
       </div>
       <div className="flex-shrink-0 border-t border-accent-foreground">
       <ArchivedWorkspacesSection
@@ -526,7 +525,6 @@ function ArchivedWorkspacesSection({
       <span className="text-muted-foreground/40">({workspaces.length})</span>
       <span className='flex-1'></span>
       <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
-
 
       </button>
 

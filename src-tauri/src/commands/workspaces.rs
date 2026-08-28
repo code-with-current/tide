@@ -1,5 +1,5 @@
 //! `workspaceList` — backs the TideRPC `workspaceList` method. Port of the
-//! 91ec558 producer (`configStore.listWorkspaces`): stored entries pass
+//! TS producer (`configStore.listWorkspaces`): stored entries pass
 //! through verbatim (the config already persists the full wire shape —
 //! branch/headCommit/fileCount/scripts ride tide-store's flatten-preserved
 //! extras) with `ragConfig` hydrated at read time so workspaces persisted
@@ -27,7 +27,7 @@ fn workspace_wire(ws: &Workspace) -> Value {
     wire
 }
 
-/// Max input tokens per embedder variant (91ec558 kept the same table beside
+/// Max input tokens per embedder variant (the TS kept the same table beside
 /// hydrateRagConfig so hydration stays free of the embedder modules).
 fn embedder_max_tokens(embedder_id: &str) -> Option<u64> {
     match embedder_id {
@@ -37,7 +37,7 @@ fn embedder_max_tokens(embedder_id: &str) -> Option<u64> {
     }
 }
 
-/// Port of `hydrateRagConfig` (91ec558 configStore): fill missing fields,
+/// Port of `hydrateRagConfig` (configStore): fill missing fields,
 /// force `dim` to 384, and clamp `chunkTokens` to the recorded embedder's
 /// max so a workspace flipped between embedders never keeps an
 /// un-embeddable chunk size.
@@ -77,14 +77,12 @@ pub(crate) fn hydrate_rag_config(ws: &mut Value) {
 }
 
 
-// ── M4 T2: workspace management ─────────────────────────────────────────────
+// ── Workspace management ────────────────────────────────────────────────────
 //
-// Port of `app/rpc/workspaces.ts` @ 91ec558. Deviations, both accepted in
-// this rewrite already:
+// Port of `app/rpc/workspaces.ts`. Deviations:
 //
-// - The add-workspace per-step progress pushes (`requestId` milestones over
-//   the Electrobun push channel) are dropped — the Tauri shell has no
-//   workspace-progress channel; `workspaceAdd` is one await like the rest.
+// - The add-workspace per-step progress pushes are dropped — the Tauri shell
+//   has no workspace-progress channel; `workspaceAdd` is one await like the rest.
 // - `syncCoAuthorHook` is skipped (the settings.rs M-port decision: agent
 //   commits no longer carry the co-author hook).
 // - git detection / init / clone run on git2 instead of the git CLI; the
@@ -107,7 +105,7 @@ use crate::agent::sink::{iso_ms, unix_ms_now};
 use super::worktree;
 
 
-// ── M4 T7: fileTreeGet (right-panel file explorer) ────────────────────────
+// ── fileTreeGet (right-panel file explorer) ─────────────────────────────────
 
 /// `FileNode` (src/types) — the explorer tree node.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -121,7 +119,7 @@ pub struct FileNodeWire {
     pub children: Option<Vec<FileNodeWire>>,
 }
 
-/// Port of `readDirTree` (app/rpc/workspaces.ts @ 91ec558): depth-3 tree,
+/// Port of `readDirTree` (app/rpc/workspaces.ts): depth-3 tree,
 /// skipping .git/.DS_Store/node_modules/dist/release.
 pub(crate) fn read_dir_tree(base_path: &Path, relative_path: &str, max_depth: i32) -> Vec<FileNodeWire> {
     if max_depth < 0 {

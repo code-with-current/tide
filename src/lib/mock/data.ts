@@ -7,25 +7,19 @@ import type {
   Workspace,
 } from '@/types';
 
-// ============================================================
-// Workspaces
-// ============================================================
+// ── Workspaces ──
 
 // Start empty — user adds workspaces via the dialog with a real file picker.
 export const workspaces: Workspace[] = [];
 
-// ============================================================
-// Sessions
-// ============================================================
+// ── Sessions ──
 
 // Start empty — created when the user starts chatting.
 export const sessionsByWorkspace: Record<string, Session[]> = {};
 
 export const allSessions: Session[] = [];
 
-// ============================================================
-// Providers & models
-// ============================================================
+// ── Providers & models ──
 
 export const providers: Provider[] = [
   {
@@ -120,9 +114,7 @@ export const providers: Provider[] = [
   },
 ];
 
-// ============================================================
-// File tree (for File Explorer tab)
-// ============================================================
+// ── File tree (for File Explorer tab) ──
 
 export const fileTree: FileNode[] = [
   {
@@ -170,9 +162,7 @@ export const fileTree: FileNode[] = [
   { name: 'README.md', path: 'README.md', kind: 'file' },
 ];
 
-// ============================================================
-// Terminal seed output
-// ============================================================
+// ── Terminal seed output ──
 
 export interface TerminalLine {
   kind: 'prompt' | 'cwd' | 'cmd' | 'ok' | 'err' | 'dim' | 'text';

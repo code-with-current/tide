@@ -1,4 +1,4 @@
-//! Data-dir resolution ported from `app/platform/paths.ts` @ 91ec558.
+//! Data-dir resolution ported from `app/platform/paths.ts`.
 
 use std::path::PathBuf;
 

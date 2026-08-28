@@ -1,4 +1,4 @@
-//! Terminal domain runtime — port of `91ec558:app/platform/pty.ts` (the
+//! Terminal domain runtime — port of `app/platform/pty.ts` (the
 //! session-manager half; the backend seam is portable-pty instead of
 //! Bun's terminal API / node-pty) plus the coalescer batching that fed it.
 //! One registry owns every live PTY keyed by terminal id:
@@ -72,7 +72,7 @@ pub fn clamp_pty_size(cols: Option<u16>, rows: Option<u16>) -> (u16, u16) {
 }
 
 /// Host-private environment variables that must never leak into PTY shells
-/// (the Electron-era list, kept verbatim — see pty.ts for the rationale).
+/// (kept verbatim from the TS list — see pty.ts for the rationale).
 const STRIP_ENV: [&str; 7] = [
     "ARGV0",
     "NODE_CHANNEL_FD",

@@ -1,42 +1,5 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/ChatMessage.tsx — REWRITE-PORT (ruling R3).
- * Upstream's component is store-coupled (15 store imports); structure is kept,
- * wiring is replaced with props/constants. Kept faithfully: role derivation,
- * `filterVisibleParts` visibility, the expanded/collapsed tool caches (module
- * Maps, LRU 4000), tool popup state → ToolOutputDialog, copy actions (markdown
- * + text), `FadeInOnReveal` on user parts, `renderCompare` memo comparators,
- * and `MessageBody` delegation.
- *
- * upstream port seams (each per task-6 brief R3 / handoff corrections):
- *  - DROPPED stores/branches: theme system (CSS vars themed via T2 tokens),
- *    config providers, selection/session-UI/context stores, sonner toasts,
- *    i18n (upstream English strings hardcoded), `MessageFreshnessDetector`
- *    (animation gating → `allowAnimation` false), context-into-context pinning
- *    (`isPinnedIntoContext` + pin handler), `reviewFlow` transfer UI,
- *    `contextObligatoryMessages`, image-preview store flag, `isVSCodeRuntime`
- *    branches (always false), `lazyWithChunkRecovery` (direct import),
- *    `streamPerfCount` counters, revert/fork handlers (no session-ui store).
- *  - DROPPED `@opencode-ai/sdk` types → ported `TimelinePart`/`ChatMessageEntry`.
- *  - `providerAuthError` special-casing dropped (upstream
- *    `isLikelyProviderAuthFailure`/`PROVIDER_AUTH_FAILURE_MESSAGE` module is
- *    not ported); Tide surfaces provider failures via stopReason/error rows.
- *    The reduced inline error mapping keeps the aborted-info branch.
- *  - `planModeEnabled` derived from a `permissionMode`-carrying part's
- *    metadata/input (else false) — upstream reads a feature-flag store.
- *  - `flattenAssistantTextParts` (upstream lib/messages/messageText) is not
- *    ported; a local reducer replaces it.
- *  - Device info (isMobile/isTablet/hasTouchInput) is store-fed upstream; Tide
- *    is desktop → constants.
- *  - NEW Tide wiring (no upstream equivalent): `AgentNestingProvider` mount
- *    (T4 context; map built from parts' `metadata.parentToolCallId`), and
- *    PermissionCard/QuestionCard mounting for pending tool calls / followup
- *    questions (handoff corrections 2 & 5).
- *  - Signature is plan-mandated: upstream's previousMessage/nextMessage/
- *    animation/review props are not threaded (no neighbors at the call site);
- *    hidden-neighbor padding flags default false.
- */
-
 import React from 'react';
+import { ChevronDown } from 'lucide-react';
 
 import MessageBody from './message/message-body';
 import type { AgentMentionInfo } from './message/types';
@@ -78,6 +41,15 @@ const HAS_TOUCH_INPUT = false;
 const EXPANDED_TOOLS_CACHE_MAX = 4000;
 const expandedToolsStateCache = new Map<string, Set<string>>();
 const collapsedToolsStateCache = new Map<string, Set<string>>();
+
+const USER_CLAMP_PX = 160;
+const userExpandedStateCache = new Map<string, boolean>();
+function readUserExpandedCache(messageId: string): boolean {
+  return userExpandedStateCache.get(messageId) ?? false;
+}
+function writeUserExpandedCache(messageId: string, value: boolean) {
+  userExpandedStateCache.set(messageId, value);
+}
 
 const BASH_TOOL_NAMES = new Set(['bash', 'shell', 'cmd', 'terminal']);
 const EDIT_TOOL_NAMES = new Set([
@@ -233,6 +205,14 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
   const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
   const [copiedMessage, setCopiedMessage] = React.useState(false);
   const [expandedTools, setExpandedTools] = React.useState<Set<string>>(() => readExpandedToolsCache(entry.info.id));
+  const [userClampable, setUserClampable] = React.useState(false);
+  const [userExpanded, setUserExpanded] = React.useState(() => readUserExpandedCache(entry.info.id));
+  const toggleUserExpanded = () => {
+    setUserExpanded((v) => {
+      writeUserExpandedCache(entry.info.id, !v);
+      return !v;
+    });
+  };
   const [collapsedTools, setCollapsedTools] = React.useState<Set<string>>(() => readCollapsedToolsCache(entry.info.id));
   const [popupContent, setPopupContent] = React.useState<ToolPopupContent>({
     open: false,
@@ -335,6 +315,11 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
 
     return visibleParts;
   }, [chatRenderMode, isMessageCompleted, isUser, visibleParts]);
+  const userBubbleRef = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const el = userBubbleRef.current;
+    if (el) setUserClampable(el.scrollHeight > USER_CLAMP_PX + 24);
+  }, [displayParts]);
 
   const toolParts = React.useMemo(() => {
     if (isUser) {
@@ -344,7 +329,7 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
   }, [isUser, visibleParts]);
 
   // Turn grouping seam: the plan-mandated signature carries `turn` (a Turn —
-  // structurally also a full TurnRecord once T8 threads the projection); rich
+  // structurally also a full TurnRecord once the projection lands); rich
   // projection fields are read when present, minimal flags otherwise.
   const turnGroupingContext = React.useMemo<TurnGroupingContext | undefined>(() => {
     if (!turn) return undefined;
@@ -549,7 +534,7 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
       };
     }
     return {
-      text: `The turn failed with error:\n\`${detail}\``,
+      text: `Turn failed — \`${detail}\``,
       variant: 'error' as const,
     };
   }, [isUser, entry.info]);
@@ -646,7 +631,7 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
     });
   }, [defaultOpenToolIds, effectiveExpandedTools, entry.info.id]);
 
-  // Popup seam (handoff correction 6): opens for image/mermaid content only,
+  // Popup: opens for image/mermaid content only,
   // no image-preview store flag.
   const handleShowPopup = React.useCallback((content: ToolPopupContent) => {
     if (content.image || content.mermaid) {
@@ -658,7 +643,7 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
     setPopupContent((prev) => ({ ...prev, open }));
   }, []);
 
-  // NEW Tide wiring (handoff correction 5): pending permission parts → PermissionCard.
+  // Pending permission parts → PermissionCard.
   const pendingPermissionParts = React.useMemo(() => {
     if (isUser) {
       return [];
@@ -699,7 +684,7 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
     return map;
   }, [entry.parts]);
 
-  // NEW Tide wiring (handoff correction 2): agent-nesting map from parentToolCallId metadata.
+  // Agent-nesting map from parentToolCallId metadata.
   const childPartsByToolCallId = React.useMemo(() => {
     const map = new Map<string, TimelinePart[]>();
     entry.parts.forEach((part) => {
@@ -755,12 +740,16 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
                   <div className={cn('relative flex justify-end', 'group/user-shell')}>
                     <div className={cn('max-w-[85%]', showStickyInlineHoverRow ? 'pb-5' : undefined)}>
                       <div
+                        ref={userBubbleRef}
                         style={{
                           backgroundColor: 'var(--chat-user-message-bg)',
                           borderRadius: userMessageRadius,
                           borderBottomRightRadius: 'var(--radius-sm)',
                         }}
-                        className="px-5 py-3 shadow-none border border-primary/5"
+                        className={cn(
+                          'group/user-bubble relative px-5 py-3 shadow-none border border-primary/5 overflow-hidden transition-[max-height] duration-200',
+                          userClampable && !userExpanded && 'max-h-40 [mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]',
+                        )}
                       >
                         <MessageBody
                           sessionId={sessionId ?? undefined}
@@ -802,6 +791,19 @@ const ChatMessageImpl: React.FC<ChatMessageProps> = ({
                           }
                         />
                       </div>
+                      {userClampable && (
+                        <div className="mt-1 flex justify-center">
+                          <button
+                            type="button"
+                            aria-expanded={userExpanded}
+                            title={userExpanded ? 'Collapse' : 'Expand'}
+                            onClick={toggleUserExpanded}
+                            className="flex size-5 items-center justify-center rounded-full border border-border bg-secondary/60 text-muted-foreground opacity-0 transition-opacity hover:text-foreground hover:bg-accent group-hover/user-bubble:opacity-100"
+                          >
+                            <ChevronDown className={cn('size-3 transition-transform', userExpanded && 'rotate-180')} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </FadeInOnReveal>

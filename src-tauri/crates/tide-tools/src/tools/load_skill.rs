@@ -1,4 +1,4 @@
-//! load_skill — port of `app/core/agent/tools/load-skill.ts` (91ec558).
+//! load_skill — port of `app/core/agent/tools/load-skill.ts` ().
 //! Reads a skill's SKILL.md (via read_file + the skill-root allowlist) and
 //! returns the body as instructions to follow; "execute" = load the
 //! prompt-based skill, not run code. `builtin:<name>` ids resolve against

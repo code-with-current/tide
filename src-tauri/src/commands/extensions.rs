@@ -1,5 +1,5 @@
-//! Extensions + project entries (M4 T7) — port of `app/rpc/extensions.ts`
-//! and the `projectEntriesList` half of `app/rpc/misc.ts` @ 91ec558. The
+//! Extensions + project entries — port of `app/rpc/extensions.ts`
+//! and the `projectEntriesList` half of `app/rpc/misc.ts`. The
 //! disabled-set lives in config.json (`extensions.disabled`); list
 //! handlers merge it with the built-in agent registry and the
 //! `.claude`/`.agent`/`.zcode` workspace scan (project entries shadow user
@@ -104,6 +104,7 @@ const SUBDIRS: &[&str] = &["skills", "agents"];
 pub struct ProjectEntryWire {
     pub name: String,
     pub path: String,
+    #[serde(rename = "absPath")]
     pub abs_path: String,
     pub description: String,
     pub content: String,
@@ -113,6 +114,7 @@ pub struct ProjectEntryWire {
 }
 
 #[derive(Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectEntriesResultWire {
     pub context_files: Vec<ProjectEntryWire>,
     pub skills: Vec<ProjectEntryWire>,
@@ -338,6 +340,7 @@ pub struct SkillExtensionEntryWire {
     /// project | user
     pub source: String,
     pub path: String,
+    #[serde(rename = "absPath")]
     pub abs_path: String,
     pub enabled: bool,
 }

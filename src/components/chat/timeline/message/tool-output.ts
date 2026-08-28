@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/toolOutput.ts.
- *  Pure ANSI/terminal-output renderer — ported faithfully (re-indented
- *  4-space to 2-space); no upstream deps. */
 const MAX_SYNTHETIC_TERMINAL_CELLS = 100_000;
 
 interface TerminalRenderBudget {

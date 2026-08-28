@@ -113,5 +113,5 @@ export const PanelActionsProvider: React.FC<{
   return <PanelActionsContext.Provider value={actions}>{children}</PanelActionsContext.Provider>;
 };
 
-// oxlint-disable-next-line react/only-export-components -- context+hook co-location follows the agent-nesting-context.tsx precedent (T4).
+// oxlint-disable-next-line react/only-export-components -- context+hook co-location follows the agent-nesting-context.tsx precedent.
 export const usePanelActions = (): PanelActions | null => React.useContext(PanelActionsContext);

@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdownTheme.ts.
- *  Verbatim port. */
 import { registerCustomTheme, type ThemeRegistrationResolved } from '@pierre/diffs';
 import { MARKDOWN_SHIKI_THEME, MARKDOWN_SHIKI_THEME_DEFINITION } from './markdown-shiki-theme-definition';
 

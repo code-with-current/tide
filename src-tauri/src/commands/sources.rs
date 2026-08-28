@@ -1,5 +1,5 @@
-//! Knowledge-sources commands (M4 T7) — port of `app/rpc/sources.ts` @
-//! 91ec558: registry CRUD, per-workspace enablement, and reindex
+//! Knowledge-sources commands — port of `app/rpc/sources.ts`:
+//! registry CRUD, per-workspace enablement, and reindex
 //! enqueueing through a serial ingestion manager. The `sourcesProgress`
 //! push carries the SourceProgressEvent payload verbatim; crash leftovers
 //! stuck in queued/indexing resolve to idle before the UI reads them.
@@ -26,6 +26,7 @@ use super::CommandError;
 #[derive(Debug, Serialize)]
 pub struct SourcesListResultWire {
     pub sources: Vec<tide_rag::KnowledgeSource>,
+    #[serde(rename = "enabledSourceIds")]
     pub enabled_source_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

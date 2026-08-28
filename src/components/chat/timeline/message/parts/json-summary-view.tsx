@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/JsonSummaryView.tsx.
- *  Ported verbatim; `Icon` comes from the lucide shim (`../../icon`).
- *  (Note: this native-`<details>` summary tree needs no JsonTreeView — the
- *  ruling-5 JsonTreeView seam lives in tool-output-dialog for raw JSON output.) */
-
 import React from 'react';
 
 import { Icon } from '../../icon';

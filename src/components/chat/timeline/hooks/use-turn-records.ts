@@ -1,10 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/hooks/useTurnRecords.ts — ADAPTED.
- * Wraps the T1-ported projection (`projectTurnRecords` + `turnProjectionCache`)
- * instead of upstream's. upstream port seams: `streamPerfMeasure` perf
- * counter dropped (Tide has no streamDebug store); import paths only otherwise.
- */
-
 import React from 'react';
 import { projectTurnRecords } from '../lib/turns/project-turn-records';
 import type { ChatMessageEntry, TurnProjectionResult, TurnRecord } from '../lib/turns/types';

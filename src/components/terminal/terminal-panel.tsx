@@ -124,8 +124,7 @@ function fitTerminal(term: GhosttyTerminal, wrapper: HTMLDivElement): { cols: nu
 // Component-scoped listeners would drop every PTY byte emitted while the
 // panel was unmounted; the registry terms keep accepting writes (their
 // scrollback lives in ghostty-web's WASM buffer, repainted on re-attach).
-// Transport-agnostic: the Electrobun RPC bridge or the frozen Electron
-// preload, whichever is present (client.ts picks).
+// Transport: whatever bridge is present (client.ts picks).
 subscribeTerminalEvents({
   onOutput: ({ terminalId, data, seq }: { terminalId: string; data: string; seq?: number }) => {
     // Snapshot in flight — park; the attach path replays newer chunks after

@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/projectTurnRecords.ts. Tide adaptations: `isHiddenUserMessage` (upstream: message/hiddenUserMessage.ts) is a constant-false local helper — the Tide adapter never emits hidden/synthetic user messages, and the upstream check depends on unported display normalization; the `mergeHiddenUserTurns` option stays plumbed for signature compatibility. */
-
 import { projectTurnActivity } from './project-turn-activity';
 import { projectTurnIndexes } from './project-turn-indexes';
 import { projectTurnChangedFiles, projectTurnDiffStats, projectTurnSummary } from './project-turn-summary';

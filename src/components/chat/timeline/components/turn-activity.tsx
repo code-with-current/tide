@@ -1,13 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/components/TurnActivity.tsx.
- * Near-verbatim pass-through wrapper around ProgressiveGroup. Import-path
- * rewrites only, plus: `ContentChangeReason` comes from the ported
- * `message/types` (upstream imports the type from its useChatAutoFollow hook);
- * the `onContentChange` prop is kept but only forwarded — Tide's auto-follow
- * hook is ResizeObserver-driven (T4 ruling, same seam as tool-part).
- * Named export per project convention instead of upstream's default export.
- */
-
 import React from 'react';
 
 import { ProgressiveGroup } from '../message/parts/progressive-group';

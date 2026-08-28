@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/toolPresentation.tsx.
- *  Adaptation: `Icon` comes from Tide's lucide shim (`../icon`) instead of
- *  the upstream's sprite-based `@/components/icon/Icon`; the upstream Remixicon
- *  names map to nearest lucide equivalents there. Icon-selection logic is
- *  otherwise ported verbatim. */
-
 import { Icon } from '../icon';
 
 export const getToolIcon = (toolName: string) => {

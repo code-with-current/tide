@@ -1,25 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/ReasoningPart.tsx.
- *  Adaptations:
- *  - Ruling 1: the `motion` dependency is NOT added. Upstream animates the
- *    expand/collapse height with `animate(element, { height: 'auto' | '0px' },
- *    { duration: 0.2, ease: 'easeOut' })`. The replacement below is a CSS
- *    transition approximation: measure `scrollHeight`, transition between px
- *    values, and settle to `height:auto` after an expand transition ends (the
- *    standard technique for animating to auto without a library). Fidelity
- *    difference: none visible in normal use; only a mid-transition content
- *    growth (streaming while collapsing) lands at the pre-growth height for the
- *    remaining ~200ms instead of tracking — acceptable per the ruling.
- *  - Ruling 5: upstream's `ScrollableOverlay` app component becomes a plain
- *    `overflow-y-auto` div with the same max-height contract. Lost while
- *    uncompensated: its gradient scroll shadows and `userIntentOnly` wheel
- *    capture — the box now always scrolls natively.
- *  - `useUIStore` chatRenderMode read → prop with upstream's own default
- *    ('live', matching AssistantTextPart's prop default).
- *  - i18n (`useI18n`) → literal English; SDK `Part` → `TimelinePart`; `Icon` from the
- *    lucide shim (`arrow-down-s` → ChevronDown).
- *  Summary extraction, expansion state machine, and auto-expand logic ported
- *  verbatim. */
-
 import React from 'react';
 import type { TimelinePart } from '../../types/message-parts';
 import { cn } from '@/lib/utils';
@@ -115,7 +93,7 @@ type ExpansionState = {
 };
 
 /**
- * Ruling-1 seam: CSS-transition approximation of upstream's
+ * CSS-transition approximation of upstream's
  * `animate(element, { height: 'auto' | px }, { duration: 0.2, ease: 'easeOut' })`.
  * Animates between measured pixel heights; expansion settles to `height: auto`
  * on transition end. Exposes a `stop()` shaped like motion's controls so the
@@ -470,9 +448,9 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 {reasoningBody}
               </div>
             ) : (
-              // Ruling-5 seam: upstream ScrollableOverlay → plain overflow-auto
-              // div with the same max-height contract (scroll shadows and the
-              // userIntentOnly wheel capture are not replicated).
+              // Plain overflow-auto div with the same max-height contract
+              // (scroll shadows and the userIntentOnly wheel capture are not
+              // replicated).
               <div className="max-h-80 overflow-y-auto p-0">
                 {reasoningBody}
               </div>

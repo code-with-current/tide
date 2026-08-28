@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/turnProjectionCache.ts. Tide adaptation: upstream's VS Code / mobile runtime cache-size detection (`@/lib/desktop`, `@/lib/runtimeSurface`) is not ported, so a single desktop cache size is used. */
-
 import type { ChatMessageEntry, TurnProjectionResult } from './types';
 
 const TURN_PROJECTION_CACHE_MAX = 30;

@@ -1,5 +1,5 @@
 //! git2-backed session-worktree lifecycle — the port of the worktree trio in
-//! `app/core/ipc-adjacent/git.ts` @ 91ec558 (`worktreeAdd` / `worktreeRemove`
+//! `app/core/ipc-adjacent/git.ts` (`worktreeAdd` / `worktreeRemove`
 //! / `worktreeStatus`) plus `copyConfigFile` from sessions.ts. The TS shelled
 //! out to the git CLI; libgit2 does the same jobs natively (branch create +
 //! worktree add from the base branch, recursive prune + branch delete on

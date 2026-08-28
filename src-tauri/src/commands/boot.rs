@@ -1,9 +1,8 @@
 //! Boot-path commands: last-session restore (config-backed) and the consent
-//! gate. The consent screen covered the Electrobun shell's Accessibility /
-//! Full-Disk-Access prerequisites; the Tauri shell has none yet, so it
-//! reports clear until the M4 permission work revisits it. The splash's
-//! routing effect calls `consentShouldShow` without a `.catch`, so an
-//! un-ported rejection there froze the app at the splash screen.
+//! gate. The Tauri shell has no Accessibility/Full-Disk-Access prerequisites,
+//! so consent reports clear. The splash's routing effect calls
+//! `consentShouldShow` without a `.catch`, so a rejection there freezes the
+//! app at the splash screen.
 
 use serde::Serialize;
 

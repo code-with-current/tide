@@ -1,12 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/MarkdownImageGallery.tsx.
- *  Adaptation: the server-auth machinery (`useAssetAuth`, runtime auth token
- *  acquire/refresh/subscribe, `useEffectiveDirectory`) is dropped — Tide's
- *  image sources are either remote http(s) or data URLs, neither of which needs
- *  the upstream asset-auth handshake. The VSCode workspace-fs branch is
- *  deleted (desktop-only). Local-file candidates resolve through the
- *  `markdown-image-assets` seam (reported missing and filtered out). i18n
- *  strings are literal English; `<Icon>` comes from the Tide icon shim.
- */
 import React from 'react';
 import { toast } from 'sonner';
 import { Icon } from '../icon';

@@ -1,4 +1,4 @@
-//! notebook_edit — port of `app/core/agent/tools/notebook-edit.ts` (91ec558).
+//! notebook_edit — port of `app/core/agent/tools/notebook-edit.ts` ().
 //! Edits Jupyter (.ipynb) cells by index through serde_json: the model
 //! passes `source` as a plain string, the tool splits it into the array-of-
 //! lines shape real notebooks use (trailing `\n` on every line but the

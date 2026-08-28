@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/partUtils.ts.
- *  Pure part helpers — ported faithfully (re-indented 4-space → 2-space);
- *  `Part` from `@opencode-ai/sdk/v2` becomes Tide's structural `TimelinePart`. */
-
 import type { TimelinePart } from '../types/message-parts';
 
 type PartWithText = TimelinePart & { text?: string; content?: string; value?: string };

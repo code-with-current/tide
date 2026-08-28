@@ -1,24 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/toolRenderers.tsx.
- * Adaptations:
- * - R1 (task-4 brief): the renderer vocabulary is re-keyed to Tide's `ToolName`
- *   (src/types/index.ts) via `TIDE_TOOL_ALIASES` / `resolveRendererToolName`.
- *   Upstream's helpers and the T3-ported `lib/tool-helpers.ts` /
- *   `message/tool-presentation.tsx` metadata tables speak upstream tool names
- *   (`read`, `edit`, `multiedit`, `write`, `list`, `task`, `todowrite`,
- *   `webfetch`, `websearch`, `question`, `skill`), so Tide names resolve to the
- *   nearest upstream renderer key before lookup. Unmapped Tide names (`mcp`,
- *   `git`, `git_repo`, `memory`, `bash_output`, `kill_shell`, `slash_command`,
- *   `compact`, `init`, `notebook_edit`) resolve to themselves and fall through
- *   to the generic fallback renderer / unknown-tool display name.
- * - R2: Tide's bash tool emits no `<file>` wrappers and no LSP diagnostics, so
- *   the `<file>`/diagnostic stripping below is inert for Tide bash output. The
- *   helpers are kept verbatim (R1) because the edit-family tools share them.
- * - `Icon` comes from the lucide shim (`../icon`); `isMobile` parameters from
- *   the grep/glob renderers are dropped (no mobile surface in Tide — the
- *   desktop class branch is used unconditionally).
- */
-
 import { cn } from '@/lib/utils';
 import { typography } from '../lib/typography';
 import { formatToolInput, detectToolOutputLanguage } from '../lib/tool-helpers';

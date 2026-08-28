@@ -1,5 +1,5 @@
 //! exit_plan_mode — port of `app/core/agent/tools/exit-plan-mode.ts`
-//! (91ec558). The TS presentation: the plan rides the tool result's text
+//! (). The TS presentation: the plan rides the tool result's text
 //! display; the output tells the model a human decision is pending. The
 //! TS left the IPC approval flow "to be wired later" — here the app
 //! crate's turn loop intercepts plan-mode calls and presents the plan via

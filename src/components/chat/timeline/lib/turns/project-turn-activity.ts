@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/projectTurnActivity.ts. No adaptations beyond the vendored types. */
-
 import { ACTIVITY_STANDALONE_TOOL_NAMES } from './constants';
 import type {
   ChatMessageEntry,

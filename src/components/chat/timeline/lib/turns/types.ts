@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/types.ts. `Message`/`Part` from '@opencode-ai/sdk/v2' replaced by the vendored TimelineMessage/TimelinePart types; no other changes. */
-
 import type { TimelineMessage, TimelinePart } from '../../types/message-parts';
 
 export interface ChatMessageEntry {

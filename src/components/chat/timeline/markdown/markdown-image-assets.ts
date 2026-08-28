@@ -1,16 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdownImageAssets.ts.
- *  Adaptation seam (documented): upstream validated local markdown images via
- *  an upstream server route (`/api/sessions/:id/markdown-image-grants`,
- *  through `runtimeFetch` + a runtime URL resolver) or a VSCode workspace fs
- *  bridge. Tide (Electron renderer, no such server) has neither, so the
- *  local-file grant pipeline degrades honestly: `prepareLocalMarkdownImages`
- *  reports every local source as `missing` (the gallery filters those out) and
- *  `resolveMarkdownImageSource` keeps its http/data-URL behavior verbatim,
- *  including the full size + magic-byte signature validation for data URLs.
- *  Remote and data-URL images — everything Tide can actually load — behave
- *  exactly as upstream. Wiring local-file images would need a Tide IPC grant
- *  seam (future task).
- */
 const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/png',

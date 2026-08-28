@@ -1,4 +1,4 @@
-//! Per-workspace RAG storage — port of `app/core/rag/store.ts` @ 91ec558.
+//! Per-workspace RAG storage — port of `app/core/rag/store.ts`.
 //! SQLite + FTS5 + sqlite-vec at `<data>/rag/<workspaceId>/index.db`
 //! (schema v2). Table/DDL shapes are byte-compatible with the TS store so
 //! existing indexes stay valid: `chunks` (+ `sourceId`), `chunks_fts`

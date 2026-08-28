@@ -1,5 +1,5 @@
 //! Embedders — port of `app/core/rag/{embedder,local-onnx-embedder,
-//! bun-onnx-embedder,cloud-embedder,model-downloader}.ts` @ 91ec558.
+//! bun-onnx-embedder,cloud-embedder,model-downloader}.ts`.
 //!
 //! The local embedder runs the SAME vendored ONNX model through `ort`
 //! (BertModel, 384-dim, 512-token window) with the HF `tokenizer.json`

@@ -1,5 +1,5 @@
 //! Provider-API usage reports — the port of
-//! `app/core/agent/provider-usage.ts` @ 91ec558 (CodexBar-style): fetch
+//! `app/core/agent/provider-usage.ts` (CodexBar-style): fetch
 //! real limits/usage straight from the provider's own quota endpoints
 //! using the stored API key — z.ai's monitor API and OpenRouter's key API
 //! today, plus DeepSeek/Fireworks balance endpoints. The dispatcher
@@ -88,6 +88,7 @@ pub struct UsageWindow {
     pub unit: &'static str,
     /// Epoch ms when the window resets, when the provider reports it.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "resetsAt")]
     pub resets_at: Option<i64>,
 }
 
@@ -95,6 +96,7 @@ pub struct UsageWindow {
 pub struct ProviderUsageReport {
     pub source: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "planName")]
     pub plan_name: Option<String>,
     pub windows: Vec<UsageWindow>,
 }

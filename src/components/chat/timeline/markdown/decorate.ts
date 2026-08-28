@@ -1,11 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/decorate.ts.
- *  Adaptation: sprite icon references (`<use href="#oc-...">`) replaced with
- *  inline lucide SVGs via `iconToSvgString`; clipboard uses
- *  `navigator.clipboard` directly (Tide has no central clipboard helper); the
- *  dropdown-menu style tokens are inlined (Tide has no dropdown-menu.styles
- *  module); favicon/loopback URL helpers from `@/lib/url` are replaced with
- *  local equivalents (Google favicon service + loopback detection).
- */
 import { iconToSvgString, type IconName } from '../icon';
 import { getMermaidViewerController } from './mermaid-viewer';
 

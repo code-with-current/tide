@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/projectTurnSummary.ts. Tide adaptation: before the upstream positional passes, prefer the text part carrying `metadata.isAnswer === true` (stashed by the tide-adapter from Tide's TextBlock.isAnswer) — upstream's "last text part" heuristic would pick trailing narration if Tide emits text after the answer block. Falls back to the upstream logic unchanged when no such part exists. Tide never sets `summary` on messages, so the compaction/diff paths stay dormant. */
-
 import type { ChatMessageEntry, TurnChangedFile, TurnDiffStats, TurnSummaryRecord } from './types';
 
 interface SummaryDiff {

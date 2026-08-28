@@ -4,7 +4,7 @@
 //! engine's tool definitions and consults [`permission::PermissionGate`]
 //! BEFORE calling [`Tool::execute`].
 //!
-//! Ports of the TS stack at `91ec558`:
+//! Ports of the TS stack:
 //! - tool bodies: `app/core/agent/tools/{read-file,write-file,edit-file,bash,grep,glob,list-dir,directory-tree,read-media-file,multi-edit,notebook-edit,background-shell,git,git-repo,web-fetch,web-search,todo-write,slash-command,init,memory,load-skill}.ts`
 //! - path sandboxing: `app/core/agent/path-safety.ts` → [`path_safety`]
 //! - permission gate: `app/core/agent/permission.ts` + `permissions/rules.ts`
@@ -379,17 +379,17 @@ mod tests {
         assert_eq!(tools[12].risk_tier(), RiskTier::Write);
         assert_eq!(tools[13].risk_tier(), RiskTier::Destructive);
         assert_eq!(tools[14].risk_tier(), RiskTier::ReadOnly);
-        // M3 T4 web tools: read-tier per TS toolMeta.
+        // Web tools: read-tier per TS toolMeta.
         assert_eq!(tools[15].risk_tier(), RiskTier::ReadOnly);
         assert_eq!(tools[16].risk_tier(), RiskTier::ReadOnly);
-        // M3 T6 dispatch_agent: read-tier (the target agent's effective
+        // dispatch_agent: read-tier (the target agent's effective
         // tier is gated separately at dispatch time).
         assert_eq!(tools[17].risk_tier(), RiskTier::ReadOnly);
-        // M3 T3 batch: all read-tier per TS toolMeta.
+        // Batch: all read-tier per TS toolMeta.
         for t in &tools[18..=22] {
             assert_eq!(t.risk_tier(), RiskTier::ReadOnly);
         }
-        // M3 T7 turn-flow tools: read-tier per TS toolMeta (auto-approved in
+        // Turn-flow tools: read-tier per TS toolMeta (auto-approved in
         // every mode; the parking/approval flow is orchestrator-driven).
         for t in &tools[19..=21] {
             assert_eq!(t.risk_tier(), RiskTier::ReadOnly);

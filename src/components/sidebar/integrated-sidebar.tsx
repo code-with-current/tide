@@ -176,7 +176,7 @@ function IntegratedSidebarImpl() {
       {/* Spacer clearing the native macOS traffic lights (top-left, 12,12).
           Collapses to zero while fullscreen — the buttons hide there. */}
       {isMac && (
-        <div className={cn('flex-shrink-0 drag-region', isFullScreen ? 'h-0' : 'h-6')} />
+        <div className={cn('flex-shrink-0 drag-region', isFullScreen ? '-mt-3' : 'mt-6')} />
       )}
       <UpdatePill />
       <div className={cn("px-3 py-4 flex items-center justify-between border-b border-foreground flex-shrink-0", !isMac && "drag-region")}>
@@ -424,7 +424,6 @@ function WorkspaceTreeItem({
               {status === 'in_progress' && (
                 <PixelLoader variant="globe" size="xs" className="text-warning"/>
               )}
-              {/*{status === 'unread' && <Dot tone="ok" />}*/}
               {archiveConfirm.confirming ? (
                 <InlineConfirmButton label="Confirm" onConfirm={() => { archiveConfirm.cancel(); archiveWs.mutate(ws.id); }} />
               ) : (

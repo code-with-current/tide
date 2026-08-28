@@ -1,5 +1,5 @@
-//! MCP secret resolution — port of `app/core/agent/mcp/secrets.ts` @
-//! 91ec558: `{{secret:name}}` placeholders in a server's env values and
+//! MCP secret resolution — port of `app/core/agent/mcp/secrets.ts`:
+//! `{{secret:name}}` placeholders in a server's env values and
 //! args are resolved from `<data_dir>/mcp-secrets.json` (a flat name →
 //! value map). Missing names surface as `needs_credentials` pool state.
 //!

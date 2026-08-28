@@ -1,4 +1,4 @@
-//! compact — port of `app/core/agent/tools/compact.ts` (91ec558). The TS
+//! compact — port of `app/core/agent/tools/compact.ts` (). The TS
 //! tool was a deprecation stub: compaction is orchestrator-driven, not
 //! model-invoked, and the tool exists to keep the SDK toolset complete.
 //! The orchestrator intercepts `compact` calls and runs the shared

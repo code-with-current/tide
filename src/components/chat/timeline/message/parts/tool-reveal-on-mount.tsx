@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/ToolRevealOnMount.tsx.
- *  Ported faithfully (re-indented 4-space to 2-space) — WAAPI reveal animation,
- *  no upstream deps. */
-
 import React from 'react';
 
 const WIPE_MASK =

@@ -251,9 +251,9 @@ export function useGitAgentAction(homeWorkspaceId?: string): {
 
         // Browser dev (no backend): chatSend resolves immediately without a
         // turn ever running, so a still-streaming store means no turn_end will
-        // ever land — settle with whatever report arrived. Under the Electrobun
-        // job pattern the request resolves on acceptance and the watch
-        // subscription alone settles completion.
+        // ever land — settle with whatever report arrived. With a real bridge
+        // the request resolves on acceptance and the watch subscription alone
+        // settles completion.
         if (!hasRpc && activeSidRef.current === sid) {
           const stream = useUi.getState().streams[sid];
           if (stream?.isStreaming) {

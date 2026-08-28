@@ -1,6 +1,6 @@
-//! Git panel commands (M4 T3) — the port of `app/rpc/git.ts` +
-//! `app/core/ipc-adjacent/git.ts` (+ `git-conflicts.ts` + `detectGit`) @
-//! 91ec558. The TS shelled out to the git CLI for every op; here everything
+//! Git panel commands — the port of `app/rpc/git.ts` +
+//! `app/core/ipc-adjacent/git.ts` (+ `git-conflicts.ts` + `detectGit`)
+//! The TS shelled out to the git CLI for every op; here everything
 //! runs on git2 in-process. Wire shapes are the shared/rpc.ts git types
 //! byte-compatible; list-shaped commands swallow git errors and answer their
 //! empty default exactly like the TS's try/catch, op-shaped ones return
@@ -10,7 +10,7 @@
 //! first (the v2 `session_worktree` side table — the TS read the legacy
 //! JSON row's `worktree.path`), then the workspace's main checkout.
 //!
-//! Deviations from the 91ec558 CLI behavior, all structural to libgit2:
+//! Deviations from the TS CLI behavior, all structural to libgit2:
 //! - No hooks ever run (no prepare-commit-msg co-author trailer on
 //!   gitCommit/gitAmend — the settings.rs M-port decision).
 //! - Error strings are libgit2 messages, not `git exit N: <stderr>`; the
@@ -64,8 +64,10 @@ pub struct GitCommitWire {
     pub subject: String,
     pub parents: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "isHead")]
     pub is_head: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "branchHeads")]
     pub branch_heads: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
@@ -127,8 +129,10 @@ pub struct DiffLineWire {
     #[serde(rename = "type")]
     pub kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "oldNo")]
     pub old_no: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "newNo")]
     pub new_no: Option<u32>,
     pub text: String,
 }

@@ -1,50 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/ToolPart.tsx.
- * Adaptations (task-4 brief R3–R5):
- * - Tool names: `resolveRendererToolName` (../tool-renderers, R1) maps Tide's
- *   `ToolName` onto the upstream renderer keys this component and the T3
- *   helpers (`lib/tool-helpers`, `message/tool-presentation`,
- *   `message/tool-render-utils`) are written against. Helper signatures that
- *   took `part: ToolPartType` now take the resolved `tool: string` — mechanical,
- *   same logic. Dropped branches for tools Tide never emits: `apply_patch`,
- *   `lsp`, `create`/`file_write`/`view`/`cat` aliases.
- * - Statuses (R3): Tide `ToolCallStatus` arrives as `state.status`. Display
- *   groups: pending-ish = pending|awaiting_input, active = running, completed =
- *   executed, failed-ish = failed|timeout|aborted|partial, rejected = rejected
- *   (kept a distinct predicate; it shares the error icon colour with the
- *   failed-ish group). Upstream's OpenCode strings ('completed'/'error'/
- *   'cancelled') never appear.
- * - Agent nesting (R4): upstream's child-session machinery (`taskToolModel`,
- *   `useSessionMessageRecords`, session-open button) is replaced by
- *   `../agent-nesting-context` — nested rows are real `TimelinePart`s rendered
- *   through ToolPart itself, so depth beyond one level works for free. The
- *   agent report comes from `metadata.report` (Tide adapter) instead of the
- *   task-metadata block stripper.
- * - Dropped (R5, delete-on-sight list): `useMobileAppActions`,
- *   `RuntimeAPIContext` (all editor open-file/open-diff navigation — clicking a
- *   row now always toggles), `MessageFilesDisplay` attachments,
- *   `sessionEvents.requestGitRefresh`, `useSessionUIStore`, `useUIStore`
- *   (`showToolFileIcons` is a local `true` constant until T8 threads a prop),
- *   sync stores, `ContentChangeReason` notify (Tide's `use-chat-auto-follow.ts`
- *   is ResizeObserver-driven; the prop is kept for the parent contract but
- *   unused), `ApplyPatchFileButtons` + `applyPatchEditorAction`,
- *   `isEmbeddedSessionChat`, `useI18n` (literal English), LSP diagnostics.
- * - Mapped (R5): `lazyWithChunkRecovery` → `React.lazy`; `useEffectiveDirectory`
- *   → `directory?: string` prop (T6/T8 thread it); `ScrollShadow` → plain div
-   *   with the same className contract; `Text` app component → plain `<span>`
- *   (upstream's generate-effect variant has no Tide equivalent — T3 precedent
- *   in progressive-group.tsx); `JsonTreeViewer` ui-kit → local minimal
- *   disclosure tree below; `useDurationTickerNow` → local ticker hook below;
- *   `copyTextToClipboard` → inline `navigator.clipboard`; `toast` → `@/lib/toast`.
- * - ADDED (Tide-native, user request): PixelLoader in the row header while a
- *   tool runs — upstream's only running cue is the subtle title shimmer plus a
- *   bash-only duration, which reads as "no progress indicator".
- * - Types: SDK `ToolPart`/`ToolState`/`FilePart` → vendored `TimelineToolPart`/
- *   `TimelineToolState` from ../../types/message-parts (TimelineToolState already carries
- *   metadata/input/output/error/title/time, so the upstream intersection type
- *   is redundant).
- */
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { toolTextColor } from '@/lib/tool-colors';
@@ -105,7 +58,7 @@ export interface ToolPartProps {
   onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
   onShowPopup?: (content: ToolPopupContent) => void;
   animateTailText?: boolean;
-  /** Working directory used to shorten absolute paths; threaded by T6/T8 (upstream: useEffectiveDirectory). */
+  /** Working directory used to shorten absolute paths (upstream: useEffectiveDirectory). */
   directory?: string;
 }
 

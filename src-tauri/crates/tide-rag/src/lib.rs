@@ -1,11 +1,11 @@
-//! tide-rag — local-first RAG engine, port of `app/core/rag/` @ 91ec558.
+//! tide-rag — local-first RAG engine, port of `app/core/rag/`.
 //!
 //! Same vendored ONNX model (`models/` in this crate, embedded into the
 //! binary as the packaged-app fallback), same per-workspace SQLite index
 //! layout (`<data>/rag/<workspaceId>/index.db`, schema v2 with FTS5 +
 //! sqlite-vec `vec0` shadow tables), same tokenizer (the HF
 //! `tokenizer.json` that ships beside the model) — so indexes written by
-//! the Electron/Electrobun builds stay readable and query-compatible.
+//! earlier builds stay readable and query-compatible.
 //!
 //! Everything here is synchronous (ort inference, sqlite, tree-sitter, and
 //! `reqwest::blocking` for the fetchers/downloader); the Tauri command

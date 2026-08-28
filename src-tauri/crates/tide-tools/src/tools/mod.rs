@@ -1,4 +1,4 @@
-//! The built-in tool set, ported from `app/core/agent/tools/*.ts` (91ec558).
+//! The built-in tool set, ported from `app/core/agent/tools/*.ts` ().
 //! Each module exposes a unit struct implementing [`crate::Tool`];
 //! [`core_tools`] returns the full set for the orchestrator's toolset.
 

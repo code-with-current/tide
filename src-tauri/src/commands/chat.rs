@@ -415,7 +415,20 @@ async fn turn_task(
     // emitTurnEnd's recordProviderUsage) — a spec without one (tests,
     // legacy callers) records nothing.
     let metering_provider = (!spec.provider_id.is_empty()).then(|| spec.provider_id.clone());
-    let result = execute_turn(&hub, &spec, engine, tools, turn_handle).await;
+    // A panicking step must still release the session's turn slot — an
+    // unguarded task death would ghost-hold it forever.
+    let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+        execute_turn(&hub, &spec, engine, tools, turn_handle),
+    ))
+    .await
+    .unwrap_or_else(|panic| {
+        let detail = panic
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_owned());
+        Err(format!("turn task panicked: {detail}"))
+    });
     if let Some(provider_id) = metering_provider {
         if let Ok(summary) = &result {
             let delta = tide_store::usage::UsageDelta {
@@ -669,23 +682,32 @@ pub(crate) fn resolve_followup_core(
 /// after the handshake; a re-attach replaces the previous forwarder (the
 /// generation counter retires the old task). Every AgentEvent and every
 /// live-session FlushBatch rides this single Channel, tagged by `kind`.
-/// MCP status pings (M4 T6) join here too — the pool's transitions
+/// MCP status pings join here too — the pool's transitions
 /// broadcast on the McpPoolCell and forward as `mcpEvents` pushes.
 #[tauri::command]
 pub async fn chat_attach_channel(
     state: tauri::State<'_, AppState>,
     hub_cell: tauri::State<'_, ChatHubCell>,
     mcp_cell: tauri::State<'_, crate::agent::mcp::McpPoolCell>,
+    updater_shared: tauri::State<'_, std::sync::Arc<crate::commands::updater::UpdaterShared>>,
     channel: tauri::ipc::Channel<ChatPush>,
 ) -> Result<(), CommandError> {
     let hub = hub_cell
         .get(state.data_dir())
         .await
         .map_err(|e| CommandError::with_code(e, "DB_OPEN"))?;
+    // A webview reload orphans any parked permission/followup card while the
+    // turn keeps waiting — re-push the live cards onto the fresh Channel.
+    for event in hub.pending_push_events() {
+        if channel.send(ChatPush::Agent { event }).is_err() {
+            break;
+        }
+    }
     let generation = hub.next_channel_generation();
     let mut push_rx = hub.subscribe_push();
     let forward_hub = Arc::clone(&hub);
     let status_channel = channel.clone();
+    let update_channel = channel.clone();
     tokio::spawn(async move {
         while let Ok(push) = push_rx.recv().await {
             if forward_hub.channel_generation() != generation {
@@ -705,6 +727,25 @@ pub async fn chat_attach_channel(
                         .send(ChatPush::McpStatus {
                             event: crate::agent::events::McpStatusEvent::status_changed(),
                         })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    // Updater status snapshots join the same Channel as `updateStatus`
+    // pushes (the consent state machine publishes on the shared bus).
+    let mut update_rx = updater_shared.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match update_rx.recv().await {
+                Ok(status) => {
+                    if update_channel
+                        .send(ChatPush::UpdateStatus { status })
                         .is_err()
                     {
                         break;

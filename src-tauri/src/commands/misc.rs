@@ -1,4 +1,4 @@
-//! OS/window glue — the M4 T1 port of `app/rpc/misc.ts` (91ec558): native
+//! OS/window glue — the port of `app/rpc/misc.ts`: native
 //! dialogs (tauri-plugin-dialog), shell opener ops (tauri-plugin-opener),
 //! clipboard-blob persistence, renderer log forwarding, env/diagnostics,
 //! macOS permission consent, pid liveness, mermaid repair, and the
@@ -382,8 +382,7 @@ fn env_info() -> EnvInfoWire {
         arch: node_arch().into(),
         release: os_release(),
         shell: default_shell(),
-        // Electron-v10 blob migration was an Electrobun-shell-only concern;
-        // under Tauri there is nothing to migrate.
+        // Legacy Electron blob migration doesn't apply under Tauri.
         keys_need_migration: false,
     }
 }
@@ -752,6 +751,7 @@ fn normalize_absolute(p: &Path) -> Option<PathBuf> {
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct ImageFileWire {
+    #[serde(rename = "dataUrl")]
     pub data_url: String,
     pub bytes: u64,
 }
@@ -820,7 +820,7 @@ pub fn image_file_read(
 /// `agentList` — the dispatch catalog for the UI's @mention picker, from
 /// the tide-tools parsed AgentDefs (the bundled src/lib/prompts/agents
 /// markdown). Wire shape is the three-field AgentCatalogEntry exactly as
-/// the 91ec558 misc handler returned it.
+/// the TS misc handler returned it.
 #[derive(Serialize, Debug, PartialEq, Eq)]
 pub struct AgentCatalogEntryWire {
     pub name: String,

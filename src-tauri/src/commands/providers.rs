@@ -1,5 +1,5 @@
-//! The provider domain — `providerList` plus the M4 T4 surface ported
-//! from `app/rpc/providers.ts` + `app/core/configStore.ts` @ 91ec558:
+//! The provider domain — `providerList` plus the provider surface ported
+//! from `app/rpc/providers.ts` + `app/core/configStore.ts`:
 //! CRUD (`providerAdd`/`Update`/`Delete` — id gen, defaults, model entry
 //! mapping, apiKey → kcv2 keychain handle), the connection probes
 //! (`providerProbeModels` / `providerDetectProtocol` /

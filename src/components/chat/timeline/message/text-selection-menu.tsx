@@ -1,23 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/TextSelectionMenu.tsx.
- *  Adaptations (selection-tracking, positioning, drag handling, and markdown
- *  conversion ported verbatim):
- *  - upstream store hooks (`useSessionUIStore`/`useSessions`/`useInputStore`/
- *    `useUIStore`) are not ported. "Add to chat" becomes an optional
- *    `onAddToChat?: (markdownBlock: string) => void` prop (ruling 6 pattern:
- *    callers thread it in Task 8); the button renders only when provided.
- *  - "New session" (session-ui-store) and "Add to notes" (project-context store
- *    + smallModel + projectResolution — OpenCode-server features) branches are
- *    dropped per the standing recipe, along with `normalizeDistilledInsight`.
- *  - Mobile bottom-bar branch and the `isVSCodeRuntime()` gate are dropped
- *    (mobile/VSCode branches delete on sight); only the desktop popup remains,
- *    with the pure-local Copy action promoted into it (upstream desktop menu
- *    had no Copy; mobile did — Tide keeps copy since it needs no store).
- *  - `copyTextToClipboard` (`@/lib/clipboard`) → `navigator.clipboard` directly.
- *  - `focusChatInput` (upstream composer/editor/dom helper, out of scope) →
- *    best-effort focus of a `[data-chat-input]` element; no-op when absent.
- *  - i18n (`useI18n`) → literal English.
- */
-
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
@@ -26,7 +6,7 @@ import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } fro
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
-  /** Receives the selection wrapped as a markdown code block; wires into Tide's composer in Task 8. */
+  /** Receives the selection wrapped as a markdown code block. */
   onAddToChat?: (markdownBlock: string) => void;
 }
 

@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/mermaidViewer.ts.
- *  Verbatim port (dependency-free module). */
 type MermaidViewBox = {
   x: number;
   y: number;

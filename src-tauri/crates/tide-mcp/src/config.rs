@@ -1,5 +1,5 @@
 //! MCP server config resolution — port of `app/core/agent/mcp/config.ts` +
-//! `types.ts` @ 91ec558 under the consolidated-config rules (memory:
+//! `types.ts` under the consolidated-config rules (memory:
 //! mcp.json + extensions.json were merged into config.json):
 //! - user-scope servers live in config.json's top-level `mcpServers`;
 //! - project-scope server definitions live in `<workspace>/.mcp.json` on

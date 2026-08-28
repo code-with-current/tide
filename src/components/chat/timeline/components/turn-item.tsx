@@ -1,9 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/components/TurnItem.tsx.
- * Near-verbatim; only import paths rewritten (`../lib/turns/types` → the ported
- * `../lib/turns/types`, sibling `./TurnAssistantBlock` → `./turn-assistant-block`).
- */
-
 import React from 'react';
 
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';

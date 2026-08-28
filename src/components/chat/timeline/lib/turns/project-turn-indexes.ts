@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/projectTurnIndexes.ts. No adaptations beyond the vendored types. */
-
 import type { TurnIndexes, TurnProjectionResult, TurnRecord } from './types';
 
 export const projectTurnIndexes = (turns: TurnRecord[]): TurnProjectionResult => {

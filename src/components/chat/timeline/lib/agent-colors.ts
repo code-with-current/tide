@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/lib/agentColors.ts.
- *  Pure map — ported verbatim. Tide defines the `--status-*`/`--syntax-*` vars
- *  in chat-timeline.css / markdown syntax tokens. */
-
 const AGENT_COLOR_PALETTE = [
   { var: '--status-success', class: 'agent-success' },
   { var: '--syntax-keyword', class: 'agent-keyword' },

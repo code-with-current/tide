@@ -1,4 +1,4 @@
-//! sessions-v2.db reader ported from `app/core/ipc-adjacent/session-store-v2.ts` @ 91ec558.
+//! sessions-v2.db reader ported from `app/core/ipc-adjacent/session-store-v2.ts`.
 //!
 //! The db is part-normalized (`session`/`message`/`part`/`event`,
 //! `user_version` 2, WAL journal). This module only reads — no migrations:
@@ -178,7 +178,7 @@ pub struct SessionMessagesPageV2 {
 }
 
 /// `SessionHeader` in shared/rpc.ts — the legacy sidebar-list shape, derived
-/// from v2 rows. Matching the 91ec558 producer (`sessionStore.listSessions`):
+/// from v2 rows. Matching the TS producer (`sessionStore.listSessions`):
 /// subagent rows (`parent_id` set) never appear, archived rows never appear,
 /// `messageCount` counts ALL message rows, and a null `model_id` coerces to
 /// `""`. `providerId`/`parentId` are TS `?` optionals — omitted when unset.
@@ -340,7 +340,7 @@ impl SessionsV2 {
         })
     }
 
-    /// Legacy `listSessions` (91ec558 sessionStore.ts) derived from v2 rows:
+    /// Legacy `listSessions` (TS sessionStore.ts) derived from v2 rows:
     /// non-archived, non-subagent sessions of one workspace, newest first.
     /// `workspace_id` is the config-workspace id the caller resolved
     /// `workspace_path` from — the TS headers carried it verbatim, so it is
@@ -528,6 +528,28 @@ impl SessionsV2 {
 
     /// The session's persisted worktree metadata from the additive side table
     /// (same old-db tolerance as [`SessionsV2::session_settings_of`]).
+    /// Frozen-message payloads (the finalize call's full JSON), keyed by
+    /// message id. Tolerates dbs that predate the table.
+    pub fn message_payloads(&self, message_ids: &[String]) -> Result<std::collections::HashMap<String, Value>> {
+        if !self.table_exists("message_payload") || message_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let placeholders = message_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!("SELECT message_id, payload FROM message_payload WHERE message_id IN ({placeholders})");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(message_ids.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let (id, payload) = row?;
+            if let Ok(value) = serde_json::from_str::<Value>(&payload) {
+                out.insert(id, value);
+            }
+        }
+        Ok(out)
+    }
+
     pub fn session_worktree_of(&self, session_id: &str) -> Result<Option<Value>> {
         if !self.table_exists("session_worktree") {
             return Ok(None);

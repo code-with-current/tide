@@ -6,23 +6,41 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Platform detection for the renderer (mac/win/linux). Source:
- *  navigator.platform/userAgent. */
-const _platform: 'macos' | 'windows' | 'linux' =
-  typeof navigator !== 'undefined'
-    ? /Mac/i.test(navigator.platform || navigator.userAgent)
-      ? 'macos'
-      : /Win/i.test(navigator.platform || navigator.userAgent)
-        ? 'windows'
-        : 'linux'
-    : 'macos';
+/**
+ * Platform detection for the renderer (mac/win/linux). navigator is only
+ * the synchronous fallback for first paint — the Tauri host knows the
+ * truth, so the bridge adopts its `os` right after the handshake
+ * (`adoptHostPlatform`). Live bindings mean every `isMac`/`isWindows`
+ * read after that reflects the host.
+ */
+type Platform = 'macos' | 'windows' | 'linux';
+
+function detectPlatform(): Platform {
+  if (typeof navigator === 'undefined') return 'macos';
+  const ua = navigator.userAgent ?? '';
+  const platform = (navigator as { platform?: string; userAgentData?: { platform?: string } });
+  const hint = platform.userAgentData?.platform ?? platform.platform ?? ua;
+  if (/Mac/i.test(hint)) return 'macos';
+  if (/Win/i.test(hint)) return 'windows';
+  return 'linux';
+}
+
+let _platform: Platform = detectPlatform();
+
+/** Adopt the Rust host's OS (`darwin`/`windows`/`linux` per tide_ping). */
+export function adoptHostPlatform(os: string) {
+  _platform = os === 'darwin' ? 'macos' : os === 'macos' ? 'macos' : (os as Platform) === 'windows' ? 'windows' : 'linux';
+  isMac = _platform === 'macos';
+  isWindows = _platform === 'windows';
+  isLinux = _platform === 'linux';
+}
 
 /** True on macOS. */
-export const isMac = _platform === 'macos';
+export let isMac = _platform === 'macos';
 /** True on Windows. */
-export const isWindows = _platform === 'windows';
+export let isWindows = _platform === 'windows';
 /** True on Linux (and other Unix that aren't Mac). */
-export const isLinux = _platform === 'linux';
+export let isLinux = _platform === 'linux';
 
 /** Format USD cost: 0.0431 → "$0.04". Never throws on undefined/null. */
 export function formatCost(usd: number | null | undefined): string {

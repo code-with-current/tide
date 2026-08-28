@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/messageRole.ts.
- *  Pure role derivation — ported verbatim; `Message` becomes `TimelineMessage`. */
-
 import type { TimelineMessage } from '../types/message-parts';
 
 export interface MessageRoleInfo {

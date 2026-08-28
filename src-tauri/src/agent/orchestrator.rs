@@ -1,4 +1,4 @@
-//! The turn loop — port of `app/core/agent/orchestrator.ts` @ 91ec558,
+//! The turn loop — port of `app/core/agent/orchestrator.ts`,
 //! driving tide-engine's [`stream_step`] one completion at a time:
 //!
 //! ```text
@@ -258,7 +258,7 @@ pub fn persist_user_message(
     Ok(())
 }
 
-// ── v2 part tracker — port of V2TurnTracker @ 91ec558 ───────────────────────
+// ── v2 part tracker — port of the TS V2TurnTracker ──────────────────────────
 
 struct V2ToolEnd {
     tool_name: String,
@@ -781,7 +781,7 @@ pub async fn execute_turn(
                 }
                 continue;
             }
-            // Turn-flow tools (T7): read-tier + auto-approve everywhere per
+            // Turn-flow tools: read-tier + auto-approve everywhere per
             // the TS toolMeta, so only a deny rule short-circuits them.
             // Their parking/escalation bodies are orchestrator-driven and
             // live below; plain `Tool::execute` is the non-turn fallback.
@@ -1142,7 +1142,7 @@ async fn run_gated_tool(
             reason: _,
             allow_rule,
         } => {
-            hub.emit_agent(AgentEvent::PermissionRequired {
+            let ask_event = AgentEvent::PermissionRequired {
                 session_id: session_id.to_owned(),
                 seq: hub.next_seq(session_id),
                 tool_calls: vec![ToolCallWire {
@@ -1165,16 +1165,18 @@ async fn run_gated_tool(
                     meta: None,
                 }],
                 timeout_at: unix_ms_now() + spec.permission_timeout.as_millis() as i64,
-            });
+            };
             let rx = if emit.parent_tc.is_some() {
                 hub.register_ask_with_mode(
                     session_id,
                     &call.tool_call_id,
                     Some(Arc::clone(&turn.mode)),
+                    ask_event.clone(),
                 )
             } else {
-                hub.register_ask(session_id, &call.tool_call_id)
+                hub.register_ask(session_id, &call.tool_call_id, ask_event.clone())
             };
+            hub.emit_agent(ask_event);
             let answer = tokio::time::timeout(spec.permission_timeout, rx).await;
             let answer = match answer {
                 Ok(Ok(answer)) => answer,
@@ -1280,7 +1282,7 @@ async fn run_followup_tool(
             ask.options.len()
         ));
     }
-    hub.emit_agent(AgentEvent::FollowupRequired {
+    let followup_event = AgentEvent::FollowupRequired {
         session_id: emit.emit_id.clone(),
         seq: hub.next_seq(&emit.emit_id),
         tool_call_id: call.tool_call_id.clone(),
@@ -1288,15 +1290,17 @@ async fn run_followup_tool(
         options: ask.options.iter().map(|o| o.label.clone()).collect(),
         option_descriptions: ask.options.iter().map(|o| o.description.clone()).collect(),
         multiple: ask.multiple,
-    });
-    let rx = hub.register_followup(&emit.emit_id, &call.tool_call_id);
-    // TS waited indefinitely — no timeout; abort and turn-end resolve
-    // None through the hub, and the abort watch unblocks immediately even
-    // when no one resolved the registry entry.
+    };
+    let rx = hub.register_followup(&emit.emit_id, &call.tool_call_id, followup_event.clone());
+    hub.emit_agent(followup_event);
+    // TS waited indefinitely — its popup lived in the same page. A Tauri
+    // webview reload orphans the card, so the park also expires unanswered
+    // instead of ghost-holding the session's turn slot forever.
     let mut abort_rx = turn.abort_rx.clone();
     let answer = tokio::select! {
         answer = rx => answer.unwrap_or(None),
         _ = turn_is_aborted(&mut abort_rx) => None,
+        _ = tokio::time::sleep(std::time::Duration::from_secs(600)) => None,
     };
     tide_tools::followup_pick_outcome(answer.as_deref())
 }
@@ -1336,7 +1340,7 @@ async fn run_exit_plan_tool(
     }
 
     let session_id = emit.emit_id.as_str();
-    hub.emit_agent(AgentEvent::PermissionRequired {
+    let ask_event = AgentEvent::PermissionRequired {
         session_id: session_id.to_owned(),
         seq: hub.next_seq(session_id),
         tool_calls: vec![ToolCallWire {
@@ -1355,16 +1359,18 @@ async fn run_exit_plan_tool(
             meta: None,
         }],
         timeout_at: unix_ms_now() + spec.permission_timeout.as_millis() as i64,
-    });
+    };
     let rx = if emit.parent_tc.is_some() {
         hub.register_ask_with_mode(
             session_id,
             &call.tool_call_id,
             Some(Arc::clone(&turn.mode)),
+            ask_event.clone(),
         )
     } else {
-        hub.register_ask(session_id, &call.tool_call_id)
+        hub.register_ask(session_id, &call.tool_call_id, ask_event.clone())
     };
+    hub.emit_agent(ask_event);
     let answer = tokio::time::timeout(spec.permission_timeout, rx).await;
     let answer = match answer {
         Ok(Ok(answer)) => answer,

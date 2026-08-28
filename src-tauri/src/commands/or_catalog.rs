@@ -1,5 +1,5 @@
 //! OpenRouter enrichment catalog — the port of the catalog half of
-//! `app/rpc/providers.ts` @ 91ec558. OpenRouter `/models` is the universal
+//! `app/rpc/providers.ts`. OpenRouter `/models` is the universal
 //! metadata source: fetched on first probe, cached to the data dir as
 //! `openrouter-models.json`, refreshed when older than 7 days. Bare-id
 //! providers (z.ai, OpenAI direct, LM Studio) get their probed models

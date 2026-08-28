@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/generatedJsonResult.ts.
- *  Pure JSON-result classifier — ported verbatim (no upstream deps). */
-
 type GeneratedCommitResult = {
   kind: 'commit';
   subject: string;

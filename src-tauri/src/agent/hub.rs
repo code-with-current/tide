@@ -32,6 +32,9 @@ pub struct PermissionAnswer {
 struct PendingAsk {
     tx: oneshot::Sender<PermissionAnswer>,
     mode: Option<Arc<StdMutex<AutonomyMode>>>,
+    /// The card as emitted — re-pushed when a fresh webview attaches (a
+    /// reload orphans the popup while the turn stays parked).
+    event: AgentEvent,
 }
 
 /// One parked ask_followup_question call (TS followup-resolver.ts): the
@@ -40,6 +43,7 @@ struct PendingAsk {
 /// reports "User did not answer the question").
 struct PendingFollowup {
     tx: oneshot::Sender<Option<String>>,
+    event: AgentEvent,
 }
 
 struct ActiveTurn {
@@ -294,8 +298,9 @@ impl ChatHub {
         &self,
         session_id: &str,
         tool_call_id: &str,
+        event: AgentEvent,
     ) -> oneshot::Receiver<PermissionAnswer> {
-        self.register_ask_with_mode(session_id, tool_call_id, None)
+        self.register_ask_with_mode(session_id, tool_call_id, None, event)
     }
 
     /// Sub-agent variant: the ask rides the root session's id space (the
@@ -307,6 +312,7 @@ impl ChatHub {
         session_id: &str,
         tool_call_id: &str,
         mode: Option<Arc<StdMutex<AutonomyMode>>>,
+        event: AgentEvent,
     ) -> oneshot::Receiver<PermissionAnswer> {
         let (tx, rx) = oneshot::channel();
         self.asks
@@ -314,9 +320,30 @@ impl ChatHub {
             .expect("permission asks poisoned")
             .insert(
                 format!("{session_id}\u{0}{tool_call_id}"),
-                PendingAsk { tx, mode },
+                PendingAsk { tx, mode, event },
             );
         rx
+    }
+
+    /// Parked permission/followup cards, snapshot for `chat_attach_channel`:
+    /// a fresh webview (reload) gets the live cards re-pushed so the turn
+    /// never parks invisibly.
+    pub fn pending_push_events(&self) -> Vec<AgentEvent> {
+        let mut out: Vec<AgentEvent> = self
+            .asks
+            .lock()
+            .expect("permission asks poisoned")
+            .values()
+            .map(|a| a.event.clone())
+            .collect();
+        out.extend(
+            self.followups
+                .lock()
+                .expect("followups poisoned")
+                .values()
+                .map(|f| f.event.clone()),
+        );
+        out
     }
 
     /// `permission_respond`: resolve the listed asks. Unknown ids no-op (the
@@ -359,6 +386,7 @@ impl ChatHub {
         &self,
         session_id: &str,
         tool_call_id: &str,
+        event: AgentEvent,
     ) -> oneshot::Receiver<Option<String>> {
         let (tx, rx) = oneshot::channel();
         self.followups
@@ -366,7 +394,7 @@ impl ChatHub {
             .expect("followups poisoned")
             .insert(
                 format!("{session_id}\u{0}{tool_call_id}"),
-                PendingFollowup { tx },
+                PendingFollowup { tx, event },
             );
         rx
     }
@@ -449,6 +477,16 @@ mod tests {
         hub
     }
 
+    #[cfg(test)]
+    fn test_ask_event(session_id: &str, _tool_call_id: &str) -> AgentEvent {
+        AgentEvent::PermissionRequired {
+            session_id: session_id.to_owned(),
+            seq: 1,
+            tool_calls: Vec::new(),
+            timeout_at: 0,
+        }
+    }
+
     #[tokio::test]
     async fn one_turn_per_session() {
         let hub = hub("lock");
@@ -488,7 +526,7 @@ mod tests {
         let hub = hub("asks");
         hub.begin_turn("s_1", AutonomyMode::Ask).unwrap();
 
-        let mut rx = hub.register_ask("s_1", "t_1");
+        let mut rx = hub.register_ask("s_1", "t_1", test_ask_event("s_1", "t_1"));
         assert!(hub.resolve_ask(
             "s_1",
             "t_1",
@@ -512,7 +550,7 @@ mod tests {
             None,
         ));
 
-        let mut pending = hub.register_ask("s_1", "t_2");
+        let mut pending = hub.register_ask("s_1", "t_2", test_ask_event("s_1", "t_2"));
         hub.end_turn("s_1");
         let answer = pending.try_recv().expect("end_turn denies pending asks");
         assert!(!answer.approve);
@@ -532,6 +570,7 @@ mod tests {
             "s_root",
             "t_child",
             Some(Arc::clone(&child_mode)),
+            test_ask_event("s_root", "t_child"),
         );
         assert!(hub.resolve_ask(
             "s_root",
@@ -548,7 +587,7 @@ mod tests {
         assert_eq!(parent.mode(), AutonomyMode::Plan, "parent unchanged");
 
         // Root asks escalate the session's active turn as before.
-        let mut rx = hub.register_ask("s_root", "t_root");
+        let mut rx = hub.register_ask("s_root", "t_root", test_ask_event("s_root", "t_root"));
         assert!(hub.resolve_ask(
             "s_root",
             "t_root",

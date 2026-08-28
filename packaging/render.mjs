@@ -4,13 +4,16 @@
 // streaming each GitHub Release asset through sha256.
 //
 // Usage:
-//   node packaging/render.mjs --version 0.3.0-beta.1 [--repo code-with-current/tide] [--out out/]
+//   node packaging/render.mjs --version 0.4.0-beta.1 [--repo code-with-current/tide] [--out out/] [--base https://…]
 //
 // Release tags carry the v prefix; the artifact names below match what
-// release.yml actually publishes (see the live release):
-//   mac arm64: Tide-<version>-arm64.dmg
-//   win x64  : win-x64-Tide-Setup.zip   (zip wrapping a Tide-Setup.exe bootstrapper)
-//   linux    : linux-{x64,arm64}-Tide-Setup.tar.gz  (no manifest consumer yet)
+// release.yml actually publishes (standard Tauri bundler names):
+//   mac arm64: Tide-<version>_aarch64.dmg        (homebrew cask, on_arm)
+//   mac x64  : Tide-<version>_x64.dmg             (homebrew cask, on_intel)
+//   win x64  : Tide-<version>_x64-setup.exe       (winget, NSIS)
+//   win arm64: Tide-<version>_arm64-setup.exe     (winget, NSIS)
+//   linux    : Tide-<version>_amd64.deb           (hashed into meta.json only —
+//              no manifest consumer yet)
 //
 // Partial releases don't fail the run: an asset that can't be fetched disables
 // that platform's manifests with a warning. If no platform can be rendered,
@@ -56,20 +59,23 @@ const repo = args.repo ?? 'code-with-current/tide'
 const outDir = path.resolve(args.out ?? path.join(PKG, 'packaging', 'out'))
 
 if (!version) {
-  console.error('Missing --version (e.g. 0.3.0-beta.1, matching the tag without the v prefix)')
+  console.error('Missing --version (e.g. 0.4.0-beta.1, matching the tag without the v prefix)')
   process.exit(1)
 }
 
 // winget PackageVersion: dotted numeric only (drop the prerelease segment),
-// padded to four parts: "0.3.0-beta.1" -> "0.3.0.0".
+// padded to four parts: "0.4.0-beta.1" -> "0.4.0.0".
 const wingetParts = version.replace(/-[A-Za-z0-9.]+$/, '').split('.').map(Number)
 while (wingetParts.length < 4) wingetParts.push(0)
 const WINGET_VERSION = wingetParts.slice(0, 4).join('.')
 
 const BASE = args.base ?? `https://github.com/${repo}/releases/download/v${version}`
 const ASSETS = {
-  DMG_ARM64: `${BASE}/Tide-${version}-arm64.dmg`,
-  WIN_ZIP: `${BASE}/win-x64-Tide-Setup.zip`,
+  DMG_ARM64: `${BASE}/Tide_${version}_aarch64.dmg`,
+  DMG_X64: `${BASE}/Tide_${version}_x64.dmg`,
+  WIN_X64: `${BASE}/Tide_${version}_x64-setup.exe`,
+  WIN_ARM64: `${BASE}/Tide_${version}_arm64-setup.exe`,
+  DEB_AMD64: `${BASE}/Tide_${version}_amd64.deb`,
 }
 
 async function sha256(url) {
@@ -119,12 +125,19 @@ console.error('Hashing release assets (this downloads each installer)…')
 
 const SHAS = {
   DMG_ARM64: await sha256(ASSETS.DMG_ARM64),
-  WIN_ZIP: await sha256(ASSETS.WIN_ZIP),
+  DMG_X64: await sha256(ASSETS.DMG_X64),
+  WIN_X64: await sha256(ASSETS.WIN_X64),
+  WIN_ARM64: await sha256(ASSETS.WIN_ARM64),
+  DEB_AMD64: await sha256(ASSETS.DEB_AMD64),
 }
 
+// The cask covers both mac arches (on_arm/on_intel) and the winget installer
+// manifest carries both windows arches, so a platform renders only when all
+// of its assets exist (release.yml uploads its matrix all-or-nothing). The
+// deb has no manifest consumer — it is recorded in meta.json whenever present.
 const platforms = {
-  homebrew: SHAS.DMG_ARM64 !== null,
-  winget: SHAS.WIN_ZIP !== null,
+  homebrew: SHAS.DMG_ARM64 !== null && SHAS.DMG_X64 !== null,
+  winget: SHAS.WIN_X64 !== null && SHAS.WIN_ARM64 !== null,
 }
 
 // meta.json carries every value the release-pkgs workflow needs to submit to
@@ -138,15 +151,24 @@ const meta = {
   platforms,
   assets: {},
 }
-if (platforms.homebrew) meta.assets.dmgArm64 = { url: ASSETS.DMG_ARM64, sha256: SHAS.DMG_ARM64 }
-if (platforms.winget) meta.assets.winZip = { url: ASSETS.WIN_ZIP, sha256: SHAS.WIN_ZIP }
+if (platforms.homebrew) {
+  meta.assets.dmgArm64 = { url: ASSETS.DMG_ARM64, sha256: SHAS.DMG_ARM64 }
+  meta.assets.dmgX64 = { url: ASSETS.DMG_X64, sha256: SHAS.DMG_X64 }
+}
+if (platforms.winget) {
+  meta.assets.winX64Setup = { url: ASSETS.WIN_X64, sha256: SHAS.WIN_X64 }
+  meta.assets.winArm64Setup = { url: ASSETS.WIN_ARM64, sha256: SHAS.WIN_ARM64 }
+}
+if (SHAS.DEB_AMD64 !== null) meta.assets.debAmd64 = { url: ASSETS.DEB_AMD64, sha256: SHAS.DEB_AMD64 }
 writeOut('meta.json', JSON.stringify(meta, null, 2) + '\n')
 
 const common = {
   VERSION: version,
   VERSION_WINGET: WINGET_VERSION,
   SHA256_ARM64: SHAS.DMG_ARM64 ?? '',
-  SHA256_WINZIP: SHAS.WIN_ZIP ?? '',
+  SHA256_X64: SHAS.DMG_X64 ?? '',
+  SHA256_WIN_X64: SHAS.WIN_X64 ?? '',
+  SHA256_WIN_ARM64: SHAS.WIN_ARM64 ?? '',
 }
 
 console.error('Writing rendered manifests…')
@@ -155,7 +177,7 @@ console.error('Writing rendered manifests…')
 if (platforms.homebrew) {
   writeOut('homebrew/tide.rb', render(readTpl('homebrew/tide.rb'), common))
 } else {
-  console.warn('warning: no arm64 .dmg asset — homebrew cask NOT rendered')
+  console.warn('warning: missing mac dmg asset — homebrew cask NOT rendered')
 }
 
 // winget (version + installer + default locale)
@@ -164,7 +186,7 @@ if (platforms.winget) {
   writeOut('winget/Tide.Tide.installer.yaml', render(readTpl('winget/Tide.Tide.installer.yaml'), common))
   writeOut('winget/Tide.Tide.locale.en-US.yaml', render(readTpl('winget/Tide.Tide.locale.en-US.yaml'), common))
 } else {
-  console.warn('warning: no win-x64-Tide-Setup.zip asset — winget manifests NOT rendered')
+  console.warn('warning: missing windows setup.exe asset — winget manifests NOT rendered')
 }
 
 // Drop manifests left by earlier renders of a platform we couldn't render

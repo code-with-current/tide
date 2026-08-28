@@ -1,5 +1,5 @@
 //! bash_output + kill_shell — ports of the tool envelopes in
-//! `app/core/agent/tools/background-shell.ts` (91ec558). Neither reads the
+//! `app/core/agent/tools/background-shell.ts` (). Neither reads the
 //! workspace: both address the process-wide
 //! [`ShellRegistry`](crate::shell_registry) by shell id (the bash tool
 //! registers shells there when spawned with `background:true`).

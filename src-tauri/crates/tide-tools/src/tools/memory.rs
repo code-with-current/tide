@@ -1,4 +1,4 @@
-//! memory — port of `app/core/agent/tools/memory.ts` (91ec558): semantic +
+//! memory — port of `app/core/agent/tools/memory.ts` (): semantic +
 //! full-text search over the workspace RAG index, fused with the global
 //! knowledge-sources index, merged via reciprocal rank fusion (RRF, k=60).
 //!

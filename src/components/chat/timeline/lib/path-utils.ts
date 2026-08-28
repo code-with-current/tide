@@ -1,7 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/lib/path-utils.ts.
- *  Pure module — ported verbatim (cross-platform path normalization incl.
- *  Windows drive/UNC roots; Tide runs on all three desktop platforms). */
-
 const WINDOWS_DRIVE_ROOT_PATTERN = /^[A-Za-z]:\/$/;
 const WINDOWS_DRIVE_ABSOLUTE_PATTERN = /^[A-Za-z]:\//;
 

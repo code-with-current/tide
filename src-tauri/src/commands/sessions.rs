@@ -1,6 +1,6 @@
 //! `sessionListV2` / `sessionMessagesV2` plus the legacy sidebar pair
 //! `sessionList` / `sessionListArchived` — thin command wrappers over the
-//! tide-store sessions-v2 reader. The 91ec558 shell created the db file at
+//! tide-store sessions-v2 reader. The TS shell created the db file at
 //! boot, so a missing db always read as an empty store; the command layer
 //! reproduces that (empty page, not an error) while real open/schema errors
 //! still surface.
@@ -8,7 +8,7 @@
 //! The legacy pair takes a config workspaceId (the v2 store keys rows by
 //! workspace_path): resolve id → path via the config workspaces, then stamp
 //! the requested id back onto every header. An unknown id matched nothing in
-//! the 91ec558 store (headers were keyed by workspaceId directly) and still
+//! the TS store (headers were keyed by workspaceId directly) and still
 //! returns an empty list — not a `WORKSPACE_NOT_FOUND` error.
 
 use tide_store::sessions_v2::{
@@ -125,7 +125,7 @@ fn list_archived(state: &AppState, workspace_id: &str) -> Result<Vec<ArchivedHea
     }
 }
 
-/// Port of the 91ec558 `workspacePathOf`: first config workspace whose id
+/// Port of the TS `workspacePathOf`: first config workspace whose id
 /// matches. None for an unknown id — callers read that as an empty list.
 fn workspace_path_of(state: &AppState, workspace_id: &str) -> Result<Option<String>, CommandError> {
     state.read_config(|cfg| {
@@ -137,9 +137,9 @@ fn workspace_path_of(state: &AppState, workspace_id: &str) -> Result<Option<Stri
 }
 
 
-// ── M4 T2: session management (legacy-shaped, v2-backed) ───────────────────
+// ── Session management (legacy-shaped, v2-backed) ──────────────────────────
 //
-// Port of `app/rpc/sessions.ts` @ 91ec558 minus the dual-track legacy store:
+// Port of `app/rpc/sessions.ts` minus the dual-track legacy store:
 // sessions-v2 is the only store, so every legacy-shaped response is DERIVED
 // from v2 rows (the M1 `sessionList` pattern) and every legacy mutation maps
 // onto the writer. Mapping decisions per method:
@@ -196,6 +196,15 @@ pub struct StoredMessageWire {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
+    /// Legacy `toolCalls` — derived from v2 tool parts so the block
+    /// migration can rebuild the tool rows on reload (without these the
+    /// timeline collapses to a reasoning blob + one text block).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<Value>,
+    /// Legacy `timeline` — text/tool interleaving in part order, same
+    /// purpose: restores the streamed turn structure on reload.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub timeline: Vec<Value>,
 }
 
 /// `HydratedSession` in shared/rpc.ts — the persisted session plus UI
@@ -210,7 +219,7 @@ pub struct HydratedSessionWire {
     pub model_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
-    pub messages: Vec<StoredMessageWire>,
+    pub messages: Vec<Value>,
     pub created_at: String,
     pub updated_at: String,
     pub autonomy_mode: String,
@@ -326,6 +335,12 @@ fn get_session(state: &AppState, session_id: &str) -> Result<Option<HydratedSess
         .unwrap_or((None, None));
     let worktree = store.session_worktree_of(session_id)?;
     let workspace_id = workspace_id_of_path(state, &meta.workspace_path);
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[tide] session_get {} -> {} messages",
+        session_id,
+        messages.len()
+    );
     Ok(Some(HydratedSessionWire {
         id: meta.id,
         workspace_id,
@@ -365,7 +380,7 @@ fn get_session(state: &AppState, session_id: &str) -> Result<Option<HydratedSess
 fn stored_messages_of(
     store: &SessionsV2,
     session_id: &str,
-) -> Result<Vec<StoredMessageWire>, CommandError> {
+) -> Result<Vec<Value>, CommandError> {
     let mut pages: Vec<Vec<SessionMessageV2>> = Vec::new();
     let mut before: Option<String> = None;
     loop {
@@ -381,32 +396,88 @@ fn stored_messages_of(
         }
     }
     pages.reverse();
-    Ok(pages
+    let flat: Vec<SessionMessageV2> = pages.into_iter().flatten().collect();
+    let ids: Vec<String> = flat.iter().map(|m| m.id.clone()).collect();
+    let payloads = store.message_payloads(&ids).unwrap_or_default();
+    Ok(flat
         .into_iter()
-        .flatten()
-        .map(|message| StoredMessageWire {
-            created_at: iso_ms(message.time_created),
-            content: concat_parts(&message, "text"),
-            reasoning: some_if_non_empty(&concat_parts(&message, "thinking")),
-            id: message.id,
-            role: message.role,
+        .map(|message| {
+            let mut content = String::new();
+            let mut reasoning = String::new();
+            let mut tool_calls: Vec<Value> = Vec::new();
+            let mut timeline: Vec<Value> = Vec::new();
+            for part in &message.parts {
+                match part.kind.as_str() {
+                    "text" => {
+                        let text = part
+                            .data
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        content.push_str(text);
+                        timeline.push(serde_json::json!({ "type": "text", "text": text }));
+                    }
+                    "thinking" => {
+                        reasoning.push_str(
+                            part.data.get("text").and_then(Value::as_str).unwrap_or_default(),
+                        );
+                    }
+                    "tool" => {
+                        let tool_name = part
+                            .data
+                            .get("toolName")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        let input = part.data.get("input").cloned().unwrap_or(Value::Null);
+                        let status = part
+                            .data
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("executed");
+                        tool_calls.push(serde_json::json!({
+                            "id": part.id,
+                            "messageId": message.id,
+                            "toolName": tool_name,
+                            "arguments": input,
+                            "argPreview": crate::agent::events::format_arg_preview(tool_name, &input),
+                            "status": status,
+                            "riskTier": "read_only",
+                            "output": part.data.get("output").cloned().unwrap_or(Value::Null),
+                            "display": part.data.get("display").cloned().unwrap_or(Value::Null),
+                            "durationMs": part.data.get("durationMs").cloned().unwrap_or(Value::Null),
+                        }));
+                        timeline.push(serde_json::json!({
+                            "type": "tool",
+                            "toolIndex": tool_calls.len() - 1,
+                        }));
+                    }
+                    _ => {}
+                }
+            }
+            let wire = StoredMessageWire {
+                created_at: iso_ms(message.time_created),
+                content,
+                reasoning: some_if_non_empty(&reasoning),
+                tool_calls,
+                timeline,
+                id: message.id.clone(),
+                role: message.role,
+            };
+            let mut value = serde_json::to_value(&wire).unwrap_or(Value::Null);
+            // The frozen payload wins field-for-field — it is exactly what
+            // the streamed view rendered (blocks, turn, toolCalls…).
+            if let Some(payload) = payloads.get(&message.id) {
+                if let (Some(target), Some(source)) = (value.as_object_mut(), payload.as_object()) {
+                    for (key, field) in source {
+                        target.insert(key.clone(), field.clone());
+                    }
+                }
+            }
+            value
         })
         .collect())
 }
 
-fn concat_parts(message: &SessionMessageV2, kind: &str) -> String {
-    message
-        .parts
-        .iter()
-        .filter(|part| part.kind == kind)
-        .map(|part| {
-            part.data
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-        })
-        .collect()
-}
 
 fn some_if_non_empty(text: &str) -> Option<String> {
     (!text.trim().is_empty()).then(|| text.to_owned())
@@ -721,7 +792,7 @@ pub async fn session_finalize_assistant_message(
     hub_cell: tauri::State<'_, ChatHubCell>,
     session_id: String,
     message_id: String,
-    message: AssistantMessageInputWire,
+    message: serde_json::Value,
 ) -> Result<(), CommandError> {
     let hub = hub(hub_cell, &state).await?;
     finalize_assistant_message(&hub, &session_id, &message_id, &message)
@@ -731,8 +802,15 @@ fn finalize_assistant_message(
     hub: &Arc<ChatHub>,
     session_id: &str,
     message_id: &str,
-    message: &AssistantMessageInputWire,
+    payload: &serde_json::Value,
 ) -> Result<(), CommandError> {
+    let content = payload.get("content").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let reasoning = payload
+        .get("reasoning")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty())
+        .map(str::to_owned);
+    let message = &AssistantMessageInputWire { content, reasoning };
     with_writer(hub, |writer| {
         if writer.session_workspace_path(session_id).is_none() {
             return Ok(());
@@ -762,6 +840,12 @@ fn finalize_assistant_message(
             )?;
         }
         writer.complete_message(message_id, now)?;
+        // The frozen message JSON (blocks/turn/toolCalls/timeline) rides
+        // alongside the parts — reloads serve it verbatim so the structured
+        // turn renders exactly as it streamed.
+        if let Err(error) = writer.upsert_message_payload(message_id, payload, now) {
+            eprintln!("[tide] message payload persist failed: {error}");
+        }
         writer.update_session(session_id, SessionPatch::default(), now)
     })
 }
@@ -878,6 +962,8 @@ fn fork_session(
                 content: text.to_owned(),
                 created_at: iso_ms(message_ms),
                 reasoning: None,
+                tool_calls: Vec::new(),
+                timeline: Vec::new(),
             });
         }
         // autonomy/thinking: opts → source → defaults (the TS chain).
@@ -895,7 +981,10 @@ fn fork_session(
         title,
         model_id: new_model_id.to_owned(),
         provider_id: opts.provider_id,
-        messages: seed_message.into_iter().collect(),
+        messages: seed_message
+            .into_iter()
+            .map(|m| serde_json::to_value(&m).unwrap_or(Value::Null))
+            .collect(),
         created_at: iso_ms(now),
         updated_at: iso_ms(now),
         autonomy_mode: autonomy_of,
@@ -1494,7 +1583,7 @@ mod tests {
     #[test]
     fn legacy_list_unknown_workspace_and_missing_db_read_empty() {
         let (state, dir) = state_legacy("legacy-unknown");
-        // The 91ec558 store compared workspaceId against stored headers — an
+        // The TS store compared workspaceId against stored headers — an
         // unknown id matched nothing and returned [], never an error.
         assert!(list_headers(&state, "ws_nope").unwrap().is_empty());
         assert!(list_archived(&state, "ws_nope").unwrap().is_empty());
@@ -1666,9 +1755,9 @@ mod management_tests {
         assert_eq!(hydrated.thinking_level, "high");
         assert_eq!(hydrated.status, "idle");
         assert_eq!(hydrated.messages.len(), 2);
-        assert_eq!(hydrated.messages[0].content, "hello there");
-        assert_eq!(hydrated.messages[0].id, m1);
-        assert_eq!(hydrated.messages[1].role, "assistant");
+        assert_eq!(hydrated.messages[0]["content"], "hello there");
+        assert_eq!(hydrated.messages[0]["id"], serde_json::json!(m1));
+        assert_eq!(hydrated.messages[1]["role"], "assistant");
         assert_eq!(
             hydrated.worktree.as_ref().unwrap()["branch"],
             serde_json::json!("wt")
@@ -1810,9 +1899,9 @@ mod management_tests {
         .unwrap();
         let one = get_session(&state, "s_1").unwrap().unwrap();
         assert_eq!(one.messages.len(), 1);
-        assert_eq!(one.messages[0].role, "assistant");
-        assert_eq!(one.messages[0].content, "answer");
-        assert_eq!(one.messages[0].reasoning.as_deref(), Some("thinking…"));
+        assert_eq!(one.messages[0]["role"], "assistant");
+        assert_eq!(one.messages[0]["content"], "answer");
+        assert_eq!(one.messages[0]["reasoning"].as_str(), Some("thinking…"));
 
         // Ghosts no-op like the TS.
         add_message(&hub, "s_ghost", "assistant", "x").unwrap();
@@ -1832,25 +1921,25 @@ mod management_tests {
             &hub,
             "s_1",
             &streamed,
-            &AssistantMessageInputWire { content: "final text".into(), reasoning: None },
+            &serde_json::json!({ "content": "final text" }),
         )
         .unwrap();
         let one = get_session(&state, "s_1").unwrap().unwrap();
         assert_eq!(one.messages.len(), 1, "update in place, never a second copy");
-        assert_eq!(one.messages[0].content, "final text");
+        assert_eq!(one.messages[0]["content"], "final text");
 
         // A finalize for a message that never streamed appends with that id.
         finalize_assistant_message(
             &hub,
             "s_1",
             "m_shortturn",
-            &AssistantMessageInputWire { content: "appended".into(), reasoning: None },
+            &serde_json::json!({ "content": "appended" }),
         )
         .unwrap();
         let one = get_session(&state, "s_1").unwrap().unwrap();
         assert_eq!(one.messages.len(), 2);
-        assert_eq!(one.messages[1].id, "m_shortturn");
-        assert_eq!(one.messages[1].content, "appended");
+        assert_eq!(one.messages[1]["id"], "m_shortturn");
+        assert_eq!(one.messages[1]["content"], "appended");
         fs::remove_dir_all(&dir).unwrap();
         fs::remove_dir_all(&ws).unwrap();
     }
@@ -1883,8 +1972,8 @@ mod management_tests {
         assert_eq!(fork.autonomy_mode, "edit");
         assert_eq!(fork.thinking_level, "low");
         assert_eq!(fork.messages.len(), 1);
-        assert_eq!(fork.messages[0].content, "final answer");
-        assert_eq!(fork.messages[0].role, "assistant");
+        assert_eq!(fork.messages[0]["content"], "final answer");
+        assert_eq!(fork.messages[0]["role"], "assistant");
 
         // Source unchanged, both readable back.
         let source = get_session(&state, "s_src").unwrap().unwrap();

@@ -1,4 +1,4 @@
-//! EventSink — port of `app/core/agent/event-sink.ts` @ 91ec558 onto the
+//! EventSink — port of `app/core/agent/event-sink.ts` onto the
 //! tide-store write path. One per app (NOT per session): turn tasks `emit`
 //! [`SinkEventWire`]s into an unbounded mpsc; a single flush task commits
 //! every ~50ms as ONE WAL transaction ([`SessionsV2Writer::commit_batch`])

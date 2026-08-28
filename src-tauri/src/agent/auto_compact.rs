@@ -1,5 +1,5 @@
 //! Context autocompact — port of `app/core/agent/context/{auto-compact,
-//! summarize}.ts` @ 91ec558, opencode-style multi-layer compaction:
+//! summarize}.ts`, opencode-style multi-layer compaction:
 //!
 //! - **Layer 1** — tool output pruning (free, no LLM): walks backwards
 //!   through tool results, protects the last ~40K tokens, erases older

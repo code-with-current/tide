@@ -1,5 +1,5 @@
 //! ask_followup_question — port of `app/core/agent/tools/ask-followup.ts`
-//! (91ec558). Two envelopes share one body, exactly like the TS:
+//! (). Two envelopes share one body, exactly like the TS:
 //! - `Tool::execute` = the legacy echo path (`runAskFollowup`): validates,
 //!   normalizes, renders the question for model + UI — no parking.
 //! - The live turn path (the TS Phase-3 SDK factory) is orchestrated: the

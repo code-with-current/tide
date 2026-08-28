@@ -1,12 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/code/WorkerHighlightedCode.tsx.
- *  Adaptations:
- *  - Theme seam: `useThemeSystem()` (upstream runtime theme registry) is
- *    replaced by the same next-themes pattern Task 2's markdown-renderer-impl
- *    uses — `useTheme().resolvedTheme` → `resolveDark` → dark/light syntax
- *    palette. Colors still resolve through the `--md-syntax-*` CSS variables.
- *  - Worker import points at Task 2's ported `../markdown/markdown-worker`.
- *  Logic otherwise unchanged. */
-
 import React from 'react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';

@@ -1,4 +1,4 @@
-//! Embedder resolution — port of `app/core/rag/resolve.ts` @ 91ec558.
+//! Embedder resolution — port of `app/core/rag/resolve.ts`.
 //! Build time prefers local and falls back to cloud only when (local
 //! unavailable + cloudAllowed + cloud configured); query time returns the
 //! embedder matching the index's recorded embedderId — never cross (a

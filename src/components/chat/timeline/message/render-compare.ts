@@ -1,8 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/renderCompare.ts.
- *  Pure render-relevance comparators — ported verbatim; `Message`/`Part` become
- *  Tide's `TimelineMessage`/`TimelinePart`, and turns types come from Tide's ported
- *  `../lib/turns/types` (Task 1). */
-
 import type { TimelineMessage, TimelinePart } from '../types/message-parts';
 import type { TurnActivityGroup, TurnActivityRecord, TurnChangedFile, TurnDiffStats, TurnGroupingContext } from '../lib/turns/types';
 

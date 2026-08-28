@@ -1,9 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/AssistantTextPart.tsx.
- *  Adaptations: `streamPerfCount`/`streamPerfObserve` probes dropped (Task 2's
- *  convention — the stream-debug store is not ported); SDK `Part` → `TimelinePart`;
- *  `ContentChangeReason` from ../types; renderer/hook point at Tide's ported
- *  modules. Logic otherwise ported faithfully (re-indented 4-space to 2-space). */
-
 import React from 'react';
 import type { TimelinePart } from '../../types/message-parts';
 import { MarkdownRenderer } from '../../markdown/markdown-renderer';

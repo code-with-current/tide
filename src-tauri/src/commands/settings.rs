@@ -7,6 +7,13 @@
 //! the faithful port of the TS object spread — so an explicit `null` patch
 //! value overwrites (e.g. clearing `titleModel`) while an absent key keeps
 //! the stored value, and unknown keys land in the flatten-preserved extras.
+//!
+//! `startAtLogin` additionally drives the OS login item (the old Electron
+//! `setLoginItemSettings` side effect): a patch carrying the key applies it
+//! immediately (best-effort — a failed login-item write warns and keeps the
+//! saved flag; the boot reconcile retries it), and every general reply
+//! reports the login item's ACTUAL state so external changes (System
+//! Settings, reinstall) show truth instead of the stored flag.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -15,6 +22,7 @@ use tide_store::config::{
     AgentSettings, EffectiveAgentSettings, EffectiveGeneralSettings, GeneralSettings,
 };
 
+use crate::autostart::{reconcile, AutoStartBackend, PluginAutostart};
 use crate::state::AppState;
 
 use super::CommandError;
@@ -58,38 +66,66 @@ fn update_agent(
 
 #[tauri::command]
 pub fn settings_get_general(
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<EffectiveGeneralSettings, CommandError> {
-    get_general(&state)
+    let autostart = PluginAutostart::new(&app);
+    get_general(&state, &autostart)
 }
 
-fn get_general(state: &AppState) -> Result<EffectiveGeneralSettings, CommandError> {
-    state.read_config(|cfg| {
-        cfg.general_settings
-            .clone()
-            .unwrap_or_default()
-            .effective()
-    })
+fn get_general(
+    state: &AppState,
+    autostart: &dyn AutoStartBackend,
+) -> Result<EffectiveGeneralSettings, CommandError> {
+    let effective = state
+        .read_config(|cfg| cfg.general_settings.clone().unwrap_or_default().effective())?;
+    Ok(with_actual_autostart(effective, autostart))
 }
 
 #[tauri::command]
 pub fn settings_update_general(
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
     patch: Value,
 ) -> Result<EffectiveGeneralSettings, CommandError> {
-    update_general(&state, patch)
+    let autostart = PluginAutostart::new(&app);
+    update_general(&state, &autostart, patch)
 }
 
 fn update_general(
     state: &AppState,
+    autostart: &dyn AutoStartBackend,
     patch: Value,
 ) -> Result<EffectiveGeneralSettings, CommandError> {
     let patch = patch_map(patch)?;
-    state.update_config(|cfg| {
+    // Key presence (not value truthiness): `startAtLogin: null` clears to
+    // the default and still applies — the TS `'startAtLogin' in patch` guard.
+    let touches_autostart = patch.contains_key("startAtLogin");
+    let effective = state.update_config(|cfg| {
         let merged: GeneralSettings = merge_patch(cfg.general_settings.clone(), &patch)?;
         cfg.general_settings = Some(merged.clone());
         Ok(merged.effective())
-    })
+    })?;
+    if touches_autostart {
+        if let Err(e) = reconcile(autostart, effective.start_at_login) {
+            eprintln!("[tide] failed to apply startAtLogin: {e}");
+        }
+    }
+    Ok(with_actual_autostart(effective, autostart))
+}
+
+/// Overlay the login item's actual state onto the effective block. Best
+/// effort: a failing query keeps the stored flag rather than failing the
+/// whole settings read.
+fn with_actual_autostart(
+    mut effective: EffectiveGeneralSettings,
+    autostart: &dyn AutoStartBackend,
+) -> EffectiveGeneralSettings {
+    match autostart.is_enabled() {
+        Ok(actual) => effective.start_at_login = actual,
+        Err(e) => eprintln!("[tide] autostart state unavailable, serving stored flag: {e}"),
+    }
+    effective
 }
 
 fn patch_map(patch: Value) -> Result<Map<String, Value>, CommandError> {
@@ -151,6 +187,7 @@ fn validate_autonomy(value: Option<&str>) -> Result<(), CommandError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autostart::MockAutoStart;
     use std::fs;
     use std::path::PathBuf;
 
@@ -201,7 +238,8 @@ mod tests {
                 "titleModel": { "providerId": "p_1", "modelId": "glm-4.5-air" }
             }}"#,
         );
-        let wire = serde_json::to_value(get_general(&state).unwrap()).unwrap();
+        let autostart = MockAutoStart::default();
+        let wire = serde_json::to_value(get_general(&state, &autostart).unwrap()).unwrap();
         assert_eq!(
             wire,
             serde_json::json!({
@@ -281,8 +319,10 @@ mod tests {
                 "titleModel": { "providerId": "p_1", "modelId": "glm-4.5-air" }
             }}"#,
         );
+        let autostart = MockAutoStart::default();
         let updated = update_general(
             &state,
+            &autostart,
             patch(r#"{ "notifications": false, "titleModel": null }"#),
         )
         .unwrap();
@@ -290,7 +330,7 @@ mod tests {
         assert_eq!(updated.title_model, None, "explicit null overwrites (TS spread)");
 
         let reloaded = AppState::load(dir.clone());
-        let reloaded = get_general(&reloaded).unwrap();
+        let reloaded = get_general(&reloaded, &autostart).unwrap();
         assert!(!reloaded.notifications);
         assert_eq!(reloaded.title_model, None);
         fs::remove_dir_all(&dir).unwrap();
@@ -299,12 +339,13 @@ mod tests {
     #[test]
     fn unreadable_config_fails_get_and_update() {
         let (state, dir) = state_with_config("broken", "{ nope");
+        let autostart = MockAutoStart::default();
         assert_eq!(
             get_agent(&state).unwrap_err().code.as_deref(),
             Some("CONFIG_UNREADABLE")
         );
         assert_eq!(
-            get_general(&state).unwrap_err().code.as_deref(),
+            get_general(&state, &autostart).unwrap_err().code.as_deref(),
             Some("CONFIG_UNREADABLE")
         );
         assert_eq!(
@@ -315,6 +356,110 @@ mod tests {
             Some("CONFIG_UNREADABLE")
         );
         assert_eq!(fs::read_to_string(dir.join("config.json")).unwrap(), "{ nope");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn update_general_applies_start_at_login_immediately() {
+        let (state, dir) = state_with_config("general-autostart", "{}");
+        let autostart = MockAutoStart::with_enabled(false);
+
+        let updated =
+            update_general(&state, &autostart, patch(r#"{ "startAtLogin": true }"#)).unwrap();
+        assert!(updated.start_at_login);
+        assert_eq!(
+            autostart.calls(),
+            [
+                "is_enabled".to_owned(),
+                "set_enabled(true)".to_owned(),
+                "is_enabled".to_owned(),
+            ]
+        );
+
+        let disk: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(dir.join("config.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(disk["generalSettings"]["startAtLogin"], serde_json::json!(true));
+
+        let updated =
+            update_general(&state, &autostart, patch(r#"{ "startAtLogin": false }"#)).unwrap();
+        assert!(!updated.start_at_login);
+        assert_eq!(
+            autostart.calls().last().map(String::as_str),
+            Some("is_enabled"),
+            "disables after enabling"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn update_general_clearing_start_at_login_applies_the_default() {
+        let (state, dir) = state_with_config(
+            "general-autostart-clear",
+            r#"{"generalSettings": { "startAtLogin": true }}"#,
+        );
+        let autostart = MockAutoStart::with_enabled(true);
+        let updated =
+            update_general(&state, &autostart, patch(r#"{ "startAtLogin": null }"#)).unwrap();
+        assert!(!updated.start_at_login, "null clears to the default");
+        assert!(autostart.calls().contains(&"set_enabled(false)".to_owned()));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn update_general_without_the_key_leaves_the_login_item_alone() {
+        let (state, dir) = state_with_config(
+            "general-autostart-untouched",
+            r#"{"generalSettings": { "startAtLogin": true }}"#,
+        );
+        let autostart = MockAutoStart::with_enabled(false);
+        let updated =
+            update_general(&state, &autostart, patch(r#"{ "notifications": false }"#)).unwrap();
+        assert!(
+            !autostart.calls().iter().any(|c| c.starts_with("set_enabled")),
+            "no implicit reconcile on unrelated patches"
+        );
+        assert!(!updated.start_at_login, "reply still reports actual state");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn update_general_survives_login_item_failure() {
+        let (state, dir) = state_with_config("general-autostart-fail", "{}");
+        let autostart = MockAutoStart::with_enabled(false);
+        autostart.fail_set();
+        let updated =
+            update_general(&state, &autostart, patch(r#"{ "startAtLogin": true }"#)).unwrap();
+        assert!(!updated.start_at_login, "reply reports the login item that exists");
+        let reloaded = AppState::load(dir.clone());
+        let stored = reloaded
+            .read_config(|cfg| cfg.general_settings.clone().unwrap_or_default().start_at_login)
+            .unwrap();
+        assert_eq!(stored, Some(true), "failed apply still saves the flag (boot retries)");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn get_general_reports_actual_login_item_over_stored_flag() {
+        let (state, dir) = state_with_config(
+            "general-external-drift",
+            r#"{"generalSettings": { "startAtLogin": true }}"#,
+        );
+        let autostart = MockAutoStart::with_enabled(false);
+        assert!(!get_general(&state, &autostart).unwrap().start_at_login);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn get_general_falls_back_to_stored_flag_when_state_unreadable() {
+        let (state, dir) = state_with_config(
+            "general-state-error",
+            r#"{"generalSettings": { "startAtLogin": true }}"#,
+        );
+        let autostart = MockAutoStart::default();
+        autostart.fail_is_enabled();
+        assert!(get_general(&state, &autostart).unwrap().start_at_login);
         fs::remove_dir_all(&dir).unwrap();
     }
 }

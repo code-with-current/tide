@@ -1,5 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/lib/turns/types.ts + @opencode-ai/sdk/v2 `Message`/`Part` shapes, vendored so the projection port has no runtime SDK dependency. Adds a Tide-specific 'followup' part type and permissive extras (mentions/attachments stash, clientRole/finish passthrough) consumed by the tide-adapter. */
-
 export interface TimelineMessage {
   id: string;
   role: string;

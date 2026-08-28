@@ -1,9 +1,3 @@
-/**
- * Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/components/TurnAssistantBlock.tsx.
- * Near-verbatim; only the import path is rewritten. Named export per project
- * convention instead of upstream's default export.
- */
-
 import React from 'react';
 
 import type { ChatMessageEntry } from '../lib/turns/types';
@@ -16,7 +10,9 @@ interface TurnAssistantBlockProps {
 const TurnAssistantBlock: React.FC<TurnAssistantBlockProps> = ({ assistantMessages, renderMessage }) => {
   return (
     <div className="relative z-0">
-      {assistantMessages.map((message) => renderMessage(message))}
+      {assistantMessages.map((message) => (
+        <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+      ))}
     </div>
   );
 };

@@ -464,7 +464,6 @@ export function GitPanel() {
             )}
           </div>
 
-
         </>
       ) : (
         <>

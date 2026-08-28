@@ -5,8 +5,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['test/**/*.test.ts'],
-    // The suite is empty between the Electrobun removal and the Tauri
-    // bridge tests landing — keep `vitest run` green.
     passWithNoTests: true,
   },
   resolve: {

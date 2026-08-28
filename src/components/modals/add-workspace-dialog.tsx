@@ -969,7 +969,6 @@ export function AddWorkspaceDialog() {
             <Switch checked={addScript} onCheckedChange={setAddScript} className="mt-1.5" />
                 </div>
 
-
           <div className="h-3" />
 
           {/* RAG enable card */}

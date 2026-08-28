@@ -7,6 +7,9 @@ Every row below must be checked off by **dogfooding the behavior in the rewritte
 MCP pool (rmcp) + subagents + auto-compact + followup/exit-plan. Rows below remain UNTICKED until
 dogfooded per the gate rule; this note records implementation coverage only. -->
 
+<!-- M5 code-complete 2026-08-28: updater dual-channel + consent flow live, autostart parity,
+perf gates in CI (500-msg), winget/homebrew rewired + secrets-gated. Rows remain UNTICKED until
+dogfooded; the v0.4.0-beta tag is the gate. -->
 ## Tools
 
 All 26 registered tools (see `fixtures/schemas/tools.json` for name/description/JSON Schema, both legacy wire format and live zod-converted SDK schema):

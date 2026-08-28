@@ -1,15 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/parts/userTextPartContent.ts.
- *  Adaptation: upstream injects agent-mention and skill links via
- *  `@/lib/messages/inlineMessageLinks` (`buildAgentHref`/`buildSkillHref`,
- *  upstream app-link helpers on the delete-on-sight list — Tide has no
- *  app-link runtime). Those branches are dropped; instead Tide's own mention
- *  metadata (composer slash-picks) renders known `/name` tokens as chip spans
- *  via `tide-user-mention-chip` (styled in chat-timeline.css). File mentions
- *  are NOT handled here — they persist as `[/label/](target)` links which
- *  parseRefLinks lifts into chips before this runs. Text stays escaped with
- *  preserved hard line breaks. `SKILL_TOKEN_PATTERN` is kept for downstream
- *  consumers (Task 4+). */
-
 import type { AgentMentionInfo } from '../types';
 import type { UserMentionMeta } from './user-ref-links';
 

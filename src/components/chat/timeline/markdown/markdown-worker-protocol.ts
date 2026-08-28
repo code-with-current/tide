@@ -1,6 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdown-worker-protocol.ts.
- *  Verbatim port — the worker/protocol contract must stay identical to upstream. */
-
 // Message protocol for the markdown Shiki Web Worker.
 //
 // The worker tokenizes a complete code block off the main thread and returns

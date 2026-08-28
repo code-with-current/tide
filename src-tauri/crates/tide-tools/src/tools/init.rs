@@ -1,4 +1,4 @@
-//! init — port of `app/core/agent/tools/init.ts` (91ec558). Scans the
+//! init — port of `app/core/agent/tools/init.ts` (). Scans the
 //! workspace and generates a minimal AGENTS.md at the project root. The
 //! tool itself only reports whether AGENTS.md exists and returns the
 //! scaffolding instructions — the model writes the file with write_file.

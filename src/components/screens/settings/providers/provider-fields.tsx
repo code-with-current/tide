@@ -28,9 +28,7 @@ export const PROTOCOL = {
   { baseUrlPlaceholder: string; keyPlaceholder: string; authHeader: string }
 >;
 
-// =============================================================
-// EndpointPreview — echoes the typed baseUrl verbatim. No trailing-slash strip, no /v1 auto-append, no path suffix: provider endpoints vary (z.ai's coding relay lives at /api/coding/pas/v4; some gateways want /v1, others don't), so transforming the input here would misrepresent non-standard gateways. The SDK appends its own path at runtime.
-// =============================================================
+// ── EndpointPreview — echoes the typed baseUrl verbatim. No trailing-slash strip, no /v1 auto-append, no path suffix: provider endpoints vary (z.ai's coding relay lives at /api/coding/pas/v4; some gateways want /v1, others don't), so transforming the input here would misrepresent non-standard gateways. The SDK appends its own path at runtime. ──
 export function EndpointPreview({
   apiStyle,
   baseUrl,

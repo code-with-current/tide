@@ -1,11 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/message/normalizeUserDisplayParts.ts.
- *  Ported faithfully (re-indented 4-space → 2-space); SDK `Part` becomes
- *  Tide's structural `TimelinePart`. The synthetic GitHub issue/PR attachment parts
- *  are kept even though Tide's adapter never emits synthetic parts —
- *  `hiddenUserMessage` and `filterVisibleParts` depend on this normalization
- *  contract, and the downstream file-attachment renderer those parts target is
- *  permanently dropped (ruling 2), so they simply flow through unrendered. */
-
 import type { TimelinePart } from '../types/message-parts';
 
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';

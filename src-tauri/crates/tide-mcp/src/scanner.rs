@@ -1,4 +1,4 @@
-//! MCP import scanner — port of `app/core/agent/mcp/scanner.ts` @ 91ec558.
+//! MCP import scanner — port of `app/core/agent/mcp/scanner.ts`.
 //! Detects servers from other tools' config files (Claude Code, Codex,
 //! OpenCode, generic) and normalizes them to Tide's [`McpServerConfig`].
 //!

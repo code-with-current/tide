@@ -1,4 +1,4 @@
-//! bash — port of `app/core/agent/tools/bash.ts` (91ec558). Shell execution
+//! bash — port of `app/core/agent/tools/bash.ts` (). Shell execution
 //! in the workspace root via `/bin/sh -c` (cmd.exe on Windows), bounded by
 //! a hard blocklist for catastrophic patterns, output caps (50 KB per
 //! stream / 1000 lines), a wall-clock timeout with an early-kill heuristic

@@ -1,16 +1,3 @@
-/** Ported from upstream project (MIT, see THIRD_PARTY_NOTICES.md): packages/ui/src/components/chat/markdown/markdownSyntaxVars.ts.
- *  Adaptation: upstream typed the palette against the upstream's runtime theme
- *  registry (`@/types/theme` Theme). Tide has no theme registry — it uses
- *  next-themes with static CSS tokens — so the seam is a local structural
- *  `MarkdownSyntaxPalette` type plus two exported palettes (light/dark) that
- *  mirror the `--md-syntax-*` values in chat-timeline.css. The renderer
- *  picks the palette from the resolved next-themes theme. Tide pins code
- *  blocks to the dark palette in both themes (product decision), so the light
- *  export aliases the dark palette. Keep this module free
- *  of `@pierre/diffs` imports — eager consumers must not pull that stack into
- *  the startup graph (upstream constraint, preserved).
- */
-
 /** Structural slice of a theme palette consumed by the syntax CSS variables. */
 export interface MarkdownSyntaxPalette {
   base: {

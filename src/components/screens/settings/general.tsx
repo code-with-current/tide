@@ -143,10 +143,6 @@ export function GeneralSection() {
           </Card>
         </SettingsGroup>
 
-
-
-
-
           <SettingsGroup title="Git Attribution">
             <Card>
               <SettingsRow
