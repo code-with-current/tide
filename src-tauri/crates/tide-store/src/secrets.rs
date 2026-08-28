@@ -94,6 +94,7 @@ pub fn decrypt_stored(stored: &str) -> SecretsResult<Option<String>> {
 
 /// Stored keychain data for a value: hex of the utf8 bytes, `-` for the
 /// empty string (an empty `-X` payload is not expressible — see header).
+#[cfg(any(target_os = "macos", test))]
 fn to_envelope(value: &str) -> String {
     if value.is_empty() {
         EMPTY_ENVELOPE.to_owned()
@@ -104,6 +105,7 @@ fn to_envelope(value: &str) -> String {
 
 /// The `-X` argument: the envelope string hex-encoded once more, so the
 /// bytes `security` decodes-and-stores are always printable ASCII hex.
+#[cfg(any(target_os = "macos", test))]
 fn keychain_payload(value: &str) -> String {
     hex_encode(to_envelope(value).as_bytes())
 }
@@ -111,6 +113,7 @@ fn keychain_payload(value: &str) -> String {
 /// Interactive-mode accounts must be single tokens: the `-i` tokenizer has
 /// no quoting, so whitespace/control characters would split or inject
 /// commands (port of the TS `assertTokenSafe`).
+#[cfg(any(target_os = "macos", test))]
 fn assert_token_safe(account: &str) -> SecretsResult<()> {
     let ok = (1..=512).contains(&account.len())
         && account
@@ -128,6 +131,7 @@ fn assert_token_safe(account: &str) -> SecretsResult<()> {
 
 /// OS randomness for the per-write account id + salt. /dev/urandom is the
 /// only source this crate needs — the keychain write path runs on macOS.
+#[cfg(target_os = "macos")]
 fn random_bytes(n: usize) -> SecretsResult<Vec<u8>> {
     use std::io::Read;
     let mut buf = vec![0u8; n];
@@ -141,6 +145,7 @@ fn random_bytes(n: usize) -> SecretsResult<Vec<u8>> {
 /// the keychain write injected so tests verify the envelope without
 /// touching the real keychain. Returns the base64 `encryptedKey` to store
 /// in config.json.
+#[cfg(any(target_os = "macos", test))]
 fn encrypt_handle_with(
     random: impl Fn(usize) -> SecretsResult<Vec<u8>>,
     mut keychain_set: impl FnMut(&str, &str) -> SecretsResult<()>,
@@ -203,14 +208,17 @@ pub fn encrypt_stored(value: &str) -> SecretsResult<String> {
     if value.is_empty() {
         return Ok(String::new());
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        return Ok(base64::engine::general_purpose::STANDARD.encode(value));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        encrypt_handle_with(random_bytes, cli_keychain_set, value)
-    }
+    encrypt_stored_impl(value)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn encrypt_stored_impl(value: &str) -> SecretsResult<String> {
+    Ok(base64::engine::general_purpose::STANDARD.encode(value))
+}
+
+#[cfg(target_os = "macos")]
+fn encrypt_stored_impl(value: &str) -> SecretsResult<String> {
+    encrypt_handle_with(random_bytes, cli_keychain_set, value)
 }
 
 fn decrypt_with(
@@ -253,17 +261,15 @@ fn decrypt_with(
     Ok(Some(text))
 }
 
-fn real_keychain_get(account: &str) -> SecretsResult<Option<String>> {
+#[cfg(not(target_os = "macos"))]
+fn real_keychain_get(_account: &str) -> SecretsResult<Option<String>> {
     // Off darwin the TS backend was an honest null stub; absent key, not error.
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = account;
-        return Ok(None);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        cli_keychain_get(account)
-    }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn real_keychain_get(account: &str) -> SecretsResult<Option<String>> {
+    cli_keychain_get(account)
 }
 
 /// Port of the TS `keychainRead`: one-shot `security find-generic-password`
