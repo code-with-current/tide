@@ -138,6 +138,13 @@ fn grep_walk(root: &Path, re: &Regex, glob_re: Option<&Regex>, max: usize) -> Ve
 }
 
 fn walk(dir: &Path, visit: &mut dyn FnMut(&Path, &str) -> bool) {
+    // The root may be a file (grep scoped to one path) — read_dir would
+    // fail and silently return zero matches; visit the file directly.
+    if dir.is_file() {
+        let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        visit(dir, &name);
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -279,6 +286,15 @@ mod tests {
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
         assert_eq!(out.output, "(no matches)");
         assert!(out.meta.as_deref().unwrap().ends_with("0 matches"));
+    }
+
+    #[test]
+    fn fallback_searches_a_file_root_directly() {
+        let tmp = workspace();
+        let re = RegexBuilder::new("hello").case_insensitive(true).build().unwrap();
+        let matches = grep_walk(&tmp.path().join("src/a.ts"), &re, None, MAX_RESULTS);
+        assert_eq!(matches.len(), 2, "both hello lines in a.ts");
+        assert!(matches[0].ends_with(":1:hello world"));
     }
 
     #[test]
