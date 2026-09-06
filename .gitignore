@@ -1,15 +1,12 @@
 target
-.waku-cache
 .tide-cache
 .DS_Store
 *.log
 .env
 
-/dist
+dist
 node_modules
-temp/
+temp
 
-.DS_Store
-.zcode/
-
-.dsh-research/
+.docs
+.zcode

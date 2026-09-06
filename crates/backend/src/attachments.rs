@@ -10,8 +10,8 @@ use base64::Engine as _;
 use uuid::Uuid;
 
 pub use protocol::attachments::{
-    ATTACHMENT_SCHEME, AttachmentUpload, AttachmentUploadEntry, LEGACY_ATTACHMENT_SCHEME,
-    MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_FILES, StoredAttachment,
+    ATTACHMENT_SCHEME, AttachmentUpload, AttachmentUploadEntry, MAX_ATTACHMENT_BYTES,
+    MAX_ATTACHMENT_FILES, StoredAttachment,
 };
 
 pub struct AttachmentStore {
@@ -116,9 +116,7 @@ impl AttachmentStore {
     }
 
     pub fn path_for(&self, reference: &str) -> Option<PathBuf> {
-        let id = reference
-            .strip_prefix(ATTACHMENT_SCHEME)
-            .or_else(|| reference.strip_prefix(LEGACY_ATTACHMENT_SCHEME))?;
+        let id = reference.strip_prefix(ATTACHMENT_SCHEME)?;
         let id = Uuid::parse_str(id).ok()?;
         Some(self.root.join(id.to_string()))
     }
@@ -170,9 +168,7 @@ impl AttachmentStore {
             let Ok(id) = Uuid::parse_str(&name) else {
                 continue;
             };
-            if live.contains(&format!("{ATTACHMENT_SCHEME}{id}"))
-                || live.contains(&format!("{LEGACY_ATTACHMENT_SCHEME}{id}"))
-            {
+            if live.contains(&format!("{ATTACHMENT_SCHEME}{id}")) {
                 continue;
             }
             if cutoff.is_some_and(|cutoff| {

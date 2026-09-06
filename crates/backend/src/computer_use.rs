@@ -460,7 +460,7 @@ pub fn skill_root_path() -> anyhow::Result<PathBuf> {
 }
 
 fn host_executable_path() -> anyhow::Result<PathBuf> {
-    protocol::env_var_os_or_legacy(crate::APP_EXECUTABLE_ENV)
+    std::env::var_os(crate::APP_EXECUTABLE_ENV)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
         .map(Ok)

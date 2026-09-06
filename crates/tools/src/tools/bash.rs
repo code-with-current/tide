@@ -437,7 +437,14 @@ mod tests {
     #[test]
     fn stderr_is_appended_with_marker() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_bash("echo err-msg >&2", tmp.path(), 10_000, false, &no_abort(), S);
+        let out = run_bash(
+            "echo err-msg >&2",
+            tmp.path(),
+            10_000,
+            false,
+            &no_abort(),
+            S,
+        );
         assert!(out.output.contains("[stderr]"));
         assert!(out.output.contains("err-msg"));
     }
@@ -528,7 +535,9 @@ mod tests {
         );
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
-            let read = registry.read(session, &key, crate::jobs::Reader::Model).unwrap();
+            let read = registry
+                .read(session, &key, crate::jobs::Reader::Model)
+                .unwrap();
             if read.text.contains("bg-echo") {
                 break;
             }
@@ -550,7 +559,10 @@ mod tests {
                 .find(|item| item.key == key)
                 .unwrap();
             if !settled.status.is_live() {
-                assert_eq!(settled.status, protocol::model::BackgroundWorkStatus::Stopped);
+                assert_eq!(
+                    settled.status,
+                    protocol::model::BackgroundWorkStatus::Stopped
+                );
                 break;
             }
             assert!(std::time::Instant::now() < deadline, "job never settled");

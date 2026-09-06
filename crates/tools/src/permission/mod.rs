@@ -138,8 +138,9 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
         | "ask_followup_question"
         | "exit_plan_mode"
         | "compact" => RiskTier::ReadOnly,
-        "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell"
-        | "job_kill" => RiskTier::Write,
+        "write_file" | "edit_file" | "multi_edit" | "notebook_edit" | "kill_shell" | "job_kill" => {
+            RiskTier::Write
+        }
         // The git tool executes a whole subcommand per call; the static
         // sidecar tier is destructive (TS toolMeta). [`risk_tier_for_call`]
         // refines it per subcommand at gate time.
@@ -148,8 +149,13 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
         // list_apps/get_app_state observe the screen, the action tools
         // drive the user's session (matching upstream readOnlyHint).
         "list_apps" | "get_app_state" => RiskTier::ReadOnly,
-        "click" | "drag" | "press_key" | "type_text" | "perform_secondary_action"
-        | "set_value" | "scroll" => RiskTier::Write,
+        "click"
+        | "drag"
+        | "press_key"
+        | "type_text"
+        | "perform_secondary_action"
+        | "set_value"
+        | "scroll" => RiskTier::Write,
         // Dynamically bridged MCP tools (`mcp__<server>__<tool>`) — the TS
         // toolMeta `mcp` entry: read-only, auto-approved in all modes (the
         // TS never wrapped MCP executes in the permission wrapper).

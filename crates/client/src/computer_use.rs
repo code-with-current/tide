@@ -11,7 +11,7 @@ pub struct PendingComputerApproval {
 }
 
 pub fn helper_display_name() -> String {
-    protocol::env_var_os_or_legacy(APP_EXECUTABLE_ENV)
+    std::env::var_os(APP_EXECUTABLE_ENV)
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_exe().ok())

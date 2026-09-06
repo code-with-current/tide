@@ -318,7 +318,11 @@ mod tests {
         }));
         assert_eq!(outcome.status, crate::OutcomeStatus::Executed);
         assert_eq!(outcome.output, "App=TextEdit");
-        let Some(ToolDisplay::Media { data_url, mime_type }) = outcome.display else {
+        let Some(ToolDisplay::Media {
+            data_url,
+            mime_type,
+        }) = outcome.display
+        else {
             panic!("expected media display");
         };
         assert_eq!(data_url, "data:image/png;base64,aGVsbG8=");

@@ -14,10 +14,6 @@ use client::tide::TideProviderWire;
 use gpui::relative;
 use protocol::git_panel::{PanelAheadBehind, PanelFileChange};
 
-/// The iteration ceiling shown next to the live count — the tide driver's
-/// main turn-loop bound (MAX_STEPS in crates/backend/src/driver/tide.rs).
-pub(crate) const ITERATION_MAX_STEPS: u64 = 100;
-
 /// A monospaced text leaf sized for stat values — the inspector's numbers
 /// are mono everywhere upstream (`font-mono`).
 fn mono_text(size: f32, color: Hsla) -> Div {
@@ -423,8 +419,8 @@ impl Tide {
         )
     }
 
-    /// The Configuration section: icon-led Provider / Model / Permissions /
-    /// Iteration rows, matching upstream's layout and icons.
+    /// The Configuration section: icon-led Provider / Model / Permissions
+    /// rows, matching upstream's layout and icons.
     pub(super) fn render_inspector_config_section(&mut self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let Some(session) = self.selected_session() else {
@@ -440,18 +436,13 @@ impl Tide {
             session.interaction_mode,
             &self.tide.providers,
         );
-        let calls = session
-            .usage_totals
-            .as_ref()
-            .map(|totals| totals.calls)
-            .unwrap_or(0);
         render_section(
             SectionId::Config,
             &tr!("inspector.section_config"),
             None,
             None,
             self.inspector.is_collapsed(SectionId::Config),
-            config_body(&data, calls, &theme),
+            config_body(&data, &theme),
             &theme,
             cx,
         )
@@ -572,6 +563,7 @@ impl Tide {
             cx,
         ))
     }
+}
 
 // ── Configuration ─────────────────────────────────────────────────────────
 
@@ -680,7 +672,7 @@ fn config_row(icon_path: &'static str, label: SharedString, value: Div, theme: &
         .child(value.min_w_0().max_w(px(150.0)))
 }
 
-fn config_body(data: &ConfigData, calls: u64, theme: &Theme) -> Div {
+fn config_body(data: &ConfigData, theme: &Theme) -> Div {
     // The provider row's value: brand tile at upstream's chip scale
     // (size-3.5 tile, size-2 mark) beside the provider name.
     let provider_value = div()
@@ -731,10 +723,6 @@ fn config_body(data: &ConfigData, calls: u64, theme: &Theme) -> Div {
                     .child(data.mode.label.clone()),
             ),
     );
-    let iteration_value = div()
-        .flex()
-        .justify_end()
-        .child(mono_text(11.0, theme.text).child(format!("{calls} / {ITERATION_MAX_STEPS}")));
 
     div()
         .flex()
@@ -756,12 +744,6 @@ fn config_body(data: &ConfigData, calls: u64, theme: &Theme) -> Div {
             "icons/shield.svg",
             SharedString::from(tr!("inspector.permissions")),
             mode_value,
-            theme,
-        ))
-        .child(config_row(
-            "icons/repeat.svg",
-            SharedString::from(tr!("inspector.iteration")),
-            iteration_value,
             theme,
         ))
 }

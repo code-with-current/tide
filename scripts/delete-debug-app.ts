@@ -8,13 +8,7 @@ import { createInterface } from "node:readline/promises";
 const projectRoot = resolve(import.meta.dir, "..");
 const userHome = homedir();
 const library = join(userHome, "Library");
-// Current debug bundle id first, then the pre-rename spellings so stale
-// Waku-era installs are cleaned up too.
-const debugBundleIdentifiers = [
-  "codes.tide.dev",
-  "sh.waku.dev",
-  "codes.waku.dev",
-];
+const debugBundleIdentifiers = ["codes.tide.dev"];
 
 type Target = {
   path: string;
@@ -28,7 +22,7 @@ function addCandidate(path: string): void {
 }
 
 function isDebugDiagnostic(name: string): boolean {
-  return /^(?:Tide|Waku) Debug(?: Computer Use)?[-_.]/.test(name);
+  return /^Tide Debug(?: Computer Use)?[-_.]/.test(name);
 }
 
 async function addMatchingChildren(
@@ -71,9 +65,7 @@ async function existingTargets(): Promise<Target[]> {
 // Checkout-local state and build artifacts. Keep the release cache intact.
 addCandidate(join(projectRoot, "temp"));
 addCandidate(join(projectRoot, ".tide-cache", "computer-use", "debug"));
-addCandidate(join(projectRoot, ".waku-cache", "computer-use", "debug"));
 addCandidate(join(projectRoot, "target", "debug", "Tide Debug.app"));
-addCandidate(join(projectRoot, "target", "debug", "Waku Debug.app"));
 
 if (process.env.CARGO_TARGET_DIR) {
   addCandidate(
@@ -88,13 +80,9 @@ if (process.env.CARGO_TARGET_DIR) {
 // Debug app bundles that may have been copied outside the checkout.
 addCandidate(join(userHome, "Applications", "Tide Debug.app"));
 addCandidate("/Applications/Tide Debug.app");
-addCandidate(join(userHome, "Applications", "Waku Debug.app"));
-addCandidate("/Applications/Waku Debug.app");
 
 // Debug-only app data. The release app uses Tide/codes.tide and is not included.
-// Waku-era directories are legacy cleanup from before the rename.
 addCandidate(join(library, "Application Support", "Tide Debug"));
-addCandidate(join(library, "Application Support", "Waku Debug"));
 addCandidate(
   join(
     library,
@@ -104,21 +92,9 @@ addCandidate(
     "Tide Debug Computer Use.app",
   ),
 );
-addCandidate(
-  join(
-    library,
-    "Application Support",
-    "Waku",
-    "Computer Use",
-    "Waku Debug Computer Use.app",
-  ),
-);
 addCandidate(join(library, "Caches", "Tide Debug"));
-addCandidate(join(library, "Caches", "Waku Debug"));
 addCandidate(join(library, "Logs", "Tide Debug"));
-addCandidate(join(library, "Logs", "Waku Debug"));
 
-// sh.waku.dev and codes.waku.dev were Tide Debug's bundle IDs before the rename.
 for (const bundleIdentifier of debugBundleIdentifiers) {
   for (const path of [
     join(library, "Application Support", bundleIdentifier),
@@ -174,8 +150,6 @@ for (const target of targets) {
 const runningProcesses = [
   "Tide Debug",
   "Tide Debug Computer Use",
-  "Waku Debug",
-  "Waku Debug Computer Use",
 ].filter((name) =>
     Bun.spawnSync(["/usr/bin/pgrep", "-x", name], {
       stdout: "ignore",

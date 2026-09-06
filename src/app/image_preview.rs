@@ -51,8 +51,7 @@ impl Tide {
         name: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Option<Arc<gpui::Image>> {
-        let attachment_reference = reference.starts_with(protocol::attachments::ATTACHMENT_SCHEME)
-            || reference.starts_with(protocol::attachments::LEGACY_ATTACHMENT_SCHEME);
+        let attachment_reference = reference.starts_with(protocol::attachments::ATTACHMENT_SCHEME);
         if !protocol::blob::is_reference(reference) && !attachment_reference {
             return None;
         }

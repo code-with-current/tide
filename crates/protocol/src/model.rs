@@ -61,9 +61,7 @@ impl ProviderKind {
     tag = "provider"
 )]
 pub enum ProviderResumeCursor {
-    Tide {
-        session_id: String,
-    },
+    Tide { session_id: String },
 }
 
 impl ProviderResumeCursor {
@@ -1712,10 +1710,7 @@ pub enum BackgroundWorkStatus {
 
 impl BackgroundWorkStatus {
     pub fn is_live(self) -> bool {
-        matches!(
-            self,
-            Self::Starting | Self::Running | Self::Stopping
-        )
+        matches!(self, Self::Starting | Self::Running | Self::Stopping)
     }
 
     pub fn is_stoppable(self) -> bool {
@@ -3383,8 +3378,8 @@ mod tests {
             "server",
             BackgroundWorkStatus::Running,
         );
-        let json = serde_json::to_value(BackgroundWorkEvent::ReconcileLive { items: vec![item] })
-            .unwrap();
+        let json =
+            serde_json::to_value(BackgroundWorkEvent::ReconcileLive { items: vec![item] }).unwrap();
 
         assert_eq!(json["type"], "reconcileLive");
         assert_eq!(json["items"][0]["key"]["providerId"], "process-1");
@@ -3982,16 +3977,12 @@ mod tests {
         let legacy = Project::from_path(root.clone());
         let legacy_dated = Project::from_path(root.join("2026-08-08/new-chat"));
         let project = Project::from_path(root.join("projects/2026-08-08/new-chat"));
-        // The pre-rename app directory's layouts stay recognized so persisted
-        // projects pointing there can still be classified and migrated.
-        let pre_rename = Project::from_path(home.join(".waku/projects/2026-08-29/new-chat"));
         let ordinary = Project::from_path(home.join("dev/tide"));
 
         assert!(hardcoded.is_projectless());
         assert!(legacy.is_projectless());
         assert!(legacy_dated.is_projectless());
         assert!(project.is_projectless());
-        assert!(pre_rename.is_projectless());
         assert!(!ordinary.is_projectless());
     }
 

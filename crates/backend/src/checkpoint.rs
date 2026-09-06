@@ -14,8 +14,6 @@ use uuid::Uuid;
 use crate::model::{Checkpoint, CheckpointFile, CheckpointStatus, unix_time};
 
 const TURN_START_METADATA_PREFIX: &str = "Tide-Turn-Start: ";
-/// Commit messages written before the Tide rename carry this spelling.
-const LEGACY_TURN_START_METADATA_PREFIX: &str = "Waku-Turn-Start: ";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -49,7 +47,6 @@ pub fn capture_turn_start(cwd: &Path, session_id: Uuid, turn_count: usize) -> an
     let head = resolve_ref(cwd, "HEAD");
     let branch = symbolic_head(cwd);
     let refs = repository_refs(cwd)?;
-    migrate_legacy_session_refs(cwd, &refs);
     let metadata = TurnStartMetadata {
         head: head.clone(),
         branch,
@@ -246,31 +243,11 @@ fn prepare_turn_diff_base(
     Ok(diff_ref)
 }
 
-/// Sessions checkpointed before the Tide rename keep their refs under
-/// `refs/waku/`. Copy them forward under `refs/tide/` so reconstructed ref
-/// names resolve; runs only while legacy refs remain and is best-effort.
-fn migrate_legacy_session_refs(cwd: &Path, refs: &BTreeMap<String, String>) {
-    let mut commands = String::new();
-    for (refname, commit) in refs {
-        if let Some(suffix) = refname.strip_prefix("refs/waku/session-") {
-            commands.push_str(&format!("update refs/tide/session-{suffix} {commit}\n"));
-        }
-    }
-    if !commands.is_empty()
-        && let Err(error) = update_refs(cwd, commands)
-    {
-        eprintln!("could not migrate legacy checkpoint refs: {error}");
-    }
-}
-
 fn turn_start_metadata(cwd: &Path, start_ref: &str) -> anyhow::Result<TurnStartMetadata> {
     let message = git_output(cwd, ["show", "-s", "--format=%B", start_ref])?;
     let encoded = message
         .lines()
-        .find_map(|line| {
-            line.strip_prefix(TURN_START_METADATA_PREFIX)
-                .or_else(|| line.strip_prefix(LEGACY_TURN_START_METADATA_PREFIX))
-        })
+        .find_map(|line| line.strip_prefix(TURN_START_METADATA_PREFIX))
         .ok_or_else(|| anyhow!("turn starting checkpoint metadata is unavailable"))?;
     serde_json::from_str(encoded).context("invalid turn starting checkpoint metadata")
 }
@@ -545,22 +522,15 @@ struct SessionCheckpointRefs {
 }
 
 /// Every checkpoint ref for `session_id`, resolved in one `git for-each-ref`.
-/// The `refs/waku/` pattern still picks up sessions checkpointed before the
-/// Tide rename until [`migrate_legacy_session_refs`] copies them forward.
 fn session_checkpoint_ref_commits(cwd: &Path, session_id: Uuid) -> SessionCheckpointRefs {
-    let prefixes = [
-        format!("refs/tide/session-{session_id}-"),
-        format!("refs/waku/session-{session_id}-"),
-    ];
-    let tide_pattern = format!("{}*", prefixes[0]);
-    let legacy_pattern = format!("{}*", prefixes[1]);
+    let prefix = format!("refs/tide/session-{session_id}-");
+    let pattern = format!("{prefix}*");
     git_output(
         cwd,
         [
             "for-each-ref",
             "--format=%(refname) %(objectname)",
-            &tide_pattern,
-            &legacy_pattern,
+            &pattern,
         ],
     )
     .map(|output| {
@@ -569,10 +539,7 @@ fn session_checkpoint_ref_commits(cwd: &Path, session_id: Uuid) -> SessionCheckp
             let Some((refname, commit)) = line.trim().split_once(' ') else {
                 continue;
             };
-            let Some(suffix) = prefixes
-                .iter()
-                .find_map(|prefix| refname.strip_prefix(prefix.as_str()))
-            else {
+            let Some(suffix) = refname.strip_prefix(prefix.as_str()) else {
                 continue;
             };
             let target = if let Some(turn_count) = suffix.strip_prefix("turn-start-") {

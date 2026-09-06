@@ -28,11 +28,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use protocol::model::{BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkStatus};
+use protocol::model::{
+    BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkStatus,
+};
 
 pub use api::{
-    global_job_registry, JobError, JobHandle, JobHooks, JobOutcome, JobRead, JobRegistry,
-    JobStart, JobOutputSink, KillOutcome, Reader, SettledStatus,
+    global_job_registry, JobError, JobHandle, JobHooks, JobOutcome, JobOutputSink, JobRead,
+    JobRegistry, JobStart, KillOutcome, Reader, SettledStatus,
 };
 pub use wake::{JobNotice, JobWake, NoticeSource, WakeListener};
 
@@ -216,10 +218,7 @@ impl JobBuffer {
                 cut += 1;
             }
             state.text.drain(..cut);
-            state.model_cursor = state
-                .model_cursor
-                .saturating_sub(cut)
-                .min(state.text.len());
+            state.model_cursor = state.model_cursor.saturating_sub(cut).min(state.text.len());
             state.ui_cursor = state.ui_cursor.saturating_sub(cut).min(state.text.len());
         }
     }
@@ -227,14 +226,18 @@ impl JobBuffer {
     /// Consume the delta since the model cursor's last read, advancing only
     /// that cursor and clamping to the job's remaining `output_limit`.
     pub(crate) fn read_model(&self, output_limit: Option<usize>) -> String {
-        let BufferState { text, model_cursor, .. } = &mut *self.inner.lock().unwrap();
+        let BufferState {
+            text, model_cursor, ..
+        } = &mut *self.inner.lock().unwrap();
         read_at(model_cursor, text, output_limit)
     }
 
     /// Consume the delta since the UI cursor's last read, advancing only
     /// that cursor. Never limited: the UI stream is not the model's read.
     pub(crate) fn read_ui(&self) -> String {
-        let BufferState { text, ui_cursor, .. } = &mut *self.inner.lock().unwrap();
+        let BufferState {
+            text, ui_cursor, ..
+        } = &mut *self.inner.lock().unwrap();
         read_at(ui_cursor, text, None)
     }
 }
@@ -277,7 +280,11 @@ impl JobDone {
     pub fn new() -> Self {
         let (tx, rx) = tokio::sync::watch::channel(None);
         Self {
-            inner: Arc::new(DoneInner { tx, rx, resolved: AtomicBool::new(false) }),
+            inner: Arc::new(DoneInner {
+                tx,
+                rx,
+                resolved: AtomicBool::new(false),
+            }),
         }
     }
 
@@ -302,7 +309,6 @@ impl JobDone {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-
 }
 
 impl Default for JobDone {

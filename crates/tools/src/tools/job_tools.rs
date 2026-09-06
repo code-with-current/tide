@@ -8,8 +8,8 @@
 //! whether it never existed, already finished and was reaped, or belongs
 //! to another session.
 
-use serde_json::json;
 use protocol::model::{BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkStatus};
+use serde_json::json;
 
 use crate::jobs::{global_job_registry, KillOutcome, Reader};
 use crate::permission::RiskTier;
@@ -127,12 +127,14 @@ pub(crate) fn run_job_list(session: &str) -> ToolOutcome {
             .unwrap_or_default();
         let mut label = item.title;
         if label.len() > 120 {
-            label.truncate(label
-                .char_indices()
-                .take(120)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(120));
+            label.truncate(
+                label
+                    .char_indices()
+                    .take(120)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(120),
+            );
             label.push('…');
         }
         output.push_str(&format!(
@@ -192,7 +194,10 @@ impl Tool for JobOutputTool {
         ctx: &ToolContext,
         args: serde_json::Value,
     ) -> Result<ToolOutcome, ToolError> {
-        Ok(run_job_output(&ctx.session_id, &super::arg_str(&args, "job_id")))
+        Ok(run_job_output(
+            &ctx.session_id,
+            &super::arg_str(&args, "job_id"),
+        ))
     }
 }
 
@@ -248,7 +253,10 @@ impl Tool for JobKillTool {
         ctx: &ToolContext,
         args: serde_json::Value,
     ) -> Result<ToolOutcome, ToolError> {
-        Ok(run_job_kill(&ctx.session_id, &super::arg_str(&args, "job_id")))
+        Ok(run_job_kill(
+            &ctx.session_id,
+            &super::arg_str(&args, "job_id"),
+        ))
     }
 }
 
@@ -287,11 +295,19 @@ mod tests {
         assert_eq!(out.output, "Missing required arg: job_id");
         let out = run_job_output(&session, "bash-9");
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
-        assert!(out.output.starts_with("Unknown job id: bash-9."), "{}", out.output);
+        assert!(
+            out.output.starts_with("Unknown job id: bash-9."),
+            "{}",
+            out.output
+        );
         assert!(out.output.contains("job_list"));
         let out = run_job_kill(&session, "bash-9");
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
-        assert!(out.output.starts_with("Unknown job id: bash-9."), "{}", out.output);
+        assert!(
+            out.output.starts_with("Unknown job id: bash-9."),
+            "{}",
+            out.output
+        );
     }
 
     #[test]

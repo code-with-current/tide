@@ -13,10 +13,12 @@ use anyhow::{Context as _, bail};
 use client::DaemonExposureSettings;
 
 pub fn start_process() -> anyhow::Result<client::DaemonSupervisor> {
-    let address = client::env_var_or_legacy(client::DAEMON_ADDRESS_ENV)
+    let address = std::env::var(client::DAEMON_ADDRESS_ENV)
+        .ok()
         .filter(|value| !value.trim().is_empty());
-    let token =
-        client::env_var_or_legacy(client::DAEMON_TOKEN_ENV).filter(|value| !value.is_empty());
+    let token = std::env::var(client::DAEMON_TOKEN_ENV)
+        .ok()
+        .filter(|value| !value.is_empty());
     match (address, token) {
         (Some(address), Some(token)) => {
             return client::DaemonSupervisor::connect(address.trim(), token);

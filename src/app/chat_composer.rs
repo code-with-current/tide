@@ -321,9 +321,9 @@ impl Tide {
     }
 
     /// The card's bottom row: provider/model and session controls left, the
-    /// background-jobs indicator then the send/stop control right. The
-    /// indicator takes first position in the right cluster (stage 6) and
-    /// adds no control of its own outside its popup.
+    /// context gauge then the send/stop control right. The gauge takes the
+    /// first position in the right cluster — an indicator, not an action —
+    /// and adds no control of its own outside its popup.
     fn render_composer_toolbar(
         &self,
         submit_action: ComposerSubmitAction,
@@ -346,6 +346,7 @@ impl Tide {
             .child(self.render_interaction_mode_control(cx))
             .children(self.render_goal_control(cx))
             .child(div().flex_1())
+            .children(self.render_usage_meter(cx))
             .child(match submit_action {
                 ComposerSubmitAction::Preparing => div()
                     .id("send-or-stop")

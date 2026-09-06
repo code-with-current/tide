@@ -308,7 +308,6 @@ impl BackgroundWorkRegistry {
         self.dirty_output.insert(key.clone());
     }
 
-
     fn reconcile_live(&mut self, items: Vec<BackgroundWorkItem>) {
         let present = items
             .iter()
@@ -2239,9 +2238,7 @@ fn render_subagent_tool_row(block: &SubagentBlock, theme: &Theme) -> Div {
         }
         None => row = row.child(div().flex_1()),
     }
-    if !running
-        && let Some(duration) = duration_ms
-    {
+    if !running && let Some(duration) = duration_ms {
         row = row.child(
             div()
                 .flex_none()
@@ -3439,11 +3436,7 @@ impl Tide {
                 let open_key = item.key.clone();
                 move |_, _, cx| {
                     let _ = weak.update(cx, |this, cx| {
-                        this.open_background_work_surface(
-                            session_id,
-                            open_key.clone(),
-                            cx,
-                        );
+                        this.open_background_work_surface(session_id, open_key.clone(), cx);
                     });
                 }
             })

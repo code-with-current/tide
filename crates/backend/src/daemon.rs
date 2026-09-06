@@ -1261,7 +1261,6 @@ fn next_response_fork_title<'a>(
     format!("{base} ({})", highest_number.saturating_add(1).max(2))
 }
 
-
 fn handle_driver_command(
     driver: &DriverHandle,
     command: Command,

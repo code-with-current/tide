@@ -1,8 +1,8 @@
 //! Private workspaces for tasks that are not attached to a user project.
 //!
 //! A projectless task has exactly one location: the daemon host's home
-//! directory. Tide used to generate a dated workspace under
-//! `~/.tide/projects` (and, before the app was renamed, `~/.waku`) for every
+//! directory. Tide used to generate a dated workspace under `~/.tide/projects`
+//! for every
 //! projectless task; those generated directories could dangle — a renamed or
 //! removed data directory left persisted projects pointing at paths that no
 //! longer exist, and every shell execution in the session failed to spawn.
@@ -21,8 +21,8 @@ pub struct Workspace {
 }
 
 pub use protocol::projectless::{
-    home_directory, is_legacy_root_path, is_projectless_path, needs_migration,
-    set_workspace_root, workspace_root,
+    home_directory, is_legacy_root_path, is_projectless_path, needs_migration, set_workspace_root,
+    workspace_root,
 };
 
 /// The hardcoded projectless session location.
@@ -49,7 +49,7 @@ pub fn create_workspace(_prompt: Option<&str>) -> io::Result<Workspace> {
 
 /// Repoint a projectless project at the hardcoded home location. Migration is
 /// intentionally filesystem-free: a workspace whose old directory was already
-/// deleted (the pre-rename `~/.waku`) must still repair cleanly, and any
+/// deleted must still repair cleanly, and any
 /// generated files an old layout left behind remain reachable from the home
 /// directory the session now runs in.
 pub fn migrate_workspace(path: &Path) -> io::Result<Workspace> {
@@ -75,16 +75,17 @@ mod tests {
     #[test]
     fn migration_repoints_to_home_without_touching_the_old_directory() {
         let home = dirs::home_dir().expect("the test user has a home directory");
-        let old = std::env::temp_dir().join(format!(
-            "tide-projectless-old-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let old =
+            std::env::temp_dir().join(format!("tide-projectless-old-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&old).unwrap();
 
         let migrated = migrate_workspace(&old).expect("repointing needs only the home directory");
 
         assert_eq!(migrated.cwd, home);
-        assert!(old.exists(), "repointing must leave the old directory alone");
+        assert!(
+            old.exists(),
+            "repointing must leave the old directory alone"
+        );
         std::fs::remove_dir_all(&old).ok();
     }
 }

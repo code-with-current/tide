@@ -145,17 +145,24 @@ mod tests {
             seen.push_str(&out.output);
             if seen.contains("alias-live") {
                 assert_eq!(out.status, OutcomeStatus::Executed);
-                assert!(out.meta.as_deref().unwrap().contains("running"), "{:?}", out.meta);
+                assert!(
+                    out.meta.as_deref().unwrap().contains("running"),
+                    "{:?}",
+                    out.meta
+                );
                 break;
             }
             assert!(Instant::now() < deadline, "output never arrived: {seen:?}");
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        let out = KillShellTool.execute(&ctx, json!({ "shell_id": id })).unwrap();
+        let out = KillShellTool
+            .execute(&ctx, json!({ "shell_id": id }))
+            .unwrap();
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(
-            out.output.contains(&format!("Stopping background job {id}")),
+            out.output
+                .contains(&format!("Stopping background job {id}")),
             "{}",
             out.output
         );
@@ -199,10 +206,14 @@ mod tests {
     fn alias_errors_mirror_the_job_copy() {
         let session = session("errors");
         let ctx = ctx_for(&session);
-        let out = BashOutputTool.execute(&ctx, json!({ "shell_id": "" })).unwrap();
+        let out = BashOutputTool
+            .execute(&ctx, json!({ "shell_id": "" }))
+            .unwrap();
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert_eq!(out.output, "Missing required arg: job_id");
-        let out = KillShellTool.execute(&ctx, json!({ "shell_id": "" })).unwrap();
+        let out = KillShellTool
+            .execute(&ctx, json!({ "shell_id": "" }))
+            .unwrap();
         assert_eq!(out.output, "Missing required arg: job_id");
         // A stale `sh_` id — the retired registry's id shape — reports the
         // job tools' unknown-id copy.

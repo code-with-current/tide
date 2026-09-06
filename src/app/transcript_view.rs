@@ -2318,7 +2318,6 @@ fn render_activity_image(
     }
     if protocol::blob::is_reference(image_url)
         || image_url.starts_with(protocol::attachments::ATTACHMENT_SCHEME)
-        || image_url.starts_with(protocol::attachments::LEGACY_ATTACHMENT_SCHEME)
     {
         return div()
             .id(id)

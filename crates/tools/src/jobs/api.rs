@@ -252,11 +252,7 @@ impl JobRegistry {
     }
 
     /// Wire the session's wake listener. Called once at driver construction.
-    pub fn set_waker(
-        &self,
-        session: &str,
-        listener: Box<dyn Fn(JobNotice) + Send + Sync>,
-    ) {
+    pub fn set_waker(&self, session: &str, listener: Box<dyn Fn(JobNotice) + Send + Sync>) {
         let mut state = state_lock();
         state
             .sessions
@@ -353,8 +349,13 @@ impl JobRegistry {
             replaces_terminal = true;
         }
 
-        let key = BackgroundWorkKey { kind, provider_id: id };
-        let buffer = spec.streams.then(|| Arc::new(JobBuffer::new(config.stream_buffer_bytes)));
+        let key = BackgroundWorkKey {
+            kind,
+            provider_id: id,
+        };
+        let buffer = spec
+            .streams
+            .then(|| Arc::new(JobBuffer::new(config.stream_buffer_bytes)));
         let record = super::JobRecord {
             key: key.clone(),
             label: spec.label,
@@ -456,7 +457,10 @@ impl JobRegistry {
         if record.is_terminal() && reader == Reader::Model {
             record.reported = true;
         }
-        Ok(JobRead { text, snapshot: record.snapshot() })
+        Ok(JobRead {
+            text,
+            snapshot: record.snapshot(),
+        })
     }
 
     /// Wait for settlement, timeout, or abort — the job is never touched by
@@ -544,7 +548,12 @@ impl JobRegistry {
                 session_registry
                     .order
                     .iter()
-                    .filter_map(|key| session_registry.items.get(key).map(|record| record.snapshot()))
+                    .filter_map(|key| {
+                        session_registry
+                            .items
+                            .get(key)
+                            .map(|record| record.snapshot())
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -608,7 +617,11 @@ impl JobRegistry {
         // Announce last, after the lock drops: a reporter may open a turn.
         if let (Some(notice), Some(waker)) = (notice, waker) {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                waker(JobNotice { text: notice.text, snapshot: notice.snapshot, source: notice.source })
+                waker(JobNotice {
+                    text: notice.text,
+                    snapshot: notice.snapshot,
+                    source: notice.source,
+                })
             }));
         }
     }
@@ -644,15 +657,11 @@ impl JobRegistry {
         let registry = global_job_registry();
         let reap = move || {
             for (key, producer_done) in cancels {
-                let outcome = producer_done
-                    .wait_bounded(grace)
-                    .unwrap_or(JobOutcome {
-                        status: SettledStatus::Failed,
-                        detail: Some(
-                            "cancel returned during teardown; work may be orphaned".into(),
-                        ),
-                        output: None,
-                    });
+                let outcome = producer_done.wait_bounded(grace).unwrap_or(JobOutcome {
+                    status: SettledStatus::Failed,
+                    detail: Some("cancel returned during teardown; work may be orphaned".into()),
+                    output: None,
+                });
                 registry.settle(&session, &key, outcome);
             }
         };

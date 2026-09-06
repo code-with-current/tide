@@ -57,7 +57,7 @@ pub use protocol::{
     InitProgressWire, KnowledgeSourceWire, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, RagStatusWire,
     ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent,
     ServerMessage, SourceProgressWire, WireComputerToolRequest, WireDriverEvent,
-    WireDriverStartOptions, WireSessionOptions, env_var_or_legacy, env_var_os_or_legacy,
+    WireDriverStartOptions, WireSessionOptions,
 };
 pub use settings::DaemonSettings;
 pub use workspace::{WorkspaceOperation, WorkspaceResult};

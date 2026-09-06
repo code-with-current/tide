@@ -1148,10 +1148,6 @@ pub struct Tide {
     pub(crate) timeline_v2_state: TranscriptV2,
     /// Collapse state for the floating inspector column; per app run only.
     inspector: InspectorState,
-    /// Per-turn iteration counts for the inspector's Context Window strip —
-    /// the only usage figure that must NOT survive a turn boundary, so it
-    /// lives here rather than on the persisted session totals.
-    inspector_turn_calls: HashMap<Uuid, u64>,
     /// Live event tails for the inspector's Stream log sections. In-memory
     /// rings, capped per session: a tail, not history.
     inspector_stream_log: HashMap<Uuid, VecDeque<StreamLogEntry>>,
@@ -2758,7 +2754,6 @@ impl Tide {
                 timeline_v2,
                 timeline_v2_state: TranscriptV2::new(),
                 inspector: InspectorState::new(),
-                inspector_turn_calls: HashMap::new(),
                 inspector_stream_log: HashMap::new(),
                 tide_edit_request: None,
                 model_picker_scroll: ScrollHandle::new(),

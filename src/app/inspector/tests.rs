@@ -1,7 +1,7 @@
 use super::sections::{
-    HeroStatus, PerfStats, config_data, diffstat_add_fraction, format_duration_ms,
-    format_elapsed, git_section_data, hero_data, hero_status, mode_badge, stream_log_entry,
-    tokens_per_sec, working_time_secs,
+    HeroStatus, PerfStats, config_data, diffstat_add_fraction, format_duration_ms, format_elapsed,
+    git_section_data, hero_data, hero_status, mode_badge, stream_log_entry, tokens_per_sec,
+    working_time_secs,
 };
 use super::*;
 use crate::model::{InteractionMode, ProviderKind, RuntimeMode};

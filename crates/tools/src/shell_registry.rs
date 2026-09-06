@@ -276,7 +276,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         let item = wait_for_status(&session, &key);
-        assert_eq!(item.status, protocol::model::BackgroundWorkStatus::Completed);
+        assert_eq!(
+            item.status,
+            protocol::model::BackgroundWorkStatus::Completed
+        );
         assert_eq!(item.detail.as_deref(), Some("exit code: 0"));
     }
 
@@ -291,7 +294,10 @@ mod tests {
         let item = wait_for_status(&session, &key);
         assert_eq!(item.status, protocol::model::BackgroundWorkStatus::Stopped);
         assert!(
-            item.detail.as_deref().unwrap_or("").starts_with("exit code:"),
+            item.detail
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("exit code:"),
             "{item:?}"
         );
     }

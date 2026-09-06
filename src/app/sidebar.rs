@@ -2498,17 +2498,7 @@ mod tests {
             path: PathBuf::from("/tmp/dev/ordinary"),
             created_at: 0,
         };
-        // A project persisted before the app directory was renamed points at
-        // a deleted ~/.waku layout; it still groups as projectless.
-        let pre_rename = Project {
-            id: Uuid::from_u128(3),
-            name: "No project".to_owned(),
-            path: PathBuf::from("/tmp/.waku/projects/2026-08-29/new-chat"),
-            created_at: 0,
-        };
-
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));
-        assert!(sidebar_project_is_projectless(&pre_rename, Some(root)));
         assert!(!sidebar_project_is_projectless(&ordinary, Some(root)));
         assert!(!sidebar_project_is_projectless(&projectless, None));
     }

@@ -32,7 +32,6 @@ pub mod git_identities;
 pub mod git_panel;
 pub mod i18n;
 pub mod identity;
-pub mod migration;
 pub mod model;
 pub mod model_metadata;
 pub mod or_catalog;

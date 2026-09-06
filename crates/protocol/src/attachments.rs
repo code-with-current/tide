@@ -3,8 +3,6 @@ use std::path::PathBuf;
 use ts_rs::TS;
 
 pub const ATTACHMENT_SCHEME: &str = "tide-attachment:";
-/// Persisted references written before the Tide rename keep this spelling.
-pub const LEGACY_ATTACHMENT_SCHEME: &str = "waku-attachment:";
 pub const MAX_ATTACHMENT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_ATTACHMENT_FILES: usize = 4_096;
 

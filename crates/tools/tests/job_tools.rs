@@ -11,7 +11,7 @@ use serde_json::json;
 use tools::jobs::{global_job_registry, Reader};
 use tools::{
     AbortFlag, BashOutputTool, BashTool, JobKillTool, JobListTool, JobOutputTool, KillShellTool,
-    OutcomeStatus, Tool, ToolContext, TodoState,
+    OutcomeStatus, TodoState, Tool, ToolContext,
 };
 
 fn test_session(tag: &str) -> String {
@@ -52,7 +52,10 @@ fn start_background(ctx: &ToolContext, command: &str) -> String {
         .execute(ctx, json!({ "command": command, "background": true }))
         .unwrap();
     assert_eq!(out.status, OutcomeStatus::Executed, "{}", out.output);
-    assert!(matches!(out.display, Some(tools::ToolDisplay::Command { .. })));
+    assert!(matches!(
+        out.display,
+        Some(tools::ToolDisplay::Command { .. })
+    ));
     assert_eq!(out.meta.as_deref(), Some("backgrounded"));
     job_id_of(&out.output)
 }
@@ -80,12 +83,17 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
     // The ack points at the job tools, not the retired aliases.
     // (Read once off the ack text itself.)
     let read_ack = BashTool
-        .execute(&ctx, json!({ "command": "echo ack-check; sleep 30", "background": true }))
+        .execute(
+            &ctx,
+            json!({ "command": "echo ack-check; sleep 30", "background": true }),
+        )
         .unwrap();
     assert!(read_ack.output.contains("job_output(job_id:"));
     assert!(read_ack.output.contains("job_kill(job_id:"));
     let extra = job_id_of(&read_ack.output);
-    JobKillTool.execute(&ctx, json!({ "job_id": extra })).unwrap();
+    JobKillTool
+        .execute(&ctx, json!({ "job_id": extra }))
+        .unwrap();
 
     // job_output: first delta carries the echo, the next is empty while
     // the sleep keeps running.
@@ -104,13 +112,23 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
         .execute(&ctx_for(&session), json!({ "job_id": id }))
         .unwrap();
     assert_eq!(out.output, "(no new output)");
-    assert!(out.meta.as_deref().unwrap().starts_with("running"), "{:?}", out.meta);
+    assert!(
+        out.meta.as_deref().unwrap().starts_with("running"),
+        "{:?}",
+        out.meta
+    );
 
     // A bounded registry wait on the live job times out and leaves it
     // untouched.
     let key = key_of(&id);
     let snapshot = global_job_registry()
-        .wait(&session, &key, Duration::from_millis(150), &AbortFlag::new(), Reader::Model)
+        .wait(
+            &session,
+            &key,
+            Duration::from_millis(150),
+            &AbortFlag::new(),
+            Reader::Model,
+        )
         .unwrap();
     assert_eq!(snapshot.status, BackgroundWorkStatus::Running);
     assert!(snapshot.detail.is_none());
@@ -127,7 +145,8 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
         .unwrap();
     assert_eq!(out.status, OutcomeStatus::Executed);
     assert!(
-        out.output.contains(&format!("Stopping background job {id}")),
+        out.output
+            .contains(&format!("Stopping background job {id}")),
         "{}",
         out.output
     );
@@ -150,7 +169,10 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
         .unwrap();
     assert_eq!(item.status, BackgroundWorkStatus::Stopped);
     assert!(
-        item.detail.as_deref().unwrap_or("").starts_with("exit code:"),
+        item.detail
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("exit code:"),
         "{item:?}"
     );
 
@@ -164,7 +186,11 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
         "{}",
         out.output
     );
-    assert!(out.meta.as_deref().unwrap().starts_with("stopped"), "{:?}", out.meta);
+    assert!(
+        out.meta.as_deref().unwrap().starts_with("stopped"),
+        "{:?}",
+        out.meta
+    );
 }
 
 /// Natural completion settles `Completed` with `exit code: 0` and the
@@ -189,13 +215,17 @@ fn natural_exit_settles_completed_and_reads_back_the_code() {
         .unwrap();
     assert!(out.output.contains("jt-done"), "{}", out.output);
     assert!(
-        out.output
-            .contains(&format!("[background job {id} finished — completed, exit code: 0]")),
+        out.output.contains(&format!(
+            "[background job {id} finished — completed, exit code: 0]"
+        )),
         "{}",
         out.output
     );
     assert!(
-        out.meta.as_deref().unwrap().starts_with("completed (exit code: 0)"),
+        out.meta
+            .as_deref()
+            .unwrap()
+            .starts_with("completed (exit code: 0)"),
         "{:?}",
         out.meta
     );
@@ -214,9 +244,17 @@ fn admission_limit_reports_the_registry_copy() {
         .execute(&ctx, json!({ "command": "sleep 30", "background": true }))
         .unwrap();
     assert_eq!(out.status, OutcomeStatus::Failed);
-    assert!(out.output.contains("background job limit reached"), "{}", out.output);
+    assert!(
+        out.output.contains("background job limit reached"),
+        "{}",
+        out.output
+    );
     assert!(out.output.contains("limit: 10"), "{}", out.output);
-    assert!(out.output.contains("kill one with job_kill"), "{}", out.output);
+    assert!(
+        out.output.contains("kill one with job_kill"),
+        "{}",
+        out.output
+    );
 
     // No id was minted for the rejected start; clean up the ten live ones.
     let list = JobListTool.execute(&ctx_for(&session), json!({})).unwrap();
@@ -253,7 +291,8 @@ fn aliases_forward_to_the_job_registry() {
         .unwrap();
     assert_eq!(out.status, OutcomeStatus::Executed);
     assert!(
-        out.output.contains(&format!("Stopping background job {id}")),
+        out.output
+            .contains(&format!("Stopping background job {id}")),
         "{}",
         out.output
     );
@@ -266,22 +305,10 @@ fn stale_shell_id_reports_the_unknown_job_copy() {
     let session = test_session("stale");
     let ctx = ctx_for(&session);
     for (tool, args) in [
-        (
-            "job_output",
-            json!({ "job_id": "sh_000042" }),
-        ),
-        (
-            "job_kill",
-            json!({ "job_id": "sh_000042" }),
-        ),
-        (
-            "bash_output",
-            json!({ "shell_id": "sh_000042" }),
-        ),
-        (
-            "kill_shell",
-            json!({ "shell_id": "sh_000042" }),
-        ),
+        ("job_output", json!({ "job_id": "sh_000042" })),
+        ("job_kill", json!({ "job_id": "sh_000042" })),
+        ("bash_output", json!({ "shell_id": "sh_000042" })),
+        ("kill_shell", json!({ "shell_id": "sh_000042" })),
     ] {
         let outcome = match tool {
             "job_output" => JobOutputTool.execute(&ctx, args).unwrap(),
@@ -290,15 +317,26 @@ fn stale_shell_id_reports_the_unknown_job_copy() {
             "kill_shell" => KillShellTool.execute(&ctx, args).unwrap(),
             _ => unreachable!(),
         };
-        assert_eq!(outcome.status, OutcomeStatus::Failed, "{tool}: {}", outcome.output);
+        assert_eq!(
+            outcome.status,
+            OutcomeStatus::Failed,
+            "{tool}: {}",
+            outcome.output
+        );
         assert!(
             outcome.output.starts_with("Unknown job id: sh_000042."),
             "{tool}: {}",
             outcome.output
         );
-        assert!(outcome.output.contains("job_list"), "{tool}: {}", outcome.output);
+        assert!(
+            outcome.output.contains("job_list"),
+            "{tool}: {}",
+            outcome.output
+        );
     }
     // And job_list on a fresh session says exactly this.
-    let out = JobListTool.execute(&ctx_for(&test_session("stale-empty")), json!({})).unwrap();
+    let out = JobListTool
+        .execute(&ctx_for(&test_session("stale-empty")), json!({}))
+        .unwrap();
     assert_eq!(out.output, "No background jobs in this session.");
 }

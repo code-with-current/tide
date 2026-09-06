@@ -213,10 +213,7 @@ impl TideApplicationExt for Application {
 fn ensure_single_instance() {
     use std::time::Duration;
 
-    if std::env::var_os("TIDE_NO_SINGLETON")
-        .or_else(|| std::env::var_os("WAKU_NO_SINGLETON"))
-        .is_some()
-    {
+    if std::env::var_os("TIDE_NO_SINGLETON").is_some() {
         return;
     }
     let lock_path = backend::persistence::StateStore::default_path()
@@ -261,9 +258,6 @@ fn activate_other_instance(pid: i32) {
 fn activate_other_instance(_pid: i32) {}
 
 pub fn run() {
-    // Move pre-rename data directories into place before any store or the
-    // singleton lock resolves paths under the new names.
-    backend::migration::migrate_legacy_directories();
     ensure_single_instance();
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Tide daemon: {error:#}"));

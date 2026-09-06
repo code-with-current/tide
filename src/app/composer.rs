@@ -1979,7 +1979,6 @@ impl Tide {
 
         let branch_selector = self.render_branch_selector(cx);
 
-        let usage_meter = self.render_usage_meter(cx);
         div()
             .flex_none()
             .px(px(20.0))
@@ -2006,8 +2005,7 @@ impl Tide {
                     .child(project_selector)
                     .child(worktree_selector)
                     .children(branch_selector)
-                    .child(div().flex_1())
-                    .children(usage_meter),
+                    .child(div().flex_1()),
             )
     }
 }

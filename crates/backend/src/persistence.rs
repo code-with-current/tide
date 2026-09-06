@@ -631,16 +631,10 @@ fn live_references(connection: &Connection, scheme: &str) -> io::Result<HashSet<
 /// reference is nested in transcript or composer-draft metadata.
 fn collect_blob_references(data: &str, references: &mut HashSet<String>) {
     collect_references(data, crate::blob_store::BLOB_SCHEME, references);
-    collect_references(data, crate::blob_store::LEGACY_BLOB_SCHEME, references);
 }
 
 fn collect_attachment_references(data: &str, references: &mut HashSet<String>) {
     collect_references(data, crate::attachments::ATTACHMENT_SCHEME, references);
-    collect_references(
-        data,
-        crate::attachments::LEGACY_ATTACHMENT_SCHEME,
-        references,
-    );
 }
 
 fn collect_references(data: &str, scheme: &str, references: &mut HashSet<String>) {

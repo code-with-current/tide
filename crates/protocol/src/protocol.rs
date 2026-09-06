@@ -11,9 +11,7 @@ use crate::git_settings::{
     GitDiscoveredCredentialWire, GitOpResultWire, GitProfileWire, GitSnapshotWire,
     GithubConnectPollWire, GithubDeviceStartWire,
 };
-use crate::model::{
-    AgentSession, GoalOperation, Project, UserInputAnswer,
-};
+use crate::model::{AgentSession, GoalOperation, Project, UserInputAnswer};
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
@@ -26,27 +24,6 @@ pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "TIDE_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "TIDE_DAEMON_ADDRESS";
 pub const APP_EXECUTABLE_ENV: &str = "TIDE_APP_EXECUTABLE";
-
-/// Reads `name`, falling back to its pre-rename `WAKU_*` spelling so external
-/// tooling and scripts written before the rename keep connecting for one
-/// release. Only the daemon-contract variables have a legacy alias.
-pub fn env_var_os_or_legacy(name: &str) -> Option<std::ffi::OsString> {
-    if let Some(value) = std::env::var_os(name) {
-        return Some(value);
-    }
-    let legacy = match name {
-        DAEMON_TOKEN_ENV => "WAKU_DAEMON_TOKEN",
-        DAEMON_ADDRESS_ENV => "WAKU_DAEMON_ADDRESS",
-        APP_EXECUTABLE_ENV => "WAKU_APP_EXECUTABLE",
-        _ => return None,
-    };
-    std::env::var_os(legacy)
-}
-
-/// String form of [`env_var_os_or_legacy`] for callers that validate text.
-pub fn env_var_or_legacy(name: &str) -> Option<String> {
-    env_var_os_or_legacy(name)?.into_string().ok()
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

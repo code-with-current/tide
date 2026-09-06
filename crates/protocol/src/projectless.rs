@@ -3,10 +3,9 @@
 //! A projectless ("No project") session has exactly one location: the home
 //! directory of the host that owns the workspace root. Nothing is generated
 //! on disk for it, so shell and file tools always start in a directory that
-//! exists. Historic layouts — `~/.tide/projects/<date>/<slug>`, the older
-//! dated directories directly under `~/.tide`, and everything the pre-rename
-//! `~/.waku` app directory left behind — stay recognized so existing projects
-//! can be classified and repointed to the home directory.
+//! exists. Historic layouts — `~/.tide/projects/<date>/<slug>` and the older
+//! dated directories directly under `~/.tide` — stay recognized so existing
+//! projects can be classified and repointed to the home directory.
 
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
@@ -43,7 +42,7 @@ fn default_workspace_root() -> Option<PathBuf> {
 
 /// Whether `path` names a projectless session location for the home that owns
 /// `root`: the hardcoded home directory itself, the generated-workspace root,
-/// or any historic layout under `~/.tide` and the pre-rename `~/.waku`.
+/// or any historic layout under `~/.tide`.
 pub fn is_projectless_path_under(path: &Path, root: &Path) -> bool {
     let Some(home) = root.parent().and_then(Path::parent) else {
         return false;
@@ -51,16 +50,12 @@ pub fn is_projectless_path_under(path: &Path, root: &Path) -> bool {
     if path == home || path.starts_with(root) {
         return true;
     }
-    let waku = home.join(".waku");
-    let legacy_roots = [root.parent(), Some(waku.as_path())];
-    legacy_roots
-        .into_iter()
-        .flatten()
-        .any(|legacy_root| {
-            path == legacy_root
-                || path.starts_with(legacy_root.join("projects"))
-                || is_legacy_workspace_path(path, legacy_root)
-        })
+    let Some(legacy_root) = root.parent() else {
+        return false;
+    };
+    path == legacy_root
+        || path.starts_with(legacy_root.join("projects"))
+        || is_legacy_workspace_path(path, legacy_root)
 }
 
 pub fn is_projectless_path(path: &Path) -> bool {
@@ -76,8 +71,7 @@ pub fn is_projectless_path(path: &Path) -> bool {
 
 /// A projectless project migrates when it classifies as projectless but no
 /// longer points at the hardcoded home location — stale generated layouts
-/// under `~/.tide`, and everything the deleted pre-rename `~/.waku` left
-/// behind in persisted state.
+/// under `~/.tide` left behind in persisted state.
 pub fn needs_migration(path: &Path) -> bool {
     is_projectless_path(path) && home_directory().is_some_and(|home| path != home)
 }
@@ -146,26 +140,10 @@ mod tests {
             &root
         ));
         assert!(is_projectless_path_under(dot_tide, &root));
-        // The pre-rename app directory, both of its layouts, and its root.
-        let waku = home.join(".waku");
-        assert!(is_projectless_path_under(
-            &waku.join("projects/2026-08-29/new-chat"),
-            &root
-        ));
-        assert!(is_projectless_path_under(
-            &waku.join("2026-08-29/new-chat"),
-            &root
-        ));
-        assert!(is_projectless_path_under(&waku, &root));
-
         // Ordinary workspaces stay ordinary, including prefix look-alikes.
         assert!(!is_projectless_path_under(&home.join("dev/tide"), &root));
         assert!(!is_projectless_path_under(
             &home.join(".tide-projects/2026-09-05/new-chat"),
-            &root
-        ));
-        assert!(!is_projectless_path_under(
-            &home.join(".waku-backup/2026-08-29/new-chat"),
             &root
         ));
     }
@@ -190,7 +168,6 @@ mod tests {
         assert!(!migrates(home));
         assert!(migrates(&root.join("2026-09-05/new-chat")));
         assert!(migrates(dot_tide));
-        assert!(migrates(&home.join(".waku/projects/2026-08-29/new-chat")));
         assert!(!migrates(&home.join("dev/tide")));
     }
 }

@@ -313,9 +313,7 @@ struct SupervisorInner {
     /// address it bound. Set once at boot by the serving desktop.
     local_restarter: Mutex<
         Option<
-            std::sync::Arc<
-                dyn Fn(DaemonExposureSettings) -> anyhow::Result<String> + Send + Sync,
-            >,
+            std::sync::Arc<dyn Fn(DaemonExposureSettings) -> anyhow::Result<String> + Send + Sync>,
         >,
     >,
     target: Mutex<DaemonTarget>,
@@ -542,24 +540,23 @@ impl DaemonSupervisor {
         };
         let address = restarter(exposure.clone())?;
         let token = exposure.token.clone();
-        let replacement = match DaemonClient::connect_with_resume(
-            &address,
-            token.clone(),
-            resume_from,
-        ) {
-            Ok(client) => client,
-            Err(error) => {
-                // The new server is already live, so point the supervisor at
-                // its address and let the reconnect loop land the client.
-                *self.inner.target.lock() = DaemonTarget::Remote {
-                    client: previous_client,
-                    address,
-                    token,
-                };
-                *self.inner.exposure.lock() = Some(exposure);
-                return Err(error.context("could not reconnect to the reconfigured Tide daemon"));
-            }
-        };
+        let replacement =
+            match DaemonClient::connect_with_resume(&address, token.clone(), resume_from) {
+                Ok(client) => client,
+                Err(error) => {
+                    // The new server is already live, so point the supervisor at
+                    // its address and let the reconnect loop land the client.
+                    *self.inner.target.lock() = DaemonTarget::Remote {
+                        client: previous_client,
+                        address,
+                        token,
+                    };
+                    *self.inner.exposure.lock() = Some(exposure);
+                    return Err(
+                        error.context("could not reconnect to the reconfigured Tide daemon")
+                    );
+                }
+            };
         *self.inner.target.lock() = DaemonTarget::Remote {
             client: replacement.clone(),
             address,

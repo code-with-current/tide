@@ -5,10 +5,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use protocol::model::{BackgroundWorkEvent, BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus};
+use protocol::model::{
+    BackgroundWorkEvent, BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus,
+};
 use tools::jobs::{
-    global_job_registry, JobDone, JobError, JobHooks, JobOutcome, JobStart,
-    KillOutcome, Reader, SettledStatus,
+    global_job_registry, JobDone, JobError, JobHooks, JobOutcome, JobStart, KillOutcome, Reader,
+    SettledStatus,
 };
 use tools::AbortFlag;
 
@@ -27,22 +29,31 @@ fn status_word(status: BackgroundWorkStatus) -> &'static str {
 fn test_session(tag: &str) -> String {
     // Unique per test: the global registry keys everything by session.
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    format!("jobs-test-{}-{}", tag, N.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+    format!(
+        "jobs-test-{}-{}",
+        tag,
+        N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    )
 }
 
 type EventLog = Arc<Mutex<Vec<String>>>;
 
 fn wire_sink(log: EventLog) -> Box<dyn Fn(BackgroundWorkEvent) + Send + Sync> {
     Box::new(move |event| match event {
-        BackgroundWorkEvent::Upsert(item) => {
-            log.lock().unwrap().push(format!("upsert:{}", status_word(item.status)))
-        }
+        BackgroundWorkEvent::Upsert(item) => log
+            .lock()
+            .unwrap()
+            .push(format!("upsert:{}", status_word(item.status))),
         BackgroundWorkEvent::StopRequested(_) => log.lock().unwrap().push("stop-requested".into()),
         _ => {}
     })
 }
 
-fn start_streaming(session: &str, prefix: &'static str, label: &str) -> Result<BackgroundWorkKey, JobError> {
+fn start_streaming(
+    session: &str,
+    prefix: &'static str,
+    label: &str,
+) -> Result<BackgroundWorkKey, JobError> {
     global_job_registry().start(JobStart {
         kind: match prefix {
             "bash" => BackgroundWorkKind::Process,
@@ -54,7 +65,12 @@ fn start_streaming(session: &str, prefix: &'static str, label: &str) -> Result<B
         owner_session: session.into(),
         output_limit: None,
         streams: true,
-        run: Box::new(|_handle| Ok(JobHooks { cancel: Box::new(|_| {}), done: JobDone::new() })),
+        run: Box::new(|_handle| {
+            Ok(JobHooks {
+                cancel: Box::new(|_| {}),
+                done: JobDone::new(),
+            })
+        }),
     })
 }
 
@@ -68,7 +84,10 @@ fn subagent_start(session: &str, id: Option<&str>, label: &str) -> JobStart {
         output_limit: None,
         streams: false,
         run: Box::new(|handle| {
-            Ok(JobHooks { cancel: Box::new(|_| {}), done: handle.done.clone() })
+            Ok(JobHooks {
+                cancel: Box::new(|_| {}),
+                done: handle.done.clone(),
+            })
         }),
     }
 }
@@ -78,7 +97,9 @@ fn ids_mint_per_prefix_and_per_session() {
     let session = test_session("mint");
     let registry = global_job_registry();
     let bash_one = start_streaming(&session, "bash", "first").unwrap();
-    let sub_one = registry.start(subagent_start(&session, None, "delegate")).unwrap();
+    let sub_one = registry
+        .start(subagent_start(&session, None, "delegate"))
+        .unwrap();
     let bash_two = start_streaming(&session, "bash", "second").unwrap();
 
     assert_eq!(bash_one.provider_id, "bash-1");
@@ -114,11 +135,15 @@ fn a_terminal_supplied_id_is_replaced_a_live_one_collides() {
         registry.kill(&session, &key, None).unwrap(),
         KillOutcome::Requested
     );
-    registry.settle(&session, &key, JobOutcome {
-        status: SettledStatus::Stopped,
-        detail: None,
-        output: None,
-    });
+    registry.settle(
+        &session,
+        &key,
+        JobOutcome {
+            status: SettledStatus::Stopped,
+            detail: None,
+            output: None,
+        },
+    );
 
     // The resume: same id, new run — the old terminal record is replaced
     // and keeps its registration-order slot.
@@ -194,11 +219,15 @@ fn stopping_occupies_capacity_and_terminals_release_it() {
     assert!(error.to_string().contains("background job limit reached"));
 
     // Terminal release frees capacity.
-    registry.settle(&session, &keys[0], JobOutcome {
-        status: SettledStatus::Stopped,
-        detail: None,
-        output: None,
-    });
+    registry.settle(
+        &session,
+        &keys[0],
+        JobOutcome {
+            status: SettledStatus::Stopped,
+            detail: None,
+            output: None,
+        },
+    );
     let third = start_streaming(&session, "sub", "three").unwrap();
     assert_eq!(third.provider_id, "sub-1");
 }
@@ -217,7 +246,10 @@ fn cursors_are_isolated_in_both_directions() {
             streams: true,
             run: Box::new(|handle| {
                 handle.output.append("abc");
-                Ok(JobHooks { cancel: Box::new(|_| {}), done: JobDone::new() })
+                Ok(JobHooks {
+                    cancel: Box::new(|_| {}),
+                    done: JobDone::new(),
+                })
             }),
         })
         .unwrap();
@@ -251,7 +283,10 @@ fn ring_trim_keeps_both_cursors_valid() {
                 for _ in 0..40 {
                     handle.output.append("界界界界");
                 }
-                Ok(JobHooks { cancel: Box::new(|_| {}), done: JobDone::new() })
+                Ok(JobHooks {
+                    cancel: Box::new(|_| {}),
+                    done: JobDone::new(),
+                })
             }),
         })
         .unwrap();
@@ -271,16 +306,24 @@ fn settlement_is_first_wins_against_a_late_outcome() {
     let key = start_streaming(&session, "bash", "one").unwrap();
     let registry = global_job_registry();
 
-    registry.settle(&session, &key, JobOutcome {
-        status: SettledStatus::Completed,
-        detail: Some("first".into()),
-        output: Some("done".into()),
-    });
-    registry.settle(&session, &key, JobOutcome {
-        status: SettledStatus::Failed,
-        detail: Some("late".into()),
-        output: None,
-    });
+    registry.settle(
+        &session,
+        &key,
+        JobOutcome {
+            status: SettledStatus::Completed,
+            detail: Some("first".into()),
+            output: Some("done".into()),
+        },
+    );
+    registry.settle(
+        &session,
+        &key,
+        JobOutcome {
+            status: SettledStatus::Failed,
+            detail: Some("late".into()),
+            output: None,
+        },
+    );
 
     let item = registry
         .list_session(&session)
@@ -290,7 +333,13 @@ fn settlement_is_first_wins_against_a_late_outcome() {
     assert_eq!(item.status, BackgroundWorkStatus::Completed);
     assert_eq!(item.detail.as_deref(), Some("first"));
     let kinds = log.lock().unwrap().clone();
-    assert_eq!(kinds.iter().filter(|k| k == &&"upsert:completed".to_string()).count(), 1);
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|k| k == &&"upsert:completed".to_string())
+            .count(),
+        1
+    );
     assert!(!kinds.contains(&"upsert:failed".to_string()));
 }
 
@@ -302,7 +351,9 @@ fn kill_marks_stopping_and_emits_stop_requested() {
     let key = start_streaming(&session, "bash", "one").unwrap();
 
     assert_eq!(
-        global_job_registry().kill(&session, &key, Some("done with it".into())).unwrap(),
+        global_job_registry()
+            .kill(&session, &key, Some("done with it".into()))
+            .unwrap(),
         KillOutcome::Requested
     );
     // A live-but-stopping job is still `Requested` (idempotent cancellation),
@@ -313,11 +364,15 @@ fn kill_marks_stopping_and_emits_stop_requested() {
     );
 
     // After settlement the same kill reports the terminal status.
-    global_job_registry().settle(&session, &key, JobOutcome {
-        status: SettledStatus::Stopped,
-        detail: Some("terminated".into()),
-        output: None,
-    });
+    global_job_registry().settle(
+        &session,
+        &key,
+        JobOutcome {
+            status: SettledStatus::Stopped,
+            detail: Some("terminated".into()),
+            output: None,
+        },
+    );
     assert_eq!(
         global_job_registry().kill(&session, &key, None).unwrap(),
         KillOutcome::AlreadyFinished
@@ -335,21 +390,49 @@ fn wait_settles_timeouts_out_and_honors_abort() {
     let live = start_streaming(&session, "bash", "one").unwrap();
 
     // Timeout: still running, job untouched.
-    let snapshot = registry.wait(&session, &live, Duration::from_millis(80), &abort, Reader::Model).unwrap();
+    let snapshot = registry
+        .wait(
+            &session,
+            &live,
+            Duration::from_millis(80),
+            &abort,
+            Reader::Model,
+        )
+        .unwrap();
     assert_eq!(snapshot.status, BackgroundWorkStatus::Running);
 
     // Abort: same live snapshot, job untouched.
     abort.abort();
-    let snapshot = registry.wait(&session, &live, Duration::from_secs(10), &abort, Reader::Model).unwrap();
+    let snapshot = registry
+        .wait(
+            &session,
+            &live,
+            Duration::from_secs(10),
+            &abort,
+            Reader::Model,
+        )
+        .unwrap();
     assert_eq!(snapshot.status, BackgroundWorkStatus::Running);
 
     // Settlement: the wait returns the terminal snapshot.
-    registry.settle(&session, &live, JobOutcome {
-        status: SettledStatus::Completed,
-        detail: None,
-        output: Some("final".into()),
-    });
-    let snapshot = registry.wait(&session, &live, Duration::from_secs(10), &abort, Reader::Model).unwrap();
+    registry.settle(
+        &session,
+        &live,
+        JobOutcome {
+            status: SettledStatus::Completed,
+            detail: None,
+            output: Some("final".into()),
+        },
+    );
+    let snapshot = registry
+        .wait(
+            &session,
+            &live,
+            Duration::from_secs(10),
+            &abort,
+            Reader::Model,
+        )
+        .unwrap();
     assert_eq!(snapshot.status, BackgroundWorkStatus::Completed);
 }
 
@@ -359,11 +442,15 @@ fn wake_listener_panics_are_contained() {
     global_job_registry().set_waker(&session, Box::new(|_| panic!("listener exploded")));
     let key = start_streaming(&session, "bash", "one").unwrap();
 
-    global_job_registry().settle(&session, &key, JobOutcome {
-        status: SettledStatus::Completed,
-        detail: None,
-        output: None,
-    });
+    global_job_registry().settle(
+        &session,
+        &key,
+        JobOutcome {
+            status: SettledStatus::Completed,
+            detail: None,
+            output: None,
+        },
+    );
     let item = global_job_registry()
         .list_session(&session)
         .into_iter()
@@ -417,7 +504,10 @@ fn settle_during_start_cannot_reorder_events() {
                     detail: None,
                     output: Some("fast".into()),
                 });
-                Ok(JobHooks { cancel: Box::new(|_| {}), done: handle.done.clone() })
+                Ok(JobHooks {
+                    cancel: Box::new(|_| {}),
+                    done: handle.done.clone(),
+                })
             }),
         })
         .unwrap();
@@ -438,15 +528,23 @@ fn final_output_jobs_read_from_outcome_and_never_from_a_buffer() {
         .start(subagent_start(&session, Some("child-1"), "delegate"))
         .unwrap();
 
-    global_job_registry().settle(&session, &key, JobOutcome {
-        status: SettledStatus::Completed,
-        detail: None,
-        output: Some("the report".into()),
-    });
+    global_job_registry().settle(
+        &session,
+        &key,
+        JobOutcome {
+            status: SettledStatus::Completed,
+            detail: None,
+            output: Some("the report".into()),
+        },
+    );
 
-    let read = global_job_registry().read(&session, &key, Reader::Model).unwrap();
+    let read = global_job_registry()
+        .read(&session, &key, Reader::Model)
+        .unwrap();
     assert_eq!(read.text, "the report");
-    let again = global_job_registry().read(&session, &key, Reader::Model).unwrap();
+    let again = global_job_registry()
+        .read(&session, &key, Reader::Model)
+        .unwrap();
     assert_eq!(again.text, "the report");
 }
 
@@ -454,6 +552,8 @@ fn final_output_jobs_read_from_outcome_and_never_from_a_buffer() {
 fn session_fence_hides_other_sessions_from_listing() {
     let session = test_session("fence");
     start_streaming(&session, "bash", "mine").unwrap();
-    assert!(global_job_registry().list_session(&test_session("fence-other")).is_empty());
+    assert!(global_job_registry()
+        .list_session(&test_session("fence-other"))
+        .is_empty());
     assert_eq!(global_job_registry().list_session(&session).len(), 1);
 }

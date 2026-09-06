@@ -242,7 +242,6 @@ impl Event {
 fn analytics_available() -> bool {
     !cfg!(debug_assertions)
         && !env_flag("TIDE_DISABLE_ANALYTICS")
-        && !env_flag("WAKU_DISABLE_ANALYTICS")
         && ENDPOINT.is_some_and(|value| !value.trim().is_empty())
         && WEBSITE_ID.is_some_and(|value| !value.trim().is_empty())
 }

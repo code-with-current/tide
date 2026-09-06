@@ -37,7 +37,7 @@ use tools::jobs::{
 use tools::permission::{RiskTier, risk_tier_for_call};
 use tools::{AbortFlag, TodoState, Tool, ToolConcurrency, ToolContext, ToolDisplay, ToolOutcome};
 use tools::{
-    DEFAULT_MAX_STEPS, MAX_AGENT_DEPTH, AgentDef, can_dispatch_to, concurrency_for,
+    AgentDef, DEFAULT_MAX_STEPS, MAX_AGENT_DEPTH, can_dispatch_to, concurrency_for,
     effective_child_tools, get_agent,
 };
 
@@ -286,10 +286,7 @@ impl JobWake for OrchestratorWake {
     fn is_idle(&self) -> bool {
         // Advisory lane-picking only — the claim inside wake_turn is the
         // race guard.
-        self.with_inner(
-            |inner| !inner.turn_active.load(Ordering::Acquire),
-            true,
-        )
+        self.with_inner(|inner| !inner.turn_active.load(Ordering::Acquire), true)
     }
 
     fn inject_step(&self, notice: JobNotice) {
@@ -509,9 +506,12 @@ fn wire_background_jobs(inner: &Arc<Inner>) {
         // an unbounded channel send is exactly that.
         let inner = Arc::clone(inner);
         let session = inner.session_id.clone();
-        jobs.set_event_sink(&session, Box::new(move |event| {
-            emit(&inner, DriverEvent::BackgroundWork(event));
-        }));
+        jobs.set_event_sink(
+            &session,
+            Box::new(move |event| {
+                emit(&inner, DriverEvent::BackgroundWork(event));
+            }),
+        );
     }
     {
         // Registered once: settle → (already-reported jobs never produce a
@@ -520,15 +520,18 @@ fn wire_background_jobs(inner: &Arc<Inner>) {
         // `wake_turn` is the race guard.
         let wake = Arc::clone(&inner.wake);
         let session = inner.session_id.clone();
-        jobs.set_waker(&session, Box::new(move |notice| {
-            // Try the idle lane; on a budget refusal (or a driver already
-            // gone) degrade to the busy lane — wake_turn consumes its
-            // copy, so the fallback carries the original notice through.
-            if wake.is_idle() && wake.wake_turn(notice.clone()) {
-                return;
-            }
-            wake.inject_step(notice);
-        }));
+        jobs.set_waker(
+            &session,
+            Box::new(move |notice| {
+                // Try the idle lane; on a budget refusal (or a driver already
+                // gone) degrade to the busy lane — wake_turn consumes its
+                // copy, so the fallback carries the original notice through.
+                if wake.is_idle() && wake.wake_turn(notice.clone()) {
+                    return;
+                }
+                wake.inject_step(notice);
+            }),
+        );
     }
     spawn_output_pusher(inner);
 }
@@ -1040,7 +1043,9 @@ fn prompt_image_mentions(prompt: &str) -> Vec<String> {
         }
         let start = index + 1;
         if start < bytes.len() && bytes[start] == b'"' {
-            let Some(end) = prompt[start + 1..].find('"').map(|offset| start + 1 + offset)
+            let Some(end) = prompt[start + 1..]
+                .find('"')
+                .map(|offset| start + 1 + offset)
             else {
                 break;
             };
@@ -1723,10 +1728,7 @@ fn emit_step_usage(
         inner,
         DriverEvent::UsageUpdated {
             context_tokens: Some(
-                usage.input_tokens
-                    + usage.output_tokens
-                    + usage.cache_read
-                    + usage.cache_write,
+                usage.input_tokens + usage.output_tokens + usage.cache_read + usage.cache_write,
             ),
             context_window: *inner.context_window.lock().unwrap(),
             breakdown: Some(UsageBreakdown {
@@ -2019,8 +2021,7 @@ async fn drive_engine(
         // The stream is done — llm timing is final. The usage breakdown
         // waits for the tool phase only when the step has calls to run.
         let llm_ms = step_started.elapsed().as_millis() as u64;
-        let ttft_ms = first_token_at
-            .map(|at| at.duration_since(step_started).as_millis() as u64);
+        let ttft_ms = first_token_at.map(|at| at.duration_since(step_started).as_millis() as u64);
         let runs_tools = step_stop
             .as_ref()
             .is_some_and(|s| matches!(s, EngineStopReason::ToolUse));
@@ -2503,12 +2504,8 @@ fn prepare_dispatch(
         .clone()
         .map(|level| thinking_level(Some(level.as_str())))
         .unwrap_or(inherited_thinking);
-    let system = contextualize_system_prompt(
-        &agent.system_prompt,
-        &inner.cwd,
-        engine.model_id(),
-        mode,
-    );
+    let system =
+        contextualize_system_prompt(&agent.system_prompt, &inner.cwd, engine.model_id(), mode);
     Ok(PreparedDispatch {
         started,
         child_id,
@@ -2584,12 +2581,7 @@ async fn run_child_loop(
     // Whatever arrived after the loop's last step boundary parks in the
     // mailbox — it delivers when the child is resumed.
     for message in prepared.state.inbox.close_and_return_step() {
-        prepared
-            .state
-            .mailbox
-            .lock()
-            .unwrap()
-            .push_back(message);
+        prepared.state.mailbox.lock().unwrap().push_back(message);
     }
     (report, outcome)
 }
@@ -2715,18 +2707,16 @@ async fn run_dispatch_foreground(
     );
     // The dispatch id is the durable handle: the schema documents it in the
     // output (for resumeFrom) and the display card carries it for the UI.
-    ToolOutcome::executed(format!(
-        "{report}\n\ndispatchId: {}",
-        prepared.child_id
-    ))
-    .with_display(ToolDisplay::Agent {
-        agent_name: prepared.agent_name.clone(),
-        title: Some(prepared.item_title.clone()),
-        task: prepared.task.clone(),
-        report,
-        reasoning: None,
-        dispatch_id: Some(prepared.child_id.clone()),
-    })
+    ToolOutcome::executed(format!("{report}\n\ndispatchId: {}", prepared.child_id)).with_display(
+        ToolDisplay::Agent {
+            agent_name: prepared.agent_name.clone(),
+            title: Some(prepared.item_title.clone()),
+            task: prepared.task.clone(),
+            report,
+            reasoning: None,
+            dispatch_id: Some(prepared.child_id.clone()),
+        },
+    )
 }
 
 /// The background dispatch (stage 5): the child loop detaches onto the
@@ -5157,8 +5147,8 @@ mod tests {
 #[cfg(test)]
 mod background_fixtures {
     use super::*;
-    use crate::driver::DriverControl as _;
     use crate::TIDE_DIR_TEST_LOCK;
+    use crate::driver::DriverControl as _;
     use base64::Engine as _;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -5180,7 +5170,10 @@ mod background_fixtures {
         assert!(!description.contains("kill_shell"));
         // And the parameter description carries the same flip.
         let background = &spec.parameters["properties"]["background"]["description"];
-        assert!(background.as_str().unwrap().contains("job_output"), "{background}");
+        assert!(
+            background.as_str().unwrap().contains("job_output"),
+            "{background}"
+        );
         assert!(!background.as_str().unwrap().contains("bash_output"));
     }
 
@@ -5201,15 +5194,10 @@ mod background_fixtures {
         /// the mock, so queue positions cannot tell them apart, but the
         /// child's prompt (the dispatch task) can; the delay pins WHEN the
         /// child settles relative to the acking turn.
-        fn spawn_routed(
-            routes: Vec<(&'static str, u64, String)>,
-            responses: Vec<String>,
-        ) -> Self {
+        fn spawn_routed(routes: Vec<(&'static str, u64, String)>, responses: Vec<String>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let base_url =
-                format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-            let requests: Arc<Mutex<Vec<serde_json::Value>>> =
-                Arc::new(Mutex::new(Vec::new()));
+            let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+            let requests: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
             let server_requests = Arc::clone(&requests);
             let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
             let routes: Arc<Vec<(String, u64, String)>> = Arc::new(
@@ -5235,9 +5223,7 @@ mod background_fixtures {
                             std::thread::Builder::new()
                                 .name("mock-model-conn".into())
                                 .spawn(move || {
-                                    if let Err(error) =
-                                        serve(&stream, &queue, &routes, &requests)
-                                    {
+                                    if let Err(error) = serve(&stream, &queue, &routes, &requests) {
                                         eprintln!("mock-model connection error: {error}");
                                     }
                                 })
@@ -5379,10 +5365,7 @@ mod background_fixtures {
 
         /// [`Self::start`] with content-routed responses for detached child
         /// loops (see [`MockModel::spawn_routed`]).
-        fn start_routed(
-            routes: Vec<(&'static str, u64, String)>,
-            responses: Vec<String>,
-        ) -> Self {
+        fn start_routed(routes: Vec<(&'static str, u64, String)>, responses: Vec<String>) -> Self {
             let mock = MockModel::spawn_routed(routes, responses);
             let workspace = tempfile::tempdir().unwrap();
             let data_dir = tempfile::tempdir().unwrap();
@@ -5404,27 +5387,29 @@ mod background_fixtures {
                     }]
                 }]
             });
-            std::fs::write(data_dir.path().join("config.json"), config.to_string())
-                .unwrap();
+            std::fs::write(data_dir.path().join("config.json"), config.to_string()).unwrap();
             // Only reachable while the caller holds TIDE_DIR_TEST_LOCK.
             unsafe { std::env::set_var("TIDE_DATA_DIR", data_dir.path()) };
             let (wake, _wakes) = smol::channel::bounded(1);
             let (sender, events) = crate::driver::event_channel(wake);
             let driver = Arc::new(
-                TideDriver::start(DriverStartOptions {
-                    binary: PathBuf::new(),
-                    prior_session: None,
-                    cwd: workspace.path().to_path_buf(),
-                    mode: protocol::model::RuntimeMode::FullAccess,
-                    interaction_mode: InteractionMode::Build,
-                    model: None,
-                    reasoning_effort: None,
-                    service_tier: None,
-                    context_window: None,
-                    agent_preset: None,
-                    computer_use_enabled: false,
-                    provider_cursor: None,
-                }, sender)
+                TideDriver::start(
+                    DriverStartOptions {
+                        binary: PathBuf::new(),
+                        prior_session: None,
+                        cwd: workspace.path().to_path_buf(),
+                        mode: protocol::model::RuntimeMode::FullAccess,
+                        interaction_mode: InteractionMode::Build,
+                        model: None,
+                        reasoning_effort: None,
+                        service_tier: None,
+                        context_window: None,
+                        agent_preset: None,
+                        computer_use_enabled: false,
+                        provider_cursor: None,
+                    },
+                    sender,
+                )
                 .expect("fixture driver starts against the mock model"),
             );
             Self {
@@ -5562,10 +5547,11 @@ mod background_fixtures {
         // Events accumulate across every wait: drains consume, so the final
         // assertions read one merged transcript of the whole scenario.
         let mut seen: Vec<DriverEvent> = Vec::new();
-        seen.extend(collect_until(&fixture.events, Duration::from_secs(20), |events| {
-            upsert_statuses(events, "bash-1")
-                .contains(&BackgroundWorkStatus::Running)
-        }));
+        seen.extend(collect_until(
+            &fixture.events,
+            Duration::from_secs(20),
+            |events| upsert_statuses(events, "bash-1").contains(&BackgroundWorkStatus::Running),
+        ));
 
         // The control id IS the job id: stop via the trait path.
         fixture
@@ -5574,13 +5560,17 @@ mod background_fixtures {
 
         // StopRequested arrives, then the job settles Stopped — the cancel
         // hook terminated the process and the exit watch resolved.
-        seen.extend(collect_until(&fixture.events, Duration::from_secs(10), |events| {
-            upsert_statuses(events, "bash-1").last() == Some(&BackgroundWorkStatus::Stopped)
-                && work_events(events).iter().any(|work| {
-                    matches!(work, BackgroundWorkEvent::StopRequested(requested)
+        seen.extend(collect_until(
+            &fixture.events,
+            Duration::from_secs(10),
+            |events| {
+                upsert_statuses(events, "bash-1").last() == Some(&BackgroundWorkStatus::Stopped)
+                    && work_events(events).iter().any(|work| {
+                        matches!(work, BackgroundWorkEvent::StopRequested(requested)
                         if requested == &key)
-                })
-        }));
+                    })
+            },
+        ));
         let statuses = upsert_statuses(&seen, "bash-1");
         assert!(
             statuses.contains(&BackgroundWorkStatus::Stopping),
@@ -5590,12 +5580,16 @@ mod background_fixtures {
 
         // Reconciliation answers straight from the registry.
         fixture.driver.refresh_background_work();
-        seen.extend(collect_until(&fixture.events, Duration::from_secs(5), |events| {
-            work_events(events).iter().any(|work| {
-                matches!(work, BackgroundWorkEvent::ReconcileLive { items }
+        seen.extend(collect_until(
+            &fixture.events,
+            Duration::from_secs(5),
+            |events| {
+                work_events(events).iter().any(|work| {
+                    matches!(work, BackgroundWorkEvent::ReconcileLive { items }
                     if items.iter().any(|item| item.key == key))
-            })
-        }));
+                })
+            },
+        ));
         let items = work_events(&seen)
             .into_iter()
             .find_map(|work| match work {
@@ -5671,7 +5665,9 @@ mod background_fixtures {
             sse_text("Collected the background output."),
         ]);
 
-        fixture.driver.prompt("run the marker job in the background".to_owned());
+        fixture
+            .driver
+            .prompt("run the marker job in the background".to_owned());
         // Four requests: turn 1's two steps, then turn 2's two steps.
         wait_for_requests(&fixture, 4, Duration::from_secs(20));
         wait_for_idle(&fixture);
@@ -5732,7 +5728,9 @@ mod background_fixtures {
             sse_text("Done with the foreground work."),
         ]);
 
-        fixture.driver.prompt("overlap background and foreground work".to_owned());
+        fixture
+            .driver
+            .prompt("overlap background and foreground work".to_owned());
         wait_for_requests(&fixture, 3, Duration::from_secs(20));
         wait_for_idle(&fixture);
         std::thread::sleep(Duration::from_millis(500));
@@ -5893,9 +5891,11 @@ mod background_fixtures {
         requests: &'a [serde_json::Value],
         needle: &str,
     ) -> Option<&'a serde_json::Value> {
-        requests
-            .iter()
-            .find(|request| serde_json::to_string(request).unwrap_or_default().contains(needle))
+        requests.iter().find(|request| {
+            serde_json::to_string(request)
+                .unwrap_or_default()
+                .contains(needle)
+        })
     }
 
     /// The dispatch id carried by the background ack (the request whose tool
@@ -5956,7 +5956,9 @@ mod background_fixtures {
             ],
         );
 
-        fixture.driver.prompt("delegate research in the background".to_owned());
+        fixture
+            .driver
+            .prompt("delegate research in the background".to_owned());
         // Turn 1's two steps, the child's step, then turn 2's single step
         // (the wake turn ends on the repeated tail response). Drains consume,
         // so events accumulate into one merged transcript as in the stage-3
@@ -5996,7 +5998,9 @@ mod background_fixtures {
         let notice_texts = user_messages(wake_request);
         let notice = notice_texts.last().expect("wake turn carries user input");
         assert!(
-            notice.contains(&format!("background job {child_id} finished [status: completed]")),
+            notice.contains(&format!(
+                "background job {child_id} finished [status: completed]"
+            )),
             "notice: {notice}"
         );
 
@@ -6019,7 +6023,10 @@ mod background_fixtures {
             .expect("terminal upsert")
             .clone();
         assert_eq!(terminal.status, BackgroundWorkStatus::Completed);
-        assert_eq!(terminal.output.as_deref(), Some("the background child report"));
+        assert_eq!(
+            terminal.output.as_deref(),
+            Some("the background child report")
+        );
         assert!(terminal.background);
         assert_eq!(terminal.control_id.as_deref(), Some(child_id.as_str()));
 
@@ -6061,7 +6068,9 @@ mod background_fixtures {
             ],
         );
 
-        fixture.driver.prompt("delegate and then stop it".to_owned());
+        fixture
+            .driver
+            .prompt("delegate and then stop it".to_owned());
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let child_id = loop {
             if let Some(child_id) = acked_dispatch_id(&fixture.mock.captured()) {
@@ -6080,7 +6089,9 @@ mod background_fixtures {
         };
 
         // The control id IS the job id: stop through the trait path.
-        fixture.driver.stop_background_work(key.clone(), child_id.clone());
+        fixture
+            .driver
+            .stop_background_work(key.clone(), child_id.clone());
 
         // StopRequested arrives, then the job settles Stopped — which only
         // happens once the aborted child loop has actually finished.
@@ -6175,7 +6186,9 @@ mod background_fixtures {
             ],
         );
 
-        fixture.driver.prompt("delegate twice, once foreground once background".to_owned());
+        fixture
+            .driver
+            .prompt("delegate twice, once foreground once background".to_owned());
         // Four requests: the two dispatch steps, the foreground child's step,
         // and the ack step; the wake turn ends on the repeated tail.
         wait_for_requests(&fixture, 5, Duration::from_secs(30));
@@ -6203,13 +6216,19 @@ mod background_fixtures {
             .filter(|item| item.key.kind == BackgroundWorkKind::Subagent)
             .collect::<Vec<_>>();
         assert_eq!(
-            listed.iter().map(|item| item.key.provider_id.clone()).collect::<Vec<_>>(),
+            listed
+                .iter()
+                .map(|item| item.key.provider_id.clone())
+                .collect::<Vec<_>>(),
             vec![background_id.clone()],
             "exactly the background job is registered: {listed:?}"
         );
         let background = listed.first().unwrap();
         assert!(background.background);
-        assert_eq!(background.control_id.as_deref(), Some(background_id.as_str()));
+        assert_eq!(
+            background.control_id.as_deref(),
+            Some(background_id.as_str())
+        );
         assert_eq!(background.title, "background exploration");
         // The background child settles on its own — its report lands in the
         // job's output (the notice path itself is covered by the dedicated
@@ -6225,7 +6244,10 @@ mod background_fixtures {
             .unwrap()
             .clone();
         assert_eq!(terminal.status, BackgroundWorkStatus::Completed);
-        assert_eq!(terminal.output.as_deref(), Some("the background child report"));
+        assert_eq!(
+            terminal.output.as_deref(),
+            Some("the background child report")
+        );
         teardown(fixture);
     }
 

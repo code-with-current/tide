@@ -1,14 +1,13 @@
-//! The usage meter under the composer: a circular context-window gauge whose
-//! panel carries the session's whole context story — occupancy meter,
-//! Iteration / Tools / Cost strip, and the per-class cumulative breakdown
-//! that used to live in the inspector's Context Window section. Context
-//! numbers stream in from the tide transport; frames read only snapshots
-//! stored on the entity.
+//! The usage meter in the composer toolbar: a circular context-window gauge
+//! beside the send/stop control whose panel carries the session's whole
+//! context story — the occupancy meter, the last-compaction line, and the
+//! per-class cumulative breakdown that used to live in the inspector's
+//! Context Window section. Context numbers stream in from the tide
+//! transport; frames read only snapshots stored on the entity.
 
 use gpui::{PathBuilder, relative};
 
 use super::*;
-use crate::app::inspector::ITERATION_MAX_STEPS;
 use crate::app::timeline_v2::tools_dim;
 // The protocol's per-step usage shape; the panel's meter segments and
 // totals read it directly.
@@ -19,14 +18,15 @@ use crate::usage::format_tokens;
 const USAGE_METER_MENU_ID: &str = "usage-meter";
 
 impl Tide {
-    /// Whether the footer shows the gauge. Always true with a session
+    /// Whether the toolbar shows the gauge. Always true with a session
     /// selected — an empty ring is the honest "nothing measured yet" state,
     /// and hiding it would make the control feel intermittent.
     pub(super) fn usage_meter_available(&self) -> bool {
         self.selected_session().is_some()
     }
 
-    /// Primary modifier + U: toggle the usage panel as if its footer trigger were clicked.
+    /// Primary modifier + U: toggle the usage panel as if its toolbar trigger
+    /// were clicked.
     pub(super) fn toggle_usage_panel_action(
         &mut self,
         _: &ToggleUsagePanel,
@@ -56,26 +56,17 @@ impl Tide {
         });
     }
 
-    /// The footer's circular context gauge plus its anchored panel. `None`
-    /// while there is nothing to show for the selected session.
+    /// The composer toolbar's circular context gauge plus its anchored
+    /// panel. `None` while there is nothing to show for the selected session.
     pub(super) fn render_usage_meter(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.usage_meter_available() {
             return None;
         }
         let session = self.selected_session()?;
         let context = session.context_usage;
-        // The persisted totals keep the strip and breakdown grid alive across
-        // session switches and relaunches; only the per-turn iteration count
-        // is ephemeral.
-        let totals = session.usage_totals.as_ref().map(|totals| {
-            UsageTotals::from_session(
-                totals,
-                self.inspector_turn_calls
-                    .get(&session.id)
-                    .copied()
-                    .unwrap_or(0),
-            )
-        });
+        // The persisted totals keep the breakdown grid alive across session
+        // switches and relaunches.
+        let totals = session.usage_totals.as_ref().map(UsageTotals::from_session);
         let data = context_data(context.as_ref(), totals.as_ref(), session.last_compaction);
         let theme = Theme::current(cx);
 
@@ -253,9 +244,9 @@ fn usage_panel(handle: &ContextMenuHandle, data: ContextData, cx: &App) -> AnyEl
         .into_any_element()
 }
 
-/// The render-facing view of one session's usage: the persisted
-/// [`SessionUsageTotals`] plus the ephemeral per-turn iteration count.
-/// `last_step` carries the newest step's composition — the meter segments.
+/// The render-facing view of one session's cumulative token usage: the
+/// persisted [`SessionUsageTotals`]. `last_step` carries the newest step's
+/// composition — the meter segments.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct UsageTotals {
     input: u64,
@@ -263,26 +254,19 @@ struct UsageTotals {
     cache_read: u64,
     cache_write: u64,
     reasoning: u64,
-    calls: u64,
-    cost_usd: f64,
     last_step: UsageBreakdown,
-    turn_calls: u64,
 }
 
 impl UsageTotals {
-    /// Project the persisted totals into the render view, grafting on the
-    /// per-turn count the strip shows as Iteration.
-    fn from_session(totals: &SessionUsageTotals, turn_calls: u64) -> Self {
+    /// Project the persisted totals into the render view.
+    fn from_session(totals: &SessionUsageTotals) -> Self {
         Self {
             input: totals.input_tokens,
             output: totals.output_tokens,
             cache_read: totals.cache_read,
             cache_write: totals.cache_write,
             reasoning: totals.reasoning_tokens,
-            calls: totals.calls,
-            cost_usd: totals.cost_usd,
             last_step: totals.last_step.unwrap_or_default(),
-            turn_calls,
         }
     }
 }
@@ -359,61 +343,6 @@ fn mono_text(size: f32, color: Hsla) -> Div {
         .text_color(color)
 }
 
-/// One cell of the Iteration / Tools / Cost strip: tiny uppercase label
-/// with icon over a big mono value.
-fn context_strip_cell(
-    icon_path: &'static str,
-    label: SharedString,
-    value: String,
-    suffix: Option<SharedString>,
-    theme: &Theme,
-) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(3.0))
-        .min_w_0()
-        .flex_1()
-        .px(px(8.0))
-        .py(px(7.0))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(3.0))
-                .child(icon(icon_path, 9.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .text_size(sp(8.5))
-                        .line_height(sp(11.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.text_tertiary)
-                        .child(label),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_baseline()
-                .gap(px(3.0))
-                .min_w_0()
-                .child(
-                    mono_text(12.0, theme.text)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .truncate()
-                        .child(value),
-                )
-                .children(suffix.map(|suffix| {
-                    div()
-                        .text_size(sp(9.0))
-                        .line_height(sp(12.0))
-                        .text_color(theme.text_tertiary)
-                        .truncate()
-                        .child(suffix)
-                })),
-        )
-}
-
 /// One dotted cell of the per-class breakdown grid. Cells flex equally so
 /// the two value columns line up across rows, like upstream's grid-cols-2.
 fn breakdown_cell(label: SharedString, dot: Hsla, value: String, theme: &Theme) -> Div {
@@ -472,44 +401,6 @@ fn context_body(data: &ContextData, theme: &Theme) -> Div {
             .children(compact_line);
     };
 
-    // Equal thirds with hairline dividers — the border sits on the cells
-    // themselves so every cell stretches the same share of the strip.
-    let strip = div()
-        .flex()
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(theme.border)
-        .overflow_hidden()
-        .child(context_strip_cell(
-            "icons/cpu.svg",
-            SharedString::from(tr!("usage.iteration")),
-            totals.turn_calls.to_string(),
-            Some(SharedString::from(format!(" / {ITERATION_MAX_STEPS}"))),
-            theme,
-        ))
-        .child(
-            context_strip_cell(
-                "icons/wrench.svg",
-                SharedString::from(tr!("usage.tools")),
-                format_tokens(totals.calls),
-                Some(SharedString::from(tr!("usage.calls_suffix"))),
-                theme,
-            )
-            .border_l_1()
-            .border_color(theme.border),
-        )
-        .child(
-            context_strip_cell(
-                "icons/circle-dollar-sign.svg",
-                SharedString::from(tr!("usage.cost")),
-                format!("{:.3}", totals.cost_usd),
-                Some(SharedString::from("USD")),
-                theme,
-            )
-            .border_l_1()
-            .border_color(theme.border),
-        );
-
     // The per-class cumulative grid, each row's dot matching its meter
     // segment. Upstream's meter order: cache read, input, output,
     // reasoning — cache write rides between the cache classes.
@@ -554,7 +445,6 @@ fn context_body(data: &ContextData, theme: &Theme) -> Div {
         .flex()
         .flex_col()
         .gap(px(10.0))
-        .child(strip)
         .child(context_meter(
             data.fill,
             data.tokens,
@@ -713,22 +603,22 @@ mod tests {
         });
 
         // The persisted totals carry the history and the newest composition —
-        // the per-turn count is grafted on by the view, not stored.
+        // the panel projects the token classes, not the bookkeeping.
         assert_eq!(persisted.input_tokens, 1_500);
         assert_eq!(persisted.output_tokens, 350);
         assert_eq!(persisted.cache_read, 11_000);
         assert_eq!(persisted.cache_write, 250);
         assert_eq!(persisted.reasoning_tokens, 100);
-        assert_eq!(persisted.calls, 2);
-        assert_eq!(persisted.cost_usd, 0.5);
         assert_eq!(persisted.last_step.as_ref().unwrap().input_tokens, 500);
 
-        let totals = UsageTotals::from_session(&persisted, 2);
-        assert_eq!(totals.turn_calls, 2);
+        let totals = UsageTotals::from_session(&persisted);
+        assert_eq!(totals.input, 1_500);
+        assert_eq!(totals.output, 350);
+        assert_eq!(totals.reasoning, 100);
         assert_eq!(totals.last_step.input_tokens, 500);
         // A view over a fresh session starts at zero, never at a sibling's.
         assert_eq!(
-            UsageTotals::from_session(&SessionUsageTotals::default(), 0).calls,
+            UsageTotals::from_session(&SessionUsageTotals::default()).input,
             0
         );
     }

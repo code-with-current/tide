@@ -2951,8 +2951,7 @@ impl Tide {
                 // totals here, before any reducer sees the event — the
                 // reducer below persists context occupancy; this keeps the
                 // Context Window detail alive across session switches and
-                // relaunches. The per-turn iteration count is ephemeral by
-                // design: a new turn resets it.
+                // relaunches.
                 if let DriverEvent::UsageUpdated {
                     breakdown: Some(step),
                     ..
@@ -2965,10 +2964,6 @@ impl Tide {
                             .apply_step(step);
                         self.state.mark_session_dirty(session_id);
                     }
-                    *self.inspector_turn_calls.entry(session_id).or_insert(0) += step.calls;
-                }
-                if matches!(event, DriverEvent::TurnStarted) {
-                    self.inspector_turn_calls.insert(session_id, 0);
                 }
                 // The Stream log tail rides the same pre-dispatch point:
                 // one classified line per event, capped per session.

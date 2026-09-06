@@ -50,12 +50,12 @@ pub use tools::memory::{
 pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
 pub use tools::{
     core_tools, AskFollowupTool, BashOutputTool, BashTool, ClickTool, CompactTool,
-    DirectoryTreeTool, DispatchAgentTool, DragTool, EditFileTool, ExitPlanModeTool, GetAppStateTool,
-    GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, JobKillTool, JobListTool, JobOutputTool,
-    KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool, LoadSkillTool, MemoryTool,
-    MultiEditTool, NotebookEditTool, PerformSecondaryActionTool, PressKeyTool, ReadFileTool,
-    ReadMediaFileTool, RememberTool, ScrollTool, SendMessageTool, SetValueTool, SlashCommandTool,
-    TodoWriteTool, TypeTextTool, WebFetchTool, WebSearchTool, WriteFileTool,
+    DirectoryTreeTool, DispatchAgentTool, DragTool, EditFileTool, ExitPlanModeTool,
+    GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, JobKillTool, JobListTool,
+    JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool, LoadSkillTool,
+    MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool, PressKeyTool,
+    ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool, SendMessageTool, SetValueTool,
+    SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool, WebSearchTool, WriteFileTool,
 };
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`

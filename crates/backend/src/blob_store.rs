@@ -14,7 +14,6 @@ use std::time::SystemTime;
 
 use base64::Engine as _;
 
-pub use protocol::blob::LEGACY_SCHEME as LEGACY_BLOB_SCHEME;
 pub use protocol::blob::SCHEME as BLOB_SCHEME;
 
 /// Payloads below this stay inline: a reference plus a file is not worth it for
@@ -68,9 +67,7 @@ pub fn is_blob_reference(value: &str) -> bool {
 }
 
 fn resolve_path(root: &Path, reference: &str) -> Option<PathBuf> {
-    let name = reference
-        .strip_prefix(BLOB_SCHEME)
-        .or_else(|| reference.strip_prefix(LEGACY_BLOB_SCHEME))?;
+    let name = reference.strip_prefix(BLOB_SCHEME)?;
     if name.is_empty() || name.contains('/') || name.contains("..") {
         return None;
     }
@@ -190,9 +187,7 @@ impl BlobStore {
                 let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                     continue;
                 };
-                if live.contains(&format!("{BLOB_SCHEME}{name}"))
-                    || live.contains(&format!("{LEGACY_BLOB_SCHEME}{name}"))
-                {
+                if live.contains(&format!("{BLOB_SCHEME}{name}")) {
                     continue;
                 }
                 let metadata = match entry.metadata() {

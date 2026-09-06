@@ -46,8 +46,9 @@ pub use bash::BashTool;
 pub use compact::{CompactTool, DEFAULT_KEEP_LAST};
 pub use computer::ComputerBackend;
 pub use computer_tools::{
-    ClickTool, DragTool, GetAppStateTool, ListAppsTool, PerformSecondaryActionTool,
-    PressKeyTool, ScrollTool, SetValueTool, TypeTextTool, COMPUTER_TOOLS, is_computer_tool,
+    is_computer_tool, ClickTool, DragTool, GetAppStateTool, ListAppsTool,
+    PerformSecondaryActionTool, PressKeyTool, ScrollTool, SetValueTool, TypeTextTool,
+    COMPUTER_TOOLS,
 };
 pub use directory_tree::DirectoryTreeTool;
 pub use dispatch_agent::DispatchAgentTool;
