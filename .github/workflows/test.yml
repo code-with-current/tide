@@ -30,9 +30,6 @@ jobs:
           rustup toolchain install 1.96.0 --profile minimal
           rustup default 1.96.0
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -61,16 +58,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked
-
-      # The generated protocol and browser client are platform-independent, so
-      # one runner is enough to catch a drifted checked-in artifact.
-      - name: Install JavaScript dependencies
-        if: runner.os == 'Linux'
-        run: bun install --frozen-lockfile
-
-      - name: Check generated protocol and browser client
-        if: runner.os == 'Linux'
-        run: |
-          bun run protocol:check
-          bun run --filter tide-client check
-          bun run --filter tide-client test

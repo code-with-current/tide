@@ -116,13 +116,7 @@ before opening a pull request:
 cargo fmt --package tide --package protocol --package client --package backend --package tide-daemon -- --check
 cargo check
 cargo test
-bun run protocol:check
-bun run --filter @tide/client check
-bun run --filter @tide/client test
 ```
-
-When a Rust wire type changes, run `bun run protocol:generate` and commit the
-updated files under `packages/client/src/generated`.
 
 For user-visible changes, wait for the watcher to report a successful rebuild
 and validate the freshly relaunched app. Include screenshots or a short

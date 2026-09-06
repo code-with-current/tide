@@ -51,10 +51,8 @@ always refer to the daemon host. The desktop retains only presentation state
 and a disposable preview cache.
 
 The Remote Control browser client lives in the separate `tide-remote` repo
-(`tide-web` + `tide-relay`, deployed to `remote.tide.codes`). Its
-checked-in types are generated directly from the Rust protocol; run
-`bun run protocol:generate` here after changing a wire type and sync the
-generated files to `tide-remote/packages/tide-client`.
+(`tide-web` + `tide-relay`, deployed to `remote.tide.codes`). Its protocol
+bindings are owned and generated in that repo.
 
 Projectless task workspaces live on the daemon host under
 `~/.tide/projects/<date>/<slug>`. The daemon moves workspaces created by the
