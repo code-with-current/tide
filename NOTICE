@@ -1,0 +1,19 @@
+Tide
+Copyright (c) 2026-present Tide contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License. See LICENSE.
+
+Tide is a fork of Waku (https://github.com/egoist/waku).
+Portions Copyright (c) EGOIST and Waku contributors, licensed GPL-3.0-only.
+
+The crates under crates/engine, crates/store, and crates/tools are vendored
+from the tide project (https://github.com/code-with-current/tide) and are
+licensed under the MIT License, Copyright (c) 2026 Code with Current. See each
+crate's LICENSE file.
+
+The Computer Use helper incorporates the Open Computer Use kit
+(https://github.com/ifuryst/open-codex-computer-use), vendored under
+resources/computer-use/kit and licensed under the MIT License,
+Copyright (c) 2026 Leo. See resources/computer-use/kit/LICENSE.

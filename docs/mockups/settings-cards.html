@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tide — Settings · unified card pattern mockup</title>
+<style>
+  /* ------------------------------------------------------------------
+     Tide theme tokens, lifted from src/theme.rs (dark / light).
+     hsla(220,10%,90%,a) ≈ rgb(227,229,232); hsla(220,10%,12%,a) ≈ rgb(21,27,40)
+     ------------------------------------------------------------------ */
+  :root[data-theme="dark"] {
+    --desk: #101010;
+    --canvas: #1A1A1A;
+    --surface: #1A1A1A;
+    --raised: #232323;
+    --composer: #212121;
+    --inset: #151515;
+    --overlay: rgba(227, 229, 232, 0.05);
+    --overlay-strong: rgba(227, 229, 232, 0.09);
+    --border: rgba(227, 229, 232, 0.07);
+    --border-strong: rgba(227, 229, 232, 0.14);
+    --item-bg: rgba(240, 240, 240, 0.06);
+    --text: #E2E2E2;
+    --text-2: #A3A3A3;
+    --text-3: #7D7D7D;
+    --text-ghost: #575757;
+    --accent: #E2795B;
+    --accent-text: #2A1510;
+    --success: #62C987;
+    --danger: #E2726A;
+    --warning: #E0B36A;
+    --sidebar: #17171B;
+    --sidebar-wash: linear-gradient(180deg, rgba(43, 58, 105, 0.32), rgba(43, 58, 105, 0) 82%);
+    --frame-ring: rgba(227, 229, 232, 0.10);
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 3px 12px rgba(0, 0, 0, 0.35);
+  }
+  :root[data-theme="light"] {
+    --desk: #E4E3E4;
+    --canvas: #F6F5F6;
+    --surface: #F6F5F6;
+    --raised: #ECECEC;
+    --composer: #FFFFFF;
+    --inset: #E6E6E6;
+    --overlay: rgba(21, 27, 40, 0.05);
+    --overlay-strong: rgba(21, 27, 40, 0.09);
+    --border: rgba(21, 27, 40, 0.08);
+    --border-strong: rgba(21, 27, 40, 0.15);
+    --item-bg: rgba(20, 20, 20, 0.06);
+    --text: #242424;
+    --text-2: #666666;
+    --text-3: #858585;
+    --text-ghost: #A4A4A4;
+    --accent: #C85F44;
+    --accent-text: #FFF6F3;
+    --success: #2F8F52;
+    --danger: #C64A42;
+    --warning: #A66B20;
+    --sidebar: #F3F3F3;
+    --sidebar-wash: none;
+    --frame-ring: rgba(21, 27, 40, 0.12);
+    --shadow: 0 24px 70px rgba(21, 27, 40, 0.18), 0 3px 12px rgba(21, 27, 40, 0.08);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--desk);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 20px 48px;
+    gap: 18px;
+    transition: background .25s ease, color .25s ease;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* ================= spec strip (documentation, not the app) ================= */
+  .spec {
+    width: min(1040px, 100%);
+    border: 1px solid var(--frame-ring);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--canvas) 82%, transparent);
+    padding: 14px 18px;
+    display: flex;
+    gap: 28px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .spec h1 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    margin: 2px 0 10px;
+  }
+  .spec .diagrams { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+  .diagram { width: 300px; }
+  .diagram .tag { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 6px; }
+  .diagram.after .tag { color: var(--success); }
+  .diagram.before .tag { color: var(--text-ghost); }
+  .d-card {
+    border: 1px dashed var(--border-strong);
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-3);
+    position: relative;
+  }
+  .d-card .d-title { color: var(--text-2); font-weight: 600; font-size: 11.5px; margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .d-card .d-title em { font-style: normal; color: var(--text-ghost); font-weight: 400; }
+  .d-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 2px 7px; }
+  .d-head .t { font-size: 11.5px; font-weight: 600; color: var(--text); }
+  .d-head .a { font-size: 10px; color: var(--accent); font-weight: 600; }
+  .d-body { background: var(--raised); border-radius: 7px; padding: 8px 10px; color: var(--text-3); }
+  .diagram.before .d-body { border-top: 1px solid var(--border); border-radius: 0 0 7px 7px; }
+  .diagram.before .d-card { padding: 0; border-style: solid; overflow: hidden; }
+  .diagram.before .d-card .d-title { padding: 8px 10px; margin: 0; border-bottom: 1px dashed var(--border-strong); }
+  .spec ul { margin: 2px 0 0; padding-left: 16px; color: var(--text-2); font-size: 12px; line-height: 1.75; }
+  .spec ul b { color: var(--text); font-weight: 600; }
+  .spec .rules { min-width: 300px; flex: 1; }
+
+  /* ================= app window ================= */
+  .window {
+    width: min(1040px, 100%);
+    height: min(720px, calc(100vh - 210px));
+    min-height: 520px;
+    background: var(--canvas);
+    border-radius: 10px;
+    box-shadow: var(--shadow), 0 0 0 1px var(--frame-ring);
+    display: flex;
+    overflow: hidden;
+    flex: none;
+  }
+
+  /* ---- sidebar ---- */
+  .sidebar {
+    width: 212px;
+    flex: none;
+    background: var(--sidebar);
+    background-image: var(--sidebar-wash);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    color: var(--text-2);
+  }
+  .side-titlebar {
+    height: 44px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    padding-left: 14px;
+    gap: 8px;
+  }
+  .light { width: 12px; height: 12px; border-radius: 50%; }
+  .light.r { background: #FF5F57; } .light.y { background: #FEBC2E; } .light.g { background: #28C840; }
+  :root[data-theme="light"] .light { box-shadow: inset 0 0 0 .5px rgba(0,0,0,.12); }
+
+  .back-row, .search {
+    margin: 0 12px;
+  }
+  .back-row {
+    display: flex; align-items: center; gap: 9px;
+    height: 32px; padding: 0 9px; border-radius: 8px;
+    font-size: 13px; color: var(--text-2);
+  }
+  .back-row:hover { background: var(--overlay); }
+  .search {
+    margin-top: 6px;
+    display: flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 9px;
+    background: var(--inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-ghost);
+    font-size: 12.5px;
+  }
+  .nav { margin-top: 14px; padding: 0 12px 16px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
+  .nav button {
+    display: flex; align-items: center; gap: 10px;
+    height: 34px; padding: 0 10px; border-radius: 8px;
+    font-size: 13px; color: var(--text-2);
+    text-align: left; flex: none;
+  }
+  .nav button svg { flex: none; opacity: .8; }
+  .nav button:hover { background: var(--item-bg); }
+  .nav button.active { background: var(--item-bg); color: var(--text); }
+  .nav button.active svg { color: var(--text-2); opacity: 1; }
+  .nav button:disabled { color: var(--text-ghost); cursor: default; }
+  .nav button:disabled:hover { background: none; }
+
+  /* ---- content column ---- */
+  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); }
+  .content-titlebar {
+    height: 44px; flex: none;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding: 0 14px;
+    border-bottom: 1px solid transparent;
+  }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 7px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-3);
+  }
+  .icon-btn:hover { background: var(--overlay); color: var(--text-2); }
+
+  .scroll {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 2px 32px 48px;
+  }
+  .scroll::-webkit-scrollbar { width: 10px; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--overlay-strong); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
+
+  .page { display: none; max-width: 760px; margin: 0 auto; }
+  .page.visible { display: block; }
+
+  /* ================= THE PATTERN =================
+     header (outside)  : title 13/600 · actions right-aligned
+     body  (raised box): radius 13 · px 20 · rows py 12
+     ---------------------------------------------- */
+  .card { margin-bottom: 26px; }
+  .page-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; padding: 0 2px 6px; margin-bottom: 20px;
+  }
+  .page-head .t { font-size: 18px; font-weight: 600; color: var(--text); }
+  .page-head .d { margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--text-3); }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 0 2px 8px; min-height: 22px;
+  }
+  .card-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); }
+  .card-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+  .card-body {
+    background: var(--raised);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 4px 20px;
+  }
+  .card-body.flush { padding: 0; overflow: hidden; }
+
+  .row {
+    display: flex; align-items: center; gap: 24px;
+    padding: 12px 0;
+  }
+  .row + .row { border-top: 1px solid var(--border); }
+  .row-label { flex: 1; min-width: 0; }
+  .row-label .t { font-size: 13.5px; font-weight: 500; color: var(--text); }
+  .row-label .d { margin-top: 3px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+  .row-label .hint { margin-top: 3px; font-size: 11px; color: var(--text-3); }
+  .row-control { flex: none; display: flex; align-items: center; gap: 8px; }
+  .row .value { font-size: 12.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+  .row .value svg { color: var(--success); }
+
+  /* note banner — the one headerless surface */
+  .note {
+    background: var(--raised);
+    border-radius: 13px;
+    padding: 14px 20px;
+    margin-bottom: 26px;
+  }
+  .note .t { font-size: 13.5px; font-weight: 500; color: var(--text); }
+  .note .d { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+
+  /* controls */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 27px; padding: 0 11px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    font-size: 12px; font-weight: 500;
+    color: var(--text-2);
+    transition: background .12s ease, color .12s ease, opacity .12s ease;
+  }
+  .btn:hover { background: var(--overlay); color: var(--text); }
+  .btn:active { background: var(--overlay-strong); }
+  .btn.busy { opacity: .6; pointer-events: none; }
+  .btn.disabled { opacity: .55; pointer-events: none; }
+  .btn.text { border: none; height: 24px; padding: 0 7px; color: var(--text-3); font-weight: 400; }
+  .btn.text:hover { color: var(--text-2); background: var(--overlay); }
+  .btn .count { color: var(--text-ghost); font-weight: 400; }
+
+  .switch {
+    width: 37px; height: 22px; flex: none;
+    border-radius: 999px;
+    background: var(--overlay-strong);
+    border: 1px solid var(--border-strong);
+    position: relative;
+    transition: background .18s ease, border-color .18s ease;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 1px; left: 1px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    transition: transform .18s cubic-bezier(.22,1,.36,1);
+  }
+  .switch[aria-checked="true"] { background: var(--accent); border-color: transparent; }
+  .switch[aria-checked="true"]::after { transform: translateX(15px); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 20px; padding: 0 9px;
+    border-radius: 999px;
+    background: var(--overlay);
+    font-size: 11px; font-weight: 500;
+    color: var(--text-3);
+  }
+  .pill.ok { color: var(--success); }
+  .pill.warn { color: var(--warning); }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .badge {
+    display: inline-flex; align-items: center;
+    height: 17px; padding: 0 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    color: var(--text-3);
+  }
+
+  .field {
+    display: flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 9px;
+    background: var(--inset);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 12.5px; color: var(--text);
+  }
+  .field input {
+    background: none; border: none; padding: 0;
+    color: var(--text); font: inherit; width: 100%;
+  }
+  .field input:focus { outline: none; }
+  .field:focus-within { border-color: var(--accent); }
+  .field.narrow { width: 130px; }
+  .field.wide { width: 300px; max-width: 100%; }
+
+  .picker {
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 210px; height: 28px; padding: 0 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    font-size: 12px; color: var(--text-2);
+  }
+  .picker:hover { background: var(--overlay); }
+  .picker svg { color: var(--text-ghost); flex: none; }
+
+  /* progress sub-block (inside Memory & RAG body) */
+  .progress {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 11px;
+    margin: 2px 0 12px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .progress .head { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 500; }
+  .progress .head .pct { margin-left: auto; font-size: 10.5px; color: var(--text-3); font-weight: 400; }
+  .progress .file { font-size: 10.5px; color: var(--text-ghost); }
+  .bar { height: 4px; border-radius: 999px; background: var(--inset); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+  .bar.indet > i { width: 34%; animation: shimmer 1.6s ease-in-out infinite; }
+  @keyframes shimmer { 0% { transform: translateX(-110%); } 100% { transform: translateX(400%); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 1.1s steps(24) infinite; flex: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .spin, .bar.indet > i { animation: none; }
+    .bar.indet > i { transform: none; width: 100%; opacity: .4; }
+  }
+
+  /* source rows */
+  .source { display: flex; align-items: center; gap: 14px; padding: 11px 0; }
+  .source + .source { border-top: 1px solid var(--border); }
+  .source .id { flex: 1; min-width: 0; }
+  .source .name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .source .meta { margin-top: 3px; font-size: 11.5px; color: var(--text-3); display: flex; align-items: center; gap: 7px; }
+  .source .meta .bar { width: 72px; height: 3px; flex: none; }
+  .source .meta .live { color: var(--text-2); }
+
+  .attrib {
+    font-size: 11.5px; color: var(--text-3);
+    background: var(--inset);
+    border-radius: 8px;
+    padding: 8px 11px;
+    margin: 2px 0 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .placeholder { color: var(--text-3); font-size: 13px; padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- ==================== spec strip ==================== -->
+<section class="spec" aria-label="Pattern specification">
+  <div class="diagrams">
+    <div class="diagram after">
+      <div class="tag">New — header outside</div>
+      <div class="d-head"><span class="t" style="display:flex;flex-direction:column;gap:2px"><span>Card Title</span><span style="font-size:10px;font-weight:400;color:var(--text-3)">Card description…</span></span><span class="a">Actions →</span></div>
+      <div class="d-body">Body rows…</div>
+    </div>
+    <div class="diagram before">
+      <div class="tag">Today — title trapped inside</div>
+      <div class="d-card">
+        <div class="d-title">Card Title <em>· actions buried in body</em></div>
+        <div class="d-body">Body rows…</div>
+      </div>
+    </div>
+  </div>
+  <div class="rules">
+    <h1>Rules — every settings card</h1>
+    <ul>
+      <li><b>Page header first:</b> 18/600 title, muted description beneath, page-level action right (old Tide SettingsHeader). Then each group: a 10px uppercase eyebrow, actions right, and a bordered body. No card titles inside the box.</li>
+      <li><b>Body is a pure group:</b> raised surface, radius 13, padding 20; rows 13.5/500 + 12.5 secondary, control right, hairline between rows.</li>
+      <li><b>Column:</b> max-width 760, 26px between cards. No page heading — the sidebar names the selected page and every card titles itself.</li>
+      <li><b>One exception:</b> the "Local by default" note keeps its banner shape — it is a note, not a control group.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ==================== app window ==================== -->
+<div class="window">
+
+  <!-- sidebar -->
+  <aside class="sidebar">
+    <div class="side-titlebar"><span class="light r"></span><span class="light y"></span><span class="light g"></span></div>
+    <button class="back-row" type="button">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>
+      Back
+    </button>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m13.5 13.5-3-3"/></svg>
+      Search settings
+    </div>
+    <nav class="nav" aria-label="Settings pages">
+      <button type="button" data-page="general" class="active"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/></svg>General</button>
+      <button type="button" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 1.8A6.2 6.2 0 0 1 8 14.2"/><path d="M1.8 8h12.4"/></svg>Appearance</button>
+      <button type="button" data-page="git"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="4.5" cy="3.5" r="1.8"/><circle cx="4.5" cy="12.5" r="1.8"/><circle cx="11.5" cy="6.5" r="1.8"/><path d="M4.5 5.3v5.4M11.5 8.3c0 2-2.2 2.4-4.3 2.7"/></svg>Git</button>
+      <button type="button" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8 14 5v6L8 14.2 2 11V5Z"/><path d="M2 5l6 3.2L14 5M8 8.2v6"/></svg>Tide</button>
+      <button type="button" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m4 5 3.2 3L4 11M8.5 11.5H13"/></svg>CLI</button>
+      <button type="button" data-page="knowledge"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.2c2-1 4-1 5.5.3 1.5-1.3 3.5-1.3 5.5-.3v9.3c-2-1-4-1-5.5.3-1.5-1.3-3.5-1.3-5.5-.3Z"/><path d="M8 3.5v9.3"/></svg>Knowledge</button>
+      <button type="button" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8 14 5v6l-6 3.2L2 11V5Z"/><path d="M2 5.5 8 8.7l6-3.2M8 8.7V14"/></svg>Skills</button>
+      <button type="button" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.5 13.5h11M4 13V8.5M8 13V4.5M12 13V6.5"/></svg>Usage</button>
+      <button type="button" data-page="daemon"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><path d="M4.6 4.8h.01M4.6 11.2h.01"/></svg>Daemon</button>
+      <button type="button" disabled><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m3 2.5 9.5 5.4-4.2 1-1.6 4.4z"/></svg>Computer Use</button>
+    </nav>
+  </aside>
+
+  <!-- content -->
+  <main class="content">
+    <div class="content-titlebar">
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle appearance" title="Toggle appearance">
+        <svg id="icon-moon" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A6 6 0 0 1 6.5 2.5a6 6 0 1 0 7 7Z"/></svg>
+        <svg id="icon-sun" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" style="display:none"><circle cx="8" cy="8" r="2.6"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1"/></svg>
+      </button>
+    </div>
+
+    <div class="scroll">
+
+      <!-- ================= GENERAL ================= -->
+      <section class="page visible" id="page-general" aria-label="General settings">
+
+        <div class="note">
+          <div class="t">Local by default</div>
+          <div class="d">Projects, sessions, and transcripts stay on this machine. Tide works with no account and no remote service.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">USAGE &AMP; PRIVACY</div></div>
+            <div class="card-actions"></div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Share anonymous usage data</div>
+                <div class="d">Helps prioritize what to fix. Never includes prompts, code, or project names.</div>
+              </div>
+              <div class="row-control">
+                <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Share anonymous usage data"></button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Automatic updates</div>
+                <div class="d">Check for updates in the background and install them when Tide restarts.</div>
+              </div>
+              <div class="row-control">
+                <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Automatic updates"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">BACKGROUND TASKS</div></div>
+            <div class="card-actions">
+              <button class="btn text" type="button">Reset both</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Session titles</div>
+                <div class="d">Model used to name sessions in the background. Defaults to the session's own model.</div>
+              </div>
+              <div class="row-control">
+                <button class="picker" type="button">
+                  Anthropic · Claude Sonnet 4.5
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Commit messages</div>
+                <div class="d">Model used to draft commit messages from staged changes.</div>
+              </div>
+              <div class="row-control">
+                <button class="picker" type="button">
+                  Session model
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= KNOWLEDGE ================= -->
+      <section class="page" id="page-knowledge" aria-label="Knowledge settings">
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">MEMORY &AMP; RAG <span class="sub">waku — this workspace</span></div></div>
+            <div class="card-actions">
+              <span class="pill ok"><span class="dot"></span>Model ready</span>
+              <button class="btn busy" type="button">
+                <svg class="spin" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1.8a6.2 6.2 0 1 0 6.2 6.2"/></svg>
+                Rebuild index
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Enable memory</div>
+                <div class="d">The memory tool searches this project's index; enabling downloads the embedding model on first use.</div>
+              </div>
+              <div class="row-control">
+                <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Enable memory"></button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label"><div class="t">Embedding model</div></div>
+              <div class="row-control">
+                <span class="value">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8.5 3.2 3L13 4.5"/></svg>
+                  Local · bge-small-en-v1.5 · 384 dims
+                </span>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label"><div class="t">Code index</div></div>
+              <div class="row-control">
+                <span class="value">Indexed · 1,284 chunks</span>
+              </div>
+            </div>
+            <div class="progress" role="status">
+              <div class="head">
+                <svg class="spin" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="color:var(--text-3)"><path d="M8 1.8a6.2 6.2 0 1 0 6.2 6.2"/></svg>
+                Embedding
+                <span class="pct">62%</span>
+              </div>
+              <div class="bar"><i style="width:62%"></i></div>
+              <div class="file">1,240 / 2,000 chunks · src/app/runtime.rs</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">KNOWLEDGE SOURCES</div></div>
+            <div class="card-actions">
+              <button class="btn" type="button">
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+                Add Source
+              </button>
+            </div>
+          </div>
+          <div class="card-body flush">
+            <div class="source">
+              <div class="id">
+                <div class="name">Zed docs <span class="badge">DOCS</span></div>
+                <div class="meta">docs.zed.dev — 812 chunks · indexed 2h ago</div>
+              </div>
+              <button class="btn text" type="button">Remove</button>
+            </div>
+            <div class="source">
+              <div class="id">
+                <div class="name">waku repo <span class="badge">REPO</span></div>
+                <div class="meta">/Volumes/512gb/TestAi/waku — 4,371 chunks · indexed yesterday</div>
+              </div>
+              <button class="btn text" type="button">Remove</button>
+            </div>
+            <div class="source">
+              <div class="id">
+                <div class="name">Release notes <span class="badge">URL</span></div>
+                <div class="meta">
+                  <span class="live">Embedding 45%</span>
+                  <span class="bar indet" style="width:72px"><i></i></span>
+                </div>
+              </div>
+              <button class="btn text" type="button">Remove</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= DAEMON ================= -->
+      <section class="page" id="page-daemon" aria-label="Daemon settings">
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">EXPOSURE</div></div>
+            <div class="card-actions">
+              <span class="pill ok"><span class="dot"></span>Exposed</span>
+              <button class="btn disabled" type="button">Apply</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Expose the daemon on a fixed port</div>
+                <div class="d">Lets the browser client connect over loopback. Off keeps the daemon private to this app.</div>
+              </div>
+              <div class="row-control">
+                <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Expose the daemon on a fixed port"></button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Port</div>
+                <div class="hint">Fixed loopback port. Applies after Apply.</div>
+              </div>
+              <div class="row-control">
+                <label class="field narrow"><input value="4919" aria-label="Port"></label>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Allowed origins</div>
+                <div class="hint">Exact browser origins allowed to connect, comma separated.</div>
+              </div>
+              <div class="row-control">
+                <label class="field wide"><input value="https://tide.codes" aria-label="Allowed origins"></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">AUTHENTICATION</div></div>
+            <div class="card-actions">
+              <button class="btn text" type="button">Regenerate token</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Access token</div>
+                <div class="d">Clients authenticate with this token. Copy it into the browser client's connection settings.</div>
+              </div>
+              <div class="row-control">
+                <button class="btn" type="button">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3.5v5A1.5 1.5 0 0 0 4 10h1.5"/></svg>
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= GIT ================= -->
+      <section class="page" id="page-git" aria-label="Git settings">
+        <div class="page-head"><div><div class="t">Git</div><div class="d">GitHub accounts and identities.</div></div></div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">COMMIT ATTRIBUTION</div></div>
+            <div class="card-actions">
+              <button class="btn" type="button">Edit</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Co-authored-by trailer</div>
+                <div class="d">Credits the provider account that wrote the change.</div>
+              </div>
+              <div class="row-control">
+                <button class="switch" type="button" role="switch" aria-checked="true" aria-label="Co-authored-by trailer"></button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Generated-with trailer</div>
+                <div class="d">Marks the commit as agent-generated. The commit bar previews exactly this text.</div>
+              </div>
+              <div class="row-control">
+                <button class="switch" type="button" role="switch" aria-checked="false" aria-label="Generated-with trailer"></button>
+              </div>
+            </div>
+            <div class="attrib">Co-Authored-By: Claude &lt;noreply@anthropic.com&gt;</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">CHECKPOINTS</div></div>
+            <div class="card-actions">
+              <button class="btn text" type="button">Clean up old refs</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <div class="row-label">
+                <div class="t">Conversation-aware rewind</div>
+                <div class="d">Every turn starts a git checkpoint under refs/waku, so rewind never loses work.</div>
+              </div>
+              <div class="row-control"><span class="pill"><span class="dot"></span>Always on</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // Theme toggle — mirrors Tide's Appearance setting.
+  const root = document.documentElement;
+  const toggle = document.getElementById('theme-toggle');
+  toggle.addEventListener('click', () => {
+    const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next;
+    document.getElementById('icon-moon').style.display = next === 'dark' ? '' : 'none';
+    document.getElementById('icon-sun').style.display = next === 'light' ? '' : 'none';
+  });
+
+  // Sidebar navigation between the mocked pages.
+  const pages = document.querySelectorAll('.nav button[data-page]');
+  pages.forEach(button => button.addEventListener('click', () => {
+    pages.forEach(b => b.classList.remove('active'));
+    button.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('visible'));
+    document.getElementById('page-' + button.dataset.page).classList.add('visible');
+    document.querySelector('.scroll').scrollTop = 0;
+  }));
+
+  // Switches flip locally so the mockup feels alive.
+  document.querySelectorAll('.switch').forEach(sw =>
+    sw.addEventListener('click', () =>
+      sw.setAttribute('aria-checked', sw.getAttribute('aria-checked') === 'true' ? 'false' : 'true')));
+</script>
+</body>
+</html>
