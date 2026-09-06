@@ -1065,10 +1065,7 @@ usage.chart_description: "Claude Code と Codex の日別 %{metric}。"
 usage.refresh_failed: "使用状況の更新に失敗しました：%{error}"
 usage.context_used: コンテキストウインドウを %{percent}% 使用（%{shortcut}）
 usage.shortcut: 使用状況（%{shortcut}）
-usage.iteration: イテレーション
-usage.tools: ツール
 usage.context_fill: コンテキスト使用量
-usage.calls_suffix: 回呼び出し
 usage.stat_cache_read: キャッシュ読み取り
 usage.stat_cache_write: キャッシュ書き込み
 usage.stat_input_total: 入力（累計）
@@ -1280,9 +1277,6 @@ inspector.stat_last_active:
   ja: 最終アクティビティ
 inspector.section_config:
   ja: 設定
-  ja: コンテキストウィンドウ
-  ja: キャッシュ読み取り
-  ja: キャッシュ書き込み
 inspector.section_git:
   ja: Git
 
@@ -1296,12 +1290,6 @@ inspector.model:
   ja: モデル
 inspector.permissions:
   ja: 権限
-inspector.iteration:
-  ja: イテレーション
-  ja: ツール
-  ja: コスト
-  ja: コンテキスト使用量
-  ja: 回呼び出し
 inspector.started_ago:
   ja: "%{ago} 開始"
 inspector.turns_count:
@@ -1324,9 +1312,6 @@ inspector.git_staged:
   ja: "%{count} 件ステージ済み"
 inspector.worktree:
   ja: worktree
-  ja: 入力（累計）
-  ja: 出力（累計）
-  ja: 推論（累計）
 
 inspector.section_stream_log:
   ja: ストリームログ

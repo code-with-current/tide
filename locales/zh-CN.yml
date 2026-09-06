@@ -1014,10 +1014,7 @@ usage.chart_description: Claude Code 与 Codex 的每日%{metric}分布。
 usage.refresh_failed: "用量刷新失败：%{error}"
 usage.context_used: 上下文窗口已使用 %{percent}%（%{shortcut}）
 usage.shortcut: 用量（%{shortcut}）
-usage.iteration: 迭代
-usage.tools: 工具
 usage.context_fill: 上下文占用
-usage.calls_suffix: 次调用
 usage.stat_cache_read: 缓存读取
 usage.stat_cache_write: 缓存写入
 usage.stat_input_total: 输入（累计）
@@ -1228,9 +1225,6 @@ inspector.stat_last_active:
   zh-CN: 最近活动
 inspector.section_config:
   zh-CN: 配置
-  zh-CN: 上下文窗口
-  zh-CN: 缓存读取
-  zh-CN: 缓存写入
 inspector.section_git:
   zh-CN: Git
 
@@ -1244,12 +1238,6 @@ inspector.model:
   zh-CN: 模型
 inspector.permissions:
   zh-CN: 权限
-inspector.iteration:
-  zh-CN: 迭代
-  zh-CN: 工具
-  zh-CN: 成本
-  zh-CN: 上下文占用
-  zh-CN: 次调用
 inspector.started_ago:
   zh-CN: 开始于 %{ago}
 inspector.turns_count:
@@ -1272,9 +1260,6 @@ inspector.git_staged:
   zh-CN: "%{count} 已暂存"
 inspector.worktree:
   zh-CN: worktree
-  zh-CN: 输入（累计）
-  zh-CN: 输出（累计）
-  zh-CN: 思考（累计）
 
 inspector.section_stream_log:
   zh-CN: 流式日志

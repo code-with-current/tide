@@ -2184,14 +2184,8 @@ usage.context_used:
   en: Context window %{percent}% used (%{shortcut})
 usage.shortcut:
   en: Usage (%{shortcut})
-usage.iteration:
-  en: Iteration
-usage.tools:
-  en: Tools
 usage.context_fill:
   en: Context fill
-usage.calls_suffix:
-  en: calls
 usage.stat_cache_read:
   en: Cache read
 usage.stat_cache_write:
@@ -2773,8 +2767,6 @@ inspector.model:
   en: Model
 inspector.permissions:
   en: Permissions
-inspector.iteration:
-  en: Iteration
 inspector.started_ago:
   en: started %{ago}
 inspector.turns_count:
