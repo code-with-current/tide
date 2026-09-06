@@ -1,0 +1,38 @@
+[package]
+name = "tools"
+# Vendored from tide (upstream: src-tauri/crates/tide-tools, locally renamed). De-inherited
+# from tide's [workspace.package]/[workspace.dependencies] on purpose — the host app
+# has no workspace inheritance; keep these literals in sync when re-vendoring.
+version = "0.4.0-beta.2"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+thiserror = "2"
+base64 = "0.22"
+git2 = { version = "0.21", features = ["https"] }
+# Defaults kept: `default-tls` (rustls in 0.13) powers the git_repo REST
+# fast path; dropping it would silently strand https:// URLs when this
+# crate is built standalone (cargo test -p tools).
+reqwest = { version = "0.13", features = ["json"] }
+# rt: block_on bridging in tool bodies; sync: settlement watch; time+macros:
+# the abort-aware bounded select in `wait` and the close_session reaper.
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+sha1_smol = "1"
+tempfile = "3"
+# ~/.tide resolution for the slash_command catalog (mirrors store::paths)
+dirs = "6"
+# Commit attribution reads generalSettings from the data dir at commit time.
+store = { path = "../store" }
+# Background-job ids/statuses/events are wire types; the jobs registry keys
+# and reports them directly (cycle-free: protocol has no tools dependency).
+protocol = { path = "../protocol" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+# Tests drive the registry's watch-based waits through a real runtime.
+tokio = { version = "1", features = ["rt-multi-thread"] }

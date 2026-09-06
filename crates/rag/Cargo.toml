@@ -1,0 +1,56 @@
+[package]
+# Vendored from tide (upstream: src-tauri/crates/tide-rag, locally renamed). De-inherited
+# from tide's [workspace.package]/[workspace.dependencies] on purpose — the host app
+# has no workspace inheritance; keep these literals in sync when re-vendoring.
+name = "rag"
+version = "0.4.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+bytemuck = "1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+sqlite-vec = "0.1.9"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
+  "std",
+  "download-binaries",
+  "copy-dylibs",
+  "tls-native",
+] }
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
+regex = "1"
+url = "2"
+tree-sitter = "0.26"
+tree-sitter-language = "0.1"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-java = "0.23.5"
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-c-sharp = "0.23.5"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-php = "0.24.2"
+tree-sitter-swift = "0.7.3"
+tree-sitter-kotlin-ng = "1.1.0"
+tree-sitter-scala = "0.26.2"
+tree-sitter-bash = "0.25.1"
+tree-sitter-lua = "0.5.0"
+tree-sitter-vue-next = "0.1.0"
+tree-sitter-dart = "0.2.0"
+tree-sitter-html = "0.23.2"
+tree-sitter-css = "0.25.0"
+tree-sitter-elixir = "0.3.5"
+tree-sitter-elm = "5.9.4"
+tree-sitter-solidity = "1.2.13"
+tree-sitter-zig = "1.1.2"
+tree-sitter-ocaml = "0.25.0"
+tree-sitter-objc = "3.0.2"
+
+[dev-dependencies]
+tempfile = "3"

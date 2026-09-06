@@ -1,0 +1,16 @@
+[package]
+name = "store"
+# Vendored from tide (upstream: src-tauri/crates/tide-store, locally renamed). De-inherited
+# from tide's [workspace.package]/[workspace.dependencies] on purpose — the host app
+# has no workspace inheritance; keep these literals in sync when re-vendoring.
+version = "0.4.0-beta.2"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# home-dir resolution; already a transitive dep via tauri, so no new code
+dirs = "6"
+base64 = "0.22"
+sha2 = "0.10"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
