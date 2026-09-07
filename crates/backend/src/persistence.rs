@@ -31,7 +31,7 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, FavoriteModel, InteractionMode, Message, MessageAttachment, MessageRole, Project,
-    ProjectIcon, ProviderKind, RuntimeMode, SessionWorkspace,
+    ProviderKind, RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemePreference;
 pub use protocol::persistence::{
@@ -1060,7 +1060,11 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at FROM projects ORDER BY position")
+            .prepare(
+                "SELECT id, name, path, created_at, icon, icon_color,
+                        default_provider, default_model, actions
+                 FROM projects ORDER BY position",
+            )
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1069,23 +1073,36 @@ impl StateStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
-            .filter_map(|(id, name, path, created_at)| {
-                Some(Project {
-                    id: Uuid::parse_str(&id).ok()?,
-                    name,
-                    path: PathBuf::from(path),
-                    created_at: created_at as u64,
-                    icon: ProjectIcon::default(),
-                    icon_color: None,
-                    default_provider: None,
-                    default_model: None,
-                    actions: Vec::new(),
-                })
-            })
+            .filter_map(
+                |(id, name, path, created_at, icon, icon_color, default_provider, default_model, actions)| {
+                    Some(Project {
+                        id: Uuid::parse_str(&id).ok()?,
+                        name,
+                        path: PathBuf::from(path),
+                        created_at: created_at as u64,
+                        icon: icon
+                            .and_then(|icon| serde_json::from_str(&icon).ok())
+                            .unwrap_or_default(),
+                        icon_color,
+                        default_provider: default_provider.and_then(|provider| {
+                            serde_json::from_value(serde_json::Value::String(provider)).ok()
+                        }),
+                        default_model,
+                        actions: actions
+                            .and_then(|actions| serde_json::from_str(&actions).ok())
+                            .unwrap_or_default(),
+                    })
+                },
+            )
             .collect();
         drop(projects);
 
@@ -1307,13 +1324,7 @@ impl StateStore {
                 transaction
                     .execute(
                         INSERT_PROJECT,
-                        params![
-                            project.id.to_string(),
-                            project.name,
-                            project.path.to_string_lossy(),
-                            position as i64,
-                            project.created_at as i64
-                        ],
+                        rusqlite::params_from_iter(project_params(position, project)),
                     )
                     .map_err(to_io_error)?;
             }
@@ -1728,13 +1739,19 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          updated_at    = excluded.updated_at,
          last_reply_at = excluded.last_reply_at";
 
-const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at)
-     VALUES(?1, ?2, ?3, ?4, ?5)
+const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at,
+     icon, icon_color, default_provider, default_model, actions)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
          position   = excluded.position,
-         created_at = excluded.created_at";
+         created_at = excluded.created_at,
+         icon       = excluded.icon,
+         icon_color = excluded.icon_color,
+         default_provider = excluded.default_provider,
+         default_model    = excluded.default_model,
+         actions    = excluded.actions";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)
@@ -1748,6 +1765,29 @@ fn tag_of(value: impl Serialize) -> String {
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_default()
+}
+
+fn project_params(position: usize, project: &Project) -> Vec<rusqlite::types::Value> {
+    use rusqlite::types::Value;
+    vec![
+        Value::Text(project.id.to_string()),
+        Value::Text(project.name.clone()),
+        Value::Text(project.path.to_string_lossy().into_owned()),
+        Value::Integer(position as i64),
+        Value::Integer(project.created_at as i64),
+        // Unparseable payloads fall back to defaults on read, so a
+        // serialization failure here degrades to "no setting" losslessly.
+        Value::Text(serde_json::to_string(&project.icon).unwrap_or_default()),
+        project.icon_color.clone().map_or(Value::Null, Value::Text),
+        project
+            .default_provider
+            .map_or(Value::Null, |provider| Value::Text(tag_of(provider))),
+        project
+            .default_model
+            .clone()
+            .map_or(Value::Null, Value::Text),
+        Value::Text(serde_json::to_string(&project.actions).unwrap_or_default()),
+    ]
 }
 
 fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
@@ -1780,7 +1820,7 @@ mod tests {
     use super::*;
     use crate::model::{
         ActivityItem, ActivityKind, BackgroundWorkStatus, FavoriteModel, MessageRole,
-        ReasoningBlock, SubagentBlock, SubagentRun, TranscriptBlock,
+        ProjectAction, ProjectIcon, ReasoningBlock, SubagentBlock, SubagentRun, TranscriptBlock,
     };
     use base64::Engine as _;
 
@@ -2091,6 +2131,14 @@ mod tests {
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/some project"));
         let project = state.projects[0].clone();
         assert!(project.created_at > 0, "a new project is dated");
+        state.projects[0].icon = ProjectIcon::Preset("icons/projects/rocket.svg".into());
+        state.projects[0].icon_color = Some("#7c3aed".into());
+        state.projects[0].default_provider = Some(ProviderKind::Tide);
+        state.projects[0].default_model = Some("claude-opus-4-5".into());
+        state.projects[0].actions = vec![ProjectAction {
+            name: "run".into(),
+            command: "bun run dev".into(),
+        }];
         store.save(&mut state).unwrap();
 
         // Stored as columns, not as a JSON blob.
@@ -2102,15 +2150,75 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(name, project.name);
-        assert_eq!(path, project.path.to_string_lossy());
-        assert_eq!(created_at as u64, project.created_at);
+        assert_eq!(name, state.projects[0].name);
+        assert_eq!(path, state.projects[0].path.to_string_lossy());
+        assert_eq!(created_at as u64, state.projects[0].created_at);
+        let (icon, icon_color, actions): (String, Option<String>, String) = connection
+            .query_row(
+                "SELECT icon, icon_color, actions FROM projects WHERE id = ?1",
+                params![project.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert!(icon.contains("rocket.svg"));
+        assert_eq!(icon_color.as_deref(), Some("#7c3aed"));
+        assert!(actions.contains("bun run dev"));
         drop(connection);
 
         let restored = store_in(&directory).load().unwrap();
-        assert_eq!(restored.projects[0].name, project.name);
-        assert_eq!(restored.projects[0].path, project.path);
-        assert_eq!(restored.projects[0].created_at, project.created_at);
+        assert_eq!(restored.projects[0].name, state.projects[0].name);
+        assert_eq!(restored.projects[0].path, state.projects[0].path);
+        assert_eq!(restored.projects[0].created_at, state.projects[0].created_at);
+        assert_eq!(
+            restored.projects[0].icon,
+            ProjectIcon::Preset("icons/projects/rocket.svg".into())
+        );
+        assert_eq!(restored.projects[0].icon_color.as_deref(), Some("#7c3aed"));
+        assert_eq!(restored.projects[0].default_provider, Some(ProviderKind::Tide));
+        assert_eq!(
+            restored.projects[0].default_model.as_deref(),
+            Some("claude-opus-4-5")
+        );
+        assert_eq!(
+            restored.projects[0].actions,
+            vec![ProjectAction {
+                name: "run".into(),
+                command: "bun run dev".into(),
+            }]
+        );
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn project_rows_without_settings_columns_load_with_defaults() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/some project"));
+        let project = state.projects[0].clone();
+        store.save(&mut state).unwrap();
+
+        // A row written before per-project settings existed: every settings
+        // column reads back as NULL and must not fail the load.
+        let connection = Connection::open(directory.join("app.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE projects SET icon = NULL, icon_color = NULL,
+                        default_provider = NULL, default_model = NULL, actions = NULL
+                 WHERE id = ?1",
+                params![project.id.to_string()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let restored = store_in(&directory).load().unwrap();
+        assert_eq!(restored.projects.len(), 1);
+        assert_eq!(restored.projects[0].id, project.id);
+        assert_eq!(restored.projects[0].icon, ProjectIcon::Auto);
+        assert_eq!(restored.projects[0].icon_color, None);
+        assert_eq!(restored.projects[0].default_provider, None);
+        assert_eq!(restored.projects[0].default_model, None);
+        assert!(restored.projects[0].actions.is_empty());
 
         fs::remove_dir_all(directory).ok();
     }

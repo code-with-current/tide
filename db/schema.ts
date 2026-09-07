@@ -22,6 +22,13 @@ export const projects = sqliteTable("projects", {
   position: integer("position").notNull(),
   /** When the project was added, unix seconds. */
   createdAt: integer("created_at").notNull(),
+  /** Icon setting: "auto" | preset asset path | uploaded file name. */
+  icon: text("icon"),
+  iconColor: text("icon_color"),
+  defaultProvider: text("default_provider"),
+  defaultModel: text("default_model"),
+  /** JSON array of { name, command }. */
+  actions: text("actions"),
 });
 
 export const sessions = sqliteTable(
