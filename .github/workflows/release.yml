@@ -328,7 +328,10 @@ jobs:
           restore-keys: |
             macos-${{ matrix.runner }}-rust-1.96.0-release-
 
+      # Only meaningful when real signing material exists; without it the
+      # Release step falls back to ad-hoc signing below.
       - name: Import Apple Developer Certificate
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -345,6 +348,7 @@ jobs:
           rm certificate.p12
 
       - name: Store notary credentials
+        if: ${{ secrets.APPLE_ID != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -362,8 +366,14 @@ jobs:
           TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          bun run release --local --output \
-            "dist/tide-v${{ needs.version.outputs.version }}-mac-${{ matrix.arch }}.dmg"
+          args=(--local --output \
+            "dist/tide-v${{ needs.version.outputs.version }}-mac-${{ matrix.arch }}.dmg")
+          # No Developer ID identity in this repo → ad-hoc sign, unnotarized.
+          # A production release sets TIDE_SIGNING_IDENTITY instead.
+          if [ -z "$TIDE_SIGNING_IDENTITY" ]; then
+            args+=(--adhoc)
+          fi
+          bun run release "${args[@]}"
 
       - uses: actions/upload-artifact@v7
         with:
