@@ -12,6 +12,7 @@ use serde_json::json;
 use crate::permission::RiskTier;
 use crate::{Tool, ToolContext, ToolError, ToolOutcome, ToolSpec};
 
+use super::arg_bool;
 use super::arg_str;
 use super::job_tools::{run_job_kill, run_job_output};
 
@@ -50,7 +51,12 @@ impl Tool for BashOutputTool {
         ctx: &ToolContext,
         args: serde_json::Value,
     ) -> Result<ToolOutcome, ToolError> {
-        Ok(run_job_output(&ctx.session_id, &arg_str(&args, "shell_id")))
+        Ok(run_job_output(
+            &ctx.session_id,
+            &arg_str(&args, "shell_id"),
+            arg_bool(&args, "wait"),
+            &ctx.abort,
+        ))
     }
 }
 

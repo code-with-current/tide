@@ -9,7 +9,7 @@ use crate::git::{AgentInvocation, BranchSnapshot, CommitSnapshot, CreatedWorktre
 use crate::git_panel::{
     PanelAheadBehind, PanelBranchInfo, PanelCommit, PanelCommitResult, PanelConflict,
     PanelCurrentIdentity, PanelDiffHunk, PanelFileChange, PanelMergeResult, PanelOpResult,
-    PanelRevertResult, PanelStash,
+    PanelRevertResult, PanelStash, PanelWorktree,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -329,16 +329,34 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
-    /// Pulls from the upstream of the current branch.
+    /// Pulls from the upstream of the current branch — fast-forward only,
+    /// or rebase the branch onto its upstream when `rebase` is set.
     GitPull {
         #[ts(type = "string")]
         cwd: PathBuf,
+        rebase: bool,
     },
     /// Resolves the identity the next commit at `cwd` would use, with the
     /// matching profile id when the resolved pair equals a stored profile.
     GitCurrentIdentity {
         #[ts(type = "string")]
         cwd: PathBuf,
+    },
+    /// Lists every working tree linked to the repository at `cwd`.
+    GitWorktreeList {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Removes a linked working tree. The repository's main working tree
+    /// is refused; `delete_branch` only ever deletes `tide/*` branches;
+    /// `force` covers dirty and locked trees.
+    GitWorktreeRemove {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        #[ts(type = "string")]
+        path: PathBuf,
+        delete_branch: bool,
+        force: bool,
     },
 }
 
@@ -455,5 +473,9 @@ pub enum WorkspaceResult {
     /// The identity the next commit at the requested path would use.
     GitCurrentIdentityDone {
         identity: PanelCurrentIdentity,
+    },
+    /// Linked working trees for the git panel's Worktrees tab.
+    GitWorktrees {
+        worktrees: Vec<PanelWorktree>,
     },
 }

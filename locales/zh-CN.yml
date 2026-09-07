@@ -597,6 +597,7 @@ branches.create_and_checkout: 创建并切换到新分支
 branches.create_hint: 按 Return 创建 · 按 Esc 取消
 branches.none_found: 未找到分支
 branches.create_and_checkout_ellipsis: 创建并切换到新分支…
+branches.work_in_new_worktree: 在新工作树中工作
 branches.title: 分支
 branches.choose: 选择分支
 branches.checked_out_elsewhere: 已在另一个工作树中检出
@@ -1142,6 +1143,18 @@ right_panel.git: Git
 right_panel.git_description: 跟踪更改与历史
 git_panel.changes: 更改
 git_panel.history: 历史
+git_panel.worktrees: 工作树
+git_panel.worktrees_empty: 暂无工作树
+git_panel.worktrees_empty_description: 关联到此仓库的每个检出都会显示在这里。
+git_panel.worktree_main: 主工作树
+git_panel.worktree_current: 当前任务
+git_panel.worktree_dirty: 有未提交更改
+git_panel.worktree_locked: 已锁定
+git_panel.worktree_detached: "分离于 %{sha}"
+git_panel.worktree_bare: 裸仓库
+git_panel.worktree_in_use: "%{title} 正在使用"
+git_panel.worktree_in_use_busy: 此工作树的任务仍在运行
+git_panel.worktree_remove: 移除此工作树及其 tide/* 分支
 git_panel.loading: 正在读取仓库…
 git_panel.loading_description: 工作区的 git 状态将显示在这里。
 git_panel.not_a_repository: 不是 git 仓库
@@ -1152,7 +1165,6 @@ git_panel.changes_count: "%{count} 个已更改文件"
 git_panel.history_count: "%{count} 个提交"
 git_panel.error: Git 错误
 git_panel.more_actions: 更多 git 操作
-git_panel.refresh: 刷新 git 状态
 git_panel.branch: 当前分支
 git_panel.stage_all: 全部暂存
 git_panel.unstage_all: 全部取消暂存
@@ -1178,12 +1190,9 @@ git_panel.no_identity: "未配置用户身份"
 git_panel.identity_override: "覆盖"
 git_panel.manage_identities: "管理身份…"
 git_panel.summary_placeholder: "提交信息"
-git_panel.description_placeholder: "描述…"
 git_panel.amend: "⌥ 修正"
 git_panel.amend_last_commit: "修正上次提交"
 git_panel.commit: "提交"
-git_panel.stage_all_and_commit: "暂存全部并提交"
-git_panel.staged_count: "已暂存 %{count}"
 git_panel.conflicts_hint: "请先解决合并冲突再提交。"
 
 git_panel.refresh_history: 刷新历史
@@ -1219,6 +1228,7 @@ git_panel.recent_branches: 最近
 git_panel.create_branch: 创建分支
 git_panel.fetch: 拉取
 git_panel.pull: 拉回
+git_panel.pull_rebase: 拉取（变基）
 git_panel.push: 推送
 git_panel.fetched: 已拉取
 git_panel.pulled: 已拉回

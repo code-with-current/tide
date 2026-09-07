@@ -17,22 +17,24 @@ use std::time::Duration;
 use gpui::{App, AppContext, Context, Entity, KeyBinding, Window, actions, px};
 use protocol::git_panel::{
     PanelAheadBehind, PanelBranchInfo, PanelCommit, PanelConflict, PanelCurrentIdentity,
-    PanelDiffHunk, PanelFileChange, PanelStash,
+    PanelDiffHunk, PanelFileChange, PanelStash, PanelWorktree,
 };
 
 use crate::Tide;
 use crate::input::TextInput;
+use crate::model::{AgentSession, SessionWorkspace};
 use crate::query::Query;
 use crate::review_diff::{self, Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 
 use super::git_history::{self, HistoryGraph};
 
-/// The panel's two tabs, mirroring tide's git panel.
+/// The panel's tabs, mirroring tide's git panel.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum GitPanelTab {
     #[default]
     Changes,
     History,
+    Worktrees,
 }
 
 /// A section's read state. The app's [`Query`] is keyed by a cache key; the
@@ -134,8 +136,9 @@ pub(crate) struct HistoryRowAction {
 /// navigating away; `amend` rides alongside because it belongs to the draft
 /// upstream too.
 pub(crate) struct CommitDraft {
-    pub summary: Entity<TextInput>,
-    pub description: Entity<TextInput>,
+    /// One message field — the first line is the subject, the rest the
+    /// body, exactly how git stores it.
+    pub message: Entity<TextInput>,
     pub amend: bool,
 }
 
@@ -376,9 +379,6 @@ pub(crate) struct GitPanelState {
     /// Guards the flash timer: a newer flash (or a new commit) cancels the
     /// older timer's clear.
     pub flash_generation: u64,
-    /// Guards the amend-prefill request: a toggle-off (or a second toggle)
-    /// must not land the older HEAD message into the fields.
-    pub amend_generation: u64,
     pub stash_dialog_open: bool,
     /// The History tab's precomputed lane graph, rebuilt whenever the log
     /// lands — never on a frame.
@@ -395,6 +395,13 @@ pub(crate) struct GitPanelState {
     /// Whether the history log has been loaded once — the Changes tab does
     /// not re-request it until History is opened.
     pub log_loaded: bool,
+    /// The Worktrees tab's linked working trees; the other tabs do not
+    /// request the listing until Worktrees is opened.
+    pub worktrees: GitQuery<Vec<PanelWorktree>>,
+    /// Whether the worktree listing has been loaded once.
+    pub worktrees_loaded: bool,
+    /// The linked worktree whose Remove action is armed for confirmation.
+    pub confirm_remove_worktree: Option<PathBuf>,
     /// Bumped whenever a timer chain starts; an older chain sees the bump
     /// and stops itself.
     pub timer_generation: u64,
@@ -429,7 +436,6 @@ impl Default for GitPanelState {
             generating_message: false,
             flash_sha: None,
             flash_generation: 0,
-            amend_generation: 0,
             stash_dialog_open: false,
             history_graph: None,
             commit_detail: None,
@@ -437,6 +443,9 @@ impl Default for GitPanelState {
             commit_file_diff_generation: 0,
             history_action: None,
             log_loaded: false,
+            worktrees: Query::Pending,
+            worktrees_loaded: false,
+            confirm_remove_worktree: None,
             timer_generation: 0,
         }
     }
@@ -456,25 +465,12 @@ actions!(tide_git_panel, [ConfirmGitPanelCommit, DismissGitStash]);
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new(
-            "enter",
+            "cmd-enter",
             ConfirmGitPanelCommit,
-            Some("GitPanelCommitSummary > TextInput"),
+            Some("GitPanelCommitMessage > TextInput"),
         ),
         KeyBinding::new("escape", DismissGitStash, Some("GitStashDialog")),
     ]);
-}
-
-/// tide's subject/body split for a full commit message: first line is the
-/// summary, the blank line after it is dropped, the rest is the body.
-fn split_commit_message(message: &str) -> (String, String) {
-    let message = message.trim();
-    match message.split_once('\n') {
-        Some((subject, rest)) => (
-            subject.trim().to_owned(),
-            rest.trim_start_matches('\n').trim_end().to_owned(),
-        ),
-        None => (message.to_owned(), String::new()),
-    }
 }
 
 impl Tide {
@@ -494,8 +490,9 @@ impl Tide {
             return;
         }
         let needs_log = tab == GitPanelTab::History && !self.git_panel.log_loaded;
+        let needs_worktrees = tab == GitPanelTab::Worktrees && !self.git_panel.worktrees_loaded;
         self.git_panel.tab = tab;
-        if needs_log {
+        if needs_log || needs_worktrees {
             self.refresh_git_panel(cx);
         }
         cx.notify();
@@ -572,6 +569,8 @@ impl Tide {
         self.git_panel.generation = self.git_panel.generation.wrapping_add(1);
         let generation = self.git_panel.generation;
         let want_log = self.git_panel.tab == GitPanelTab::History || self.git_panel.log_loaded;
+        let want_worktrees =
+            self.git_panel.tab == GitPanelTab::Worktrees || self.git_panel.worktrees_loaded;
         self.git_panel.refresh_in_flight = true;
         self.git_panel.error = None;
         cx.notify();
@@ -675,6 +674,22 @@ impl Tide {
                             Ok(_) => None,
                             Err(_) => None,
                         };
+                        let worktrees = if want_worktrees {
+                            match workspace.request(client::WorkspaceOperation::GitWorktreeList {
+                                cwd: cwd.clone(),
+                            }) {
+                                Ok(client::WorkspaceResult::GitWorktrees { worktrees }) => {
+                                    Some(worktrees)
+                                }
+                                Ok(_) => None,
+                                Err(err) => {
+                                    note_failure(err);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
                         // The trailer preview mirrors the daemon's decision
                         // from the same config file, resolved against the
                         // fresh identity for author mode.
@@ -694,6 +709,7 @@ impl Tide {
                             log,
                             history_graph,
                             identity,
+                            worktrees,
                             trailer,
                             error,
                         )
@@ -720,6 +736,7 @@ impl Tide {
                     log,
                     history_graph,
                     identity,
+                    worktrees,
                     trailer,
                     error,
                 ) = result;
@@ -738,6 +755,17 @@ impl Tide {
                 }
                 if let Some(identity) = identity {
                     tide.git_panel.current_identity = Query::Ready(Arc::new(identity));
+                }
+                if let Some(worktrees) = worktrees {
+                    tide.git_panel.worktrees_loaded = true;
+                    // A worktree that vanished since the last pass disarms
+                    // its own pending confirmation.
+                    if let Some(armed) = tide.git_panel.confirm_remove_worktree.clone()
+                        && !worktrees.iter().any(|entry| entry.path == armed)
+                    {
+                        tide.git_panel.confirm_remove_worktree = None;
+                    }
+                    tide.git_panel.worktrees = Query::Ready(Arc::new(worktrees));
                 }
                 tide.git_panel.trailer = trailer;
                 if let Some(commits) = log {
@@ -946,6 +974,61 @@ impl Tide {
             .ok();
         })
         .detach();
+    }
+
+    /// Arm (or disarm) a linked worktree's Remove action — the armed row
+    /// swaps to a confirm/cancel pair, like the discard confirmations.
+    pub(super) fn toggle_worktree_removal(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.git_panel.confirm_remove_worktree =
+            if self.git_panel.confirm_remove_worktree.as_deref() == Some(path.as_path()) {
+                None
+            } else {
+                Some(path)
+            };
+        cx.notify();
+    }
+
+    /// Remove a linked worktree through the panel op lane. The branch goes
+    /// with it when Tide created it (`tide/*`); dirty or locked trees pass
+    /// force so the daemon's own refusal is overridden deliberately.
+    pub(super) fn remove_worktree(&mut self, entry: &PanelWorktree, cx: &mut Context<Self>) {
+        if self.git_panel.busy.is_some() || self.worktree_session_is_busy(&entry.path) {
+            return;
+        }
+        let delete_branch = entry
+            .branch
+            .as_deref()
+            .is_some_and(|branch| branch.starts_with("tide/"));
+        self.git_panel.confirm_remove_worktree = None;
+        self.run_git_panel_op(
+            "remove worktree",
+            client::WorkspaceOperation::GitWorktreeRemove {
+                cwd: self
+                    .selected_workspace_path()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default(),
+                path: entry.path.clone(),
+                delete_branch,
+                force: entry.dirty || entry.locked,
+            },
+            cx,
+        );
+    }
+
+    /// The session working in a linked worktree, if one owns it.
+    pub(super) fn worktree_session(&self, path: &Path) -> Option<&AgentSession> {
+        self.state.sessions.iter().find(|session| {
+            matches!(
+                &session.workspace,
+                SessionWorkspace::Worktree { path: session_path, .. } if session_path == path
+            )
+        })
+    }
+
+    /// Whether the worktree's owning session is mid-turn — removal stays
+    /// blocked until it settles.
+    pub(super) fn worktree_session_is_busy(&self, path: &Path) -> bool {
+        self.worktree_session(path).is_some_and(|session| session.is_busy())
     }
 
     /// Opens the per-file diff sub-view for a clicked change and requests
@@ -1242,23 +1325,19 @@ impl Tide {
         };
         let key = cwd.display().to_string();
         if !self.git_panel.commit_drafts.contains_key(&key) {
-            let summary = cx.new(|cx| {
-                TextInput::new(window, cx).placeholder(tr!("git_panel.summary_placeholder"))
-            });
-            let description = cx.new(|cx| {
+            let message = cx.new(|cx| {
                 TextInput::new(window, cx)
                     .multi_line()
                     .auto_height()
-                    // Ten visible lines at the auto-height line metric
+                    // Five visible lines at the auto-height line metric
                     // (22px); the rest scrolls under the overlay scrollbar.
-                    .auto_height_max(px(220.0))
-                    .placeholder(tr!("git_panel.description_placeholder"))
+                    .auto_height_max(px(110.0))
+                    .placeholder(tr!("git_panel.summary_placeholder"))
             });
             self.git_panel.commit_drafts.insert(
                 key,
                 CommitDraft {
-                    summary,
-                    description,
+                    message,
                     amend: false,
                 },
             );
@@ -1280,76 +1359,6 @@ impl Tide {
             return;
         };
         self.git_set_project_identity(cwd.display().to_string(), profile_id);
-    }
-
-    /// Toggles the amend mode; enabling requests HEAD's full message and
-    /// prefills the draft with it, mirroring tide's amend effect.
-    pub(super) fn toggle_git_panel_amend(&mut self, cx: &mut Context<Self>) {
-        let Some(cwd) = self.selected_workspace_path().map(Path::to_path_buf) else {
-            return;
-        };
-        let key = cwd.display().to_string();
-        let Some(draft) = self.git_panel.commit_drafts.get_mut(&key) else {
-            return;
-        };
-        draft.amend = !draft.amend;
-        let amend = draft.amend;
-        self.git_panel.amend_generation = self.git_panel.amend_generation.wrapping_add(1);
-        let generation = self.git_panel.amend_generation;
-        cx.notify();
-        if !amend {
-            return;
-        }
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let workspace = client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |tide, cx| {
-            let result = cx
-                .background_executor()
-                .spawn({
-                    let cwd = cwd.clone();
-                    async move {
-                        match workspace.request(client::WorkspaceOperation::GitCommitMessage {
-                            cwd,
-                            sha: "HEAD".to_owned(),
-                        }) {
-                            Ok(client::WorkspaceResult::GitText { text }) => Ok(text),
-                            Ok(_) => Err(anyhow::anyhow!(
-                                "the daemon returned an invalid commit message response"
-                            )),
-                            Err(err) => Err(err),
-                        }
-                    }
-                })
-                .await;
-            tide.update(cx, |tide, cx| {
-                if tide.git_panel.amend_generation != generation
-                    || tide.state.selected_session != Some(session_id)
-                    || tide
-                        .selected_workspace_path()
-                        .is_some_and(|path| path != cwd)
-                {
-                    return;
-                }
-                let (summary, description) = match result {
-                    Ok(text) if !text.trim().is_empty() => split_commit_message(&text),
-                    _ => return,
-                };
-                let key = cwd.display().to_string();
-                if let Some(draft) = tide.git_panel.commit_drafts.get_mut(&key) {
-                    draft
-                        .summary
-                        .update(cx, |input, cx| input.set_content(summary, cx));
-                    draft
-                        .description
-                        .update(cx, |input, cx| input.set_content(description, cx));
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
     }
 
     /// Resolve the commit-message generation invocation: the background-model
@@ -1460,14 +1469,10 @@ impl Tide {
                 match result {
                     Ok(message) => {
                         let key = cwd.display().to_string();
-                        let (summary, description) = split_commit_message(&message);
                         if let Some(draft) = tide.git_panel.commit_drafts.get_mut(&key) {
                             draft
-                                .summary
-                                .update(cx, |input, cx| input.set_content(summary, cx));
-                            draft
-                                .description
-                                .update(cx, |input, cx| input.set_content(description, cx));
+                                .message
+                                .update(cx, |input, cx| input.set_content(message, cx));
                         }
                     }
                     Err(err) => tide.git_panel.error = Some(err.to_string()),
@@ -1494,17 +1499,11 @@ impl Tide {
         let Some(draft) = self.git_panel.commit_drafts.get(&cwd.display().to_string()) else {
             return;
         };
-        let summary = draft.summary.read(cx).content().trim().to_owned();
-        if summary.is_empty() {
+        let message = draft.message.read(cx).content().trim().to_owned();
+        if message.is_empty() {
             return;
         }
-        let description = draft.description.read(cx).content().trim().to_owned();
         let amend = draft.amend;
-        let message = if description.is_empty() {
-            summary
-        } else {
-            format!("{summary}\n\n{description}")
-        };
         // Upstream stages everything first when nothing is staged but the
         // worktree is dirty; an empty worktree is left to the daemon to
         // reject.
@@ -1628,10 +1627,7 @@ impl Tide {
                         if let Some(draft) = tide.git_panel.commit_drafts.get_mut(&key) {
                             draft.amend = false;
                             draft
-                                .summary
-                                .update(cx, |input, cx| input.set_content("", cx));
-                            draft
-                                .description
+                                .message
                                 .update(cx, |input, cx| input.set_content("", cx));
                         }
                         if let Some(sha) = sha.filter(|sha| !sha.is_empty()) {
@@ -2044,6 +2040,7 @@ impl Tide {
         &mut self,
         label: &'static str,
         fetch: bool,
+        rebase: bool,
         cx: &mut Context<Self>,
     ) {
         let Some(session_id) = self.state.selected_session else {
@@ -2055,7 +2052,10 @@ impl Tide {
         let operation = if fetch {
             client::WorkspaceOperation::GitFetch { cwd: cwd.clone() }
         } else {
-            client::WorkspaceOperation::GitPull { cwd: cwd.clone() }
+            client::WorkspaceOperation::GitPull {
+                cwd: cwd.clone(),
+                rebase,
+            }
         };
         self.git_panel.busy = Some(label);
         cx.notify();

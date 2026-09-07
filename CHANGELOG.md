@@ -23,6 +23,19 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- The new-session screen is now a single centered composition: the greeting,
+  the chat composer, and the git workspace chips — project, Local vs new
+  worktree, and the base-branch picker — sit together in the middle of the
+  screen instead of the composer being pinned to the window's bottom edge.
+  The branch picker itself now carries a "Work in a new worktree" toggle
+  with a checkmark state, keyboard-navigable like the branch rows, so a
+  worktree and its base branch are chosen in one place.
+- The Git panel's new Worktrees tab lists every working tree linked to the
+  repository — main first — with each tree's branch, uncommitted-changes
+  state, and the task using it, plus a two-step removal that also deletes
+  the task's `tide/*` branch. Refuses the main working tree and non-Tide
+  branches, and requires the deliberate confirm to override a dirty or
+  locked tree, so finished tasks' workspaces can be reclaimed safely.
 - Sub-agent runs survive an app restart. The agents panel rebuilds each
   session's run history from the store when the session is opened, including
   the timeline, task, and report the detail panel renders, and a run that was

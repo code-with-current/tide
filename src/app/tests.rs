@@ -363,6 +363,34 @@ fn branch_picker_pins_selection_and_filters_by_name() {
 }
 
 #[test]
+fn branch_picker_caps_the_list_at_five_rows() {
+    let branches = ["selected", "a", "b", "c", "d", "e", "f", "g"]
+        .into_iter()
+        .map(|name| BranchEntry {
+            name: name.into(),
+            checked_out_elsewhere: false,
+        })
+        .collect::<Vec<_>>();
+
+    // The pinned selection survives the cap; the rest fill alphabetically.
+    assert_eq!(
+        visible_branch_entries(&branches, "selected", "")
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["selected", "a", "b", "c", "d"]
+    );
+    // A search that narrows below the cap is untouched.
+    assert_eq!(
+        visible_branch_entries(&branches, "selected", "f")
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["f"]
+    );
+}
+
+#[test]
 fn driver_errors_are_bounded_before_rendering() {
     let error = (0..20)
         .map(|line| format!("provider diagnostic line {line}"))

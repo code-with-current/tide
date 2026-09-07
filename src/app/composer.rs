@@ -1957,7 +1957,11 @@ impl Tide {
         )
     }
 
-    fn render_branch_selector(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_branch_selector(
+        &mut self,
+        cx: &mut Context<Self>,
+        chips_align: MenuAlign,
+    ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
         let session = self.selected_session()?;
         let workspace = session.workspace.clone();
@@ -2006,12 +2010,20 @@ impl Tide {
                     .selected(branch_enabled && open)
                     .max_w(px(210.0))
             },
-            MenuAlign::AboveLeft,
-            cx,
-        )
+        chips_align,
+        cx,
+    )
     }
 
-    pub(super) fn render_workspace_footer(&mut self, cx: &mut Context<Self>) -> Div {
+    /// The workspace chips row: project, Local vs new worktree, and the
+    /// branch picker. `chips_align` is the direction the menus open — the
+    /// bottom chrome opens upward, the centered new-session screen opens
+    /// downward over the space beneath the chips.
+    pub(super) fn render_workspace_footer(
+        &mut self,
+        cx: &mut Context<Self>,
+        chips_align: MenuAlign,
+    ) -> Div {
         let theme = Theme::current(cx);
         let selected_project_id = self.state.selected_project;
         let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
@@ -2058,7 +2070,7 @@ impl Tide {
                 project_trigger,
                 "workspace-project-menu",
                 &project_handle,
-                MenuAlign::AboveLeft,
+                chips_align,
                 move |_| {
                     let mut items = project_options
                         .clone()
@@ -2136,7 +2148,7 @@ impl Tide {
                 worktree_trigger,
                 "workspace-worktree-menu",
                 &worktree_handle,
-                MenuAlign::AboveLeft,
+                chips_align,
                 move |_| {
                     let local = weak.clone();
                     let worktree = weak.clone();
@@ -2167,7 +2179,7 @@ impl Tide {
             worktree_trigger.into_any_element()
         };
 
-        let branch_selector = self.render_branch_selector(cx);
+        let branch_selector = self.render_branch_selector(cx, chips_align);
 
         div()
             .flex_none()
@@ -2201,8 +2213,12 @@ impl Tide {
 }
 
 /// Branches matching the search, with the selected branch pinned first and
-/// every other row sorted by name. Disabled worktree-owned rows stay in the
-/// result; the UI needs to explain why Git cannot switch to them.
+/// every other row sorted by name, capped at [`MAX_PICKER_BRANCHES`] rows —
+/// a long match list keeps the popover compact instead of scrolling.
+/// Disabled worktree-owned rows stay in the result; the UI needs to explain
+/// why Git cannot switch to them.
+pub(super) const MAX_PICKER_BRANCHES: usize = 5;
+
 pub(super) fn visible_branch_entries(
     branches: &[crate::git_branch::BranchEntry],
     selected_branch: &str,
@@ -2225,6 +2241,7 @@ pub(super) fn visible_branch_entries(
             .cmp(&left_selected)
             .then_with(|| left.name.cmp(&right.name))
     });
+    visible.truncate(MAX_PICKER_BRANCHES);
     visible
 }
 

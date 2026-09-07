@@ -1409,23 +1409,78 @@ fn fetch_remote(repo: &Repository) -> Result<(), String> {
 }
 
 /// `gitPull` — `git pull --ff-only`: fetch, then fast-forward HEAD's branch
-/// to its upstream or fail.
-pub fn pull(cwd: &Path) -> PanelOpResult {
+/// to its upstream or fail. With `rebase`, the branch is rebased onto the
+/// upstream instead.
+pub fn pull(cwd: &Path, rebase: bool) -> PanelOpResult {
     let result = Repository::open(cwd)
         .map_err(|e| e.to_string())
-        .and_then(|repo| pull_inner(&repo));
+        .and_then(|repo| {
+            if rebase {
+                pull_rebase_inner(&repo)
+            } else {
+                pull_inner(&repo)
+            }
+        });
     op_result(result)
 }
 
-fn pull_inner(repo: &Repository) -> Result<(), String> {
-    fetch_remote(repo)?;
-    let upstream = repo
-        .head()
+/// The local branch HEAD sits on, resolved to its tracked upstream.
+fn head_upstream(repo: &Repository) -> Result<git2::Branch<'_>, String> {
+    repo.head()
         .ok()
         .and_then(|h| h.shorthand().ok().map(String::from))
         .and_then(|name| repo.find_branch(&name, BranchType::Local).ok())
         .and_then(|branch| branch.upstream().ok())
-        .ok_or_else(|| "no upstream configured for branch".to_string())?;
+        .ok_or_else(|| "no upstream configured for branch".to_owned())
+}
+
+/// `git pull --rebase`: the credentialed git2 fetch, then a local rebase of
+/// HEAD onto the upstream ref via plain `git rebase` — the rebase itself
+/// needs no network, so the CLI's conflict handling comes free.
+fn pull_rebase_inner(repo: &Repository) -> Result<(), String> {
+    fetch_remote(repo)?;
+    let upstream = head_upstream(repo)?;
+    let annotated = repo
+        .reference_to_annotated_commit(upstream.get())
+        .map_err(|e| e.to_string())?;
+    let (analysis, _) = repo
+        .merge_analysis(&[&annotated])
+        .map_err(|e| e.to_string())?;
+    if analysis.is_up_to_date() {
+        return Ok(());
+    }
+    let refname = upstream
+        .get()
+        .name()
+        .map_err(|e| e.to_string())?
+        .to_owned();
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| "bare repository".to_owned())?
+        .to_path_buf();
+    let output = crate::command_env::plain_command("git")
+        .arg("rebase")
+        .arg(&refname)
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(format!(
+            "rebase stopped: {}",
+            if stderr.is_empty() {
+                String::from_utf8_lossy(&output.stdout).trim().to_owned()
+            } else {
+                stderr
+            }
+        ));
+    }
+    Ok(())
+}
+
+fn pull_inner(repo: &Repository) -> Result<(), String> {
+    fetch_remote(repo)?;
+    let upstream = head_upstream(repo)?;
     let target = upstream.get().peel_to_commit().map_err(|e| e.to_string())?;
     let annotated = repo
         .reference_to_annotated_commit(upstream.get())
@@ -3270,7 +3325,7 @@ mod tests {
             repo.checkout_tree(tree.as_object(), Some(&mut opts))
                 .unwrap();
         }
-        assert!(pull(&root).ok);
+        assert!(pull(&root, false).ok);
         assert_eq!(head_oid(&root), tip, "pull fast-forwarded back to the tip");
         assert_eq!(
             ahead_behind(&root),
@@ -3290,7 +3345,7 @@ mod tests {
             r.error
         );
         // pull without a remote fails the same way (fetch step first).
-        let r = pull(&orphan);
+        let r = pull(&orphan, false);
         assert!(!r.ok);
 
         fs::remove_dir_all(root.parent().unwrap()).unwrap();

@@ -162,6 +162,23 @@ impl Tide {
     /// `true` asks the caller to dismiss the picker after this entity update
     /// ends. Closing sooner runs the toggle observer, which re-enters `Tide`
     /// and double-leases the entity.
+    /// Flip the selected draft's workspace between the project checkout and
+    /// a planned new worktree. The base branch is left unset when flipping
+    /// on — it falls back to the repository's default branch, and any pick
+    /// in the branch list pins it.
+    pub(super) fn toggle_planned_worktree(&mut self, cx: &mut Context<Self>) {
+        let planned = self.selected_session().is_some_and(|session| {
+            matches!(session.workspace, SessionWorkspace::NewWorktree { .. })
+        });
+        let next = if planned {
+            SessionWorkspace::Local
+        } else {
+            SessionWorkspace::NewWorktree { base_branch: None }
+        };
+        self.select_workspace(next, cx);
+        self.refresh_selected_branch_snapshot(cx);
+    }
+
     pub(super) fn choose_workspace_branch(
         &mut self,
         branch: String,
@@ -323,6 +340,10 @@ impl Tide {
                 self.begin_branch_creation(window, cx);
                 false
             }
+            BranchPickerAction::ToggleWorktree => {
+                self.toggle_planned_worktree(cx);
+                false
+            }
         }
     }
 
@@ -418,6 +439,16 @@ impl Tide {
         let theme = Theme::current(cx);
         let planned_worktree = context.planned_worktree;
         let surface = context.surface;
+        // The worktree toggle rides along with the branch list only where a
+        // workspace choice still exists: the composer surface of an
+        // unstarted, non-busy session in a real (non-projectless) project.
+        let worktree_toggle = surface == BranchPickerSurface::Composer
+            && self
+                .selected_session()
+                .is_some_and(|session| !session.has_started() && !session.is_busy())
+            && self
+                .selected_project()
+                .is_some_and(|project| !project.is_projectless());
         let snapshot = self.branch_snapshot_for_workspace(&context.workspace_path, cx)?;
         let selected_branch = selected_from_snapshot(&snapshot);
 
@@ -494,6 +525,7 @@ impl Tide {
                 .filter(|branch| planned_worktree || !branch.checked_out_elsewhere)
                 .map(|branch| BranchPickerAction::Checkout(branch.name.clone()))
                 .chain(allow_create.then_some(BranchPickerAction::Create))
+                .chain(worktree_toggle.then_some(BranchPickerAction::ToggleWorktree))
                 .collect::<Vec<_>>(),
         );
         let highlight = self
@@ -706,6 +738,55 @@ impl Tide {
                             })
                     });
 
+                    let worktree_row = worktree_toggle.then(|| {
+                        let toggle_weak = weak.clone();
+                        div()
+                            .id("toggle-workspace-worktree")
+                            .mx(px(4.0))
+                            .h(px(BRANCH_PICKER_ROW_HEIGHT))
+                            .px(px(8.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .cursor_default()
+                            .when(
+                                highlight.and_then(|index| actions.get(index))
+                                    == Some(&BranchPickerAction::ToggleWorktree),
+                                |element| element.bg(theme.overlay_strong),
+                            )
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.opacity(0.85))
+                            .child(icon("icons/fork.svg", 12.0, theme.text_secondary))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(15.0))
+                                    .text_color(theme.text)
+                                    .child(tr!("branches.work_in_new_worktree")),
+                            )
+                            .when(planned_worktree, |element| {
+                                element.child(icon(
+                                    "icons/check.svg",
+                                    11.0,
+                                    theme.text_secondary,
+                                ))
+                            })
+                            // The picker stays open: flipping the workspace
+                            // on is usually followed by picking the base
+                            // branch right below.
+                            .on_click(move |_, _window, cx| {
+                                let _ = toggle_weak.update(cx, |this, cx| {
+                                    this.toggle_planned_worktree(cx);
+                                });
+                            })
+                    });
+
+                    let has_footer = create_row.is_some() || worktree_row.is_some();
+
                     div()
                         .w_full()
                         .flex()
@@ -744,12 +825,12 @@ impl Tide {
                                 .child(tr!("branches.title")),
                         )
                         .child(rows)
-                        .when_some(create_row, |element, create_row| {
-                            element
-                                .child(div().mx(px(6.0)).my(px(4.0)).h(px(1.0)).bg(theme.border))
-                                .child(create_row)
-                                .child(div().h(px(4.0)))
+                        .when(has_footer, |element| {
+                            element.child(div().mx(px(6.0)).my(px(4.0)).h(px(1.0)).bg(theme.border))
                         })
+                        .children(create_row)
+                        .children(worktree_row)
+                        .when(has_footer, |element| element.child(div().h(px(4.0))))
                         .into_any_element()
                 };
 
