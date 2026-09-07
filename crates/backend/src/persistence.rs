@@ -1083,7 +1083,17 @@ impl StateStore {
             .map_err(to_io_error)?
             .filter_map(Result::ok)
             .filter_map(
-                |(id, name, path, created_at, icon, icon_color, default_provider, default_model, actions)| {
+                |(
+                    id,
+                    name,
+                    path,
+                    created_at,
+                    icon,
+                    icon_color,
+                    default_provider,
+                    default_model,
+                    actions,
+                )| {
                     Some(Project {
                         id: Uuid::parse_str(&id).ok()?,
                         name,
@@ -2168,13 +2178,19 @@ mod tests {
         let restored = store_in(&directory).load().unwrap();
         assert_eq!(restored.projects[0].name, state.projects[0].name);
         assert_eq!(restored.projects[0].path, state.projects[0].path);
-        assert_eq!(restored.projects[0].created_at, state.projects[0].created_at);
+        assert_eq!(
+            restored.projects[0].created_at,
+            state.projects[0].created_at
+        );
         assert_eq!(
             restored.projects[0].icon,
             ProjectIcon::Preset("icons/projects/rocket.svg".into())
         );
         assert_eq!(restored.projects[0].icon_color.as_deref(), Some("#7c3aed"));
-        assert_eq!(restored.projects[0].default_provider, Some(ProviderKind::Tide));
+        assert_eq!(
+            restored.projects[0].default_provider,
+            Some(ProviderKind::Tide)
+        );
         assert_eq!(
             restored.projects[0].default_model.as_deref(),
             Some("claude-opus-4-5")
