@@ -308,7 +308,8 @@ fn diffstat_fraction_shares_and_even_split() {
 #[test]
 fn stream_log_classifies_and_formats_time_at_capture() {
     let started = stream_log_entry(&DriverEvent::TurnStarted, 1_700_000_000_000).unwrap();
-    assert_eq!(started.label.as_ref(), "turn started");
+    assert_eq!(started.source.as_ref(), "system");
+    assert_eq!(started.content.as_ref(), "turn started");
     assert!(!started.error);
     // The time label is precomputed at capture, HH:MM:SS-shaped — never
     // formatted per frame.
@@ -322,11 +323,38 @@ fn stream_log_classifies_and_formats_time_at_capture() {
         0,
     )
     .unwrap();
-    assert_eq!(failed.label.as_ref(), "turn failed");
+    assert_eq!(failed.content.as_ref(), "turn failed");
     assert!(failed.error);
 
     let delta = stream_log_entry(&DriverEvent::TextDelta("hello".into()), 0).unwrap();
-    assert_eq!(delta.label.as_ref(), "text +5c");
+    assert_eq!(delta.source.as_ref(), "assistant");
+    assert_eq!(delta.content.as_ref(), "hello");
+
+    // Tool activities log under the tool's name, with the title as content.
+    let activity = stream_log_entry(
+        &DriverEvent::Activity {
+            id: None,
+            kind: ActivityKind::Command,
+            title: "cargo test -p tide".into(),
+            detail: None,
+            complete: false,
+        },
+        0,
+    )
+    .unwrap();
+    assert_eq!(activity.source.as_ref(), "bash");
+    assert_eq!(activity.content.as_ref(), "cargo test -p tide");
+
+    // An accepted steer is the user's voice in the tail.
+    let steer = stream_log_entry(
+        &DriverEvent::SteerAccepted {
+            message: "also run clippy".into(),
+        },
+        0,
+    )
+    .unwrap();
+    assert_eq!(steer.source.as_ref(), "user");
+    assert_eq!(steer.content.as_ref(), "also run clippy");
 
     // An occupancy-less usage update and the subagent firehose stay out.
     assert!(

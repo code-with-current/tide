@@ -13,7 +13,9 @@ use super::*;
 mod section;
 mod sections;
 
-pub(crate) use sections::{STREAM_LOG_CAP, StreamLogEntry, stream_log_entry};
+pub(crate) use sections::{
+    STREAM_LOG_CAP, StreamLogEntry, stream_log_entry, user_stream_log_entry,
+};
 
 #[cfg(test)]
 mod tests;

@@ -24,8 +24,8 @@ use super::parts::tool_part::{
     parse_todo_output, render_activity_body, todo_item, trailing_failure_icon,
 };
 use super::parts::user_bubble::{
-    CLAMP_MAX_HEIGHT, UserBubbleActions, UserBubbleAttachment, clamp_id, clamp_needed,
-    edit_removals, editor_actions_row, render_user_bubble,
+    CLAMP_MAX_HEIGHT, MentionKind, UserBubbleActions, clamp_id, clamp_needed, edit_removals,
+    editor_actions_row, mention_runs, parse_mentions, render_user_bubble,
 };
 use super::permission::{
     PermissionRespond, permission_deadline, permission_layout, render_permission_card, seconds_left,
@@ -40,8 +40,8 @@ use super::rows::error_block::{
     retry_text_for_turn,
 };
 use super::rows::turn_item::{
-    format_duration, last_assistant_text, model_segment, render_turn_footer, spacing_before,
-    turn_duration, turn_top_spacing,
+    TurnFooterBranch, TurnFooterUsage, format_duration, last_assistant_text, model_segment,
+    render_turn_footer, spacing_before, turn_duration, turn_top_spacing,
 };
 use super::rows::working_footer::{elapsed_since, render_working_footer};
 use super::search::find_matches;
@@ -50,7 +50,7 @@ use crate::app::navigation_rail::NavigationTurnOpening;
 use crate::model::{
     ActivityFileChange, ActivityFileChangeStatus, ActivityItem, ActivityKind, AgentSession,
     AgentTurn, MessageRole, PendingPermission, PermissionOption, ProviderKind, ReasoningBlock,
-    SessionStatus, TranscriptBlock, TurnStatus, UserInputOption, UserInputQuestion,
+    SessionStatus, TranscriptBlock, TurnStatus, UsageBreakdown, UserInputOption, UserInputQuestion,
 };
 use crate::ui::menu::ContextMenuHandle;
 use gpui::Pixels;
@@ -345,9 +345,11 @@ fn wheel_ticks_classified() {
     // content moves down and the reader leaves the tail.
     assert_eq!(wheel_signal(px(10.0), Some(true)), Some(ScrolledUp));
     assert_eq!(wheel_signal(px(3.0), Some(false)), Some(ScrolledUp));
-    // A toward-bottom tick only re-pins once the list reports the end
-    // reached; part-way down is still released.
-    assert_eq!(wheel_signal(px(-10.0), Some(false)), None);
+    // A toward-bottom tick while exploring keeps the release (still off the
+    // tail — and direction-inverted input reads as toward-bottom, so the
+    // tail answer, not the sign, decides); it only re-pins once the end is
+    // actually reached.
+    assert_eq!(wheel_signal(px(-10.0), Some(false)), Some(ScrolledUp));
     assert_eq!(wheel_signal(px(-10.0), Some(true)), Some(AtBottom));
     // Unknown position (unscrollable or unmeasured content) cannot claim the
     // bottom, and a purely horizontal tick carries no signal.
@@ -2127,12 +2129,13 @@ fn failure_text_prefers_detail_then_output() {
 #[test]
 fn render_activity_body_constructs_for_every_family() {
     let theme = crate::theme::Theme::dark();
+    let selection = crate::md::render::TranscriptSelection::default();
 
     // Bash: command input, output result.
     let mut bash = tool_activity(ActivityKind::Command, "bash", None);
     bash.display_target = Some("cargo test".to_owned());
     bash.output = Some("test result: ok".to_owned());
-    let _ = render_activity_body(&bash, test_workspace(), &theme);
+    let _ = render_activity_body(&bash, test_workspace(), &selection, &theme);
 
     // Edit: prepared diff body under the file's relative path.
     let mut edit = tool_activity(ActivityKind::FileChange, "edit_file", None);
@@ -2143,18 +2146,18 @@ fn render_activity_body_constructs_for_every_family() {
         status: None,
         diff: Some("@@\n-old\n+new".to_owned()),
     }];
-    let _ = render_activity_body(&edit, test_workspace(), &theme);
+    let _ = render_activity_body(&edit, test_workspace(), &selection, &theme);
 
     // JSON-valued output gets the JSON card instead of the plain viewport.
     let mut json = tool_activity(ActivityKind::Tool, "memory", None);
     json.output = Some(r#"{"saved": ["a"]}"#.to_owned());
-    let _ = render_activity_body(&json, test_workspace(), &theme);
+    let _ = render_activity_body(&json, test_workspace(), &selection, &theme);
 
     // Dispatch: badge + plain report.
     let mut dispatch = tool_activity(ActivityKind::Tool, "dispatch_agent", Some("Look into it"));
     dispatch.arguments = Some(r#"{"agent": "Explorer"}"#.to_owned());
     dispatch.output = Some("Found the flake.".to_owned());
-    let _ = render_activity_body(&dispatch, test_workspace(), &theme);
+    let _ = render_activity_body(&dispatch, test_workspace(), &selection, &theme);
 
     // Failed: the error-token card replaces the result section.
     let mut failed = tool_activity(ActivityKind::Command, "bash", None);
@@ -2162,53 +2165,53 @@ fn render_activity_body_constructs_for_every_family() {
     failed.complete = true;
     failed.detail = Some("exit 1".to_owned());
     failed.output = Some("error: no such file".to_owned());
-    let _ = render_activity_body(&failed, test_workspace(), &theme);
+    let _ = render_activity_body(&failed, test_workspace(), &selection, &theme);
 
     // Directory listing: the tree listing in the scroll viewport under its
     // directory path.
     let mut listing = tool_activity(ActivityKind::Tool, "list_dir", Some("api-doc/\nbdd/"));
     listing.arguments = Some(r#"{"path": "src/"}"#.to_owned());
     listing.output = Some("api-doc/\nbdd/\nclient/\ncmd/".to_owned());
-    let _ = render_activity_body(&listing, test_workspace(), &theme);
+    let _ = render_activity_body(&listing, test_workspace(), &selection, &theme);
     // A listing whose output never landed keeps the empty body column.
     let mut bare_listing = tool_activity(ActivityKind::Tool, "directory_tree", None);
     bare_listing.display_target = Some("crates/".to_owned());
-    let _ = render_activity_body(&bare_listing, test_workspace(), &theme);
+    let _ = render_activity_body(&bare_listing, test_workspace(), &selection, &theme);
 
     // Read-only tools: the captured output as the content viewport — the
     // five the pane owes (read, media read, fetch, glob, grep) and a
     // display-only read riding the blockquote/input fallback.
     let mut read = tool_activity(ActivityKind::FileRead, "read_file", Some("src/main.rs"));
     read.output = Some("fn main() {\n    println!(\"hi\");\n}".to_owned());
-    let _ = render_activity_body(&read, test_workspace(), &theme);
+    let _ = render_activity_body(&read, test_workspace(), &selection, &theme);
 
     let mut media = tool_activity(ActivityKind::FileRead, "read_media_file", None);
     media.output = Some("[image: 640x480 png, 3.2 KB]".to_owned());
-    let _ = render_activity_body(&media, test_workspace(), &theme);
+    let _ = render_activity_body(&media, test_workspace(), &selection, &theme);
 
     let mut fetch = tool_activity(ActivityKind::Search, "web_fetch", None);
     fetch.display_target = Some("https://example.com".to_owned());
     fetch.output = Some("<!doctype html>\n<h1>Example</h1>".to_owned());
-    let _ = render_activity_body(&fetch, test_workspace(), &theme);
+    let _ = render_activity_body(&fetch, test_workspace(), &selection, &theme);
 
     let mut glob = tool_activity(ActivityKind::FileSearch, "glob", None);
     glob.arguments = Some(r#"{"pattern": "**/*.rs"}"#.to_owned());
     glob.output = Some("src/main.rs\nsrc/lib.rs".to_owned());
-    let _ = render_activity_body(&glob, test_workspace(), &theme);
+    let _ = render_activity_body(&glob, test_workspace(), &selection, &theme);
 
     let mut grep = tool_activity(ActivityKind::FileSearch, "grep", None);
     grep.arguments = Some(r#"{"pattern": "TODO"}"#.to_owned());
     grep.output = Some("src/main.rs:42: // TODO ship".to_owned());
-    let _ = render_activity_body(&grep, test_workspace(), &theme);
+    let _ = render_activity_body(&grep, test_workspace(), &selection, &theme);
 
     let mut display_only = tool_activity(ActivityKind::FileRead, "read_file", None);
     display_only.display_target = Some("src/main.rs".to_owned());
     display_only.arguments = Some(r#"{"path": "/tmp/ws/src/main.rs"}"#.to_owned());
-    let _ = render_activity_body(&display_only, test_workspace(), &theme);
+    let _ = render_activity_body(&display_only, test_workspace(), &selection, &theme);
 
     // The quietest case: no inputs, no output — an empty body column.
     let bare = tool_activity(ActivityKind::FileRead, "read_file", None);
-    let _ = render_activity_body(&bare, test_workspace(), &theme);
+    let _ = render_activity_body(&bare, test_workspace(), &selection, &theme);
 }
 
 // ── Presentation classification ────────────────────────────────────────────
@@ -2325,6 +2328,7 @@ fn render_activities_constructs_headlessly() {
         &refs,
         &closed,
         test_workspace(),
+        &crate::md::render::TranscriptSelection::default(),
         &actions,
         &theme,
         &mut test_reasoning_markdown(&mut views),
@@ -2334,6 +2338,7 @@ fn render_activities_constructs_headlessly() {
         &refs,
         &open,
         test_workspace(),
+        &crate::md::render::TranscriptSelection::default(),
         &actions,
         &theme,
         &mut test_reasoning_markdown(&mut views),
@@ -2465,6 +2470,7 @@ fn turn_at(started_at: u64, completed_at: Option<u64>) -> AgentTurn {
         started_at,
         completed_at,
         checkpoint: None,
+        usage: None,
     }
 }
 
@@ -2574,29 +2580,56 @@ fn last_assistant_text_picks_the_turns_latest_assistant_reply() {
     );
 }
 
-#[test]
-fn render_turn_footer_constructs_headlessly() {
+#[gpui::test]
+fn render_turn_footer_constructs_headlessly(cx: &mut TestAppContext) {
     let theme = crate::theme::Theme::dark();
     // With every segment present, and with each optional one absent — the
-    // renderer hides what it lacks rather than rendering empty meta.
-    let _ = render_turn_footer(
-        Uuid::new_v4(),
-        Some("anthropic/claude-opus-4.6"),
-        Some(125),
-        1_700_000_000,
-        Some("The real answer."),
-        &theme,
-        |_, _, _| {},
-    );
-    let _ = render_turn_footer(
-        Uuid::new_v4(),
-        None,
-        None,
-        1_700_000_000,
-        None,
-        &theme,
-        |_, _, _| {},
-    );
+    // renderer hides what it lacks rather than rendering empty meta. The
+    // usage segments render only when the turn's fold has facts, and the
+    // branch button only when the provider can fork the conversation.
+    cx.update(|cx| {
+        let usage_menu = ContextMenuHandle::new(cx);
+        let time_menu = ContextMenuHandle::new(cx);
+        let _ = render_turn_footer(
+            Uuid::new_v4(),
+            Some(125),
+            1_700_000_000,
+            &usage_menu,
+            &time_menu,
+            Some(TurnFooterUsage {
+                usage: UsageBreakdown {
+                    input_tokens: 1_000,
+                    output_tokens: 200,
+                    calls: 3,
+                    ..Default::default()
+                },
+                routes: Some("anthropic/claude-opus-4.6".into()),
+                tps: Some(42.5),
+                ttft_ms: Some(800),
+            }),
+            Some(TurnFooterBranch {
+                enabled: true,
+                preparing: false,
+            }),
+            |_, _, _| {},
+            Some("The real answer."),
+            &theme,
+            |_, _, _| {},
+        );
+        let _ = render_turn_footer(
+            Uuid::new_v4(),
+            None,
+            1_700_000_000,
+            &usage_menu,
+            &time_menu,
+            None,
+            None,
+            |_, _, _| {},
+            None,
+            &theme,
+            |_, _, _| {},
+        );
+    });
 }
 
 #[test]
@@ -3163,9 +3196,11 @@ fn render_user_bubble_constructs_headlessly() {
         true,
         None,
         &[],
+        crate::md::render::TranscriptSelection::default(),
         &theme,
         noop_user_actions(),
         std::sync::Arc::clone(&toggle),
+        None,
     );
     // Long content clamps collapsed, opens expanded, and hides the pencil
     // while the session is busy.
@@ -3179,11 +3214,39 @@ fn render_user_bubble_constructs_headlessly() {
             editable,
             None,
             &[],
+            crate::md::render::TranscriptSelection::default(),
             &theme,
             noop_user_actions(),
             std::sync::Arc::clone(&toggle),
+            None,
         );
     }
+    // Mention-bearing content with a resolver: both mention kinds build
+    // headlessly, the resolver standing in for list.rs's path lookup.
+    let mentioned = "check @index.ts please\n/writing-plans first";
+    let _ = render_user_bubble(
+        Uuid::new_v4(),
+        mentioned,
+        1_700_000_000,
+        false,
+        true,
+        None,
+        &[],
+        crate::md::render::TranscriptSelection::default(),
+        &theme,
+        noop_user_actions(),
+        std::sync::Arc::clone(&toggle),
+        Some(std::sync::Arc::new(|token: &str| {
+            token
+                .strip_prefix('@')
+                .map(|path| format!("/workspace{path}"))
+                .or_else(|| {
+                    token
+                        .strip_prefix('/')
+                        .map(|name| format!("/Users/tester/.claude/skills/{name}/SKILL.md"))
+                })
+        })),
+    );
     // Blank content renders the footer alone, like the legacy pane hides the
     // empty bubble.
     let _ = render_user_bubble(
@@ -3194,10 +3257,77 @@ fn render_user_bubble_constructs_headlessly() {
         false,
         None,
         &[],
+        crate::md::render::TranscriptSelection::default(),
         &theme,
         noop_user_actions(),
         toggle,
+        None,
     );
+}
+
+/// Mention parsing: tokens the pill renderer lifts out of the bubble text.
+#[test]
+fn parse_mentions_extracts_files_and_skills() {
+    fn tokens(content: &str) -> Vec<(MentionKind, String)> {
+        parse_mentions(content)
+            .into_iter()
+            .map(|mention| (mention.kind, content[mention.range.clone()].to_owned()))
+            .collect()
+    }
+
+    // A file mention mid-sentence, plus a skill invocation leading a line.
+    assert_eq!(
+        tokens("check @src/main.rs please\n/deploy now"),
+        vec![
+            (MentionKind::File, "@src/main.rs".to_owned()),
+            (MentionKind::Skill, "/deploy".to_owned()),
+        ]
+    );
+    // Trailing sentence punctuation stays outside the pill.
+    assert_eq!(
+        tokens("see @docs/ARCHITECTURE.md."),
+        vec![(MentionKind::File, "@docs/ARCHITECTURE.md".to_owned())]
+    );
+    // The composer's quoted form survives whitespace in the path.
+    assert_eq!(
+        tokens("@\"a b/c d.txt\" here"),
+        vec![(MentionKind::File, "@\"a b/c d.txt\"".to_owned())]
+    );
+    // Prose emails and mid-line slashes are not mentions.
+    assert_eq!(tokens("mail foo@bar.com and say /deploy mid-line"), vec![]);
+    // Multi-segment paths after a slash are paths, not skills.
+    assert_eq!(tokens("/usr/bin runs first"), vec![]);
+    // Skill must lead its line; the file sigil only counts at token starts.
+    assert_eq!(tokens("run:\n    /deploy"), vec![]);
+    assert_eq!(tokens("(@README.md)"), vec![]);
+}
+
+/// Mentions render as markdown links: the run over each token carries the
+/// link underline in the accent color while plain runs stay bare — and the
+/// runs still tile the string exactly, since underline is paint, not layout.
+#[test]
+fn mention_runs_underline_mentions_only() {
+    let theme = crate::theme::Theme::dark();
+    let content = "check @index.ts please\n/writing-plans first";
+    let mentions = parse_mentions(content);
+    let runs = mention_runs(content, &mentions, theme.text, theme.accent);
+
+    assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), content.len());
+
+    let mention_starts: Vec<usize> = mentions.iter().map(|m| m.range.start).collect();
+    let mut byte = 0usize;
+    for run in &runs {
+        if mention_starts.contains(&byte) {
+            let underline = run.underline.expect("mention run carries a link underline");
+            assert_eq!(run.color, theme.accent);
+            assert_eq!(underline.color, Some(theme.accent));
+            assert_eq!(underline.thickness, px(1.0));
+            assert!(!underline.wavy);
+        } else {
+            assert_eq!(run.underline, None, "plain runs stay bare");
+        }
+        byte += run.len;
+    }
 }
 
 #[test]

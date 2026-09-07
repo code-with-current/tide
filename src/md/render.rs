@@ -94,10 +94,10 @@ pub struct Metrics {
 impl Metrics {
     /// Assistant response scale, matching the transcript's body text.
     pub const BODY: Self = Self {
-        text_size: 14.0,
-        line_height: 21.0,
-        code_text_size: 13.0,
-        code_line_height: 19.5,
+        text_size: 13.0,
+        line_height: 20.0,
+        code_text_size: 12.0,
+        code_line_height: 19.0,
         block_gap: 10.0,
     };
 
@@ -682,6 +682,11 @@ impl<'a> Ctx<'a> {
 
 // ── The shared text primitive ──────────────────────────────────────────────
 
+/// Hover decorations for the user bubble's mention pills: the washed byte
+/// ranges, plus a lookup from each range's start to its tooltip label.
+/// Ranges must be sorted and non-overlapping so `contains` picks one.
+pub type MentionDecorations = (Vec<Range<usize>>, Rc<HashMap<usize, SharedString>>);
+
 /// One selectable, decorated text element.
 ///
 /// The `canvas` underlay is an *earlier sibling* than the text, so GPUI paints
@@ -700,12 +705,26 @@ fn text_element_with_selection(
     search_match_wash: Hsla,
     active_search_match_wash: Hsla,
     block_break: bool,
+    mentions: Option<MentionDecorations>,
 ) -> AnyElement {
     let styled = StyledText::new(flat.text.clone()).with_runs(runs);
     let layout = styled.layout().clone();
 
     let body: AnyElement = if flat.links.is_empty() {
-        styled.into_any_element()
+        match mentions {
+            Some((ranges, labels)) => {
+                let id = SharedString::from(format!("{}-m{}", key.row, key.index));
+                let tooltip_ranges = ranges.clone();
+                InteractiveText::new(id, styled)
+                    .tooltip(move |index, window, cx| {
+                        let range = tooltip_ranges.iter().find(|range| range.contains(&index))?;
+                        let label = labels.get(&range.start)?;
+                        Some(Tooltip::new(label.clone()).build(window, cx))
+                    })
+                    .into_any_element()
+            }
+            None => styled.into_any_element(),
+        }
     } else {
         let (ranges, urls): (Vec<_>, Vec<_>) = flat.links.iter().cloned().unzip();
         let id = SharedString::from(format!("{}-t{}", key.row, key.index));
@@ -826,6 +845,7 @@ fn text_element(flat: &FlatText, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.palette.search_match,
         ctx.palette.active_search_match,
         ctx.take_block_break(),
+        None,
     )
 }
 
@@ -855,6 +875,39 @@ pub fn selectable_flat_text(
         gpui::transparent_black(),
         gpui::transparent_black(),
         block_break,
+        None,
+    )
+}
+
+/// A selectable flat text whose mention ranges paint rounded pill washes and
+/// carry hover tooltips — the user bubble's `@path` and `/skill` chips.
+///
+/// The pills reuse the inline-code paint path (a range wash under the
+/// glyphs), so they reflow with the text and never disturb layout or
+/// transcript-wide selection; the tooltip lookup maps a range's start byte
+/// to the label shown on hover.
+pub fn selectable_mention_text(
+    flat: &FlatText,
+    mention_ranges: Vec<Range<usize>>,
+    labels: Rc<HashMap<usize, SharedString>>,
+    key: TextKey,
+    selection: TranscriptSelection,
+    mention_wash: Hsla,
+    selection_wash: Hsla,
+) -> AnyElement {
+    text_element_with_selection(
+        flat,
+        flat.runs.clone(),
+        key,
+        selection,
+        None,
+        None,
+        mention_wash,
+        selection_wash,
+        gpui::transparent_black(),
+        gpui::transparent_black(),
+        false,
+        Some((mention_ranges, labels)),
     )
 }
 

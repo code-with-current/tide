@@ -9,6 +9,7 @@ use super::super::parts;
 use super::super::parts::reasoning_part::{
     ReasoningMarkdown, reasoning_content, reasoning_streaming,
 };
+use crate::md::render::TranscriptSelection;
 use crate::model::ActivityItem;
 use crate::theme::Theme;
 use gpui::prelude::*;
@@ -35,6 +36,7 @@ pub(crate) fn render_activities(
     activities: &[&ActivityItem],
     disclosures: &HashSet<String>,
     workspace: &Path,
+    selection: &TranscriptSelection,
     actions: &TranscriptActions,
     theme: &Theme,
     markdown: &mut ReasoningMarkdown<'_>,
@@ -93,7 +95,9 @@ pub(crate) fn render_activities(
                         .flex_col()
                         .child(header)
                         .when(expanded, |card| {
-                            card.child(parts::render_activity_body(activity, workspace, theme))
+                            card.child(parts::render_activity_body(
+                                activity, workspace, selection, theme,
+                            ))
                         })
                         .into_any_element(),
                 );

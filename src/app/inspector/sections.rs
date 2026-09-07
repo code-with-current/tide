@@ -1001,17 +1001,36 @@ fn git_body(data: &GitSectionData, is_worktree: bool, theme: &Theme) -> Div {
 pub(crate) struct StreamLogEntry {
     /// Wall-clock "HH:MM:SS", precomputed at capture.
     pub(crate) time: SharedString,
+    /// Who or what the line is attributed to: a role ("user", "assistant",
+    /// "system") or a tool name ("bash", "read file", "write").
+    pub(crate) source: SharedString,
     /// SharedString so per-frame line clones are refcount bumps.
-    pub(crate) label: SharedString,
-    /// Errors and failed turns tint danger — always paired with the label's
+    pub(crate) content: SharedString,
+    /// Errors and failed turns tint danger — always paired with the content's
     /// own wording, never color alone.
     pub(crate) error: bool,
+}
+
+impl StreamLogEntry {
+    pub(crate) fn new(source: &str, content: &str, error: bool, at_ms: u64) -> Self {
+        Self {
+            time: SharedString::from(
+                DateTime::from_timestamp_millis(at_ms as i64)
+                    .map(|at| at.with_timezone(&Local).format("%H:%M:%S").to_string())
+                    .unwrap_or_default(),
+            ),
+            source: SharedString::from(source),
+            content: SharedString::from(content),
+            error,
+        }
+    }
 }
 
 /// How many lines the per-session tail keeps.
 pub(crate) const STREAM_LOG_CAP: usize = 60;
 
-/// Compact source label cap; titles and errors can run long.
+/// Compact source label cap; titles, errors, and streamed text can run
+/// long.
 const STREAM_LABEL_MAX_CHARS: usize = 64;
 
 fn truncate_label(text: &str) -> String {
@@ -1023,28 +1042,30 @@ fn truncate_label(text: &str) -> String {
     }
 }
 
-/// Classify one driver event into a log line. `None` skips events that read
-/// as noise in a tail: account-level meters, client-only acknowledgements,
-/// and the subagent output firehose (whose batches land many times a
-/// second). Labels are deliberately technical and unlocalized — this is a
-/// log, not prose.
+/// Classify one driver event into a log line: `[role / tool name] -
+/// [content]`. `None` skips events that read as noise in a tail:
+/// account-level meters, client-only acknowledgements, and the subagent
+/// output firehose (whose batches land many times a second). Sources are
+/// deliberately technical and unlocalized — this is a log, not prose.
 pub(crate) fn stream_log_entry(event: &DriverEvent, at_ms: u64) -> Option<StreamLogEntry> {
-    let (label, error) = match event {
-        DriverEvent::TurnStarted => ("turn started".to_owned(), false),
+    let (source, content, error) = match event {
+        DriverEvent::TurnStarted => ("system", "turn started".to_owned(), false),
         DriverEvent::TurnFinished { success, .. } => {
             if *success {
-                ("turn finished".to_owned(), false)
+                ("system", "turn finished".to_owned(), false)
             } else {
-                ("turn failed".to_owned(), true)
+                ("system", "turn failed".to_owned(), true)
             }
         }
-        DriverEvent::TextDelta(text) => (format!("text +{}c", text.chars().count()), false),
-        DriverEvent::ReasoningDelta(text) => {
-            (format!("reasoning +{}c", text.chars().count()), false)
-        }
+        DriverEvent::TextDelta(text) => ("assistant", truncate_label(text), false),
+        DriverEvent::ReasoningDelta(text) => ("reasoning", truncate_label(text), false),
         DriverEvent::Activity {
-            title, complete, ..
+            kind,
+            title,
+            complete,
+            ..
         } => (
+            activity_source(*kind),
             format!(
                 "{}{}",
                 truncate_label(title),
@@ -1052,28 +1073,37 @@ pub(crate) fn stream_log_entry(event: &DriverEvent, at_ms: u64) -> Option<Stream
             ),
             false,
         ),
-        DriverEvent::RichActivity(item) => (truncate_label(&item.title), false),
+        DriverEvent::RichActivity(item) => (
+            activity_source(item.kind),
+            truncate_label(&item.title),
+            false,
+        ),
         DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) => {
-            (format!("bg · {}", truncate_label(&item.title)), false)
+            ("bg", truncate_label(&item.title), false)
         }
-        DriverEvent::Permission { title, .. } => {
-            (format!("permission · {}", truncate_label(title)), true)
-        }
-        DriverEvent::UserInputRequested { .. } => ("input request".to_owned(), true),
+        DriverEvent::Permission { title, .. } => ("permission", truncate_label(title), true),
+        DriverEvent::UserInputRequested { questions, .. } => (
+            "input",
+            questions
+                .first()
+                .map(|question| truncate_label(&question.question))
+                .unwrap_or_else(|| "request".to_owned()),
+            true,
+        ),
         DriverEvent::UsageUpdated {
             context_tokens: Some(tokens),
             ..
-        } => (format!("usage · {} tok", format_tokens(*tokens)), false),
-        DriverEvent::Error(message) => (truncate_label(message), true),
-        DriverEvent::SteerAccepted { .. } => ("steer accepted".to_owned(), false),
-        DriverEvent::SteerRejected { .. } => ("steer rejected".to_owned(), false),
-        DriverEvent::Connected { .. } => ("connected".to_owned(), false),
-        DriverEvent::ProcessExited => ("process exited".to_owned(), false),
-        DriverEvent::AutoTitleUpdated(_) => ("auto title".to_owned(), false),
-        DriverEvent::GoalUpdated(_) => ("goal updated".to_owned(), false),
-        DriverEvent::ComputerUseUpdated(_) => ("computer use".to_owned(), false),
-        DriverEvent::AgentPresetSelected(_) => ("preset selected".to_owned(), false),
-        DriverEvent::AvailableCommands(_) => ("commands".to_owned(), false),
+        } => ("usage", format!("{} tok", format_tokens(*tokens)), false),
+        DriverEvent::Error(message) => ("error", truncate_label(message), true),
+        DriverEvent::SteerAccepted { message } => ("user", truncate_label(message), false),
+        DriverEvent::SteerRejected { .. } => ("system", "steer rejected".to_owned(), true),
+        DriverEvent::Connected { .. } => ("system", "connected".to_owned(), false),
+        DriverEvent::ProcessExited => ("system", "process exited".to_owned(), false),
+        DriverEvent::AutoTitleUpdated(_) => ("system", "auto title".to_owned(), false),
+        DriverEvent::GoalUpdated(_) => ("system", "goal updated".to_owned(), false),
+        DriverEvent::ComputerUseUpdated(_) => ("system", "computer use".to_owned(), false),
+        DriverEvent::AgentPresetSelected(_) => ("system", "preset selected".to_owned(), false),
+        DriverEvent::AvailableCommands(_) => ("system", "commands".to_owned(), false),
         DriverEvent::PlanUsageUpdated(_)
         | DriverEvent::RuntimeEventCursorAdvanced(_)
         | DriverEvent::UsageUpdated {
@@ -1082,19 +1112,37 @@ pub(crate) fn stream_log_entry(event: &DriverEvent, at_ms: u64) -> Option<Stream
         }
         | DriverEvent::BackgroundWork(_) => return None,
     };
-    Some(StreamLogEntry {
-        time: SharedString::from(
-            DateTime::from_timestamp_millis(at_ms as i64)
-                .map(|at| at.with_timezone(&Local).format("%H:%M:%S").to_string())
-                .unwrap_or_default(),
-        ),
-        label: SharedString::from(label),
-        error,
-    })
+    Some(StreamLogEntry::new(source, &content, error, at_ms))
+}
+
+/// The name an activity kind logs under — the tool name the user knows,
+/// not the provider's raw identifier.
+fn activity_source(kind: ActivityKind) -> &'static str {
+    match kind {
+        ActivityKind::Reasoning => "reasoning",
+        ActivityKind::Command => "bash",
+        ActivityKind::FileChange => "write",
+        ActivityKind::FileRead => "read file",
+        ActivityKind::FileSearch => "search",
+        ActivityKind::FileList => "list",
+        ActivityKind::Search => "web search",
+        ActivityKind::Plan => "plan",
+        ActivityKind::Compact => "compact",
+        ActivityKind::Tool => "tool",
+    }
+}
+
+/// A user-authored line for the submit path — driver events only carry
+/// the assistant side of the conversation, so the sent message is logged
+/// where the turn begins.
+pub(crate) fn user_stream_log_entry(message: &str, at_ms: u64) -> StreamLogEntry {
+    StreamLogEntry::new("user", &truncate_label(message), false, at_ms)
 }
 
 /// The event tail as a scrollable mono list, newest first — the reverse
-/// order keeps the live end visible without scroll management.
+/// order keeps the live end visible without scroll management. Each line
+/// reads `[role / tool name] - [content]`, with only the content
+/// truncating so the source stays visible.
 fn stream_log_body<'a>(
     entries: impl DoubleEndedIterator<Item = &'a StreamLogEntry>,
     theme: &Theme,
@@ -1108,10 +1156,15 @@ fn stream_log_body<'a>(
         .gap(px(2.0))
         .py(px(2.0))
         .children(entries.rev().map(|entry| {
+            let content_color = if entry.error {
+                theme.danger
+            } else {
+                theme.text_secondary
+            };
             div()
                 .flex()
                 .items_baseline()
-                .gap(px(6.0))
+                .gap(px(4.0))
                 .min_w_0()
                 .child(
                     mono_text(9.0, theme.text_ghost)
@@ -1124,12 +1177,18 @@ fn stream_log_body<'a>(
                         if entry.error {
                             theme.danger
                         } else {
-                            theme.text_secondary
+                            theme.text_tertiary
                         },
                     )
-                    .min_w_0()
-                    .truncate()
-                    .child(entry.label.clone()),
+                    .flex_none()
+                    .child(entry.source.clone()),
+                )
+                .child(mono_text(9.0, theme.text_ghost).flex_none().child("-"))
+                .child(
+                    mono_text(9.5, content_color)
+                        .min_w_0()
+                        .truncate()
+                        .child(entry.content.clone()),
                 )
         }))
 }

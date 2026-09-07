@@ -13,12 +13,15 @@ use super::super::{
 use super::diff_rows::{self, MAX_DIFF_ROWS};
 use crate::app::components::activity_file_change_stats;
 use crate::md;
+use crate::md::render::TranscriptSelection;
+use crate::md::selection::TextKey;
 use crate::model::{ActivityItem, ActivityKind};
 use crate::theme::{Theme, sp};
 use crate::ui::{icon, icon_button, motion};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, ClipboardItem, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, div, px,
+    AnyElement, ClipboardItem, Div, FontStyle, FontWeight, Hsla, MouseButton, SharedString,
+    Stateful, div, px,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -603,7 +606,7 @@ const OUTPUT_MAX_HEIGHT: f32 = 400.0;
 
 /// A `pre`-style mono block on the dark wash: commands and raw arguments.
 /// Multi-line text renders as-is; wrapping long lines keeps the card honest.
-fn mono_block(text: &str, theme: &Theme) -> Div {
+fn mono_block(text: &str, key: TextKey, selection: &TranscriptSelection, theme: &Theme) -> Div {
     div()
         .w_full()
         .min_w_0()
@@ -616,12 +619,65 @@ fn mono_block(text: &str, theme: &Theme) -> Div {
         .line_height(sp(16.0))
         .font_family(md::render::MONO_FAMILY)
         .text_color(theme.text_secondary)
-        .child(SharedString::from(text))
+        .child(selectable_text(
+            text,
+            md::render::MONO_FAMILY,
+            FontStyle::Normal,
+            theme.text_secondary,
+            key,
+            selection,
+            theme,
+            true,
+        ))
+}
+
+/// One selectable plain-text child for a tool-card body: a uniform flat run
+/// registered with the transcript's shared selection, so drag-select and
+/// Copy cover tool text the same as assistant markdown. `block_break` marks
+/// a whole-block element — copying across it joins with a paragraph break
+/// instead of a single newline.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn selectable_text(
+    text: impl Into<SharedString>,
+    family: &'static str,
+    style: FontStyle,
+    color: Hsla,
+    key: TextKey,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+    block_break: bool,
+) -> AnyElement {
+    let text: SharedString = text.into();
+    let mut run_font = gpui::font(family);
+    run_font.weight = FontWeight::NORMAL;
+    run_font.style = style;
+    let run_len = text.len();
+    let flat = md::render::FlatText {
+        text,
+        runs: vec![gpui::TextRun {
+            len: run_len,
+            font: run_font,
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }],
+        links: Vec::new(),
+        code_ranges: Vec::new(),
+    };
+    md::render::selectable_flat_text(
+        &flat,
+        key,
+        selection.clone(),
+        theme.code_wash,
+        theme.selection,
+        block_break,
+    )
 }
 
 /// The error-token failure card: 1px danger border over a danger-tinted
 /// wash, the failure text at 11.5sp.
-fn failure_card(text: &str, theme: &Theme) -> Div {
+fn failure_card(text: &str, key: TextKey, selection: &TranscriptSelection, theme: &Theme) -> Div {
     div()
         .w_full()
         .min_w_0()
@@ -635,7 +691,16 @@ fn failure_card(text: &str, theme: &Theme) -> Div {
         .text_size(sp(11.5))
         .line_height(sp(16.0))
         .text_color(theme.danger)
-        .child(SharedString::from(text))
+        .child(selectable_text(
+            text,
+            md::render::SANS_FAMILY,
+            FontStyle::Normal,
+            theme.danger,
+            key,
+            selection,
+            theme,
+            true,
+        ))
 }
 
 /// The text a failure card shows: the detail first, the output standing in
@@ -894,39 +959,68 @@ pub(crate) fn parse_todo_output(output: &str) -> Option<Vec<(TodoState, String)>
     (!parsed.is_empty()).then_some(parsed)
 }
 
-/// The 11px checkbox for one todo state: a filled accent square with the
-/// check glyph when done; a dim-bordered empty square when pending; a
-/// dim-outlined square with an accent dot while in progress (the "half"
-/// state); cancelled keeps the pending box but the label carries the
-/// strike.
-fn todo_checkbox(state: TodoState, theme: &Theme) -> Div {
+/// The 11px checkbox for one todo state: a filled green circle with the
+/// check glyph when done; a rotating accent loader while in progress; a
+/// dashed circle outline when pending; cancelled keeps the pending circle
+/// but the label carries the strike.
+pub(crate) fn todo_checkbox(state: TodoState, theme: &Theme) -> Div {
     let box_style = div()
         .size(px(11.0))
         .flex_none()
-        .rounded(px(2.5))
         .flex()
         .items_center()
         .justify_center();
     match state {
-        TodoState::Done => {
-            box_style
-                .bg(theme.accent)
-                .child(icon("icons/check.svg", 10.0, theme.on_inverse))
-        }
-        TodoState::InProgress => box_style
+        TodoState::Done => box_style.rounded_full().bg(theme.success).child(icon(
+            "icons/check.svg",
+            10.0,
+            theme.on_inverse,
+        )),
+        TodoState::InProgress => box_style.rounded_full().child(motion::spin(icon(
+            "icons/loader-circle.svg",
+            11.0,
+            theme.accent,
+        ))),
+        TodoState::Pending | TodoState::Cancelled => box_style
+            .rounded_full()
             .border_1()
-            .border_color(tools_dim(theme))
-            .child(div().size(px(5.0)).rounded_full().bg(theme.accent)),
-        TodoState::Pending | TodoState::Cancelled => {
-            box_style.border_1().border_color(tools_dim(theme))
-        }
+            .border_dashed()
+            .border_color(tools_dim(theme)),
     }
+}
+
+/// One checklist row shared by the transcript card and the composer's
+/// floating plan: the state checkbox leading and the label trailing. Done
+/// and cancelled labels strike through in the tertiary token; the
+/// in-progress row keeps the normal text.
+pub(crate) fn todo_row(state: TodoState, label: String, theme: &Theme) -> Div {
+    let struck = matches!(state, TodoState::Done | TodoState::Cancelled);
+    let label_column = div()
+        .min_w_0()
+        .flex_1()
+        .truncate()
+        .text_size(sp(12.0))
+        .line_height(sp(16.0))
+        .text_color(if struck {
+            theme.text_tertiary
+        } else {
+            tools_description(theme)
+        })
+        .when(struck, |label| label.line_through())
+        .child(SharedString::from(label));
+    div()
+        .h(px(22.0))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(todo_checkbox(state, theme))
+        .child(label_column)
 }
 
 /// A todo-write result rendered as tide's checklist: one 22px row per item,
 /// the state checkbox leading and the label trailing. Done and cancelled
 /// labels strike through in the tertiary token; the in-progress row keeps
-/// the normal text plus a dim "in progress" hint; pending stays quiet.
+/// the normal text; pending stays quiet.
 /// Output nothing parsed falls back to the plain "- item" rows.
 fn todo_section(output: &str, theme: &Theme) -> Div {
     let rows = parse_todo_output(output);
@@ -952,39 +1046,9 @@ fn todo_section(output: &str, theme: &Theme) -> Div {
             })
     };
     let checklist_rows = |items: Vec<(TodoState, String)>| {
-        items.into_iter().map(|(state, label)| {
-            let struck = matches!(state, TodoState::Done | TodoState::Cancelled);
-            let label_column = div()
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(sp(12.0))
-                .line_height(sp(16.0))
-                .text_color(if struck {
-                    theme.text_tertiary
-                } else {
-                    tools_description(theme)
-                })
-                .when(struck, |label| label.line_through())
-                .child(SharedString::from(label));
-            let mut row = div()
-                .h(px(22.0))
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .child(todo_checkbox(state, theme))
-                .child(label_column);
-            if state == TodoState::InProgress {
-                row = row.child(
-                    div()
-                        .flex_none()
-                        .text_size(sp(10.5))
-                        .text_color(tools_dim(theme))
-                        .child("· in progress"),
-                );
-            }
-            row
-        })
+        items
+            .into_iter()
+            .map(|(state, label)| todo_row(state, label, theme))
     };
     div()
         .w_full()
@@ -1011,7 +1075,18 @@ fn copy_button(id: String, text: String, theme: &Theme) -> gpui::Stateful<Div> {
 /// Streaming/plain output in the shared scroll viewport, copy button parked
 /// top-right of the section. Bash output renders mono; other families' plain
 /// text keeps the sans face.
-fn output_section(output: &str, id: &str, mono: bool, theme: &Theme) -> Div {
+fn output_section(
+    output: &str,
+    id: &str,
+    mono: bool,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+) -> Div {
+    let family = if mono {
+        md::render::MONO_FAMILY
+    } else {
+        md::render::SANS_FAMILY
+    };
     let viewport = div()
         .id(SharedString::from(format!("tool-output-{id}")))
         .max_h(px(OUTPUT_MAX_HEIGHT))
@@ -1026,7 +1101,16 @@ fn output_section(output: &str, id: &str, mono: bool, theme: &Theme) -> Div {
         .line_height(sp(16.0))
         .text_color(theme.text_secondary)
         .when(mono, |block| block.font_family(md::render::MONO_FAMILY))
-        .child(SharedString::from(output));
+        .child(selectable_text(
+            output,
+            family,
+            FontStyle::Normal,
+            theme.text_secondary,
+            TextKey::new(format!("tool-body-{id}-out"), 0),
+            selection,
+            theme,
+            true,
+        ));
 
     div()
         .w_full()
@@ -1048,13 +1132,24 @@ fn output_section(output: &str, id: &str, mono: bool, theme: &Theme) -> Div {
 /// scrolls instead of stretching the card, and no content line ever wraps.
 /// `title_hint` names the content (a listing's directory path) in a dim
 /// one-line label above it, when the caller has one.
-fn content_section(title_hint: Option<&str>, text: &str, id: &str, theme: &Theme) -> Stateful<Div> {
-    let lines = text.lines().map(|line| {
-        div()
-            .w_full()
-            .min_w_0()
-            .truncate()
-            .child(SharedString::from(line.trim()))
+fn content_section(
+    title_hint: Option<&str>,
+    text: &str,
+    id: &str,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+) -> Stateful<Div> {
+    let lines = text.lines().enumerate().map(|(ix, line)| {
+        div().w_full().min_w_0().truncate().child(selectable_text(
+            line.trim(),
+            md::render::MONO_FAMILY,
+            FontStyle::Normal,
+            theme.text_secondary,
+            TextKey::new(format!("tool-content-{id}"), ix),
+            selection,
+            theme,
+            false,
+        ))
     });
     div()
         .id(SharedString::from(format!("tool-content-{id}")))
@@ -1087,7 +1182,12 @@ fn content_section(title_hint: Option<&str>, text: &str, id: &str, theme: &Theme
 
 /// A JSON-valued output: pretty-printed mono block behind a tag row ("json",
 /// "raw" — tree/summary views come later), copy button top-right.
-fn json_section(value: &serde_json::Value, id: &str, theme: &Theme) -> Div {
+fn json_section(
+    value: &serde_json::Value,
+    id: &str,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+) -> Div {
     let pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
     let viewport = div()
         .id(SharedString::from(format!("tool-json-{id}")))
@@ -1103,7 +1203,16 @@ fn json_section(value: &serde_json::Value, id: &str, theme: &Theme) -> Div {
         .line_height(sp(16.0))
         .font_family(md::render::MONO_FAMILY)
         .text_color(theme.text_secondary)
-        .child(pretty);
+        .child(selectable_text(
+            pretty,
+            md::render::MONO_FAMILY,
+            FontStyle::Normal,
+            theme.text_secondary,
+            TextKey::new(format!("tool-body-{id}-json"), 0),
+            selection,
+            theme,
+            true,
+        ));
 
     div()
         .w_full()
@@ -1139,7 +1248,12 @@ fn json_section(value: &serde_json::Value, id: &str, theme: &Theme) -> Div {
 /// A dispatched agent's report: the agent badge (bot glyph + name when the
 /// arguments carried one) over the report as plain text — markdown arrives
 /// with the text-part task; plain here keeps v1 honest.
-fn dispatch_section(activity: &ActivityItem, report: &str, theme: &Theme) -> Div {
+fn dispatch_section(
+    activity: &ActivityItem,
+    report: &str,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+) -> Div {
     // Structured card when the driver attached the Agent payload: agent
     // chip + title, the task as a dim prompt line, the report, and the
     // durable dispatch id with its copy affordance (the resumeFrom target).
@@ -1182,7 +1296,16 @@ fn dispatch_section(activity: &ActivityItem, report: &str, theme: &Theme) -> Div
                     .text_size(sp(11.0))
                     .line_height(sp(15.0))
                     .text_color(tools_description(theme))
-                    .child(SharedString::from(agent.task.trim().to_owned())),
+                    .child(selectable_text(
+                        agent.task.trim(),
+                        md::render::SANS_FAMILY,
+                        FontStyle::Normal,
+                        tools_description(theme),
+                        TextKey::new(format!("tool-body-{id}-task"), 0),
+                        selection,
+                        theme,
+                        true,
+                    )),
             );
         }
         if !agent.report.trim().is_empty() {
@@ -1192,7 +1315,16 @@ fn dispatch_section(activity: &ActivityItem, report: &str, theme: &Theme) -> Div
                     .text_size(sp(11.5))
                     .line_height(sp(16.0))
                     .text_color(tools_description(theme))
-                    .child(SharedString::from(agent.report.trim().to_owned())),
+                    .child(selectable_text(
+                        agent.report.trim(),
+                        md::render::SANS_FAMILY,
+                        FontStyle::Normal,
+                        tools_description(theme),
+                        TextKey::new(format!("tool-body-{id}-report"), 0),
+                        selection,
+                        theme,
+                        true,
+                    )),
             );
         }
         if let Some(dispatch_id) = agent
@@ -1246,7 +1378,16 @@ fn dispatch_section(activity: &ActivityItem, report: &str, theme: &Theme) -> Div
                 .text_size(sp(11.5))
                 .line_height(sp(16.0))
                 .text_color(tools_description(theme))
-                .child(SharedString::from(report)),
+                .child(selectable_text(
+                    report,
+                    md::render::SANS_FAMILY,
+                    FontStyle::Normal,
+                    tools_description(theme),
+                    TextKey::new(format!("tool-body-{}-report", disclosure_id(activity)), 0),
+                    selection,
+                    theme,
+                    true,
+                )),
         )
 }
 
@@ -1321,35 +1462,44 @@ fn question_section(question: &str, options: &[(String, Option<String>)], theme:
 /// check leads the JSON check on purpose — a marked checklist opens with
 /// `[`, which `looks_like_json` would otherwise claim and lose to a parse
 /// error.
-fn result_section(activity: &ActivityItem, output: &str, id: &str, theme: &Theme) -> Div {
+fn result_section(
+    activity: &ActivityItem,
+    output: &str,
+    id: &str,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+) -> Div {
     if is_todo_write(activity) {
         return todo_section(output, theme);
     }
     if is_dispatch(activity) {
-        return dispatch_section(activity, output, theme);
+        return dispatch_section(activity, output, selection, theme);
     }
     if let Some(value) = looks_like_json(output) {
-        return json_section(&value, id, theme);
+        return json_section(&value, id, selection, theme);
     }
     output_section(
         output,
         id,
         label_for_activity(activity).family == ToolFamily::Bash,
+        selection,
         theme,
     )
 }
 
 /// The card body, rendered under an expanded header inside the railed
 /// container: an input section (per family) plus a result section (once the
-/// activity settles). Takes no app context — the copy buttons' click
-/// handlers receive one at click time, so `list.rs` can call this anywhere
-/// it can render.
+/// activity settles). Takes no app context beyond the shared selection
+/// handle — the copy buttons' click handlers receive one at click time, so
+/// `list.rs` can call this anywhere it can render.
 pub(crate) fn render_activity_body(
     activity: &ActivityItem,
     workspace: &Path,
+    selection: &TranscriptSelection,
     theme: &Theme,
 ) -> Div {
     let id = disclosure_id(activity);
+    let key = |suffix: &str| TextKey::new(format!("tool-body-{id}-{suffix}"), 0);
     let family = label_for_activity(activity).family;
 
     // The body column aligns under the header's label: the header's leading
@@ -1371,7 +1521,7 @@ pub(crate) fn render_activity_body(
         // Bash: the command in a mono pre-style block on the raised wash.
         ToolFamily::Bash => {
             if let Some(command) = command_source(activity).filter(|command| !command.is_empty()) {
-                body = body.child(mono_block(command, theme));
+                body = body.child(mono_block(command, key("cmd"), selection, theme));
             }
         }
         // Edit/Write: each prepared file change with a diff body renders its
@@ -1407,6 +1557,7 @@ pub(crate) fn render_activity_body(
                         .child(diff_rows::render_diff_lines(
                             diff,
                             &format!("tool-diff-{id}-{index}"),
+                            selection,
                             theme,
                             Some(MAX_DIFF_ROWS),
                         )),
@@ -1426,7 +1577,7 @@ pub(crate) fn render_activity_body(
                     .map(str::trim)
                     .filter(|text| !text.is_empty());
                 if let Some(description) = description {
-                    body = body.child(blockquote(description, theme));
+                    body = body.child(blockquote(description, key("desc"), selection, theme));
                 }
             }
         }
@@ -1465,7 +1616,7 @@ pub(crate) fn render_activity_body(
                         .map(str::trim)
                         .filter(|text| !text.is_empty()));
                 if let Some(description) = description {
-                    body = body.child(blockquote(description, theme));
+                    body = body.child(blockquote(description, key("desc"), selection, theme));
                 }
                 if let Some(arguments) = activity
                     .arguments
@@ -1473,7 +1624,7 @@ pub(crate) fn render_activity_body(
                     .map(str::trim)
                     .filter(|text| !text.is_empty())
                 {
-                    body = body.child(mono_block(arguments, theme));
+                    body = body.child(mono_block(arguments, key("args"), selection, theme));
                 }
             }
         }
@@ -1492,7 +1643,7 @@ pub(crate) fn render_activity_body(
                     .map(str::trim)
                     .filter(|text| !text.is_empty()));
             if let Some(description) = description {
-                body = body.child(blockquote(description, theme));
+                body = body.child(blockquote(description, key("desc"), selection, theme));
             }
             if let Some(arguments) = activity
                 .arguments
@@ -1500,7 +1651,7 @@ pub(crate) fn render_activity_body(
                 .map(str::trim)
                 .filter(|text| !text.is_empty())
             {
-                body = body.child(mono_block(arguments, theme));
+                body = body.child(mono_block(arguments, key("args"), selection, theme));
             }
         }
     }
@@ -1508,7 +1659,7 @@ pub(crate) fn render_activity_body(
     // ── Result section ──
     if activity.failed {
         if let Some(text) = failure_text(activity) {
-            body = body.child(failure_card(text, theme));
+            body = body.child(failure_card(text, key("fail"), selection, theme));
         }
     } else if activity.complete {
         // Read-only tools render the content viewport: the captured output
@@ -1522,12 +1673,18 @@ pub(crate) fn render_activity_body(
             && let Some(listing) = content_body_source(activity)
         {
             let hint = listing_path(activity).map(|path| directory_display(workspace, &path));
-            body = body.child(content_section(hint.as_deref(), listing, &id, theme));
+            body = body.child(content_section(
+                hint.as_deref(),
+                listing,
+                &id,
+                selection,
+                theme,
+            ));
         } else if let Some(output) = captured_output(activity) {
             if is_content_tool(activity) {
-                body = body.child(content_section(None, output, &id, theme));
+                body = body.child(content_section(None, output, &id, selection, theme));
             } else {
-                body = body.child(result_section(activity, output, &id, theme));
+                body = body.child(result_section(activity, output, &id, selection, theme));
             }
         }
     }
@@ -1537,7 +1694,12 @@ pub(crate) fn render_activity_body(
 
 /// The italic description blockquote on the rail — the generic families'
 /// input line.
-fn blockquote(description: &str, theme: &Theme) -> Div {
+fn blockquote(
+    description: &str,
+    key: TextKey,
+    selection: &TranscriptSelection,
+    theme: &Theme,
+) -> Div {
     div()
         .min_w_0()
         .border_l_2()
@@ -1545,7 +1707,15 @@ fn blockquote(description: &str, theme: &Theme) -> Div {
         .pl(px(8.0))
         .text_size(sp(11.5))
         .line_height(sp(16.0))
-        .italic()
         .text_color(tools_description(theme))
-        .child(SharedString::from(description))
+        .child(selectable_text(
+            description,
+            md::render::SANS_FAMILY,
+            FontStyle::Italic,
+            tools_description(theme),
+            key,
+            selection,
+            theme,
+            true,
+        ))
 }

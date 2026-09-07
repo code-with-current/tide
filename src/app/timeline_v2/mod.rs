@@ -9,7 +9,7 @@ mod labels;
 mod list;
 pub(crate) mod parts;
 mod permission;
-mod rows;
+pub(crate) mod rows;
 mod search;
 mod tokens;
 

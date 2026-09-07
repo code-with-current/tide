@@ -526,10 +526,8 @@ impl Tide {
         {
             return None;
         }
-        let rollback_turns = session.provider_turns_after(retained_turn_count);
-        if rollback_turns > 0 && session.provider_cursor.is_none() {
-            return None;
-        }
+        // A missing persisted cursor never blocks a rewind: Tide rebuilds its
+        // native conversation from the stored transcript.
         Some(UserMessageAction {
             session_id: session.id,
             message_id: message.id,

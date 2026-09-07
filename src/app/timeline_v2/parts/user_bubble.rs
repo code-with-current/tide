@@ -17,6 +17,8 @@ use super::super::rows::activity_group::GroupToggle;
 use super::super::rows::turn_item::clock_time;
 use crate::app::image_preview;
 use crate::app::right_panel;
+use crate::md::render::{self, FlatText, TranscriptSelection};
+use crate::md::selection::TextKey;
 use crate::model::{AgentSession, MessageRole};
 use crate::theme::{Theme, sp};
 use crate::ui::menu::{ContextMenuHandle, context_menu};
@@ -24,12 +26,160 @@ use crate::ui::tooltip::Tooltip;
 use crate::ui::{icon, icon_button};
 use gpui::prelude::*;
 use gpui::{
-    ClickEvent, Div, KeyDownEvent, ObjectFit, SharedString, Window, div, img, linear_color_stop,
-    linear_gradient, px,
+    ClickEvent, Div, FontWeight, Hsla, KeyDownEvent, ObjectFit, SharedString, TextRun,
+    UnderlineStyle, Window, div, font, img, linear_color_stop, linear_gradient, px,
 };
+use std::collections::HashMap;
+use std::ops::Range;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use uuid::Uuid;
+
+// ── Mentions, pure ───────────────────────────────────────────────────────────
+
+/// What a mention token refers to: an `@path` file reference or a line-leading
+/// `/skill` invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MentionKind {
+    File,
+    Skill,
+}
+
+/// One mention token found in a user message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Mention {
+    pub kind: MentionKind,
+    /// Byte range of the token exactly as typed, sigil included — the pill
+    /// paints behind these bytes and nothing around them.
+    pub range: Range<usize>,
+}
+
+/// Resolve a mention token (sigil included) to its hover label — the file's
+/// absolute path, or the skill's SKILL.md location. Built in `list.rs` where
+/// the workspace root and the skills catalog live.
+pub(crate) type MentionResolver = Arc<dyn Fn(&str) -> Option<String> + 'static>;
+
+/// The `@path` and `/skill` tokens a user message carries, in document order.
+///
+/// The same tokens the composer and the driver recognize: an `@` mention is a
+/// token-boundary `@` followed by a path (quoted when it holds whitespace),
+/// and only counts when the path looks pathy (`/` or `.` inside — prose
+/// `@handle` shoutouts stay plain text); a skill mention is a `/name` at the
+/// START of a line, single segment, alphanumeric-led. Trailing sentence
+/// punctuation stays outside the pill.
+pub(crate) fn parse_mentions(content: &str) -> Vec<Mention> {
+    let bytes = content.as_bytes();
+    let mut mentions = Vec::new();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let boundary = index == 0 || bytes[index - 1].is_ascii_whitespace();
+        if !boundary {
+            index += 1;
+            continue;
+        }
+        let ended = match bytes[index] {
+            b'@' => file_mention_end(content, index).map(|end| (MentionKind::File, end)),
+            b'/' if index == 0 || bytes[index - 1] == b'\n' => {
+                skill_mention_end(content, index).map(|end| (MentionKind::Skill, end))
+            }
+            _ => None,
+        };
+        match ended {
+            Some((kind, end)) => {
+                mentions.push(Mention {
+                    kind,
+                    range: index..end,
+                });
+                index = end;
+            }
+            None => index += 1,
+        }
+    }
+    mentions
+}
+
+/// End of an `@path` token starting at `at` (the `@`'s index), or `None` when
+/// the token is not path-shaped enough to pill. Handles the composer's
+/// `@"quoted path"` form for whitespace-bearing paths.
+fn file_mention_end(content: &str, at: usize) -> Option<usize> {
+    let rest = &content[at + 1..];
+    let first = rest.chars().next()?;
+    if first.is_whitespace() {
+        return None;
+    }
+    let end = if first == '"' {
+        rest[1..].find('"')? + 2
+    } else {
+        rest.find(char::is_whitespace).unwrap_or(rest.len())
+    };
+    let token = rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
+    let path = token.trim_matches('"');
+    if path.is_empty() || !(path.contains('/') || path.contains('.')) {
+        return None;
+    }
+    Some(at + 1 + token.len())
+}
+
+/// End of a line-leading `/skill` token starting at `at`, or `None` when the
+/// token is not a skill invocation (paths like `/usr/bin` have segments,
+/// `/etc`-style tokens do not start alphanumeric).
+fn skill_mention_end(content: &str, at: usize) -> Option<usize> {
+    let rest = &content[at + 1..];
+    let raw_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let name = rest[..raw_end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
+    let led = name.chars().next().is_some_and(|c| c.is_alphanumeric());
+    if !led || name.contains('/') {
+        return None;
+    }
+    Some(at + 1 + name.len())
+}
+
+/// Styled runs tiling the whole message: mention tokens as markdown links —
+/// accent text over an accent underline, the same run decoration
+/// [`render::flatten`] gives `[](..)` links, and one that changes no glyph or
+/// row height — while everything else stays in the plain bubble color. The
+/// runs must tile the string exactly — the shape engine reads `len` as raw
+/// bytes.
+pub(crate) fn mention_runs(
+    content: &str,
+    mentions: &[Mention],
+    base: Hsla,
+    accent: Hsla,
+) -> Vec<TextRun> {
+    let run = |len: usize, color: Hsla, underline: Option<UnderlineStyle>| TextRun {
+        len,
+        font: font(render::SANS_FAMILY),
+        color,
+        background_color: None,
+        underline,
+        strikethrough: None,
+    };
+    let mut runs = Vec::with_capacity(mentions.len() * 2 + 1);
+    let mut cursor = 0usize;
+    for mention in mentions {
+        if mention.range.start > cursor {
+            runs.push(run(mention.range.start - cursor, base, None));
+        }
+        // The link affordance on the label: an underline in the same accent
+        // as the text, so `@index.ts` reads as `[@index.ts](./index.ts)`
+        // without moving a single glyph.
+        runs.push(run(
+            mention.range.len(),
+            accent,
+            Some(UnderlineStyle {
+                color: Some(accent),
+                thickness: px(1.0),
+                wavy: false,
+            }),
+        ));
+        cursor = mention.range.end;
+    }
+    if cursor < content.len() {
+        runs.push(run(content.len() - cursor, base, None));
+    }
+    runs
+}
 
 // ── The folds, pure ──────────────────────────────────────────────────────────
 
@@ -145,9 +295,11 @@ pub(crate) fn render_user_bubble(
     editable: bool,
     editing: Option<&EditingMessage>,
     attachments: &[UserBubbleAttachment],
+    selection: TranscriptSelection,
     theme: &Theme,
     actions: UserBubbleActions,
     toggle_clamp: GroupToggle,
+    mention_resolver: Option<MentionResolver>,
 ) -> Div {
     let group = SharedString::from(format!("user-message-{message_id}"));
     let mut column = div()
@@ -156,6 +308,7 @@ pub(crate) fn render_user_bubble(
         .flex_col()
         .items_end()
         .gap(px(3.0))
+        .mt(px(12.0))
         .group(group.clone());
 
     // The attachments row stands above both the bubble and the editor —
@@ -172,7 +325,14 @@ pub(crate) fn render_user_bubble(
         }
         None => {
             if !content.trim().is_empty() {
-                column = column.child(user_bubble(content, clamp_expanded, theme));
+                column = column.child(user_bubble(
+                    message_id,
+                    content,
+                    clamp_expanded,
+                    theme,
+                    selection,
+                    mention_resolver,
+                ));
                 if clamp_needed(content) {
                     column = column.child(clamp_chevron(
                         message_id,
@@ -197,9 +357,67 @@ pub(crate) fn render_user_bubble(
 }
 
 /// The bubble: raised surface, 12px radius (the legacy user branch's number),
-/// plain text at the legacy's 14sp/20sp with newlines rendered as-is.
-fn user_bubble(content: &str, expanded: bool, theme: &Theme) -> Div {
-    let clamped = clamp_needed(content) && !expanded;
+/// plain text at the legacy's 14sp/20sp with newlines rendered as-is. The
+/// text registers with the transcript selection, so drag-select and Copy
+/// work across it the same as assistant markdown.
+///
+/// `@path` and `/skill` tokens render as markdown links: the token keeps its
+/// glyphs but reads as `[@index.ts](./index.ts)` — a rounded accent wash
+/// behind it (the inline-code paint path), the token itself in accent color
+/// over an accent underline, and a hover tooltip resolved through
+/// `mention_resolver` (the file's absolute path, or the skill's SKILL.md
+/// location) standing in for the link target. Underline included, it is all
+/// paint — wrapping, selection, and the clamp estimator see plain text.
+fn user_bubble(
+    message_id: Uuid,
+    content: &str,
+    clamp_expanded: bool,
+    theme: &Theme,
+    selection: TranscriptSelection,
+    mention_resolver: Option<MentionResolver>,
+) -> Div {
+    let clamped = clamp_needed(content) && !clamp_expanded;
+    let key = TextKey::new(format!("user-bubble-{message_id}"), 0);
+    let mentions = parse_mentions(content);
+    let flat = if mentions.is_empty() {
+        render::flatten_plain(content, render::SANS_FAMILY, FontWeight::NORMAL, theme.text)
+    } else {
+        FlatText {
+            text: SharedString::from(content.to_owned()),
+            runs: mention_runs(content, &mentions, theme.text, theme.accent),
+            links: Vec::new(),
+            code_ranges: mentions.iter().map(|m| m.range.clone()).collect(),
+        }
+    };
+    let text = if mentions.is_empty() {
+        render::selectable_flat_text(
+            &flat,
+            key,
+            selection,
+            theme.code_wash,
+            theme.selection,
+            false,
+        )
+    } else {
+        let mut labels: HashMap<usize, SharedString> = HashMap::new();
+        if let Some(resolver) = mention_resolver.as_deref() {
+            for mention in &mentions {
+                let token = &content[mention.range.clone()];
+                if let Some(label) = resolver(token) {
+                    labels.insert(mention.range.start, SharedString::from(label));
+                }
+            }
+        }
+        render::selectable_mention_text(
+            &flat,
+            mentions.iter().map(|m| m.range.clone()).collect(),
+            Rc::new(labels),
+            key,
+            selection,
+            theme.accent.opacity(0.12),
+            theme.selection,
+        )
+    };
     let surface = theme.raised;
     div()
         .relative()
@@ -232,7 +450,7 @@ fn user_bubble(content: &str, expanded: bool, theme: &Theme) -> Div {
                         )),
                 )
         })
-        .child(SharedString::from(content))
+        .child(text)
 }
 
 /// The attachment tiles under a user message: 96×80 tiles right-aligned by

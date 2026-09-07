@@ -6,9 +6,11 @@
 
 use crate::app::timeline_v2::tools_dim;
 use crate::md;
+use crate::md::render::TranscriptSelection;
+use crate::md::selection::TextKey;
 use crate::theme::{Theme, sp};
 use gpui::prelude::*;
-use gpui::{Div, SharedString, div, px};
+use gpui::{Div, FontStyle, SharedString, div, px};
 
 /// How one unified-diff line reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +63,7 @@ pub(crate) fn diff_truncation(total_lines: usize, max_rows: Option<usize>) -> Op
 pub(crate) fn render_diff_lines(
     diff: &str,
     element_id: &str,
+    selection: &TranscriptSelection,
     theme: &Theme,
     max_rows: Option<usize>,
 ) -> Div {
@@ -68,8 +71,13 @@ pub(crate) fn render_diff_lines(
     let shown = max_rows.map_or(lines.len(), |cap| lines.len().min(cap));
     let success = super::super::diff_added();
     let error = super::super::diff_removed(theme);
+    let key_base = format!("{element_id}-diff");
 
-    let rows = lines[..shown].iter().map(|line| {
+    let rows = lines[..shown].iter().enumerate().map(|(ix, line)| {
+        let color = match classify_diff_line(line) {
+            LineKind::Context | LineKind::HunkHeader => tools_dim(theme),
+            LineKind::Addition | LineKind::Deletion => theme.text_secondary,
+        };
         let mut row = div()
             .w_full()
             .min_w_0()
@@ -79,7 +87,16 @@ pub(crate) fn render_diff_lines(
             .text_size(sp(11.5))
             .line_height(sp(16.0))
             .font_family(md::render::MONO_FAMILY)
-            .child(SharedString::from(*line));
+            .child(super::tool_part::selectable_text(
+                *line,
+                md::render::MONO_FAMILY,
+                FontStyle::Normal,
+                color,
+                TextKey::new(key_base.clone(), ix),
+                selection,
+                theme,
+                false,
+            ));
         match classify_diff_line(line) {
             LineKind::Addition => {
                 row = row
