@@ -361,6 +361,9 @@ impl Tide {
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
                     }
+                    crate::platform::play_notification_sound(
+                        crate::platform::NotificationSound::Attention,
+                    );
                 }
             }
             DriverEvent::UserInputRequested {
@@ -376,6 +379,9 @@ impl Tide {
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
                     }
+                    crate::platform::play_notification_sound(
+                        crate::platform::NotificationSound::Attention,
+                    );
                 }
             }
             DriverEvent::ComputerUseUpdated(state) => {
@@ -511,6 +517,9 @@ impl Tide {
                     },
                 );
                 let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
+                // A failed turn is preceded by an `Error` event; a user stop
+                // is not, so this tells the two non-success endings apart.
+                let turn_failed = !success && runtime.last_driver_error.is_some();
                 runtime.last_driver_error = None;
                 if self
                     .state
@@ -605,6 +614,17 @@ impl Tide {
                         &body,
                         cx,
                     );
+                }
+                let sound = if success {
+                    Some(crate::platform::NotificationSound::Done)
+                } else if turn_failed {
+                    Some(crate::platform::NotificationSound::Error)
+                } else {
+                    // The user stopped the turn themselves; no cue.
+                    None
+                };
+                if let Some(sound) = sound {
+                    crate::platform::play_notification_sound(sound);
                 }
             }
             DriverEvent::Error(error) => {

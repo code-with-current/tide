@@ -141,9 +141,11 @@ fn parse_boolean_setting(value: &str) -> Option<bool> {
     }
 }
 
-/// Deliver an audible macOS notification. GPUI owns the notification-center
+/// Deliver a macOS notification banner. GPUI owns the notification-center
 /// delegate (and therefore click responses); Tide only supplies content here
 /// because GPUI's generic payload does not currently expose a sound field.
+/// The banner itself is silent — the audible cue is Tide's own bundled
+/// sound, played by [`play_notification_sound`] alongside this call.
 #[cfg(target_os = "macos")]
 pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App) {
     use block2::RcBlock;
@@ -151,7 +153,7 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App)
     use objc2_foundation::{NSBundle, NSError, NSString};
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
-        UNNotificationSound, UNUserNotificationCenter,
+        UNUserNotificationCenter,
     };
 
     // UserNotifications raises an Objective-C exception for an executable
@@ -171,7 +173,6 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App)
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&title));
         content.setBody(&NSString::from_str(&body));
-        content.setSound(Some(&UNNotificationSound::defaultSound()));
 
         // A nil trigger delivers immediately. The stable task tag replaces an
         // older completion banner for the same task and comes back on click.
@@ -185,9 +186,54 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App)
     });
     UNUserNotificationCenter::currentNotificationCenter()
         .requestAuthorizationWithOptions_completionHandler(
-            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+            UNAuthorizationOptions::Alert,
             &authorization,
         );
+}
+
+/// A bundled notification cue from `assets/sounds`, one per user-facing turn
+/// outcome.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NotificationSound {
+    /// The turn finished successfully.
+    Done,
+    /// The agent is blocked on a permission prompt or a question.
+    Attention,
+    /// The turn failed.
+    Error,
+}
+
+impl NotificationSound {
+    fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Done => include_bytes!("../assets/sounds/done.mp3"),
+            Self::Attention => include_bytes!("../assets/sounds/attention.mp3"),
+            Self::Error => include_bytes!("../assets/sounds/error.mp3"),
+        }
+    }
+}
+
+/// Play a notification cue off the UI thread. Each cue gets a short-lived
+/// thread that owns the audio device for the cue's duration — cues are rare,
+/// and a fresh stream per play sidesteps stale-device handling entirely.
+pub fn play_notification_sound(sound: NotificationSound) {
+    std::thread::Builder::new()
+        .name("notification-sound".into())
+        .spawn(move || play_sound_once(sound.bytes()))
+        .ok();
+}
+
+fn play_sound_once(bytes: &'static [u8]) {
+    use std::io::Cursor;
+
+    let Ok(mut device) = rodio::DeviceSinkBuilder::open_default_sink() else {
+        return;
+    };
+    device.log_on_drop(false);
+    // The device sink ends playback on drop, so it must outlive the player.
+    if let Ok(player) = rodio::play(device.mixer(), Cursor::new(bytes)) {
+        player.sleep_until_end();
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -201,7 +247,7 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, cx: &gpui::App
 }
 
 #[cfg(target_os = "macos")]
-fn app_icon_for_application_path(
+pub(crate) fn app_icon_for_application_path(
     application_path: &objc2_foundation::NSString,
 ) -> Option<std::sync::Arc<gpui::Image>> {
     use objc2::AnyThread;
