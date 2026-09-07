@@ -332,6 +332,22 @@ pub fn mcp_server_command() -> anyhow::Result<PathBuf> {
     Ok(helper.join("Contents").join("MacOS").join(executable))
 }
 
+/// The installed Computer Use helper `.app` bundle — the bundle whose TCC
+/// identity the running helper carries (see [`install_helper_app`]), and
+/// therefore the one the user must drag into the System Settings permission
+/// lists when granting Screen Recording or Accessibility. The permission
+/// panel renders this bundle as its drag card.
+pub fn helper_app_bundle() -> anyhow::Result<PathBuf> {
+    let executable = mcp_server_command()?;
+    // `<bundle>/Contents/MacOS/<executable>` → `<bundle>`.
+    let bundle = executable
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| anyhow!("Computer Use helper path is malformed"))?;
+    Ok(bundle.to_path_buf())
+}
+
 pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
     let executable = host_executable_path()?;
     let macos = executable
@@ -343,24 +359,6 @@ pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
     let path = contents.join("Resources").join("tide_js_repl");
     if !path.is_file() {
         bail!("Tide JavaScript REPL is missing from this Tide build")
-    }
-    Ok(path)
-}
-
-pub fn pi_extension_path() -> anyhow::Result<PathBuf> {
-    let executable = host_executable_path()?;
-    let macos = executable
-        .parent()
-        .ok_or_else(|| anyhow!("Tide executable has no parent directory"))?;
-    let contents = macos
-        .parent()
-        .ok_or_else(|| anyhow!("Tide app bundle is malformed"))?;
-    let path = contents
-        .join("Resources")
-        .join("computer-use")
-        .join("pi-extension.ts");
-    if !path.is_file() {
-        bail!("Tide Pi Computer Use extension is missing from this Tide build")
     }
     Ok(path)
 }

@@ -9,13 +9,13 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Local, Utc};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Div,
-    Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent,
-    KeystrokeEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels,
-    Render, ScrollHandle, SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window,
-    WindowBounds, canvas, div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient,
-    list, point, prelude::*, pulsating_between, px, rgb,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, ClipboardEntry, ClipboardItem,
+    Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, IntoElement,
+    KeyDownEvent, KeystrokeEvent, ListAlignment, ListOffset, ListState, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit,
+    PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful, StyleRefinement,
+    TextRun, WeakEntity, Window, WindowBounds, canvas, div, ease_out_quint, fill, font, img,
+    linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
 };
 use uuid::Uuid;
 
@@ -30,7 +30,7 @@ use crate::git_branch::BranchSnapshot;
 use crate::input::{InputEvent, TextInput};
 use crate::md;
 use crate::model::{
-    ActivityItem, ActivityKind, AgentSession, BackgroundWorkEvent, BackgroundWorkItem,
+    ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
     MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderModelOption,
@@ -81,17 +81,17 @@ use crate::{
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 8.0;
-const CONTENT_MAX_WIDTH: f32 = 720.0;
+const CONTENT_MAX_WIDTH: f32 = 850.0;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
 const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
 const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
-const SIDEBAR_MIN_WIDTH: f32 = 180.0;
-const SIDEBAR_MAX_WIDTH: f32 = 420.0;
+const SIDEBAR_MIN_WIDTH: f32 = 200.0;
+const SIDEBAR_MAX_WIDTH: f32 = 400.0;
 const UPDATER_BUTTON_COLLAPSED_WIDTH: f32 = 20.0;
 const UPDATER_BUTTON_EXPANDED_WIDTH: f32 = 58.0;
-const RIGHT_PANEL_MIN_WIDTH: f32 = 280.0;
+const RIGHT_PANEL_MIN_WIDTH: f32 = 300.0;
 const RIGHT_PANEL_MAX_WIDTH: f32 = 1000.0;
 const DEFAULT_FILE_TREE_WIDTH: f32 = 184.0;
 const FILE_TREE_MIN_WIDTH: f32 = 140.0;
@@ -99,7 +99,7 @@ const FILE_TREE_MAX_WIDTH: f32 = 360.0;
 const FILE_EDITOR_MIN_WIDTH: f32 = 140.0;
 const FILE_EDITOR_INITIAL_WIDTH: f32 = 500.0;
 const REVIEW_INITIAL_WIDTH: f32 = 820.0;
-const MAIN_PANEL_MIN_WIDTH: f32 = 360.0;
+const MAIN_PANEL_MIN_WIDTH: f32 = 400.0;
 const FOLLOWUP_TURN_TOP_GAP: f32 = 48.0;
 const ESCAPE_STOP_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(3);
 /// Presentation pacing only. The app sleeps until a provider or background
@@ -1024,6 +1024,14 @@ impl Default for ActivityScrollViewport {
     }
 }
 
+/// Which surface claimed the footer hover — a turn block's content row or
+/// the footer strip itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum TurnFooterHoverSource {
+    Block,
+    Footer,
+}
+
 pub struct Tide {
     /// Owns the headless provider process for exactly as long as the desktop
     /// app entity. Debug builds can replace it independently after a rebuild;
@@ -1084,6 +1092,11 @@ pub struct Tide {
     computer_permission_tx: Sender<Result<ComputerPermissions, String>>,
     computer_permission_events: Receiver<Result<ComputerPermissions, String>>,
     computer_permission_request_pending: bool,
+    /// When the last permission probe was kicked off, throttling the
+    /// Computer Use page's background grant-status poll.
+    last_permission_probe: Option<Instant>,
+    /// The floating drag-to-authorize panel state (macOS guidance flow).
+    permission_flow: permission_flow::PermissionFlowHost,
     /// The settings Usage page's snapshot: historical token/cost usage
     /// scanned from provider transcripts off-thread. Frames read only this.
     usage_history: Option<crate::usage_history::UsageHistory>,
@@ -1148,6 +1161,15 @@ pub struct Tide {
     pub(crate) timeline_v2_state: TranscriptV2,
     /// Collapse state for the floating inspector column; per app run only.
     inspector: InspectorState,
+    /// The turn whose footer the mouse is currently over — the v2
+    /// transcript reveals one turn's footer at a time on block hover,
+    /// DSH's reveal policy. In-memory, per app run.
+    turn_footer_hover: Option<Uuid>,
+    /// Which surface claimed the hover — a turn block's content row or the
+    /// footer strip itself. A leave event only clears when it matches the
+    /// claiming surface, so the leave/enter race between adjacent rows
+    /// (block leave firing after footer enter) cannot hide the footer.
+    turn_footer_hover_source: Option<TurnFooterHoverSource>,
     /// Live event tails for the inspector's Stream log sections. In-memory
     /// rings, capped per session: a tail, not history.
     inspector_stream_log: HashMap<Uuid, VecDeque<StreamLogEntry>>,
@@ -1248,12 +1270,19 @@ pub struct Tide {
     /// escape to dismiss). Runtime-only.
     composer_jobs_popup_hovered: bool,
     composer_jobs_popup_pinned: bool,
-    /// Parsed markdown for a sub-agent timeline's narration and report,
-    /// keyed `"{provider_id}:{block}"` — the agents-panel detail's own
-    /// equivalent of `message_markdown`, so parse state survives repaints.
-    subagent_markdown: RefCell<HashMap<String, MarkdownView>>,
-    /// Expanded reasoning blocks in the agents-panel detail, keyed the same
-    /// way `subagent_markdown` keys its views.
+    /// The floating todo card above the composer: expanded by default, the
+    /// header click collapses it to a single line naming the in-progress
+    /// task. Runtime-only, shared across sessions like the jobs popup.
+    composer_todo_collapsed: bool,
+    /// Parsed markdown for a sub-agent timeline's narration, report, and
+    /// reasoning traces, keyed by the blocks' deterministic ids — the
+    /// agents-panel detail's own equivalent of `message_markdown`, so parse
+    /// state survives repaints. The shared reasoning renderer reads the same
+    /// `Uuid`-keyed shape the transcript pane's activity cache uses.
+    subagent_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
+    /// Expanded disclosure rows in the agents-panel detail — task clamp,
+    /// reasoning blocks, tool cards, the files card — keyed by the blocks'
+    /// stable id strings (`"{provider_id}:{block}"`).
     subagent_disclosures: HashSet<String>,
     /// Accepted submissions still creating their workspace/checkpoint, or an
     /// edited past message still rewinding its workspace and provider. The
@@ -1618,6 +1647,7 @@ mod inspector;
 mod mermaid_images;
 mod model_picker;
 mod navigation_rail;
+mod permission_flow;
 mod rag_settings;
 mod remote_control;
 mod render;
@@ -1974,7 +2004,11 @@ impl Tide {
                 .count(),
         });
 
-        let composer = cx.new(|cx| ChatComposer::new(window, cx).padding_x(px(14.0), cx));
+        let composer = cx.new(|cx| {
+            ChatComposer::new(window, cx)
+                .padding_x(px(14.0), cx)
+                .text_paste_attachments(cx)
+        });
         let user_input_answer = cx
             .new(|cx| TextInput::new(window, cx).placeholder(tr!("user_input.other_placeholder")));
         let command_palette_search = cx.new(|cx| {
@@ -2727,6 +2761,8 @@ impl Tide {
                 computer_permission_tx,
                 computer_permission_events,
                 computer_permission_request_pending: false,
+                last_permission_probe: None,
+                permission_flow: permission_flow::PermissionFlowHost::default(),
                 usage_history: None,
                 usage_history_pending_for: None,
                 usage_history_generation: 0,
@@ -2754,6 +2790,8 @@ impl Tide {
                 timeline_v2,
                 timeline_v2_state: TranscriptV2::new(),
                 inspector: InspectorState::new(),
+                turn_footer_hover: None,
+                turn_footer_hover_source: None,
                 inspector_stream_log: HashMap::new(),
                 tide_edit_request: None,
                 model_picker_scroll: ScrollHandle::new(),
@@ -2799,6 +2837,7 @@ impl Tide {
                 last_background_work_tick: Instant::now(),
                 composer_jobs_popup_hovered: false,
                 composer_jobs_popup_pinned: false,
+                composer_todo_collapsed: false,
                 subagent_markdown: RefCell::new(HashMap::new()),
                 subagent_disclosures: HashSet::new(),
                 submission_preparations: HashSet::new(),

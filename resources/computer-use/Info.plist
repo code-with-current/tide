@@ -8,6 +8,8 @@
     <string>Tide Computer Use</string>
     <key>CFBundleExecutable</key>
     <string>Tide Computer Use</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>codes.tide.computer-use</string>
     <key>CFBundleInfoDictionaryVersion</key>

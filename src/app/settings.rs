@@ -106,7 +106,11 @@ pub(super) fn visible_settings_pages(
 }
 
 impl Tide {
-    pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
@@ -306,7 +310,7 @@ impl Tide {
             )
     }
 
-    fn render_settings_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_content(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let page = self.settings_page.unwrap_or(SettingsPage::General);
         let right_window_controls = self.render_client_window_controls(
@@ -1022,7 +1026,7 @@ impl Tide {
             .reset(self.skills_rows.borrow().len());
     }
 
-    fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_computer_use_settings(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let enabled = self.state.computer_use_enabled;
         let permissions = self.computer_permissions.clone();
@@ -1106,18 +1110,19 @@ impl Tide {
             }
         }
 
-        let recheck = CardButton::new(
-            "recheck-computer-permissions",
-            if pending {
-                tr!("common.checking")
-            } else {
-                tr!("common.recheck")
-            },
-        )
-        .busy(pending)
-        .render(theme, cx, |this, _window, cx| {
-            this.request_computer_permissions(false, cx);
-        });
+        // Background grant-status poll — only while the user is on this page:
+        // this renderer runs once per frame the section is visible, so
+        // navigating away stops it. It waits out an in-flight probe and
+        // throttles to one probe every few seconds, and goes quiet entirely
+        // once both grants are held.
+        if !pending
+            && !(permissions.screen_recording && permissions.accessibility)
+            && self
+                .last_permission_probe
+                .is_none_or(|started| started.elapsed() >= PERMISSION_PROBE_INTERVAL)
+        {
+            self.request_computer_permissions(false, cx);
+        }
 
         let allow_toggle = toggle_switch(
             "computer-use-enabled",
@@ -1127,9 +1132,6 @@ impl Tide {
             cx,
             move |this, _, cx| this.set_computer_use_enabled(!enabled, cx),
         );
-
-        let mut access_actions: Vec<gpui::AnyElement> = Vec::new();
-        access_actions.push(recheck.into_any_element());
 
         div()
             .flex()
@@ -1160,7 +1162,7 @@ impl Tide {
                     .child(settings_group_head(
                         &theme,
                         tr!("computer_use.macos_access"),
-                        access_actions,
+                        Vec::new(),
                     ))
                     .child(
                         card_body(&theme)
@@ -1178,6 +1180,7 @@ impl Tide {
                                 tr!("computer_use.screen_recording"),
                                 tr!("computer_use.screen_recording_description"),
                                 permissions.screen_recording,
+                                crate::app::permission_flow::PermissionPane::ScreenRecording,
                                 "screen-recording-settings",
                                 theme,
                                 cx,
@@ -1186,6 +1189,7 @@ impl Tide {
                                 tr!("computer_use.accessibility"),
                                 tr!("computer_use.accessibility_description"),
                                 permissions.accessibility,
+                                crate::app::permission_flow::PermissionPane::Accessibility,
                                 "accessibility-settings",
                                 theme,
                                 cx,
@@ -1228,6 +1232,7 @@ impl Tide {
             return;
         }
         self.computer_permission_request_pending = true;
+        self.last_permission_probe = Some(Instant::now());
         let tx = self.computer_permission_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         let daemon = self.daemon.client();
@@ -1414,6 +1419,11 @@ impl Tide {
 /// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
 /// hold values outside this list; they render as-is and simply select
 /// nothing here.
+/// Cadence of the background grant-status poll on the Computer Use page —
+/// one probe at most per interval, and only while the page is visible with a
+/// grant still missing.
+const PERMISSION_PROBE_INTERVAL: Duration = Duration::from_secs(3);
+
 const FONT_SIZES: [f32; 8] = [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 20.0];
 
 fn font_size_label(size: f32) -> String {
@@ -1428,6 +1438,7 @@ fn permission_status_row(
     name: String,
     description: String,
     granted: bool,
+    pane: crate::app::permission_flow::PermissionPane,
     id: &'static str,
     theme: Theme,
     cx: &mut Context<Tide>,
@@ -1461,8 +1472,10 @@ fn permission_status_row(
             .text_color(theme.text_secondary)
             .hover(|element| element.bg(theme.overlay).text_color(theme.text))
             .child(tr!("computer_use.grant_access"))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.request_computer_permissions(true, cx);
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                // Guide the user through the grant: deep-link into the pane
+                // and dock the floating drag panel next to it.
+                this.launch_permission_flow(pane, event, window, cx);
             }))
     };
 
