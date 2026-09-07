@@ -201,6 +201,7 @@ enum BranchPickerMode {
 enum BranchPickerAction {
     Checkout(String),
     Create,
+    ToggleWorktree,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

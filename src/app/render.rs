@@ -402,7 +402,17 @@ impl Render for Tide {
                                         .flex()
                                         .flex_col()
                                         .child(if empty {
-                                            self.render_empty_state(cx).into_any_element()
+                                            // The new-session screen composes
+                                            // its own centered composer and
+                                            // workspace chips; the bottom
+                                            // chrome below stays empty-state
+                                            // only.
+                                            if self.selected_project().is_some() {
+                                                self.render_new_session_screen(window, cx)
+                                                    .into_any_element()
+                                            } else {
+                                                self.render_empty_state(cx).into_any_element()
+                                            }
                                         } else {
                                             self.transcript_pane
                                                 .clone()
@@ -415,13 +425,19 @@ impl Render for Tide {
                                                 .into_any_element()
                                         })
                                         .children(permission)
-                                        .when(self.selected_project().is_some(), |element| {
-                                            element
-                                                .children(self.render_composer_todo(cx))
-                                                .children(self.render_queued_messages(cx))
-                                                .child(self.render_composer(window, cx))
-                                                .child(self.render_workspace_footer(cx))
-                                        }),
+                                        .when(
+                                            self.selected_project().is_some() && !empty,
+                                            |element| {
+                                                element
+                                                    .children(self.render_composer_todo(cx))
+                                                    .children(self.render_queued_messages(cx))
+                                                    .child(self.render_composer(window, cx))
+                                                    .child(self.render_workspace_footer(
+                                                        cx,
+                                                        MenuAlign::AboveLeft,
+                                                    ))
+                                            },
+                                        ),
                                 )
                                 // The inspector island: mounted as a pane so
                                 // targeted notifies (pulse ticks, stream

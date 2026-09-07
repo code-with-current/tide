@@ -2068,10 +2068,10 @@ impl Tide {
 
     // ── Empty states ───────────────────────────────────────────────────────
 
+    /// The no-project onboarding: a single centered call to open a folder.
     pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        if self.selected_project().is_none() {
-            return div()
+        div()
                 .flex_1()
                 .flex()
                 .flex_col()
@@ -2164,8 +2164,21 @@ impl Tide {
                                     }
                                 })),
                         ),
-                );
-        }
+                )
+    }
+
+    /// The new-session screen: the greeting, the composer, and the workspace
+    /// chips — project, Local vs new worktree, base branch — as one
+    /// vertically centered composition. The composer is the screen's
+    /// centerpiece rather than chrome pinned to the window's bottom edge,
+    /// and the git worktree options sit directly under it where the first
+    /// prompt is written.
+    pub(super) fn render_new_session_screen(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
         let selected_project_id = self.state.selected_project;
         let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
         let project_name = self
@@ -2243,16 +2256,18 @@ impl Tide {
         );
         div()
             .flex_1()
+            .min_h(px(0.0))
+            .w_full()
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
             .px_8()
-            .pb(px(52.0))
-            .child(icon("icons/sparkle.svg", 20.0, theme.accent))
+            // Optical lift: with the composer and its chips below, the
+            // block settles slightly above true center.
+            .pb(px(48.0))
             .child(
                 div()
-                    .mt(px(14.0))
                     .flex()
                     .items_baseline()
                     .text_size(sp(20.0))
@@ -2267,6 +2282,17 @@ impl Tide {
                             .child(project_selector)
                             .child(tr_cow!("onboarding.question_mark"))
                     }),
+            )
+            .child(
+                // The composer card and the workspace chips share the
+                // transcript's content width and centering, so the git
+                // worktree options read as part of the prompt itself.
+                div()
+                    .mt(px(28.0))
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .child(self.render_composer(window, cx))
+                    .child(self.render_workspace_footer(cx, MenuAlign::BelowLeft)),
             )
     }
 }
