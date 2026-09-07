@@ -90,10 +90,12 @@ jobs:
             cmake \
             libasound2-dev \
             libfontconfig-dev \
+            libssl-dev \
             libvulkan1 \
             libwayland-dev \
             libx11-xcb-dev \
             libxkbcommon-x11-dev \
+            nasm \
             pkg-config \
             rpm \
             xdg-desktop-portal
@@ -151,10 +153,12 @@ jobs:
             cmake \
             libasound2-dev \
             libfontconfig-dev \
+            libssl-dev \
             libvulkan1 \
             libwayland-dev \
             libx11-xcb-dev \
             libxkbcommon-x11-dev \
+            nasm \
             pkg-config \
             rpm \
             xdg-desktop-portal
@@ -205,7 +209,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup nasm --yes --no-progress
 
       - uses: actions/cache@v6
         with:
@@ -255,7 +259,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup nasm --yes --no-progress
 
       - uses: actions/cache@v6
         with:

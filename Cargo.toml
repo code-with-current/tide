@@ -63,6 +63,19 @@ pulldown-cmark = "0.13"
 # default features stay off so no image/svg codecs ride along.
 qrcode = { version = "0.14", default-features = false }
 regex = "1"
+# Mermaid PNG decode (mermaid_images), browser frames, and the Linux window
+# icon. Matches the version GPUI exposes through `WindowOptions::icon`; PNG
+# is the only codec these call sites need.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# The hosted mermaid renderer fetch (all platforms); gpui's http client slot
+# is only installed in Zed-shaped hosts, so the fetch rides reqwest directly.
+# The blocking client carries its own runtime — the async one panics outside
+# a Tokio context this app never installs. native-tls binds to the platform
+# store (schannel / Secure Transport / OpenSSL) — same call tungstenite makes.
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    "native-tls",
+] }
 # Notification cues (assets/sounds/*.mp3): symphonia decodes, cpal plays.
 rodio = { version = "0.22", default-features = false, features = [
     "playback",
@@ -95,14 +108,6 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 wry = { version = "0.56", features = ["devtools"] }
 block2 = "0.6"
-# Matches the version GPUI itself renders with, so RenderImage frames are the
-# same `image` types.
-image = "0.25"
-# The hosted mermaid renderer fetch; gpui's http client slot is only
-# installed in Zed-shaped hosts, so the fetch rides reqwest directly. The
-# blocking client carries its own runtime — the async one panics outside a
-# Tokio context this app never installs.
-reqwest = { version = "0.13", features = ["blocking"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "std",
     "CGImage",
@@ -179,10 +184,6 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 ] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-graphics"] }
 raw-window-handle = "0.6"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# Matches the version GPUI exposes through `WindowOptions::icon`.
-image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 embed-resource = "3.0"
