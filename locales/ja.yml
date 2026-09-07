@@ -169,9 +169,7 @@ input.search_or_enter_address: 検索またはアドレスを入力
 input.find: 検索
 input.replace: 置換
 
-common.checking: 確認中…
 common.refresh: 更新
-common.recheck: 再確認
 common.reset: リセット
 common.revoke: 許可を解除
 common.retry: 再試行
@@ -229,6 +227,8 @@ computer_use.no_always_allowed_apps: 常に許可されているアプリはあ�
 computer_use.access_granted: アクセス許可済み
 computer_use.grant_access: アクセスを許可
 computer_use.permission_check_failed: コンピュータ操作の権限を確認できませんでした
+computer_use.flow_title: リストにドラッグして、スイッチをオンにしてください
+computer_use.flow_missing_helper: このビルドにはコンピュータ操作のヘルパーが含まれていません
 
 common.settings: 設定
 common.copy: コピー
@@ -597,6 +597,7 @@ goal.usage_tokens: "%{used} / %{budget} トークン"
 goal.usage_tokens_unbudgeted: "%{used} トークン"
 composer.edit_in_composer: 入力欄で編集
 composer.steer: 指示を追加
+composer.plan: 計画
 composer.remove_followup: キューから削除
 user_input.other_placeholder: 別の回答を入力
 user_input.back: 戻る
@@ -695,6 +696,7 @@ errors.rewind_task: "タスクを巻き戻せませんでした：%{error}"
 errors.project_not_found: プロジェクトが見つかりません
 errors.prepare_task_project_not_found: タスクを準備できませんでした：プロジェクトが見つかりません
 errors.store_pasted_image: "ペーストした画像を添付できませんでした：%{error}"
+errors.store_pasted_text: "ペーストしたテキストを添付できませんでした：%{error}"
 errors.create_worktree: "ワークツリーを作成できませんでした：%{error}"
 errors.prepared_runtime_unavailable: 準備したエージェントランタイムは利用できません
 errors.start_agent: "エージェントを起動できませんでした：%{error}"
@@ -959,6 +961,23 @@ attachments.preview_unavailable: 画像を表示できません
 
 common.copy_named: "%{name} をコピー"
 
+turn.usage: 使用量
+turn.usage_title: ターンの使用量
+turn.ran_for: "実行時間 %{duration}"
+turn.time_title: ターンの時間と速度
+turn.total_run_time: 総実行時間
+turn.tps: 1秒あたりのトークン数（TPS）
+turn.tok_per_second: "%{tps} tok/s"
+turn.ttft: 最初のトークンまでの時間（TTFT）
+turn.tok: "%{count} tok"
+turn.tok_suffix: tok
+turn.provider_model: プロバイダー / モデル
+turn.cache_hit: キャッシュヒット
+turn.uncached_input: 非キャッシュ入力
+turn.cached_input: キャッシュ済み入力
+turn.cache_write: キャッシュ書き込み
+turn.output: 出力
+turn.output_reasoning: "%{tokens} tok（うち推論 %{reasoning}）"
 transcript.worked: 完了
 transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"

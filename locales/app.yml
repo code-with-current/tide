@@ -326,12 +326,8 @@ input.find:
 input.replace:
   en: Replace
 
-common.checking:
-  en: Checking…
 common.refresh:
   en: Refresh
-common.recheck:
-  en: Recheck
 common.reset:
   en: Reset
 common.revoke:
@@ -545,6 +541,10 @@ computer_use.grant_access:
   en: Grant Access
 computer_use.permission_check_failed:
   en: Could not check Computer Use permissions
+computer_use.flow_title:
+  en: Drag in to the list and Switch it On
+computer_use.flow_missing_helper:
+  en: The Computer Use helper is missing from this build
 
 common.settings:
   en: Settings
@@ -1261,6 +1261,8 @@ composer.edit_in_composer:
   en: Edit in composer
 composer.steer:
   en: Steer
+composer.plan:
+  en: Plan
 composer.remove_followup:
   en: Remove from queue
 composer.queued_message_actions:
@@ -1451,6 +1453,8 @@ errors.prepare_task_project_not_found:
   en: "Could not prepare the task: project not found"
 errors.store_pasted_image:
   en: "Could not attach the pasted image: %{error}"
+errors.store_pasted_text:
+  en: "Could not attach the pasted text: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
 errors.prepared_runtime_unavailable:
@@ -1972,6 +1976,41 @@ attachments.preview_unavailable:
 
 common.copy_named:
   en: Copy %{name}
+
+turn.usage:
+  en: Usage
+turn.usage_title:
+  en: Turn usage
+turn.ran_for:
+  en: "Ran for %{duration}"
+turn.time_title:
+  en: Turn time and speed
+turn.total_run_time:
+  en: Total run time
+turn.tps:
+  en: Tokens per second (TPS)
+turn.tok_per_second:
+  en: "%{tps} tok/s"
+turn.ttft:
+  en: Time to first token (TTFT)
+turn.tok:
+  en: "%{count} tok"
+turn.tok_suffix:
+  en: tok
+turn.provider_model:
+  en: Provider / model
+turn.cache_hit:
+  en: Cache hit
+turn.uncached_input:
+  en: Uncached input
+turn.cached_input:
+  en: Cached input
+turn.cache_write:
+  en: Cache write
+turn.output:
+  en: Output
+turn.output_reasoning:
+  en: "%{tokens} tok (%{reasoning} reasoning)"
 
 transcript.worked:
   en: Worked

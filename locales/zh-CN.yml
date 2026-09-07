@@ -163,9 +163,7 @@ input.filter_projects: 筛选项目
 input.search_or_enter_address: 搜索或输入网址
 input.find: 查找
 input.replace: 替换
-common.checking: 正在检查…
 common.refresh: 刷新
-common.recheck: 重新检查
 common.reset: 重置
 common.revoke: 撤销授权
 common.retry: 重试
@@ -220,6 +218,8 @@ computer_use.no_always_allowed_apps: 尚未始终允许任何应用。仅限当�
 computer_use.access_granted: 已授权
 computer_use.grant_access: 授予权限
 computer_use.permission_check_failed: 无法检查电脑操作权限
+computer_use.flow_title: 拖入列表，然后打开开关
+computer_use.flow_missing_helper: 此构建缺少电脑操作助手
 common.settings: 设置
 common.copy: 复制
 common.remove: 移除
@@ -568,6 +568,7 @@ goal.usage_tokens: "%{used} / %{budget} 个 token"
 goal.usage_tokens_unbudgeted: "%{used} 个 token"
 composer.edit_in_composer: 在输入框中编辑
 composer.steer: 引导
+composer.plan: 计划
 composer.remove_followup: 从队列中移除
 user_input.other_placeholder: 输入其他回答
 user_input.back: 上一步
@@ -660,6 +661,7 @@ errors.rewind_task: "无法回退任务：%{error}"
 errors.project_not_found: 找不到项目
 errors.prepare_task_project_not_found: 无法准备任务：找不到项目
 errors.store_pasted_image: "无法添加粘贴的图片：%{error}"
+errors.store_pasted_text: "无法添加粘贴的文本：%{error}"
 errors.create_worktree: "无法创建工作树：%{error}"
 errors.prepared_runtime_unavailable: 已准备的智能体运行环境不可用
 errors.start_agent: "无法启动智能体：%{error}"
@@ -910,6 +912,23 @@ attachments.close_preview: 关闭图片预览
 attachments.open_preview: 打开%{name}
 attachments.preview_unavailable: 无法显示图片
 common.copy_named: 复制%{name}
+turn.usage: 用量
+turn.usage_title: 本轮用量
+turn.ran_for: "运行 %{duration}"
+turn.time_title: 轮次耗时与速度
+turn.total_run_time: 总运行时间
+turn.tps: 每秒令牌数（TPS）
+turn.tok_per_second: "%{tps} tok/s"
+turn.ttft: 首令牌延迟（TTFT）
+turn.tok: "%{count} tok"
+turn.tok_suffix: tok
+turn.provider_model: 提供商 / 模型
+turn.cache_hit: 缓存命中
+turn.uncached_input: 未缓存输入
+turn.cached_input: 缓存输入
+turn.cache_write: 缓存写入
+turn.output: 输出
+turn.output_reasoning: "%{tokens} tok（其中推理 %{reasoning}）"
 transcript.worked: 已完成
 transcript.worked_for: 用时 %{duration}
 transcript.you_stopped_after: 你在工作 %{duration} 后停止了
