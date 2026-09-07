@@ -285,6 +285,12 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Drop a project from the app. With `delete_history`, its sessions and
+    /// their messages/transcripts are removed too.
+    RemoveProject {
+        project_id: Uuid,
+        delete_history: bool,
+    },
     HydrateSession {
         session_id: Uuid,
     },
@@ -699,6 +705,36 @@ mod base64_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remove_project_round_trips_with_history_flag() {
+        let command = Command::RemoveProject {
+            project_id: "0194883a-0000-7000-8000-000000000001"
+                .parse::<Uuid>()
+                .unwrap(),
+            delete_history: true,
+        };
+        let json = serde_json::to_value(&command).unwrap();
+
+        assert_eq!(json["type"], "removeProject");
+        assert_eq!(json["projectId"], "0194883a-0000-7000-8000-000000000001");
+        assert_eq!(json["deleteHistory"], true);
+
+        let Command::RemoveProject {
+            project_id,
+            delete_history,
+        } = serde_json::from_value(json).unwrap()
+        else {
+            panic!("unexpected command variant");
+        };
+        assert_eq!(
+            project_id,
+            "0194883a-0000-7000-8000-000000000001"
+                .parse::<Uuid>()
+                .unwrap()
+        );
+        assert!(delete_history);
+    }
 
     #[test]
     fn binary_payloads_use_base64_json_strings() {

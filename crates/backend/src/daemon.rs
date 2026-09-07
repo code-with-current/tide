@@ -546,6 +546,42 @@ impl Backend for TideBackend {
                     .collect();
                 Ok(ResponsePayload::TaskStateSaved { sessions })
             }
+            Command::RemoveProject {
+                project_id,
+                delete_history,
+            } => {
+                let mut state = self.task_state.lock();
+                if delete_history {
+                    let deleted: Vec<Uuid> = state
+                        .sessions
+                        .iter()
+                        .filter(|session| session.project_id == project_id)
+                        .map(|session| session.id)
+                        .collect();
+                    {
+                        let mut removed = self.removed_session_ids.lock();
+                        removed.extend(deleted.iter().copied());
+                    }
+                    self.sessions
+                        .lock()
+                        .retain(|session_id, _| !deleted.contains(session_id));
+                    state
+                        .sessions
+                        .retain(|session| session.project_id != project_id);
+                }
+                state.projects.retain(|project| project.id != project_id);
+                self.task_store.save(&mut state)?;
+                Ok(ResponsePayload::TaskState {
+                    projects: state.projects.clone(),
+                    sessions: state
+                        .sessions
+                        .iter()
+                        .map(AgentSession::list_projection)
+                        .collect(),
+                    default_cwd: self.default_cwd.clone(),
+                    projectless_root: crate::projectless::workspace_root(),
+                })
+            }
             Command::RemoveSession => {
                 {
                     let mut state = self.task_state.lock();
@@ -1365,6 +1401,7 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::RemoveProject { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::LoadComposerDrafts

@@ -2207,6 +2207,62 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_project_keeps_sessions_unless_history_is_deleted() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/some project"));
+        let project = state.projects[0].clone();
+        let second = crate::model::AgentSession::new(project.id, ProviderKind::Tide);
+        state.sessions.push(second);
+        let session_ids: Vec<Uuid> = state.sessions.iter().map(|session| session.id).collect();
+        for session in &mut state.sessions {
+            session.push_message(MessageRole::User, "hello");
+        }
+        for id in &session_ids {
+            state.mark_session_dirty(*id);
+        }
+        store.save(&mut state).unwrap();
+
+        // Without the history flag: the project row goes, the sessions (and
+        // their messages) stay orphaned — the sidebar groups them itself.
+        state.projects.retain(|project| false);
+        store.save(&mut state).unwrap();
+        let restored = store.load().unwrap();
+        assert!(restored.projects.is_empty());
+        assert_eq!(restored.sessions.len(), 2);
+        {
+            let connection = Connection::open(directory.join("app.db")).unwrap();
+            let messages: i64 = connection
+                .query_row("SELECT count(*) FROM messages", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(messages, 2);
+        }
+
+        // With the history flag: sessions and their rows go with the project.
+        let mut state = restored;
+        state
+            .sessions
+            .retain(|session| session.project_id != project.id);
+        store.save(&mut state).unwrap();
+        let restored = store.load().unwrap();
+        assert!(restored.projects.is_empty());
+        assert!(restored.sessions.is_empty());
+        {
+            let connection = Connection::open(directory.join("app.db")).unwrap();
+            for table in ["messages", "session_details", "sessions"] {
+                let rows: i64 = connection
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                assert_eq!(rows, 0, "{table} rows must follow the project out");
+            }
+        }
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
     fn project_rows_without_settings_columns_load_with_defaults() {
         let directory = temporary_directory();
         let store = store_in(&directory);
