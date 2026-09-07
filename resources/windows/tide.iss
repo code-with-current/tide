@@ -5,7 +5,7 @@
 ; See RELEASING.md and docs/windows.md.
 ;
 ; Built by scripts/bundle-windows.ts, which supplies:
-;   /DAppVersion=<version>  /DArch=<x86_64|aarch64>
+;   /DAppVersion=<version>  /DArch=<x64|arm64>
 ;   /DStageDir=<dir with the built executables>  /DOutputDir=<dir>
 
 #ifndef AppVersion
@@ -24,7 +24,7 @@
 ; An x64 build is worth allowing on Arm, where it runs emulated; an arm64
 ; build on x64 is not, so refuse it up front rather than installing something
 ; that cannot start.
-#if Arch == "aarch64"
+#if Arch == "arm64"
   #define Architectures "arm64"
 #else
   #define Architectures "x64compatible"
@@ -47,7 +47,7 @@ UninstallDisplayName=Tide
 UninstallDisplayIcon={app}\tide.exe
 LicenseFile={#StageDir}\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=Tide-{#AppVersion}-{#Arch}-Setup
+OutputBaseFilename=tide-v{#AppVersion}-windows-{#Arch}-setup
 SetupIconFile=AppIcon.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -77,7 +77,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#StageDir}\tide.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#StageDir}\tide-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

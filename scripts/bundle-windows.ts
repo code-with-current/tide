@@ -20,11 +20,11 @@ import { join, resolve } from "node:path";
 const packageName = "tide";
 const projectRoot = resolve(import.meta.dir, "..");
 
-/** The updater picks its feed by Rust arch name, so the installer carries
- *  that rather than the full triple. */
+/** Release-asset naming (tide-v<version>-windows-<arch>), which shortens the
+ *  Rust triple. The updater's feed names keep the Rust arch names instead. */
 const architectureForTarget: Record<string, string> = {
-  "x86_64-pc-windows-msvc": "x86_64",
-  "aarch64-pc-windows-msvc": "aarch64",
+  "x86_64-pc-windows-msvc": "x64",
+  "aarch64-pc-windows-msvc": "arm64",
 };
 
 interface CargoMetadata {
@@ -116,12 +116,10 @@ if (!targetTriple || !architecture) {
   throw new Error(`Unsupported Windows target ${targetTriple ?? "(unknown)"}`);
 }
 
-const packageDirectoryName = `tide-${version}-${targetTriple}`;
-const archive = join(releaseDirectory, `${packageDirectoryName}.zip`);
-const installer = join(
-  releaseDirectory,
-  `Tide-${version}-${architecture}-Setup.exe`,
-);
+const artifactStem = `tide-v${version}-windows-${architecture}`;
+const packageDirectoryName = artifactStem;
+const archive = join(releaseDirectory, `${artifactStem}-portable.zip`);
+const installer = join(releaseDirectory, `${artifactStem}-setup.exe`);
 
 await $`cargo build --locked --release --package tide --bin tide`;
 

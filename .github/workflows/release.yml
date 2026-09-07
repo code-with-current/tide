@@ -88,12 +88,14 @@ jobs:
           sudo apt-get install --yes \
             clang \
             cmake \
+            libasound2-dev \
             libfontconfig-dev \
             libvulkan1 \
             libwayland-dev \
             libx11-xcb-dev \
             libxkbcommon-x11-dev \
             pkg-config \
+            rpm \
             xdg-desktop-portal
 
       - uses: actions/cache@v6
@@ -110,7 +112,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: rm -f target/release/tide-*.tar.gz
+        run: rm -f target/release/tide-v*-linux-*
 
       - name: Bundle
         run: ./scripts/bundle-linux.sh
@@ -121,7 +123,10 @@ jobs:
           # Named exactly, not globbed: `if-no-files-found: error` is then a
           # real check that this version built, rather than something an older
           # bundle can satisfy.
-          path: target/release/tide-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+          path: |
+            target/release/tide-v${{ needs.version.outputs.version }}-linux-x64.deb
+            target/release/tide-v${{ needs.version.outputs.version }}-linux-x64.rpm
+            target/release/tide-v${{ needs.version.outputs.version }}-linux-x64.AppImage
           if-no-files-found: error
 
   linux-arm64:
@@ -144,12 +149,14 @@ jobs:
           sudo apt-get install --yes \
             clang \
             cmake \
+            libasound2-dev \
             libfontconfig-dev \
             libvulkan1 \
             libwayland-dev \
             libx11-xcb-dev \
             libxkbcommon-x11-dev \
             pkg-config \
+            rpm \
             xdg-desktop-portal
 
       - uses: actions/cache@v6
@@ -166,7 +173,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: rm -f target/release/tide-*.tar.gz
+        run: rm -f target/release/tide-v*-linux-*
 
       - name: Bundle
         run: ./scripts/bundle-linux.sh
@@ -174,7 +181,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: linux-arm64
-          path: target/release/tide-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
+          path: |
+            target/release/tide-v${{ needs.version.outputs.version }}-linux-arm64.deb
+            target/release/tide-v${{ needs.version.outputs.version }}-linux-arm64.rpm
+            target/release/tide-v${{ needs.version.outputs.version }}-linux-arm64.AppImage
           if-no-files-found: error
 
   windows-x86_64:
@@ -211,7 +221,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/tide-*.zip, target/release/Tide-*-Setup.exe
+        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/tide-v*-windows-*
 
       - name: Bundle
         env:
@@ -223,8 +233,8 @@ jobs:
         with:
           name: windows-x86_64
           path: |
-            target/release/tide-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
-            target/release/Tide-${{ needs.version.outputs.version }}-x86_64-Setup.exe
+            target/release/tide-v${{ needs.version.outputs.version }}-windows-x64-portable.zip
+            target/release/tide-v${{ needs.version.outputs.version }}-windows-x64-setup.exe
           if-no-files-found: error
 
   windows-arm64:
@@ -261,7 +271,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/tide-*.zip, target/release/Tide-*-Setup.exe
+        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/tide-v*-windows-*
 
       - name: Bundle
         env:
@@ -273,15 +283,23 @@ jobs:
         with:
           name: windows-arm64
           path: |
-            target/release/tide-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
-            target/release/Tide-${{ needs.version.outputs.version }}-aarch64-Setup.exe
+            target/release/tide-v${{ needs.version.outputs.version }}-windows-arm64-portable.zip
+            target/release/tide-v${{ needs.version.outputs.version }}-windows-arm64-setup.exe
           if-no-files-found: error
 
   macos:
-    name: macOS
+    name: macOS ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.published != 'true'
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
@@ -302,9 +320,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-latest-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
+          key: macos-${{ matrix.runner }}-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            macos-latest-rust-1.96.0-release-
+            macos-${{ matrix.runner }}-rust-1.96.0-release-
 
       - name: Import Apple Developer Certificate
         env:
@@ -339,15 +357,27 @@ jobs:
           TIDE_ANALYTICS_ENDPOINT: ${{ secrets.TIDE_ANALYTICS_ENDPOINT }}
           TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: bun run release --local
+        run: |
+          bun run release --local --output \
+            "dist/tide-v${{ needs.version.outputs.version }}-mac-${{ matrix.arch }}.dmg"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: macos
+          name: macos-${{ matrix.arch }}
+          path: dist/tide-v${{ needs.version.outputs.version }}-mac-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+      # One Sparkle channel: the arm64 job owns the appcast, the zip that
+      # bases binary deltas, and the release notes. The x64 DMG rides along
+      # for direct download (GitHub release, Homebrew cask); in-app macOS
+      # updates stay served from the arm64 channel.
+      - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'arm64'
+        with:
+          name: macos-arm64-updater
           path: |
-            dist/Tide-${{ needs.version.outputs.version }}.dmg
-            dist/Tide-${{ needs.version.outputs.version }}.md
             dist/Tide-${{ needs.version.outputs.version }}.zip
+            dist/Tide-${{ needs.version.outputs.version }}.md
             dist/appcast.xml
           if-no-files-found: error
 
@@ -385,6 +415,12 @@ jobs:
           # "latest" to. In-app updates read the appcasts instead.
           echo "$VERSION" > artifacts/latest-linux.txt
           echo "$VERSION" > artifacts/latest-windows.txt
+
+      - name: Write checksums
+        working-directory: artifacts
+        run: |
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
+            | sort | xargs sha256sum > SHA256SUMS.txt
 
       # Signed here rather than on the Windows runners: this is the only job
       # that holds both installers, and the signing key stays in one place.
@@ -430,11 +466,14 @@ jobs:
           body_path: release-notes.md
           fail_on_unmatched_files: true
           files: |
-            artifacts/*.tar.gz
             artifacts/*.dmg
-            artifacts/*.md
             artifacts/*.zip
             artifacts/*.exe
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.AppImage
+            artifacts/*.md
+            artifacts/SHA256SUMS.txt
             artifacts/appcast.xml
             artifacts/appcast-windows-*.xml
             artifacts/latest-linux.txt

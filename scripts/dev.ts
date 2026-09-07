@@ -332,11 +332,12 @@ async function stopApp(): Promise<void> {
   restartingApp = !stopping;
   stopAppSupervisor();
   if (isMacOS) {
-    // The bundle is "Tide Debug.app" but its executable — the process name
-    // pkill sees — is "Tide", and a raw `cargo run` is lowercase "tide".
-    // Cover every name, escalate, and then confirm nothing answered: a
-    // survivor here is what stacks a second window on the next launch.
-    const names = ["Tide", "tide", appName];
+    // Kill only the debug app's own executable name. "Tide" is the production
+    // app's process name and lowercase "tide" is any raw cargo binary, so
+    // covering either would take down a production Tide running alongside
+    // this watcher. Escalate, then confirm nothing answered: a survivor here
+    // is what stacks a second window on the next launch.
+    const names = [appName];
     for (const name of names) {
       await $`pkill -TERM -x ${name}`.quiet().nothrow();
     }
@@ -369,7 +370,7 @@ async function waitForAppExit(names: string[]): Promise<void> {
     await Bun.sleep(100);
   }
   console.error(
-    "[tide-dev] Old Tide process still alive after SIGKILL; " +
+    "[tide-dev] Old Tide Debug process still alive after SIGKILL; " +
       "launching will activate it instead of starting a fresh one.",
   );
 }

@@ -289,12 +289,6 @@ const bundledComputerUseSkill = join(
   "tide-computer-use",
   "SKILL.md",
 );
-const bundledPiComputerUseExtension = join(
-  contentsDirectory,
-  "Resources",
-  "computer-use",
-  "pi-extension.ts",
-);
 const bundledComputerUseHelper = join(
   contentsDirectory,
   "Helpers",
@@ -412,7 +406,6 @@ try {
     bundledDaemonExecutable,
     bundledJsReplExecutable,
     bundledComputerUseSkill,
-    bundledPiComputerUseExtension,
     bundledComputerUseHelper,
     join(bundledSparkleFramework, "Sparkle"),
   ]) {
@@ -498,12 +491,6 @@ try {
       "skills",
       "tide-computer-use",
       "SKILL.md",
-    ),
-    join(
-      mountedContents,
-      "Resources",
-      "computer-use",
-      "pi-extension.ts",
     ),
     mountedComputerUseHelper,
     join(mountedSparkleFramework, "Sparkle"),

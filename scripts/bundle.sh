@@ -56,6 +56,10 @@ helper_source="resources/computer-use/TideComputerUse.swift"
 helper_kit_dir="resources/computer-use/kit"
 menu_bar_cursor_resource="resources/computer-use/menubar-cursor.png"
 overlay_cursor_resource="resources/computer-use/overlay-cursor.svg"
+# The helper rides the main app's icon tint: red for the debug helper, blue
+# for release. Both install as AppIcon.icns so one CFBundleIconFile key in
+# the shared Info.plist serves both profiles.
+helper_icon_source="resources/$icon_file"
 # The vendored Open Computer Use kit (MIT — see kit/LICENSE) compiles into
 # the helper as part of the same module; every kit source participates in
 # the fingerprint so a kit edit always rebuilds and reinstalls the helper.
@@ -65,6 +69,7 @@ helper_fingerprint="$({
     "$helper_source" \
     $helper_kit_sources \
     resources/computer-use/Info.plist \
+    "$helper_icon_source" \
     "$menu_bar_cursor_resource" \
     "$overlay_cursor_resource"
   printf '%s\n' "standalone-service-v3" "$helper_name" "$bundle_identifier.computer-use" "$codesign_identity" "$(uname -m)-apple-macos14.0"
@@ -89,6 +94,7 @@ if [ ! -d "$cached_helper_bundle" ]; then
   mkdir -p "$cached_helper_contents/MacOS" "$cached_helper_contents/Resources" "$swift_module_cache"
   cp resources/computer-use/Info.plist "$cached_helper_contents/Info.plist"
   cp "$menu_bar_cursor_resource" "$overlay_cursor_resource" "$cached_helper_contents/Resources/"
+  cp "$helper_icon_source" "$cached_helper_contents/Resources/AppIcon.icns"
   printf '%s\n' "$helper_fingerprint" > "$cached_helper_contents/Resources/.tide-helper-fingerprint"
   plutil -replace CFBundleDisplayName -string "$helper_name" "$cached_helper_contents/Info.plist"
   plutil -replace CFBundleExecutable -string "$helper_name" "$cached_helper_contents/Info.plist"
@@ -137,13 +143,12 @@ if [ ! -d "$sparkle_framework_source" ]; then
 fi
 
 rm -rf "$bundle"
-mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/tide-computer-use" "$contents/Helpers"
+mkdir -p "$contents/MacOS" "$contents/Resources/skills/tide-computer-use" "$contents/Helpers"
 cp "$cargo_target_dir/$profile/tide" "$contents/MacOS/$app_name"
 cp "$cargo_target_dir/$profile/tide_js_repl" "$repl_executable"
 chmod 755 "$repl_executable"
 cp resources/Info.plist "$contents/Info.plist"
 cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
-cp resources/computer-use/pi-extension.ts "$contents/Resources/computer-use/pi-extension.ts"
 cp resources/computer-use/SKILL.md "$contents/Resources/skills/tide-computer-use/SKILL.md"
 frameworks_directory="$contents/Frameworks"
 sparkle_framework="$frameworks_directory/Sparkle.framework"

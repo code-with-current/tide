@@ -5,7 +5,8 @@
 // Usage:
 //   bun scripts/appcast-windows.ts <assets-dir> <version>
 //
-// <assets-dir> holds this release's `Tide-<version>-<arch>-Setup.exe` files.
+// <assets-dir> holds this release's `tide-v<version>-windows-<arch>-setup.exe`
+// files.
 // One feed is written per architecture, because a Sparkle appcast has no way
 // to say which binary an item is for. Existing feeds in the directory are
 // merged, so older releases keep their entries.
@@ -188,7 +189,10 @@ export async function generateWindowsAppcasts(
   const present = new Set(readdirSync(assetsDir));
   const written: string[] = [];
   for (const arch of architectures) {
-    const installer = `Tide-${version}-${arch}-Setup.exe`;
+    // Asset names shorten the arch (x64/arm64); the feed filenames keep the
+    // Rust arch names the updater builds its feed URL from.
+    const shortArch = arch === "x86_64" ? "x64" : "arm64";
+    const installer = `tide-v${version}-windows-${shortArch}-setup.exe`;
     if (!present.has(installer)) {
       console.warn(`No ${installer} in ${assetsDir}; leaving that feed alone.`);
       continue;
@@ -212,7 +216,9 @@ export async function generateWindowsAppcasts(
     console.log(`Wrote ${feedPath} (${item.length} bytes signed)`);
   }
   if (written.length === 0) {
-    throw new Error(`No Tide-${version}-<arch>-Setup.exe found in ${assetsDir}`);
+    throw new Error(
+      `No tide-v${version}-windows-<arch>-setup.exe found in ${assetsDir}`,
+    );
   }
   return written;
 }
