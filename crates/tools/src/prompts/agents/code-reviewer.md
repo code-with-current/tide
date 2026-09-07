@@ -3,7 +3,7 @@ name: "code-reviewer"
 description: "Finds correctness bugs in a diff with finder angles and three-state verification. Read-only."
 whenToUse: "Reviewing a diff or recent changes for runtime-correctness bugs before committing or merging. The caller supplies the diff (or how to get it); pass verified findings back structured."
 allowedTools: "read_file,grep,glob,list_dir,directory_tree,git_repo"
-maxSteps: 20
+maxSteps: 50
 thinkingLevel: "medium"
 tideVersion: "1.0.0"
 -->
