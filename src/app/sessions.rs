@@ -302,6 +302,16 @@ impl Tide {
         let runtime_mode =
             new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
         let mut session = self.state.new_session(project_id, provider);
+        let (provider, model) = effective_start_model(
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == project_id),
+            provider,
+            self.state.last_model.clone(),
+        );
+        session.provider = provider;
+        session.model = model;
         session.runtime_mode = runtime_mode;
         let id = session.id;
         self.state.push_session(session);
@@ -1605,6 +1615,18 @@ impl Tide {
         })
         .detach();
     }
+}
+
+/// The model a fresh chat starts on: the project's default (when set) wins
+/// over the remembered last-used pair. Pure so tests need no GPUI harness.
+pub(super) fn effective_start_model(
+    project: Option<&Project>,
+    last_provider: ProviderKind,
+    last_model: Option<String>,
+) -> (ProviderKind, Option<String>) {
+    project
+        .map(|project| project.session_start_defaults(last_provider, last_model.as_deref()))
+        .unwrap_or((last_provider, last_model))
 }
 
 #[cfg(test)]
