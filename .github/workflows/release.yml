@@ -305,6 +305,11 @@ jobs:
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      # Job-level so the conditional steps below can test for the secrets —
+      # the `secrets` context itself is not readable inside `if`.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
     steps:
       - uses: actions/checkout@v6
 
@@ -331,7 +336,7 @@ jobs:
       # Only meaningful when real signing material exists; without it the
       # Release step falls back to ad-hoc signing below.
       - name: Import Apple Developer Certificate
-        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        if: env.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -348,7 +353,7 @@ jobs:
           rm certificate.p12
 
       - name: Store notary credentials
-        if: ${{ secrets.APPLE_ID != '' }}
+        if: env.APPLE_ID != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
