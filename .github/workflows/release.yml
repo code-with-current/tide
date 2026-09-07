@@ -303,8 +303,9 @@ jobs:
         include:
           - arch: arm64
             runner: macos-latest
-          - arch: x64
-            runner: macos-15-intel
+          # No x64: ort 2.0.0-rc.13 ships no prebuilt for x86_64-apple-darwin
+          # and a from-source onnxruntime build is not wired. Restore the
+          # Intel leg via load-dynamic + a bundled dylib when it matters.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
