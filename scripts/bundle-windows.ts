@@ -153,13 +153,7 @@ async function stageOnnxRuntime(packageDirectory: string): Promise<void> {
 
   // The redistributable CRT is already on every runner inside Visual Studio;
   // copying those exact files is what the vc_redist installer itself does.
-  const redistRoot = join(
-    process.env["ProgramFiles"] ?? "C:\\Program Files",
-    "Microsoft Visual Studio",
-  );
-  const crtDirectory = findNewest(
-    join(redistRoot, "2022"),
-    ["Community", "Professional", "Enterprise", "BuildTools"],
+  const crtDirectory = findRedistCrt(
     process.arch === "arm64" ? "arm64" : "x64",
   );
   for (const file of readdirSync(crtDirectory)) {
@@ -172,21 +166,55 @@ async function stageOnnxRuntime(packageDirectory: string): Promise<void> {
   }
 }
 
-/** Newest `VC\Redist\MSVC\<version>\<arch>\Microsoft.VC143.CRT` across the
- *  installed Visual Studio editions. */
-function findNewest(vsYear: string, editions: string[], arch: string): string {
-  const versionOrder = new Intl.Collator("en", { numeric: true });
-  for (const edition of editions) {
-    const redist = join(vsYear, edition, "VC", "Redist", "MSVC");
+/** Locate the redistributable CRT DLLs (`VC\Redist\MSVC\…\<arch>\…CRT`).
+ *  vswhere — the canonical discovery — first, then a scan of both Program
+ *  Files roots across every year and edition, because runner images differ
+ *  in where (and whether) they install the full VS layout. */
+function findRedistCrt(arch: string): string {
+  const order = new Intl.Collator("en", { numeric: true });
+  const candidates: string[] = [];
+  const vswhere = join(
+    process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
+    "Microsoft Visual Studio",
+    "Installer",
+    "vswhere.exe",
+  );
+  if (existsSync(vswhere)) {
+    const output = Bun.spawnSync([
+      vswhere,
+      "-latest",
+      "-products",
+      "*",
+      "-property",
+      "installationPath",
+    ]);
+    const installation = output.stdout.toString().trim().split("\r?\n")[0];
+    if (installation) {
+      candidates.push(join(installation, "VC", "Redist", "MSVC"));
+    }
+  }
+  for (const root of [
+    process.env["ProgramFiles"] ?? "C:\\Program Files",
+    process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
+  ]) {
+    const visualStudio = join(root, "Microsoft Visual Studio");
+    if (!existsSync(visualStudio)) continue;
+    for (const year of readdirSync(visualStudio)) {
+      const yearDirectory = join(visualStudio, year);
+      if (!existsSync(yearDirectory)) continue;
+      for (const edition of readdirSync(yearDirectory)) {
+        candidates.push(join(yearDirectory, edition, "VC", "Redist", "MSVC"));
+      }
+    }
+  }
+  for (const redist of candidates) {
     if (!existsSync(redist)) continue;
-    for (const version of readdirSync(redist).sort((a, b) =>
-      versionOrder.compare(b, a),
-    )) {
+    for (const version of readdirSync(redist).sort((a, b) => order.compare(b, a))) {
       const candidate = join(redist, version, arch, "Microsoft.VC143.CRT");
       if (existsSync(candidate)) return candidate;
     }
   }
-  throw new Error(`No VC redistributable CRT found under ${vsYear}.`);
+  throw new Error(`No VC redistributable CRT (${arch}) found on this machine.`);
 }
 
 await $`cargo build --locked --release --package tide --bin tide`;
