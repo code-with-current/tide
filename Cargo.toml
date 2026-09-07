@@ -50,7 +50,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 unicode-segmentation = "1.12"
 url = "2"
-uuid = { version = "1.18", features = ["v4", "serde"] }
+uuid = { version = "1.18", features = ["v4", "v5", "serde"] }
 client = { path = "crates/client" }
 backend = { path = "crates/backend" }
 protocol = { path = "crates/protocol" }
@@ -63,6 +63,11 @@ pulldown-cmark = "0.13"
 # default features stay off so no image/svg codecs ride along.
 qrcode = { version = "0.14", default-features = false }
 regex = "1"
+# Notification cues (assets/sounds/*.mp3): symphonia decodes, cpal plays.
+rodio = { version = "0.22", default-features = false, features = [
+    "playback",
+    "mp3",
+] }
 # Remote Control relay client (outbound WSS; native-tls uses the system trust store)
 tungstenite = { version = "0.30", features = ["handshake", "native-tls"] }
 rust-i18n = "4"
@@ -132,10 +137,22 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSVisualEffectView",
     "NSWindow",
     "NSWorkspace",
+    # The permission panel's drag-to-authorize card starts a native dragging
+    # session carrying the helper `.app` bundle as a file URL.
+    "NSDragging",
+    "NSDraggingItem",
+    "NSDraggingSession",
+    "NSPasteboard",
+    # Docking clamps the panel against the visible frame of the display the
+    # System Settings window sits on.
+    "NSScreen",
     "block2",
     "objc2-core-graphics",
     "objc2-quartz-core",
 ] }
+# The permission panel's settings-window tracker reads CoreFoundation
+# window-server data (`CGWindowListCopyWindowInfo`) from a background thread.
+core-foundation = "0.9"
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
     "NSArray",
