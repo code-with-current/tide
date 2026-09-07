@@ -417,6 +417,7 @@ impl Render for Tide {
                                         .children(permission)
                                         .when(self.selected_project().is_some(), |element| {
                                             element
+                                                .children(self.render_composer_todo(cx))
                                                 .children(self.render_queued_messages(cx))
                                                 .child(self.render_composer(window, cx))
                                                 .child(self.render_workspace_footer(cx))
