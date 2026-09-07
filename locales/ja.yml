@@ -71,6 +71,8 @@ settings.remote_keywords: リモート コントロール リンク QR 中継 �
 settings.computer_use: コンピュータ操作
 settings.git: Git
 settings.git_keywords: git アイデンティティ GitHub コミット 属性 共著 署名 ssh
+settings.projects: プロジェクト
+settings.projects_keywords: プロジェクト ワークスペース フォルダ アイデンティティ アイコン アクション モデル 削除
 git.caption: GitHub アカウントとコミット署名。
 git.loading: 読み込み中…
 git.op_failed: Git 操作に失敗しました

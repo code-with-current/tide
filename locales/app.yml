@@ -2340,6 +2340,10 @@ settings.git:
   en: Git
 settings.git_keywords:
   en: git identity identities github commit attribution co-author signing ssh
+settings.projects:
+  en: Projects
+settings.projects_keywords:
+  en: projects workspace folder identity icon actions model remove
 git.caption:
   en: GitHub accounts and commit identities.
 git.loading:

@@ -24,7 +24,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -42,6 +42,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
         "settings.git",
         "icons/git-branch.svg",
         "settings.git_keywords",
+    ),
+    (
+        SettingsPage::Projects,
+        "settings.projects",
+        "icons/folder.svg",
+        "settings.projects_keywords",
     ),
     (
         SettingsPage::Tide,
@@ -318,10 +324,10 @@ impl Tide {
             window,
             cx,
         );
-        // The Skills page is a mail-style split that owns the whole content
-        // column — no titlebar strip, no width cap, no card.
+        // The Skills and Projects pages are mail-style splits that own the
+        // whole content column — no titlebar strip, no width cap, no card.
         // Window dragging stays with the sidebar's own titlebar region.
-        if page == SettingsPage::Skills {
+        if page == SettingsPage::Skills || page == SettingsPage::Projects {
             return div()
                 .flex_1()
                 .h_full()
@@ -332,18 +338,21 @@ impl Tide {
                 .border_color(theme.sidebar_border)
                 .bg(theme.surface)
                 .children(right_window_controls.map(|controls| {
-                    self.render_settings_drag_region("settings-skills-titlebar", cx)
+                    let label = if page == SettingsPage::Skills {
+                        "settings-skills-titlebar"
+                    } else {
+                        "settings-projects-titlebar"
+                    };
+                    self.render_settings_drag_region(label, cx)
                         .flex()
                         .items_center()
                         .justify_end()
                         .child(controls)
                 }))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .child(self.render_skills_settings(cx)),
-                );
+                .child(div().flex_1().min_h_0().child(match page {
+                    SettingsPage::Projects => self.render_projects_settings(cx),
+                    _ => self.render_skills_settings(cx),
+                }));
         }
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
@@ -379,6 +388,7 @@ impl Tide {
                     .render_git_settings(Theme::current(cx), cx)
                     .into_any_element(),
                 SettingsPage::Knowledge => self.render_knowledge_settings(cx),
+                SettingsPage::Projects => self.render_projects_settings(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),

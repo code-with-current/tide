@@ -67,6 +67,8 @@ settings.remote_keywords: 远程 控制 链接 二维码 中继 令牌 端口 �
 settings.computer_use: 电脑操作
 settings.git: Git
 settings.git_keywords: git 身份 标识 github 提交 署名 归属 共同作者 签名 ssh
+settings.projects: 项目
+settings.projects_keywords: 项目 工作区 文件夹 身份 图标 操作 模型 删除
 git.caption: GitHub 账号与提交身份。
 git.loading: 正在加载…
 git.op_failed: Git 操作失败

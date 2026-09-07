@@ -212,6 +212,9 @@ enum SettingsPage {
     /// Port of tide's Git settings screen — accounts, identities,
     /// attribution, per-project identity state.
     Git,
+    /// Per-project configuration — identity, icon, default model, actions,
+    /// git identity, memory & RAG, removal.
+    Projects,
     /// Knowledge sources + per-project Memory & RAG (upstream's
     /// Settings → Knowledge screen).
     Knowledge,
@@ -1649,6 +1652,7 @@ mod mermaid_images;
 mod model_picker;
 mod navigation_rail;
 mod permission_flow;
+mod projects_page;
 mod rag_settings;
 mod remote_control;
 mod render;
