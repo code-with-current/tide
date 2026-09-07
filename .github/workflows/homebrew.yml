@@ -15,7 +15,9 @@ jobs:
         with:
           ref: master
 
-      - name: Bump Casks/tide.rb to the published release
+      - name: Bump casks to the published release
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -24,6 +26,7 @@ jobs:
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/tide.dmg" \
             "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
           SHA="$(sha256sum "$RUNNER_TEMP/tide.dmg" | cut -d' ' -f1)"
+
           sed -i \
             -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
             -e "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" \
@@ -33,3 +36,16 @@ jobs:
           git add Casks/tide.rb
           git commit -m "chore(brew): bump cask to ${TAG}" || exit 0
           git push
+
+          # Keep the canonical tap (code-with-current/homebrew-tap) in sync.
+          # Requires HOMEBREW_TAP_TOKEN (classic PAT, repo scope); skipped
+          # until that secret exists.
+          if [ -n "${GH_TOKEN}" ]; then
+            CUR="$(gh api repos/code-with-current/homebrew-tap/contents/Casks/tide.rb --jq '.sha')"
+            gh api -X PUT repos/code-with-current/homebrew-tap/contents/Casks/tide.rb \
+              -f message="Bump cask to ${TAG}" \
+              -f content="$(base64 -w0 < Casks/tide.rb)" \
+              -f sha="${CUR}" --silent
+          else
+            echo "HOMEBREW_TAP_TOKEN not set; tap cask not bumped."
+          fi
