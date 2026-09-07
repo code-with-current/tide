@@ -87,8 +87,8 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 /// Discover the slash commands available to `provider` inside `project_root`.
 ///
 /// Filesystem work throughout — background executor only. Tide reads two
-/// kinds of source: the cross-tool skill roots (project `.agents/skills`,
-/// plus the user's shared home pool — skills are always sent
+/// kinds of source: the cross-tool skill roots (project `.agents/skills` and
+/// `.claude/skills`, plus the user's shared home pool — skills are always sent
 /// raw; the engine's own skill machinery resolves them), and its user-defined
 /// command layer (`.tide/commands` and `~/.config/tide/commands`, templates
 /// expanded by Tide at submit). Live session commands arrive separately
@@ -104,10 +104,10 @@ fn assemble_slash_commands(project_root: &Path) -> Vec<SlashCommand> {
     let mut commands = Vec::new();
     // The cross-tool skill roots; skills are listed raw on every provider.
     scan_skill_files(&project_root.join(".agents/skills"), &mut commands);
+    scan_skill_files(&project_root.join(".claude/skills"), &mut commands);
     if let Some(home) = home.as_deref() {
         scan_skill_files(&home.join(".agents/skills"), &mut commands);
         scan_skill_files(&home.join(".claude/skills"), &mut commands);
-        scan_skill_files(&home.join(".agent/skills"), &mut commands);
         scan_skill_files(&home.join(".zcode/skills"), &mut commands);
     }
     scan_command_files(

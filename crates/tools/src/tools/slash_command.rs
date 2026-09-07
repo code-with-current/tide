@@ -104,7 +104,9 @@ pub(crate) fn run_slash_command(
         } else {
             "No commands are installed. Drop .md files in <userData>/commands/.".to_string()
         };
-        return ToolOutcome::failed(format!("Unknown command: /{name}. {list}"));
+        return ToolOutcome::failed(format!(
+            "Unknown command: /{name}. {list} If /{name} is a skill, do not use this tool — call load_skill with its SKILL.md path from the Available skills catalog instead."
+        ));
     }
 
     let raw = match std::fs::read_to_string(&file) {
@@ -250,10 +252,8 @@ mod tests {
 
         let out = run_slash_command("nope", "", &dir);
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert_eq!(
-            out.output,
-            "Unknown command: /nope. Available: alpha, beta."
-        );
+        assert!(out.output.starts_with("Unknown command: /nope. Available: alpha, beta."));
+        assert!(out.output.contains("call load_skill"));
     }
 
     #[test]
@@ -261,10 +261,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let out = run_slash_command("nope", "", &tmp.path().join("commands"));
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert_eq!(
-            out.output,
-            "Unknown command: /nope. No commands are installed. Drop .md files in <userData>/commands/."
-        );
+        assert!(out
+            .output
+            .starts_with("Unknown command: /nope. No commands are installed."));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! A skill is a directory holding a `SKILL.md` — reusable instructions any
 //! coding agent can load. Tide reads the cross-tool user roots (`~/.agents`,
-//! `~/.claude`, `~/.agent`, `~/.zcode`, each with a `skills` subtree) as one
+//! `~/.claude`, `~/.zcode`, each with a `skills` subtree) as one
 //! shared pool (see [`crate::composer_complete::discover_slash_commands`] for
 //! the invocation side); this module walks them so the settings page can show
 //! one library across scopes and projects.
@@ -59,22 +59,24 @@ pub fn user_skill_locations() -> Vec<SkillLocation> {
     // pool — grouping below folds same-name copies into a single entry.
     push(SkillSource::Shared, home_join(".agents/skills"));
     push(SkillSource::Shared, home_join(".claude/skills"));
-    push(SkillSource::Shared, home_join(".agent/skills"));
     push(SkillSource::Shared, home_join(".zcode/skills"));
     locations
 }
 
 /// Every project-scope skill root under `project_root`. Path joins only.
 pub fn project_skill_locations(project_root: &Path, project_name: &str) -> Vec<SkillLocation> {
-    [(SkillSource::Shared, ".agents/skills")]
-        .into_iter()
-        .map(|(source, suffix)| SkillLocation {
-            source,
-            scope: SkillScope::Project,
-            root: project_root.join(suffix),
-            project: Some(project_name.to_owned()),
-        })
-        .collect()
+    [
+        (SkillSource::Shared, ".agents/skills"),
+        (SkillSource::Shared, ".claude/skills"),
+    ]
+    .into_iter()
+    .map(|(source, suffix)| SkillLocation {
+        source,
+        scope: SkillScope::Project,
+        root: project_root.join(suffix),
+        project: Some(project_name.to_owned()),
+    })
+    .collect()
 }
 
 /// All roots the scan walks for the given projects: user scope plus each
@@ -544,12 +546,7 @@ mod tests {
         let project_root = std::env::temp_dir().join("tide-skills-project");
         let projects = vec![("tide".to_owned(), project_root.clone())];
         let locations = skill_locations(&projects);
-        for expected in [
-            ".agents/skills",
-            ".claude/skills",
-            ".agent/skills",
-            ".zcode/skills",
-        ] {
+        for expected in [".agents/skills", ".claude/skills", ".zcode/skills"] {
             assert!(
                 locations
                     .iter()
@@ -557,7 +554,7 @@ mod tests {
                 "user root missing: {expected}"
             );
         }
-        for expected in [".agents/skills"] {
+        for expected in [".agents/skills", ".claude/skills"] {
             let expected = project_root.join(expected);
             assert!(
                 locations.iter().any(|location| location.root == expected),

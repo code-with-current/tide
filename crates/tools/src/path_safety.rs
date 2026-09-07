@@ -199,14 +199,14 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Resolve a target under `~/.claude`, `~/.agent`, or `~/.zcode`, following
+/// Resolve a target under `~/.claude` or `~/.zcode`, following
 /// symlinks + re-verifying; used by read_file for out-of-workspace
 /// skill/context files the user explicitly invoked. Windows + macOS are
 /// case-insensitive for this comparison, matching the TS.
 pub fn resolve_under_skill_root(target: &str) -> Result<PathBuf, PathEscapeError> {
     let Some(home) = home_dir() else {
         return Err(PathEscapeError {
-            message: "Resolved path is not under a skill root (~/.claude, ~/.agent, or ~/.zcode): "
+            message: "Resolved path is not under a skill root (~/.claude, ~/.agents or ~/.zcode): "
                 .to_string()
                 + target,
             requested_path: Some(target.to_string()),
@@ -243,7 +243,7 @@ pub fn resolve_under_skill_root(target: &str) -> Result<PathBuf, PathEscapeError
     }
     Err(PathEscapeError {
         message: format!(
-            "Resolved path is not under a skill root (~/.claude, ~/.agent, or ~/.zcode): {target}"
+            "Resolved path is not under a skill root (~/.claude, ~/.agents, or ~/.zcode): {target}"
         ),
         requested_path: Some(target.to_string()),
         workspace_root: None,

@@ -42,7 +42,7 @@ pub use tools::ask_followup::{
 pub use tools::compact::{run_compact, DEFAULT_KEEP_LAST};
 pub use tools::computer::{set_shared_computer_backend, shared_computer_backend, ComputerBackend};
 pub use tools::exit_plan_mode::run_exit_plan_mode;
-pub use tools::load_skill::{build_skill_catalog_md, builtin_skills, SkillSummary};
+pub use tools::load_skill::{build_skill_catalog_md, SkillSummary};
 pub use tools::memory::{
     rrf_fuse, set_shared_memory_index, set_shared_memory_writer, shared_memory_index,
     shared_memory_writer, MemoryHit, MemoryIndex, MemoryWriter,

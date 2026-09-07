@@ -1,12 +1,8 @@
 //! load_skill — port of `app/core/agent/tools/load-skill.ts` ().
 //! Reads a skill's SKILL.md (via read_file + the skill-root allowlist) and
 //! returns the body as instructions to follow; "execute" = load the
-//! prompt-based skill, not run code. `builtin:<name>` ids resolve against
-//! the embedded [`builtin_skills`] catalog (generated from
-//! `src/lib/prompts/skills/` by `build/promptMarkdownUtils.mjs`) without
-//! touching disk.
+//! prompt-based skill, not run code.
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -28,39 +24,9 @@ pub struct SkillSummary {
     pub abs_path: String,
 }
 
-/// TS `BuiltinSkill` — the embedded catalog entry shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BuiltinSkill {
-    pub name: String,
-    pub description: String,
-    pub body: String,
-}
-
-const BUILTIN_SKILLS_JSON: &str = include_str!("builtin-skills.json");
-
-/// The bundled skills (virtual `builtin:<name>` ids, never on disk).
-pub fn builtin_skills() -> &'static [BuiltinSkill] {
-    static SKILLS: OnceLock<Vec<BuiltinSkill>> = OnceLock::new();
-    SKILLS.get_or_init(|| {
-        serde_json::from_str(BUILTIN_SKILLS_JSON).expect("builtin-skills.json is valid JSON")
-    })
-}
-
-pub fn get_builtin_skill(name: &str) -> Option<&'static BuiltinSkill> {
-    builtin_skills().iter().find(|s| s.name == name)
-}
-
 pub(crate) fn run_load_skill(skill_path: &str, workspace_root: &std::path::Path) -> ToolOutcome {
     if skill_path.is_empty() {
         return ToolOutcome::failed("Missing required arg: path");
-    }
-
-    // Builtin skills resolve in memory via virtual ids — never touch disk.
-    if let Some(name) = skill_path.strip_prefix("builtin:") {
-        let Some(skill) = get_builtin_skill(name) else {
-            return ToolOutcome::failed(format!("'{name}' is not a builtin skill"));
-        };
-        return skill_loaded(name, skill_path, &skill.body);
     }
 
     let res = run_read_file(skill_path, DEFAULT_MAX_LINES, workspace_root, &[]);
@@ -179,7 +145,7 @@ impl Tool for LoadSkillTool {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Absolute path to the skill's SKILL.md file, or a `builtin:<name>` id from the Available skills list."
+                        "description": "Absolute path to the skill's SKILL.md file."
                     }
                 },
                 "required": ["path"]
@@ -201,33 +167,6 @@ impl Tool for LoadSkillTool {
     }
 }
 
-/// Builtin catalog summaries (`builtin:<name>` virtual paths) — the TS
-/// `builtinSkillSummaries`.
-pub fn builtin_skill_summaries() -> Vec<SkillSummary> {
-    builtin_skills()
-        .iter()
-        .map(|s| SkillSummary {
-            name: s.name.clone(),
-            description: s.description.clone(),
-            abs_path: format!("builtin:{}", s.name),
-        })
-        .collect()
-}
-
-/// Append builtins after scanned ones — scanned keep their full catalog
-/// lines longer (budget) and win name collisions. Disabled names filter
-/// builtins only; scanned entries are pre-filtered by the caller.
-pub fn merge_builtin_skills(scanned: &[SkillSummary], disabled: &[String]) -> Vec<SkillSummary> {
-    let scanned_names: HashMap<&str, ()> = scanned.iter().map(|s| (s.name.as_str(), ())).collect();
-    let mut merged = scanned.to_vec();
-    merged.extend(
-        builtin_skill_summaries().into_iter().filter(|b| {
-            !disabled.contains(&b.name) && !scanned_names.contains_key(b.name.as_str())
-        }),
-    );
-    merged
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,32 +179,6 @@ mod tests {
             description: description.into(),
             abs_path: abs_path.into(),
         }
-    }
-
-    #[test]
-    fn builtin_ids_resolve_in_memory() {
-        let res = run_load_skill(
-            "builtin:brainstorming",
-            std::path::Path::new("/nonexistent/workspace"),
-        );
-        assert_eq!(res.status, OutcomeStatus::Executed);
-        let ToolDisplay::FileLoaded { path, body, .. } = res.display.unwrap() else {
-            panic!("file_loaded display");
-        };
-        assert_eq!(path, "builtin:brainstorming");
-        assert!(body.contains("# Brainstorming"));
-        assert!(res.meta.as_deref().unwrap().starts_with("brainstorming · "));
-        assert!(res.output.starts_with("Skill \"brainstorming\" loaded ("));
-    }
-
-    #[test]
-    fn unknown_builtin_fails_cleanly() {
-        let res = run_load_skill(
-            "builtin:nope",
-            std::path::Path::new("/nonexistent/workspace"),
-        );
-        assert_eq!(res.status, OutcomeStatus::Failed);
-        assert_eq!(res.output, "'nope' is not a builtin skill");
     }
 
     #[test]
@@ -395,40 +308,17 @@ mod tests {
     }
 
     #[test]
-    fn builtin_catalog_matches_bundled_set() {
-        let all = builtin_skills();
-        assert_eq!(all.len(), 13);
-        assert!(all.iter().all(|s| !s.body.is_empty()));
-        let summaries = builtin_skill_summaries();
-        assert_eq!(summaries.len(), all.len());
-        assert_eq!(
-            summaries[0].abs_path,
-            format!("builtin:{}", summaries[0].name)
-        );
-        // merge: scanned wins collisions, disabled filters builtins.
-        let scanned = vec![skill(
-            "brainstorming",
-            "scanned",
-            "/ws/brainstorming/SKILL.md",
-        )];
-        let merged = merge_builtin_skills(&scanned, &["writing-plans".to_string()]);
-        assert_eq!(merged[0].description, "scanned");
-        assert!(merged
-            .iter()
-            .any(|s| s.abs_path == "builtin:executing-plans"));
-        assert!(!merged.iter().any(|s| s.name == "writing-plans"));
-        assert_eq!(merged.len(), all.len() - 1); // writing-plans filtered, brainstorming shadowed
-    }
-
-    #[test]
     fn execute_routes_through_trait() {
         let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("trait-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: trait\n---\nBody").unwrap();
         let tool = LoadSkillTool;
         assert_eq!(tool.spec().name, "load_skill");
         assert_eq!(tool.risk_tier(), RiskTier::ReadOnly);
         let ctx = ToolContext::new(tmp.path().to_path_buf());
         let out = tool
-            .execute(&ctx, json!({ "path": "builtin:brainstorming" }))
+            .execute(&ctx, json!({ "path": skill_dir.join("SKILL.md").to_string_lossy() }))
             .unwrap();
         assert_eq!(out.status, OutcomeStatus::Executed);
     }
