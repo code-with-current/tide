@@ -118,6 +118,9 @@ jobs:
         run: rm -f target/release/tide-v*-linux-*
 
       - name: Bundle
+        env:
+          TIDE_ANALYTICS_ENDPOINT: ${{ secrets.TIDE_ANALYTICS_ENDPOINT }}
+          TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
         run: ./scripts/bundle-linux.sh
 
       - uses: actions/upload-artifact@v7
@@ -182,6 +185,9 @@ jobs:
         run: rm -f target/release/tide-v*-linux-*
 
       - name: Bundle
+        env:
+          TIDE_ANALYTICS_ENDPOINT: ${{ secrets.TIDE_ANALYTICS_ENDPOINT }}
+          TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
         run: ./scripts/bundle-linux.sh
 
       - uses: actions/upload-artifact@v7
@@ -233,6 +239,8 @@ jobs:
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          TIDE_ANALYTICS_ENDPOINT: ${{ secrets.TIDE_ANALYTICS_ENDPOINT }}
+          TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
         run: bun scripts/bundle-windows.ts
 
       - uses: actions/upload-artifact@v7
@@ -283,6 +291,8 @@ jobs:
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          TIDE_ANALYTICS_ENDPOINT: ${{ secrets.TIDE_ANALYTICS_ENDPOINT }}
+          TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
         run: bun scripts/bundle-windows.ts
 
       - uses: actions/upload-artifact@v7
