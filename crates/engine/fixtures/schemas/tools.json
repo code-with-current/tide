@@ -499,13 +499,17 @@
   },
   {
     "name": "job_output",
-    "description": "Read new output from a background job since the last read. Use after starting a long-running command (dev server, watcher, etc.) via bash with background:true. Returns the incremental stdout+stderr and the job status; a read after the job finishes also reports its exit code. Reading a finished job delivers its completion, so always read the final delta.",
+    "description": "Read new output from a background job since the last read. Use after starting a long-running command (dev server, watcher, etc.) via bash with background:true. Returns the incremental stdout+stderr and the job status; a read after the job finishes also reports its exit code. Reading a finished job delivers its completion, so always read the final delta. You are notified in-session when a job finishes — read then, not before; do not poll for progress. If you are genuinely blocked on a live job, set wait: true to block until it settles (up to 120 seconds).",
     "schema": {
       "type": "object",
       "properties": {
         "job_id": {
           "type": "string",
           "description": "The background job id, e.g. bash-1."
+        },
+        "wait": {
+          "type": "boolean",
+          "description": "Block until the job settles (or up to 120 seconds) before reading. Use only when genuinely blocked on this job; otherwise wait for the completion notification."
         }
       },
       "required": [

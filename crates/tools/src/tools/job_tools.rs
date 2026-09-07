@@ -8,12 +8,14 @@
 //! whether it never existed, already finished and was reaped, or belongs
 //! to another session.
 
+use std::time::Duration;
+
 use protocol::model::{BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkStatus};
 use serde_json::json;
 
 use crate::jobs::{global_job_registry, KillOutcome, Reader};
 use crate::permission::RiskTier;
-use crate::{Tool, ToolContext, ToolError, ToolOutcome, ToolSpec};
+use crate::{AbortFlag, Tool, ToolContext, ToolError, ToolOutcome, ToolSpec};
 
 pub const JOB_OUTPUT_NAME: &str = "job_output";
 pub const JOB_LIST_NAME: &str = "job_list";
@@ -21,7 +23,12 @@ pub const JOB_KILL_NAME: &str = "job_kill";
 pub const BASH_OUTPUT_ALIAS: &str = "bash_output";
 pub const KILL_SHELL_ALIAS: &str = "kill_shell";
 
-const JOB_OUTPUT_DESCRIPTION: &str = "Read new output from a background job since the last read. Use after starting a long-running command (dev server, watcher, etc.) via bash with background:true. Returns the incremental stdout+stderr and the job status; a read after the job finishes also reports its exit code. Reading a finished job delivers its completion, so always read the final delta.";
+const JOB_OUTPUT_DESCRIPTION: &str = "Read new output from a background job since the last read. Use after starting a long-running command (dev server, watcher, etc.) via bash with background:true. Returns the incremental stdout+stderr and the job status; a read after the job finishes also reports its exit code. Reading a finished job delivers its completion, so always read the final delta. You are notified in-session when a job finishes — read then, not before; do not poll for progress. If you are genuinely blocked on a live job, set wait: true to block until it settles (up to 120 seconds).";
+
+/// How long a `wait: true` read blocks before reporting the job as still
+/// running.
+const JOB_OUTPUT_WAIT_SECS: u64 = 120;
+const JOB_OUTPUT_WAIT: Duration = Duration::from_secs(JOB_OUTPUT_WAIT_SECS);
 
 const JOB_LIST_DESCRIPTION: &str = "List this session's background jobs — id, status, and command for each, in start order. Use it to recover a job id, e.g. after starting long-running work earlier in the session. Finished jobs stay listed until the session ends.";
 
@@ -71,7 +78,12 @@ fn unknown_job(job_id: &str) -> String {
 /// `job_output` body — also the `bash_output` alias target (`shell_id` is
 /// read as the job id). Returns the delta since this reader's last read
 /// plus the status; a terminal read delivers the completion.
-pub(crate) fn run_job_output(session: &str, job_id: &str) -> ToolOutcome {
+pub(crate) fn run_job_output(
+    session: &str,
+    job_id: &str,
+    wait: bool,
+    abort: &AbortFlag,
+) -> ToolOutcome {
     if job_id.is_empty() {
         return ToolOutcome::failed("Missing required arg: job_id");
     }
@@ -79,6 +91,14 @@ pub(crate) fn run_job_output(session: &str, job_id: &str) -> ToolOutcome {
         return ToolOutcome::failed(unknown_job(job_id));
     };
     let registry = global_job_registry();
+    // A blocked model waits here — bounded by settlement, turn abort, or
+    // the cap — instead of re-reading in a poll loop.
+    let mut wait_expired = false;
+    if wait {
+        if let Ok(snapshot) = registry.wait(session, &key, JOB_OUTPUT_WAIT, abort, Reader::Model) {
+            wait_expired = snapshot.status.is_live();
+        }
+    }
     let Ok(read) = registry.read(session, &key, Reader::Model) else {
         return ToolOutcome::failed(unknown_job(job_id));
     };
@@ -91,7 +111,19 @@ pub(crate) fn run_job_output(session: &str, job_id: &str) -> ToolOutcome {
         .unwrap_or_default();
     let bytes = read.text.len();
     let mut output = if read.text.is_empty() {
-        "(no new output)".to_string()
+        if snapshot.status.is_live() {
+            if wait_expired {
+                format!(
+                    "(no new output after waiting {JOB_OUTPUT_WAIT_SECS}s — {job_id} is still {status}. You will be notified in-session when it completes; if still blocked, call again with wait: true or continue other work in the meantime.)"
+                )
+            } else {
+                format!(
+                    "(no new output — {job_id} is still {status}. You will be notified in-session when it completes; do not re-read in a loop. If genuinely blocked on this job, call again with wait: true.)"
+                )
+            }
+        } else {
+            "(no new output)".to_string()
+        }
     } else {
         read.text
     };
@@ -107,7 +139,11 @@ pub(crate) fn run_job_output(session: &str, job_id: &str) -> ToolOutcome {
             "\n[background job {job_id} finished — {status}{detail_note}]"
         ));
     }
-    ToolOutcome::executed(output).with_meta(format!("{status}{detail} · {bytes} bytes"))
+    let mut meta = format!("{status}{detail} · {bytes} bytes");
+    if wait_expired {
+        meta.push_str(" · wait expired");
+    }
+    ToolOutcome::executed(output).with_meta(meta)
 }
 
 /// `job_list` body — every job of this session in registration order.
@@ -178,6 +214,10 @@ impl Tool for JobOutputTool {
                     "job_id": {
                         "type": "string",
                         "description": JOB_ID_DESCRIPTION
+                    },
+                    "wait": {
+                        "type": "boolean",
+                        "description": "Block until the job settles (or up to 120 seconds) before reading. Use only when genuinely blocked on this job; otherwise wait for the completion notification."
                     }
                 },
                 "required": ["job_id"]
@@ -197,6 +237,8 @@ impl Tool for JobOutputTool {
         Ok(run_job_output(
             &ctx.session_id,
             &super::arg_str(&args, "job_id"),
+            super::arg_bool(&args, "wait"),
+            &ctx.abort,
         ))
     }
 }
@@ -289,11 +331,11 @@ mod tests {
     #[test]
     fn empty_and_unknown_ids_report_the_unknown_copy() {
         let session = session("unknown");
-        let out = run_job_output(&session, "");
+        let out = run_job_output(&session, "", false, &AbortFlag::new());
         assert_eq!(out.output, "Missing required arg: job_id");
         let out = run_job_kill(&session, "");
         assert_eq!(out.output, "Missing required arg: job_id");
-        let out = run_job_output(&session, "bash-9");
+        let out = run_job_output(&session, "bash-9", false, &AbortFlag::new());
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(
             out.output.starts_with("Unknown job id: bash-9."),
@@ -332,7 +374,7 @@ mod tests {
             })
             .unwrap();
         let outsider = session("fence-other");
-        let out = run_job_output(&outsider, &key.provider_id);
+        let out = run_job_output(&outsider, &key.provider_id, false, &AbortFlag::new());
         assert!(out.output.starts_with("Unknown job id:"), "{}", out.output);
         let out = run_job_kill(&outsider, &key.provider_id);
         assert!(out.output.starts_with("Unknown job id:"), "{}", out.output);

@@ -103,7 +103,7 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
         let out = job_output
             .execute(&ctx_for(&session), json!({ "job_id": id }))
             .unwrap();
-        if out.output != "(no new output)" {
+        if !out.output.starts_with("(no new output") {
             seen.push_str(&out.output);
         }
         seen.contains("jt-flow")
@@ -111,7 +111,17 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
     let out = job_output
         .execute(&ctx_for(&session), json!({ "job_id": id }))
         .unwrap();
-    assert_eq!(out.output, "(no new output)");
+    // The empty delta on a live job carries the anti-poll contract —
+    // notification promise plus the wait: true escape hatch — so a
+    // blocked model never falls back to re-reading in a loop.
+    assert!(
+        out.output
+            .starts_with(&format!("(no new output — {id} is still running.")),
+        "{}",
+        out.output
+    );
+    assert!(out.output.contains("do not re-read in a loop"), "{}", out.output);
+    assert!(out.output.contains("wait: true"), "{}", out.output);
     assert!(
         out.meta.as_deref().unwrap().starts_with("running"),
         "{:?}",
@@ -280,7 +290,7 @@ fn aliases_forward_to_the_job_registry() {
         let out = BashOutputTool
             .execute(&ctx_for(&session), json!({ "shell_id": id }))
             .unwrap();
-        if out.output != "(no new output)" {
+        if !out.output.starts_with("(no new output") {
             seen.push_str(&out.output);
         }
         seen.contains("jt-alias")
@@ -339,4 +349,39 @@ fn stale_shell_id_reports_the_unknown_job_copy() {
         .execute(&ctx_for(&test_session("stale-empty")), json!({}))
         .unwrap();
     assert_eq!(out.output, "No background jobs in this session.");
+}
+
+/// `wait: true` on a settled job returns immediately (no 120s block) and
+/// delivers the final delta plus the completion line — the wrap-up
+/// collection path the prompt guidance points at.
+#[test]
+fn wait_true_on_a_settled_job_delivers_the_final_delta() {
+    let session = test_session("wait-settled");
+    let ctx = ctx_for(&session);
+    let id = start_background(&ctx, "echo jt-wait-done");
+
+    let key = key_of(&id);
+    wait_until("job never settled", || {
+        global_job_registry()
+            .list_session(&session)
+            .iter()
+            .any(|item| item.key == key && !item.status.is_live())
+    });
+
+    let started = Instant::now();
+    let out = JobOutputTool
+        .execute(&ctx, json!({ "job_id": id, "wait": true }))
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(out.output.contains("jt-wait-done"), "{}", out.output);
+    assert!(
+        out.output.contains(&format!("[background job {id} finished — completed")),
+        "{}",
+        out.output
+    );
+    assert!(
+        out.meta.as_deref().unwrap().starts_with("completed"),
+        "{:?}",
+        out.meta
+    );
 }
