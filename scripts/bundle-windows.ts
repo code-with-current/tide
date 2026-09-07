@@ -121,6 +121,73 @@ const packageDirectoryName = artifactStem;
 const archive = join(releaseDirectory, `${artifactStem}-portable.zip`);
 const installer = join(releaseDirectory, `${artifactStem}-setup.exe`);
 
+/** The onnxruntime build `ort` 2.0.0-rc.13 pins (see its dist.tsv). */
+const onnxRuntimeVersion = "1.28.0";
+
+/** ort rides `load-dynamic` on Windows: its prebuilt static libraries are
+ *  compiled against the dynamic CRT, which cannot link into this app —
+ *  `.cargo/config.toml` forces `+crt-static` so the install never needs the
+ *  VC redistributable. Instead the official onnxruntime.dll ships alongside
+ *  the exe (LoadLibrary searches the executable's directory first), together
+ *  with the redistributable CRT DLLs that dll itself needs. */
+async function stageOnnxRuntime(packageDirectory: string): Promise<void> {
+  const flavor = process.arch === "arm64" ? "win-arm64" : "win-x64";
+  const zip = join(staging, `onnxruntime-${flavor}.zip`);
+  const response = await fetch(
+    `https://github.com/microsoft/onnxruntime/releases/download/v${onnxRuntimeVersion}/onnxruntime-${flavor}-${onnxRuntimeVersion}.zip`,
+  );
+  if (!response.ok) {
+    throw new Error(`onnxruntime download failed: HTTP ${response.status}`);
+  }
+  await writeFile(zip, Buffer.from(await response.arrayBuffer()));
+  const extract = join(staging, "onnxruntime");
+  await $`tar -xf ${zip} -C ${extract}`;
+  const extractedRoot = join(
+    extract,
+    `onnxruntime-${flavor}-${onnxRuntimeVersion}`,
+    "lib",
+    "onnxruntime.dll",
+  );
+  await copyFile(extractedRoot, join(packageDirectory, "onnxruntime.dll"));
+
+  // The redistributable CRT is already on every runner inside Visual Studio;
+  // copying those exact files is what the vc_redist installer itself does.
+  const redistRoot = join(
+    process.env["ProgramFiles"] ?? "C:\\Program Files",
+    "Microsoft Visual Studio",
+  );
+  const crtDirectory = findNewest(
+    join(redistRoot, "2022"),
+    ["Community", "Professional", "Enterprise", "BuildTools"],
+    process.arch === "arm64" ? "arm64" : "x64",
+  );
+  for (const file of readdirSync(crtDirectory)) {
+    if (file.endsWith(".dll")) {
+      await copyFile(
+        join(crtDirectory, file),
+        join(packageDirectory, file),
+      );
+    }
+  }
+}
+
+/** Newest `VC\Redist\MSVC\<version>\<arch>\Microsoft.VC143.CRT` across the
+ *  installed Visual Studio editions. */
+function findNewest(vsYear: string, editions: string[], arch: string): string {
+  const versionOrder = new Intl.Collator("en", { numeric: true });
+  for (const edition of editions) {
+    const redist = join(vsYear, edition, "VC", "Redist", "MSVC");
+    if (!existsSync(redist)) continue;
+    for (const version of readdirSync(redist).sort((a, b) =>
+      versionOrder.compare(b, a),
+    )) {
+      const candidate = join(redist, version, arch, "Microsoft.VC143.CRT");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  throw new Error(`No VC redistributable CRT found under ${vsYear}.`);
+}
+
 await $`cargo build --locked --release --package tide --bin tide`;
 
 const staging = await mkdtemp(join(tmpdir(), "tide-bundle-"));
@@ -130,6 +197,7 @@ try {
   await mkdir(packageDirectory, { recursive: true });
   await copyFile(join(releaseDirectory, "tide.exe"), join(packageDirectory, "tide.exe"));
   await copyFile(join(projectRoot, "LICENSE"), join(packageDirectory, "LICENSE"));
+  await stageOnnxRuntime(packageDirectory);
 
   // Authenticode has to be applied before anything is packaged, so the
   // executables inside the zip and the installer are all signed. Unsigned

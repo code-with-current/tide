@@ -15,8 +15,6 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 sqlite-vec = "0.1.9"
 ort = { version = "=2.0.0-rc.13", default-features = false, features = [
   "std",
-  "download-binaries",
-  "copy-dylibs",
   "tls-native",
 ] }
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
@@ -51,6 +49,21 @@ tree-sitter-solidity = "1.2.13"
 tree-sitter-zig = "1.1.2"
 tree-sitter-ocaml = "0.25.0"
 tree-sitter-objc = "3.0.2"
+
+# Prebuilt static onnxruntime everywhere but Windows. The Windows archives are
+# built against the dynamic CRT and cannot link into this app's `+crt-static`
+# build (see `.cargo/config.toml`), so Windows rides `load-dynamic` with the
+# official onnxruntime.dll shipped by `scripts/bundle-windows.ts` instead.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
+  "download-binaries",
+  "copy-dylibs",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
+  "load-dynamic",
+] }
 
 [dev-dependencies]
 tempfile = "3"

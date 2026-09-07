@@ -465,10 +465,6 @@ try {
     "Resources",
     jsReplExecutableName,
   );
-  const mountedDaemon = join(
-    mountedContents,
-    "MacOS",
-  );
   const mountedComputerUseHelper = join(
     mountedContents,
     "Helpers",
@@ -481,7 +477,6 @@ try {
   );
   for (const artifact of [
     join(mountedContents, "MacOS", executableName),
-    mountedDaemon,
     mountedJsRepl,
     join(
       mountedContents,
@@ -505,7 +500,6 @@ try {
     );
   }
   await $`codesign --verify --strict --verbose=2 ${mountedJsRepl}`;
-  await $`codesign --verify --strict --verbose=2 ${mountedDaemon}`;
   await $`codesign --verify --deep --strict --verbose=2 ${mountedComputerUseHelper}`;
   await $`codesign --verify --strict --verbose=2 ${mountedSparkleFramework}`;
   await $`codesign --verify --deep --strict --verbose=2 ${mountedApp}`;

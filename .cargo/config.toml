@@ -32,12 +32,13 @@ rustflags = ["-C", "link-arg=-arm64hazardfree"]
 # the C++ runtime the platform link command pulls in by itself; without this
 # the Linux link dies on `std::string::_M_replace_cold` and
 # `__cxa_call_terminate`. Mac and Windows name their C++ runtime differently,
-# so the flag stays linux-only.
+# so the flag stays linux-only. link-arg, not -l: rustc emits plain `-l` libs
+# ahead of the rlib archives, where the linker has already closed them off.
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-lstdc++"]
+rustflags = ["-C", "link-arg=-lstdc++"]
 
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-lstdc++"]
+rustflags = ["-C", "link-arg=-lstdc++"]
 
 [build]
 jobs = 4
