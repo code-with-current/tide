@@ -258,6 +258,7 @@ fn activate_other_instance(pid: i32) {
 fn activate_other_instance(_pid: i32) {}
 
 pub fn run() {
+    crate::analytics::note_process_start();
     ensure_single_instance();
     let daemon = crate::daemon::start_process()
         .unwrap_or_else(|error| panic!("failed to start Tide daemon: {error:#}"));

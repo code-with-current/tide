@@ -8,9 +8,10 @@
 //! installation-scoped ID keeps aggregate sessions coherent across launches.
 
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rust_umami::{Client, Context};
 use serde_json::{Value, json};
@@ -18,6 +19,21 @@ use uuid::Uuid;
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// Delay before the single launch-performance (ttfb) sample is sent, so the
+/// metric reflects a fully started app rather than process spawn alone.
+const LAUNCH_PERFORMANCE_DELAY: Duration = Duration::from_secs(60);
+/// Keeps Umami's realtime panel showing open instances. Umami derives its
+/// realtime view purely from incoming events; heartbeats carry no data beyond
+/// the standard build metadata.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+
+/// Records the earliest possible moment of process startup so the launch
+/// performance sample can be computed later. Called at the top of `run()`.
+pub fn note_process_start() {
+    let _ = PROCESS_START.set(Instant::now());
+}
 
 #[cfg(not(debug_assertions))]
 const ENDPOINT: Option<&str> = option_env!("TIDE_ANALYTICS_ENDPOINT");
@@ -32,9 +48,16 @@ const WEBSITE_ID: Option<&str> = None;
 /// A cheap handle to the background analytics worker.
 #[derive(Clone)]
 pub struct Analytics {
-    events: SyncSender<Event>,
+    events: SyncSender<Message>,
     enabled: Arc<AtomicBool>,
     available: bool,
+}
+
+/// What the queue carries: product events plus the timer-generated launch
+/// performance sample.
+pub(crate) enum Message {
+    Event(Event),
+    Performance(f64),
 }
 
 impl Analytics {
@@ -53,6 +76,10 @@ impl Analytics {
             let _ = std::thread::Builder::new()
                 .name("tide-analytics".into())
                 .spawn(move || run(receiver, language, distinct_id, worker_enabled));
+            let timer_events = events.clone();
+            let _ = std::thread::Builder::new()
+                .name("tide-analytics-timer".into())
+                .spawn(move || run_timer(timer_events));
         } else {
             drop(receiver);
         }
@@ -68,7 +95,7 @@ impl Analytics {
         if !self.enabled.load(Ordering::Acquire) {
             return;
         }
-        let _ = self.events.try_send(event);
+        let _ = self.events.try_send(Message::Event(event));
     }
 
     /// Applies the user's persisted sharing preference. The worker also checks
@@ -115,6 +142,7 @@ pub enum Event {
         provider: &'static str,
         turn_number: usize,
     },
+    AppHeartbeat,
 }
 
 #[derive(Clone, Copy)]
@@ -218,6 +246,7 @@ impl Event {
                     "turnNumber": turn_number,
                 }),
             ),
+            Self::AppHeartbeat => ("app.heartbeat", json!({})),
         };
 
         let properties = data
@@ -256,7 +285,7 @@ fn env_flag(name: &str) -> bool {
 }
 
 fn run(
-    receiver: Receiver<Event>,
+    receiver: Receiver<Message>,
     language: &'static str,
     distinct_id: Uuid,
     enabled: Arc<AtomicBool>,
@@ -299,14 +328,38 @@ fn run(
     };
     let session = client.session().distinct_id(distinct_id.to_string());
 
-    while let Ok(event) = receiver.recv() {
+    while let Ok(message) = receiver.recv() {
         if !enabled.load(Ordering::Acquire) {
             continue;
         }
-        let (name, data) = event.into_track();
         // A failed analytics request is intentionally terminal only for this
-        // event. The next product action gets an independent best-effort send.
-        let _ = runtime.block_on(session.event(name).data(data).send());
+        // message. The next product action gets an independent best-effort send.
+        let _ = match message {
+            Message::Event(event) => {
+                let (name, data) = event.into_track();
+                runtime.block_on(session.event(name).data(data).send())
+            }
+            Message::Performance(ttfb_milliseconds) => runtime
+                .block_on(session.performance("/desktop").ttfb(ttfb_milliseconds).send()),
+        };
+    }
+}
+
+/// Sends the launch performance sample shortly after startup, then keeps a
+/// periodic heartbeat so Umami's realtime view reflects open instances.
+fn run_timer(events: SyncSender<Message>) {
+    std::thread::sleep(LAUNCH_PERFORMANCE_DELAY);
+    if let Some(start) = PROCESS_START.get() {
+        let ttfb_milliseconds = start.elapsed().as_millis() as f64;
+        // The collector rejects samples outside 0..=60000 ms; an absurd
+        // startup time says more about the machine than the app anyway.
+        if (0.0..=60_000.0).contains(&ttfb_milliseconds) {
+            let _ = events.try_send(Message::Performance(ttfb_milliseconds));
+        }
+    }
+    loop {
+        std::thread::sleep(HEARTBEAT_INTERVAL);
+        let _ = events.try_send(Message::Event(Event::AppHeartbeat));
     }
 }
 
