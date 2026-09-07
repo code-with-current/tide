@@ -329,10 +329,12 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
-    /// Pulls from the upstream of the current branch.
+    /// Pulls from the upstream of the current branch — fast-forward only,
+    /// or rebase the branch onto its upstream when `rebase` is set.
     GitPull {
         #[ts(type = "string")]
         cwd: PathBuf,
+        rebase: bool,
     },
     /// Resolves the identity the next commit at `cwd` would use, with the
     /// matching profile id when the resolved pair equals a stored profile.

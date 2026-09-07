@@ -287,8 +287,8 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::GitFetch { cwd } => WorkspaceResult::GitOp {
             result: crate::git_panel::fetch(&cwd),
         },
-        WorkspaceOperation::GitPull { cwd } => WorkspaceResult::GitOp {
-            result: crate::git_panel::pull(&cwd),
+        WorkspaceOperation::GitPull { cwd, rebase } => WorkspaceResult::GitOp {
+            result: crate::git_panel::pull(&cwd, rebase),
         },
         WorkspaceOperation::GitCurrentIdentity { cwd } => WorkspaceResult::GitCurrentIdentityDone {
             identity: crate::git_identities::GitIdentities::shared().current_identity(&cwd),
