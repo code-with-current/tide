@@ -293,7 +293,14 @@ fn run(
     let (Some(endpoint), Some(website_id)) = (ENDPOINT, WEBSITE_ID) else {
         return;
     };
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+    // A `current_thread` runtime driven by `block_on` from this plain thread
+    // hangs inside the full app process: the future freezes mid-request with
+    // the OS connection established (observed with analytics.tide.codes) and
+    // even the request timeout never fires. A multi-thread runtime executes
+    // the send on its own worker with a private IO/time driver, so the parked
+    // caller thread cannot lose the wakeup.
+    let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
         .enable_all()
         .build()
     else {
@@ -337,10 +344,13 @@ fn run(
         let _ = match message {
             Message::Event(event) => {
                 let (name, data) = event.into_track();
-                runtime.block_on(session.event(name).data(data).send())
+                runtime
+                    .block_on(session.event(name).data(data).send())
+                    .map_err(|error| eprintln!("analytics event send failed: {error:?}"))
             }
             Message::Performance(ttfb_milliseconds) => runtime
-                .block_on(session.performance("/desktop").ttfb(ttfb_milliseconds).send()),
+                .block_on(session.performance("/desktop").ttfb(ttfb_milliseconds).send())
+                .map_err(|error| eprintln!("analytics performance send failed: {error:?}")),
         };
     }
 }

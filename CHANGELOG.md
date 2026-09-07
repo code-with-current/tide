@@ -14,6 +14,13 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.16]
+
+- Fixed anonymous product analytics never reaching the server: the background
+  analytics worker froze on its first request inside the running app, so no
+  events were collected. Sends now run on a dedicated multi-thread runtime and
+  report delivery failures to the console log.
+
 ## [unreleased]
 
 - Sub-agent runs survive an app restart. The agents panel rebuilds each
