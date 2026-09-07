@@ -27,8 +27,15 @@ branch into its own git worktree so your main branch stays untouched.
 Grab the latest installer from the
 [releases page](https://github.com/code-with-current/tide/releases/latest):
 
-- **macOS** (Apple Silicon) — `tide-v<version>-mac-arm64.dmg`. The build is
-  ad-hoc signed, so on first launch right-click the app and choose **Open**.
+- **macOS** (Apple Silicon) — with Homebrew:
+
+  ```sh
+  brew install --cask code-with-current/tap/tide
+  ```
+
+  Or grab `tide-v<version>-mac-arm64.dmg` from the releases page. The build
+  is ad-hoc signed, so a direct download needs right-click → **Open** on
+  first launch; a Homebrew install skips that prompt.
 - **Windows** (x64 / arm64) — `tide-v<version>-windows-<arch>-setup.exe`
   installs per-user and updates itself. A portable `.zip` is published
   alongside it. See [docs/windows.md](docs/windows.md).

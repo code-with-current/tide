@@ -1,0 +1,35 @@
+name: homebrew
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  bump-cask:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Bump Casks/tide.rb to the published release
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          ASSET="tide-v${VERSION}-mac-arm64.dmg"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/tide.dmg" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+          SHA="$(sha256sum "$RUNNER_TEMP/tide.dmg" | cut -d' ' -f1)"
+          sed -i \
+            -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
+            -e "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" \
+            Casks/tide.rb
+          git config user.name "tide-release-bot"
+          git config user.email "noreply@tide.codes"
+          git add Casks/tide.rb
+          git commit -m "chore(brew): bump cask to ${TAG}" || exit 0
+          git push
