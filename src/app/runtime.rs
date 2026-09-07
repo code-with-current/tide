@@ -188,17 +188,27 @@ fn prepare_submission(
 
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
-    // made between turns to the next response.
-    let checkpoint_warning = workspace_ack(
-        &workspace_client,
-        client::WorkspaceOperation::CaptureTurnStart {
-            cwd: project_path.to_path_buf(),
-            session_id,
-            turn_count,
-        },
-    )
-    .err()
-    .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error));
+    // made between turns to the next response. The snapshot must land before
+    // this turn's prompt — the workspace has to be captured before the
+    // provider can edit a file — but driver startup is independent of it, so
+    // the two overlap instead of serializing both ahead of the first LLM
+    // request.
+    let checkpoint = {
+        let workspace_client = workspace_client.clone();
+        let cwd = project_path.to_path_buf();
+        std::thread::Builder::new()
+            .name("turn-start-checkpoint".to_owned())
+            .spawn(move || {
+                workspace_ack(
+                    &workspace_client,
+                    client::WorkspaceOperation::CaptureTurnStart {
+                        cwd,
+                        session_id,
+                        turn_count,
+                    },
+                )
+            })
+    };
 
     // Process startup can synchronously resolve executables, bind sockets,
     // and spawn children. It belongs behind the same animated preparation
@@ -207,6 +217,29 @@ fn prepare_submission(
     let driver = driver_start.map(|request| {
         request.and_then(|request| start_driver(request, project_path.to_path_buf()))
     });
+
+    let checkpoint_warning = match checkpoint {
+        // A thread-spawn failure degrades to the old serial behavior: capture
+        // inline on this executor thread.
+        Err(_) => workspace_ack(
+            &workspace_client,
+            client::WorkspaceOperation::CaptureTurnStart {
+                cwd: project_path.to_path_buf(),
+                session_id,
+                turn_count,
+            },
+        )
+        .err()
+        .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error)),
+        Ok(handle) => match handle.join() {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(tr!("errors.capture_pre_turn_checkpoint", error = error)),
+            Err(_) => Some(tr!(
+                "errors.capture_pre_turn_checkpoint",
+                error = anyhow::anyhow!("the checkpoint capture panicked")
+            )),
+        },
+    };
 
     Ok(PreparedSubmission {
         workspace,
@@ -455,6 +488,56 @@ struct PreparedResponseFork {
 /// Fork the tide session's transcript at a response through its daemon
 /// runtime: a live driver forks in place, and a cold one is started just for
 /// the fork. The returned cursor becomes the fork's resume point.
+/// The vendor half of a route label, properly cased — `zai` → `Zai`,
+/// `openai` → `OpenAI`. Unknown prefixes capitalize their first letter.
+/// Drop a leading vendor repetition from a catalog model name —
+/// "Z.ai: GLM 5.3 Flash" against vendor "Z.ai" becomes "GLM 5.3 Flash".
+/// Case-insensitive on the vendor; a separator (`:`, `/`, `-`, `.`, space)
+/// must follow, otherwise the name is kept untouched.
+fn strip_vendor_prefix<'a>(display: &'a str, vendor: &str) -> &'a str {
+    let lower_display = display.to_ascii_lowercase();
+    let lower_vendor = vendor.to_ascii_lowercase();
+    let Some(rest) = lower_display.strip_prefix(&lower_vendor) else {
+        return display;
+    };
+    if rest.is_empty() {
+        return "";
+    }
+    let trimmed = rest.trim_start_matches(|c| matches!(c, ':' | '/' | '-' | '.' | ' '));
+    if trimmed.len() < rest.len() {
+        let cut = display.len() - trimmed.len();
+        display[cut..].trim_start()
+    } else {
+        display
+    }
+}
+
+fn vendor_display(prefix: &str) -> String {
+    match prefix.to_ascii_lowercase().as_str() {
+        "openai" => "OpenAI".to_owned(),
+        "zai" => "Zai".to_owned(),
+        "xai" => "xAI".to_owned(),
+        "anthropic" => "Anthropic".to_owned(),
+        "deepseek" => "DeepSeek".to_owned(),
+        "google" => "Google".to_owned(),
+        "mistral" => "Mistral".to_owned(),
+        "groq" => "Groq".to_owned(),
+        "ollama" => "Ollama".to_owned(),
+        "openrouter" => "OpenRouter".to_owned(),
+        "together" => "Together".to_owned(),
+        "fireworks" => "Fireworks".to_owned(),
+        "lmstudio" => "LM Studio".to_owned(),
+        "moonshot" => "Moonshot".to_owned(),
+        other => {
+            let mut cased = other.to_owned();
+            if let Some(first) = cased.get_mut(..1) {
+                first.make_ascii_uppercase();
+            }
+            cased
+        }
+    }
+}
+
 fn fork_response_with_driver(
     request: &mut ResponseForkRequest,
 ) -> anyhow::Result<(ProviderResumeCursor, Option<PreparedDriver>)> {
@@ -739,6 +822,10 @@ impl Tide {
                     .is_some_and(|session| session.status.is_busy());
                 if !busy {
                     self.runtime_attach_misses.remove(&session_id);
+                    // No runtime came back for a settled session: a run
+                    // persisted mid-flight has no driver left to finish it,
+                    // so drop the panel's live items to Lost now.
+                    self.mark_background_work_lost(session_id);
                     return;
                 }
                 let misses = self.runtime_attach_misses.entry(session_id).or_default();
@@ -816,6 +903,9 @@ impl Tide {
                 .transcript_blocks
                 .retain(|block| !block.activities.is_empty());
         }
+        // The runtime is gone for good (attach retries exhausted): sub-agent
+        // runs still shown live can never settle through driver events.
+        self.mark_background_work_lost(session_id);
         if let Some(checkpoint) = checkpoint {
             self.pending_checkpoint_captures.push(checkpoint);
             self.start_pending_checkpoint_captures(cx);
@@ -1298,6 +1388,114 @@ impl Tide {
         }
     }
 
+    /// Record which turn block the mouse is over, driving the v2
+    /// transcript's footer reveal. The claiming surface is remembered: a
+    /// leave event only clears a hover claimed by the same surface, so the
+    /// leave/enter race between the block and the adjacent footer strip
+    /// cannot hide the footer mid-move.
+    pub(super) fn set_turn_footer_hover_enter(
+        &mut self,
+        turn: Uuid,
+        source: TurnFooterHoverSource,
+        cx: &mut Context<Self>,
+    ) {
+        let changed =
+            self.turn_footer_hover != Some(turn) || self.turn_footer_hover_source != Some(source);
+        if changed {
+            self.turn_footer_hover = Some(turn);
+            self.turn_footer_hover_source = Some(source);
+            cx.notify();
+        }
+    }
+
+    /// A hover surface of `turn` stopped being hovered. The clear is
+    /// deferred past the adjacent surface's enter event, and it only fires
+    /// when the claim still matches — a fresh claim from the other surface
+    /// wins.
+    pub(super) fn set_turn_footer_hover_leave(
+        &mut self,
+        turn: Uuid,
+        source: TurnFooterHoverSource,
+        cx: &mut Context<Self>,
+    ) {
+        if self.turn_footer_hover != Some(turn) || self.turn_footer_hover_source != Some(source) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(120))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.turn_footer_hover == Some(turn)
+                    && this.turn_footer_hover_source == Some(source)
+                {
+                    this.turn_footer_hover = None;
+                    this.turn_footer_hover_source = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The turn footer's branch state: whether "fork into a new session"
+    /// can run for this settled turn right now, and whether a fork of
+    /// exactly this turn is in flight. Never `None` — the button always
+    /// renders (DSH's shape), dimmed with an explanatory tooltip when the
+    /// conversation cannot fork. Mirrors `fork_session_from_response`'s own
+    /// preconditions; the provider cursor is deliberately NOT one of them —
+    /// a fresh Tide session connects without one, and the fork path starts
+    /// its own driver regardless.
+    /// The usage panel's "Provider / model" label for a model id: the
+    /// vendor (the model's sub-provider, prettified — `zai` → `Zai`) over
+    /// the probe-resolved model name, `Zai/GLM-5.3`. Falls back to the id's
+    /// own prefix, then to the bare name, when the catalog has no row.
+    pub(super) fn model_route_label(&self, model: Option<&str>) -> Option<String> {
+        let model = model?;
+        let candidate = self
+            .tide_models
+            .iter()
+            .find(|candidate| candidate.id == model);
+        let display = candidate
+            .map(|candidate| candidate.name.clone())
+            .unwrap_or_else(|| model.to_owned());
+        let vendor = candidate
+            .and_then(|candidate| candidate.sub_provider.as_deref())
+            .or_else(|| model.split_once('/').map(|(prefix, _)| prefix));
+        let Some(vendor) = vendor else {
+            return Some(display);
+        };
+        // Catalog names often repeat the vendor as a prefix ("Z.ai: GLM
+        // 5.3 Flash") — strip it, or the composed label reads
+        // "Z.ai/Z.ai: GLM 5.3 Flash".
+        let display = strip_vendor_prefix(&display, vendor);
+        if display.is_empty() {
+            // The name was the vendor and nothing else; the id already
+            // carries the vendor — do not double it.
+            return Some(model.to_owned());
+        }
+        Some(format!("{}/{}", vendor_display(vendor), display))
+    }
+
+    pub(super) fn turn_branch_state(
+        &self,
+        session: &AgentSession,
+        turn: &AgentTurn,
+    ) -> (bool, bool) {
+        let forkable = matches!(session.status, SessionStatus::Idle | SessionStatus::Failed)
+            && session.provider.supports_conversation_fork()
+            && turn.provider_turn_started
+            && session
+                .turns
+                .get(turn.turn_count.saturating_sub(1))
+                .is_some_and(|slot| slot.turn_count == turn.turn_count);
+        let preparing = self.response_fork_preparations.get(&session.id).copied();
+        (
+            forkable && preparing.is_none(),
+            preparing == Some(turn.turn_count),
+        )
+    }
+
     pub(super) fn fork_session_from_response(
         &mut self,
         session_id: Uuid,
@@ -1665,9 +1863,10 @@ impl Tide {
             return;
         }
         let rollback_turns = source.provider_turns_after(retained_turn_count);
-        if !source.provider.supports_conversation_rollback()
-            || (rollback_turns > 0 && source.provider_cursor.is_none())
-        {
+        // Tide rebuilds its native conversation from the stored transcript
+        // (`rebuild_history`), so a missing persisted cursor never blocks a
+        // rewind — the driver re-establishes the cursor from the rollback.
+        if !source.provider.supports_conversation_rollback() {
             self.show_toast(tr!(
                 "session.provider_cannot_rewind",
                 provider = source.provider.display_name()
@@ -2470,6 +2669,15 @@ impl Tide {
         );
     }
 
+    /// One line into the session's Stream log tail, enforcing the cap.
+    fn push_stream_log_entry(&mut self, session_id: Uuid, entry: inspector::StreamLogEntry) {
+        let log = self.inspector_stream_log.entry(session_id).or_default();
+        log.push_back(entry);
+        while log.len() > inspector::STREAM_LOG_CAP {
+            log.pop_front();
+        }
+    }
+
     fn submit_submission_for_session(
         &mut self,
         session_id: Uuid,
@@ -2593,6 +2801,12 @@ impl Tide {
         } else {
             None
         };
+        // Driver events only carry the assistant side, so the user's line
+        // enters the Stream log here, where the turn begins.
+        self.push_stream_log_entry(
+            session_id,
+            inspector::user_stream_log_entry(&human_prompt, unix_time_millis()),
+        );
         if let Some(placeholder) = title_placeholder {
             self.schedule_session_title_generation(
                 session_id,
@@ -2835,6 +3049,7 @@ impl Tide {
         // queues just because its own drain reported a change first.
         if self.drain_driver_events(cx)
             | self.drain_computer_permission_events()
+            | self.drain_permission_flow(cx)
             | self.drain_task_state_sync_events(cx)
             | self.drain_tide_ops_events(cx)
             | self.drain_git_ops_events(cx)
@@ -2962,17 +3177,24 @@ impl Tide {
                             .usage_totals
                             .get_or_insert_with(SessionUsageTotals::default)
                             .apply_step(step);
+                        // The turn's own snapshot folds beside it — persisted
+                        // on the turn, so the footer's usage trigger survives
+                        // relaunches. Sub-agent steps never emit here, so the
+                        // fold is main-thread only.
+                        if let Some(turn) = session
+                            .turns
+                            .last_mut()
+                            .filter(|turn| turn.status == TurnStatus::Running)
+                        {
+                            turn.usage.get_or_insert_with(Default::default).fold(step);
+                        }
                         self.state.mark_session_dirty(session_id);
                     }
                 }
                 // The Stream log tail rides the same pre-dispatch point:
                 // one classified line per event, capped per session.
                 if let Some(entry) = inspector::stream_log_entry(&event, unix_time_millis()) {
-                    let log = self.inspector_stream_log.entry(session_id).or_default();
-                    log.push_back(entry);
-                    while log.len() > inspector::STREAM_LOG_CAP {
-                        log.pop_front();
-                    }
+                    self.push_stream_log_entry(session_id, entry);
                 }
                 keep_runtime &= self.handle_driver_event(session_id, &mut runtime, event, true, cx);
                 if !keep_runtime {

@@ -272,6 +272,13 @@ impl OrchestratorWake {
         }
     }
 
+    /// Units left before consecutive wakes are refused; observability for
+    /// the budget test.
+    #[cfg(test)]
+    fn wake_budget_remaining(&self) -> u32 {
+        self.wake_budget.load(Ordering::Acquire)
+    }
+
     /// The prompt-entry refill: a consumed `User` message resets the
     /// budget; Job/Agent-tagged messages never do.
     fn refill_on_user_message(&self, message: &StepMessage) {
@@ -703,6 +710,23 @@ impl crate::driver::DriverControl for TideDriver {
         Ok(Some(ProviderResumeCursor::Tide {
             session_id: self.inner.session_id.clone(),
         }))
+    }
+
+    fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
+        // Forking at the live edge keeps the conversation whole — the
+        // resume cursor alone is the fork's seed point, and the forked
+        // session replays the source's persisted turns. Forking earlier
+        // reuses the rollback cut, so the provider state and the cursor
+        // move to the same truncation point.
+        if turns_to_remove == 0 {
+            let cursor = ProviderResumeCursor::Tide {
+                session_id: self.inner.session_id.clone(),
+            };
+            *self.inner.provider_cursor.lock().unwrap() = Some(cursor.clone());
+            return Ok(cursor);
+        }
+        self.rollback(turns_to_remove)?
+            .ok_or_else(|| anyhow::anyhow!("the fork produced no resume cursor"))
     }
 }
 
@@ -1181,7 +1205,7 @@ fn close_canceled_calls(
             }
             LoopSink::Subagent { .. } => {
                 emit_subagent_blocks(inner, sink, |blocks| {
-                    subagent_tool_finish(blocks, tool_call_id, false, 0)
+                    subagent_tool_finish(blocks, tool_call_id, false, 0, None)
                 });
             }
         }
@@ -1384,6 +1408,11 @@ fn subagent_tool_start(
         target: subagent_tool_target(arguments),
         status: SubagentToolStatus::Running,
         duration_ms: None,
+        // The same pretty form the transcript card carries, so the block
+        // stream's expandable body draws the input section and the edit
+        // metadata can extract from it.
+        arguments: super::activity::format_json(arguments),
+        output: None,
     });
 }
 
@@ -1395,6 +1424,7 @@ fn subagent_tool_finish(
     tool_call_id: &str,
     executed: bool,
     duration_ms: u64,
+    output: Option<String>,
 ) {
     let status = if executed {
         SubagentToolStatus::Done
@@ -1406,12 +1436,14 @@ fn subagent_tool_finish(
             id,
             status: block_status,
             duration_ms: block_duration,
+            output: block_output,
             ..
         } = block
             && id == tool_call_id
         {
             *block_status = status;
             *block_duration = Some(duration_ms);
+            *block_output = output;
             return;
         }
     }
@@ -1468,7 +1500,7 @@ struct ToolEntry {
     spec: ToolSpec,
 }
 
-fn toolset() -> Vec<ToolEntry> {
+fn toolset(workspace_root: &std::path::Path) -> Vec<ToolEntry> {
     tools::tools::core_tools()
         .into_iter()
         .filter(|tool| !ORCHESTRATOR_OWNED_TOOLS.contains(&tool.spec().name.as_str()))
@@ -1477,14 +1509,52 @@ fn toolset() -> Vec<ToolEntry> {
             let tool: Arc<dyn Tool> = Arc::from(tool);
             // tools keeps its own spec type to stay engine-free; the
             // shapes are identical, so the conversion is field-by-field.
+            let description = if spec.name == "load_skill" {
+                with_skill_catalog(&spec.description, workspace_root)
+            } else {
+                spec.description
+            };
             let spec = ToolSpec {
                 name: spec.name,
-                description: spec.description,
+                description,
                 parameters: spec.parameters,
             };
             ToolEntry { tool, spec }
         })
         .collect()
+}
+
+/// The load_skill description with the "Available skills" catalog appended —
+/// the list the system prompt promises the model. Enabled skills scanned
+/// from the workspace's `.agents`/`.claude` roots and the user's shared
+/// home pools carry their SKILL.md paths. Without this catalog the model
+/// cannot route `/skill-name` to load_skill — it has no way to learn a
+/// path (the slash_command tool knows nothing of skills), which is exactly
+/// the reported "Unknown command" failure.
+fn with_skill_catalog(base: &str, workspace_root: &std::path::Path) -> String {
+    let mut locations = crate::skills::project_skill_locations(workspace_root, "project");
+    locations.extend(crate::skills::user_skill_locations());
+    let scanned: Vec<tools::SkillSummary> = crate::skills::scan_skills(&locations)
+        .skills
+        .into_iter()
+        .filter(|skill| skill.enabled)
+        .map(|skill| {
+            // The install path is read before `skill` is destructured —
+            // `primary()` borrows, and the name/description fields move.
+            let abs_path = skill.primary().skill_file.to_string_lossy().into_owned();
+            tools::SkillSummary {
+                name: skill.name,
+                description: skill.description,
+                abs_path,
+            }
+        })
+        .collect();
+    let catalog = tools::build_skill_catalog_md(&scanned);
+    if catalog.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{base}\n\nAvailable skills:\n{catalog}")
+    }
 }
 
 /// Where a loop's output lands: the session transcript, or the background
@@ -1516,6 +1586,11 @@ struct LoopOutcome {
     usage: Option<engine::EngineUsage>,
     aborted: bool,
     error: Option<String>,
+    /// Cumulative model-stream time across the loop's steps, and the first
+    /// step's time-to-first-token — the speed facts a dispatched child's
+    /// footer derives TPS and TTFT from. The root loop's copy goes unread.
+    llm_ms: u64,
+    ttft_ms: Option<u64>,
 }
 
 /// Apply one block mutation to the sub-agent sink and ship the resulting
@@ -1623,13 +1698,19 @@ fn finish_tool_call(
             }
             emit(inner, DriverEvent::RichActivity(item));
         }
-        // The child's tool block settles with the outcome — presentation
-        // only, the real result still lands in `step_results` below.
+        // The child's tool block settles with the outcome — the same display
+        // normalization the transcript card gets (envelope unwrapping, the
+        // renderable body text), so its expanded card matches the
+        // transcript's. Presentation only; the real result still lands in
+        // `step_results` below.
         LoopSink::Subagent { .. } => {
             let executed = matches!(outcome.status, tools::OutcomeStatus::Executed);
             let duration_ms = started.elapsed().as_millis() as u64;
+            let output = super::activity::format_output(&serde_json::Value::String(
+                display_output(&outcome),
+            ));
             emit_subagent_blocks(inner, sink, |blocks| {
-                subagent_tool_finish(blocks, tool_call_id, executed, duration_ms)
+                subagent_tool_finish(blocks, tool_call_id, executed, duration_ms, output)
             });
         }
     }
@@ -1706,10 +1787,20 @@ fn needs_wrap_up(ended_turn: bool, aborted: bool, error_free: bool) -> bool {
     !ended_turn && !aborted && error_free
 }
 
-/// The nudge that opens the forced wrap-up step. Model-facing, so it states
-/// the constraint rather than the mechanism.
+/// The nudge that opens the forced wrap-up step when the step budget was
+/// actually exhausted. Model-facing, so it states the constraint rather than
+/// the mechanism.
 fn wrap_up_prompt() -> String {
     "Step limit reached. Give your final answer now — no further tool calls are possible."
+        .to_owned()
+}
+
+/// The nudge for a loop that stopped early and error-free — the provider
+/// stream ended without a finish reason, or claimed tool use but assembled
+/// no calls. The step-limit phrasing above would be a false claim here:
+/// the budget never ran out, the stream just degenerated.
+fn interrupted_prompt() -> String {
+    "The previous completion ended unexpectedly before any tool calls ran. Give your final answer now — no further tool calls are possible."
         .to_owned()
 }
 
@@ -1747,6 +1838,28 @@ fn emit_step_usage(
     );
 }
 
+/// The dispatch run's cumulative usage, projected onto the wire shape the
+/// agents panel renders. Timing fields stay `None` — the child loop does
+/// not measure them — and the total stays out of the session's usage
+/// aggregates by construction: only the work item carries it.
+fn turn_usage_breakdown(outcome: &LoopOutcome) -> UsageBreakdown {
+    let Some(usage) = outcome.usage.as_ref() else {
+        return UsageBreakdown::default();
+    };
+    UsageBreakdown {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read: usage.cache_read,
+        cache_write: usage.cache_write,
+        reasoning_tokens: usage.reasoning_tokens,
+        calls: usage.calls,
+        cost_usd: (usage.cost_usd > 0.0).then_some(usage.cost_usd),
+        llm_ms: Some(outcome.llm_ms),
+        ttft_ms: outcome.ttft_ms,
+        tool_ms: None,
+    }
+}
+
 /// The streaming step loop shared by root turns and dispatched subagents:
 /// consume engine events into `sink`, execute tools (recursing into
 /// `run_dispatch` for dispatch calls), and append results to `history`.
@@ -1768,12 +1881,23 @@ async fn drive_engine(
         usage: None,
         aborted: false,
         error: None,
+        llm_ms: 0,
+        ttft_ms: None,
     };
     // Whether the loop ended with the model's own EndTurn — the only clean
     // exit that leaves a final message. Budget exhaustion and degenerate
     // stops fall through to the forced wrap-up below.
     let mut ended_turn = false;
-    'steps: for _step in 0..max_steps {
+    // Step slots actually consumed — distinguishes a genuine budget
+    // exhaustion (wrap-up says "step limit") from an early degenerate stop
+    // (worded as an interruption).
+    let mut steps_run = 0usize;
+    // One retry budget for a degenerate stop: a stream that ends with no
+    // text, no calls, and no error. First-of-session provider hiccups
+    // recover on the immediate retry; a repeat falls through to wrap-up.
+    let mut degenerate_retries = 0u32;
+    'steps: for step in 0..max_steps {
+        steps_run = step + 1;
         if abort.is_aborted() {
             outcome.aborted = true;
             break 'steps;
@@ -2022,6 +2146,12 @@ async fn drive_engine(
         // waits for the tool phase only when the step has calls to run.
         let llm_ms = step_started.elapsed().as_millis() as u64;
         let ttft_ms = first_token_at.map(|at| at.duration_since(step_started).as_millis() as u64);
+        // The loop's own speed facts: stream time accumulates, and the
+        // first step's TTFT stays the loop's TTFT.
+        outcome.llm_ms += llm_ms;
+        if outcome.ttft_ms.is_none() {
+            outcome.ttft_ms = ttft_ms;
+        }
         let runs_tools = step_stop
             .as_ref()
             .is_some_and(|s| matches!(s, EngineStopReason::ToolUse));
@@ -2202,7 +2332,18 @@ async fn drive_engine(
                 outcome.error = Some("the model refused to continue".into());
                 break 'steps;
             }
-            _ => break 'steps,
+            _ => {
+                // Degenerate stop: the stream ended without a finish reason
+                // (stop=None → Other("stream ended")) or reported tool use
+                // but assembled no calls. Nothing streamed means nothing was
+                // committed to history, so one retry is wire-safe; a repeat
+                // degenerate stop breaks to the wrap-up below.
+                if step_text.is_empty() && pending_calls.is_empty() && degenerate_retries < 1 {
+                    degenerate_retries += 1;
+                    continue 'steps;
+                }
+                break 'steps;
+            }
         }
     }
     // A loop that stopped without a clean EndTurn — the step budget ran
@@ -2211,7 +2352,12 @@ async fn drive_engine(
     // output)") and a wire shape resume cannot replay. One forced
     // tool-less completion makes the model answer in text.
     if needs_wrap_up(ended_turn, outcome.aborted, outcome.error.is_none()) {
-        push_user_message(history, HistoryMessage::user_text(wrap_up_prompt()));
+        let nudge = if steps_run >= max_steps {
+            wrap_up_prompt()
+        } else {
+            interrupted_prompt()
+        };
+        push_user_message(history, HistoryMessage::user_text(nudge));
         let request = TurnRequest {
             messages: history.lock().unwrap().clone(),
             tools: Vec::new(),
@@ -2591,7 +2737,7 @@ impl PreparedDispatch {
     /// the pre-split `run_dispatch`): `Starting` then `Running`, keyed by
     /// the child's durable id, `background: false` — a settled foreground
     /// dispatch vanishes from the summary while the Agents panel keeps it.
-    fn emit_foreground_item(&self, inner: &Arc<Inner>, tool_call_id: &str) {
+    fn emit_foreground_item(&self, inner: &Arc<Inner>, tool_call_id: &str, model: &str) {
         let mut item = BackgroundWorkItem::new(
             BackgroundWorkKind::Subagent,
             self.child_id.clone(),
@@ -2599,6 +2745,7 @@ impl PreparedDispatch {
             BackgroundWorkStatus::Starting,
         );
         item.detail = Some(self.agent_name.clone());
+        item.model = Some(model.to_owned());
         item.origin_activity_id = Some(tool_call_id.to_owned());
         item.background = false;
         // The task rides the item as the timeline's prompt header — the
@@ -2620,7 +2767,7 @@ impl PreparedDispatch {
     /// snapshot cannot carry (agent, origin call, the task header). Title
     /// stays with the registry's label (the task); `background: true`,
     /// `can_stop`, and `control_id = child_id` already ride those upserts.
-    fn emit_background_item(&self, inner: &Arc<Inner>, tool_call_id: &str) {
+    fn emit_background_item(&self, inner: &Arc<Inner>, tool_call_id: &str, model: &str) {
         let mut item = BackgroundWorkItem::new(
             BackgroundWorkKind::Subagent,
             self.child_id.clone(),
@@ -2628,6 +2775,7 @@ impl PreparedDispatch {
             BackgroundWorkStatus::Running,
         );
         item.detail = Some(self.agent_name.clone());
+        item.model = Some(model.to_owned());
         item.origin_activity_id = Some(tool_call_id.to_owned());
         item.task = Some(self.task.clone());
         item.background = true;
@@ -2679,7 +2827,7 @@ async fn run_dispatch_foreground(
         Ok(prepared) => prepared,
         Err(outcome) => return outcome,
     };
-    prepared.emit_foreground_item(inner, tool_call_id);
+    prepared.emit_foreground_item(inner, tool_call_id, engine.model_id());
     let (report, outcome) = run_child_loop(inner, engine, &prepared, parent_abort).await;
 
     let final_status = if outcome.error.is_some() || outcome.aborted {
@@ -2697,10 +2845,15 @@ async fn run_dispatch_foreground(
         final_status,
     );
     item.detail = Some(prepared.agent_name.clone());
+    item.model = Some(engine.model_id().to_owned());
     item.origin_activity_id = Some(tool_call_id.to_owned());
     item.task = Some(prepared.task.clone());
     item.output = Some(report.clone());
     item.duration_ms = Some(prepared.started.elapsed().as_millis() as u64);
+    item.usage = outcome
+        .usage
+        .is_some()
+        .then(|| turn_usage_breakdown(&outcome));
     emit(
         inner,
         DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)),
@@ -2775,6 +2928,10 @@ fn spawn_dispatch_background(
                     status,
                     detail,
                     output: Some(report),
+                    usage: outcome
+                        .usage
+                        .is_some()
+                        .then(|| turn_usage_breakdown(&outcome)),
                 });
             });
             Ok(JobHooks {
@@ -2786,7 +2943,7 @@ fn spawn_dispatch_background(
     match started {
         Ok(started_key) => {
             debug_assert_eq!(started_key, key);
-            prepared.emit_background_item(inner, tool_call_id);
+            prepared.emit_background_item(inner, tool_call_id, engine.model_id());
             ToolOutcome::executed(format!(
                 "started background job {child_id}. The sub-agent keeps running in its own context and streams into the Agents panel; you are notified in-session when it completes — read its report then with job_output(job_id: \"{child_id}\"), and stop it early with job_kill(job_id: \"{child_id}\"). Do not poll or sleep on it.\n\ndispatchId: {child_id}"
             ))
@@ -3319,7 +3476,7 @@ async fn run_turn(inner: &Arc<Inner>, message: StepMessage) {
     ) {
         compact_history(inner, &engine, &inner.history).await;
     }
-    let tools = Arc::new(toolset());
+    let tools = Arc::new(toolset(&inner.cwd));
     let (thinking, mode) = {
         let opts = inner.opts.lock().unwrap();
         (
@@ -4409,6 +4566,11 @@ mod tests {
         assert!(!needs_wrap_up(false, true, true));
         assert!(!needs_wrap_up(false, false, false));
         assert!(wrap_up_prompt().contains("final answer"));
+        // The two nudges stay distinct: the step-limit claim is reserved
+        // for real budget exhaustion, never the interrupted wording.
+        assert!(wrap_up_prompt().contains("Step limit reached"));
+        assert!(!interrupted_prompt().contains("Step limit reached"));
+        assert!(interrupted_prompt().contains("ended unexpectedly"));
     }
 
     #[test]
@@ -4482,11 +4644,52 @@ mod tests {
             !ORCHESTRATOR_OWNED_TOOLS.contains(&"ask_followup_question"),
             "the driver owns the ask flow itself, not the filter"
         );
-        let names: Vec<String> = toolset().into_iter().map(|entry| entry.spec.name).collect();
+        let names: Vec<String> = toolset(std::path::Path::new("/nonexistent/workspace"))
+            .into_iter()
+            .map(|entry| entry.spec.name)
+            .collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         assert!(names.contains(&"ask_followup_question"));
         assert!(!names.contains(&"exit_plan_mode"));
         assert!(!names.contains(&"compact"));
+    }
+
+    #[test]
+    fn load_skill_description_carries_the_workspace_skill_catalog() {
+        let workspace = tempfile::tempdir().unwrap();
+        let skill_dir = workspace.path().join(".agents/skills/deploy");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: deploy\ndescription: Ship the build\n---\nSteps",
+        )
+        .unwrap();
+        // A disabled skill must not reach the catalog.
+        let dormant = workspace.path().join(".agents/skills/dormant");
+        std::fs::create_dir_all(&dormant).unwrap();
+        std::fs::write(
+            dormant.join("SKILL.md.disabled"),
+            "---\nname: dormant\n---\nX",
+        )
+        .unwrap();
+
+        let spec = toolset(workspace.path())
+            .into_iter()
+            .find(|entry| entry.spec.name == "load_skill")
+            .unwrap()
+            .spec;
+        let expected = skill_dir.join("SKILL.md").to_string_lossy().into_owned();
+        // With a large real-world home pool the catalog degrades to
+        // name+path lines past its budget, so only path and name are
+        // stable — description presence is covered by the tools-crate
+        // catalog unit tests.
+        assert!(
+            spec.description.contains(&expected),
+            "catalog should carry the scanned skill path: {}",
+            spec.description
+        );
+        assert!(spec.description.contains("deploy"));
+        assert!(!spec.description.contains("dormant"));
     }
 
     #[test]
@@ -4648,6 +4851,10 @@ mod tests {
                     target: Some("cargo test".into()),
                     status: SubagentToolStatus::Running,
                     duration_ms: None,
+                    arguments: super::super::activity::format_json(&json!({
+                        "command": "cargo test"
+                    })),
+                    output: None,
                 },
                 SubagentBlock::Tool {
                     id: "t2".into(),
@@ -4655,12 +4862,16 @@ mod tests {
                     target: Some("src/lib.rs".into()),
                     status: SubagentToolStatus::Running,
                     duration_ms: None,
+                    arguments: super::super::activity::format_json(&json!({
+                        "path": "src/lib.rs"
+                    })),
+                    output: None,
                 },
             ]
         );
 
-        subagent_tool_finish(&mut blocks, "t1", true, 950);
-        subagent_tool_finish(&mut blocks, "t2", false, 2_000);
+        subagent_tool_finish(&mut blocks, "t1", true, 950, None);
+        subagent_tool_finish(&mut blocks, "t2", false, 2_000, None);
         assert_eq!(
             blocks[0],
             SubagentBlock::Tool {
@@ -4669,6 +4880,10 @@ mod tests {
                 target: Some("cargo test".into()),
                 status: SubagentToolStatus::Done,
                 duration_ms: Some(950),
+                arguments: super::super::activity::format_json(&json!({
+                    "command": "cargo test"
+                })),
+                output: None,
             }
         );
         assert_eq!(
@@ -4679,12 +4894,16 @@ mod tests {
                 target: Some("src/lib.rs".into()),
                 status: SubagentToolStatus::Failed,
                 duration_ms: Some(2_000),
+                arguments: super::super::activity::format_json(&json!({
+                    "path": "src/lib.rs"
+                })),
+                output: None,
             }
         );
 
         // An unknown id settles nothing.
         let before = blocks.clone();
-        subagent_tool_finish(&mut blocks, "ghost", true, 1);
+        subagent_tool_finish(&mut blocks, "ghost", true, 1, None);
         assert_eq!(blocks, before);
     }
 
@@ -4701,6 +4920,8 @@ mod tests {
                 target: None,
                 status: SubagentToolStatus::Running,
                 duration_ms: None,
+                arguments: None,
+                output: None,
             },
             SubagentBlock::Text {
                 content: "two".into(),
@@ -4737,7 +4958,7 @@ mod tests {
             "bash",
             &json!({"command": "grep -rn Sink src/"}),
         );
-        subagent_tool_finish(&mut blocks, "t1", true, 9);
+        subagent_tool_finish(&mut blocks, "t1", true, 9, None);
         subagent_text_delta(&mut blocks, "Here's what I found.");
         subagent_blocks_close(&mut blocks); // StepEnd: message two completed
         assert_eq!(
@@ -4753,6 +4974,10 @@ mod tests {
                     target: Some("grep -rn Sink src/".into()),
                     status: SubagentToolStatus::Done,
                     duration_ms: Some(9),
+                    arguments: super::super::activity::format_json(&json!({
+                        "command": "grep -rn Sink src/"
+                    })),
+                    output: None,
                 },
                 SubagentBlock::Text {
                     content: "Here's what I found.".into(),
@@ -4788,11 +5013,44 @@ mod tests {
 
     fn child_outcome(aborted: bool, error: Option<&str>) -> LoopOutcome {
         LoopOutcome {
+            llm_ms: 0,
+            ttft_ms: None,
             text: String::new(),
             usage: None,
             aborted,
             error: error.map(str::to_owned),
         }
+    }
+
+    /// A measured child run carries its token totals AND its speed facts —
+    /// the footer's time panel derives TPS and TTFT from the same payload.
+    #[test]
+    fn turn_usage_breakdown_carries_timing_and_totals() {
+        let outcome = LoopOutcome {
+            text: String::new(),
+            usage: Some(engine::EngineUsage {
+                input_tokens: 1_000,
+                output_tokens: 250,
+                cache_read: 11_000,
+                cache_write: 250,
+                reasoning_tokens: 80,
+                calls: 3,
+                cost_usd: 0.5,
+            }),
+            aborted: false,
+            error: None,
+            llm_ms: 4_000,
+            ttft_ms: Some(800),
+        };
+        let breakdown = turn_usage_breakdown(&outcome);
+        assert_eq!(breakdown.input_tokens, 1_000);
+        assert_eq!(breakdown.calls, 3);
+        assert_eq!(breakdown.cost_usd, Some(0.5));
+        assert_eq!(breakdown.llm_ms, Some(4_000));
+        assert_eq!(breakdown.ttft_ms, Some(800));
+        // An unmeasured run reports nothing — never a zeroed "Usage 0".
+        let unmeasured = child_outcome(false, None);
+        assert!(unmeasured.usage.is_none());
     }
 
     #[test]
@@ -4808,6 +5066,8 @@ mod tests {
                 target: None,
                 status: SubagentToolStatus::Done,
                 duration_ms: Some(4),
+                arguments: None,
+                output: None,
             },
             SubagentBlock::Text {
                 content: "  The sinks live in tide.rs.  ".into(),
@@ -4833,6 +5093,8 @@ mod tests {
                     target: None,
                     status: SubagentToolStatus::Done,
                     duration_ms: Some(4),
+                    arguments: None,
+                    output: None,
                 },
             ]
         );
@@ -4905,6 +5167,8 @@ mod tests {
                 target: None,
                 status: SubagentToolStatus::Done,
                 duration_ms: Some(1),
+                arguments: None,
+                output: None,
             },
             SubagentBlock::Text {
                 content: "   ".into(),
@@ -6283,6 +6547,7 @@ mod background_fixtures {
                 status: SettledStatus::Completed,
                 detail: None,
                 output: Some("first report".into()),
+                usage: None,
             },
         );
 

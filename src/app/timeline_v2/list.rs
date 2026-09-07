@@ -20,22 +20,23 @@ use super::rows::error_block::{
     RetryAction, error_block_id, error_text_for_turn, render_error_block, retry_text_for_turn,
 };
 use super::rows::turn_item::{
-    last_assistant_text, render_turn_footer, spacing_before, turn_duration,
+    TurnFooterBranch, TurnFooterUsage, last_assistant_text, render_turn_footer, spacing_before,
+    turn_duration,
 };
 use super::rows::working_footer::render_working_footer;
 use super::{
     EditingMessage, TimelineV2Row, TranscriptActions, TranscriptV2, derive_rows, rows_fingerprint,
 };
-use crate::app::Tide;
 use crate::app::navigation_rail::{
     ConversationNavigationRailSnapshot, NavigationTurnOpening, active_navigation_turn_index,
     navigation_turns, should_show_navigation_rail,
 };
 use crate::app::transcript::message_opens_turn;
+use crate::app::{Tide, TurnFooterHoverSource};
 use crate::input::TextInput;
 use crate::model::{
     ActivityFileChange, ActivityItem, ActivityKind, AgentSession, Message, MessageRole, TurnStatus,
-    unix_time,
+    UsageBreakdown, unix_time,
 };
 use crate::theme::{Theme, sp};
 use crate::ui::icon;
@@ -43,14 +44,14 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, Div, Pixels, ScrollWheelEvent, SharedString, Window, div, list, px,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
 /// The v2 pane's content column width. Copied deliberately (not imported)
 /// from the app-shell `CONTENT_MAX_WIDTH` (720) so the pane owns its own
 /// measure and can diverge from the legacy transcript in later phases.
-const V2_CONTENT_MAX_WIDTH: f32 = 720.0;
+const V2_CONTENT_MAX_WIDTH: f32 = 800.0;
 /// Rows at the tail that re-measure when streamed text grows. Matches the
 /// legacy `STREAM_REMEASURE_TAIL_ROWS`.
 const STREAM_REMEASURE_TAIL_ROWS: usize = 3;
@@ -267,6 +268,11 @@ pub(crate) fn skeleton_active(
 /// scroll) carries no signal.
 pub(crate) fn wheel_signal(delta_y: Pixels, at_bottom: Option<bool>) -> Option<ScrollSignal> {
     if delta_y > Pixels::ZERO {
+        Some(ScrollSignal::ScrolledUp)
+    } else if delta_y < Pixels::ZERO && at_bottom == Some(false) {
+        // A toward-bottom tick while off the tail still leaves the tail:
+        // platform scroll-direction settings invert deltas, so the tail
+        // answer — not the sign — decides when the reader is exploring.
         Some(ScrollSignal::ScrolledUp)
     } else if delta_y < Pixels::ZERO && at_bottom == Some(true) {
         Some(ScrollSignal::AtBottom)
@@ -1624,6 +1630,7 @@ fn timeline_v2_row(
                 &activities,
                 &tide.timeline_v2_state.disclosures,
                 workspace.as_deref().unwrap_or(fallback_workspace),
+                &tide.transcript_selection,
                 actions,
                 &theme,
                 &mut reasoning_markdown,
@@ -1636,21 +1643,120 @@ fn timeline_v2_row(
                     .and_then(|s| last_assistant_text(s, turn_data.id))
                     .filter(|text| !text.is_empty());
                 let copy_for_click = copy_text.clone();
+                // The footer's two popovers get their handles from the app's
+                // menu registry, one pair per turn; the usage facts fold
+                // from this run's UsageUpdated stream, so a turn that
+                // predates the run shows no trigger at all.
+                let usage_menu = tide.menu_handle(
+                    SharedString::from(format!("turn-usage-{}", turn_data.id)),
+                    cx,
+                );
+                let time_menu = tide.menu_handle(
+                    SharedString::from(format!("turn-time-{}", turn_data.id)),
+                    cx,
+                );
+                // The usage facts come straight off the turn's persisted
+                // snapshot: a turn that settled before snapshots existed
+                // shows no trigger at all.
+                let usage = turn_data.usage.map(|snapshot| TurnFooterUsage {
+                    usage: UsageBreakdown {
+                        input_tokens: snapshot.input_tokens,
+                        output_tokens: snapshot.output_tokens,
+                        cache_read: snapshot.cache_read,
+                        cache_write: snapshot.cache_write,
+                        reasoning_tokens: snapshot.reasoning_tokens,
+                        calls: snapshot.calls,
+                        cost_usd: None,
+                        llm_ms: None,
+                        ttft_ms: None,
+                        tool_ms: None,
+                    },
+                    // DSH's "Provider / model" row: the provider's display
+                    // DSH's "Provider / model" row: the vendor name over
+                    // the probe-resolved model name — `Zai/GLM-5.3`.
+                    routes: session
+                        .and_then(|s| tide.model_route_label(s.model.as_deref()))
+                        .map(SharedString::from),
+                    tps: (snapshot.llm_ms > 0 && snapshot.output_tokens > 0)
+                        .then(|| snapshot.output_tokens as f64 / (snapshot.llm_ms as f64 / 1000.0)),
+                    ttft_ms: snapshot.ttft_ms,
+                });
+                // The branch button always renders on a main turn — dimmed
+                // with an explanatory tooltip when the conversation cannot
+                // fork — and its click routes through the same fork path
+                // the legacy pane's message action uses.
+                let (branch_enabled, branch_preparing) = session
+                    .map(|session| tide.turn_branch_state(session, turn_data))
+                    .unwrap_or((false, false));
+                let branch = Some(TurnFooterBranch {
+                    enabled: branch_enabled,
+                    preparing: branch_preparing,
+                });
+                let fork_target = session.map(|session| (session.id, turn_data.turn_count));
+                let tide_for_fork = cx.entity().downgrade();
                 let footer = render_turn_footer(
                     turn_data.id,
-                    session.and_then(|s| s.model.as_deref()),
                     turn_duration(turn_data),
                     turn_data.started_at,
-                    copy_text.as_deref(),
-                    &theme,
+                    &usage_menu,
+                    &time_menu,
+                    usage,
+                    branch,
                     // The clipboard write lives here — the only place with
                     // the app context — while the row owns the button.
+                    move |_, _, cx| {
+                        if let Some((session_id, turn_count)) = fork_target {
+                            let _ = tide_for_fork.update(cx, |this, cx| {
+                                this.fork_session_from_response(session_id, turn_count, cx);
+                            });
+                        }
+                    },
+                    copy_text.as_deref(),
+                    &theme,
                     move |_, _, cx| {
                         if let Some(text) = copy_for_click.as_deref() {
                             cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_owned()));
                         }
                     },
                 );
+                // DSH's reveal policy: the footer belongs to its turn
+                // block and shows only while that block is hovered.
+                // `opacity(0)` rather than `invisible`: a transparent strip
+                // still hit-tests, so hovering the footer itself keeps it
+                // shown and its buttons clickable. The strip claims the
+                // hover as its own surface, so the leave/enter race between
+                // it and the block cannot hide it mid-move.
+                let footer_tide = cx.entity().downgrade();
+                let footer_turn_id = turn_data.id;
+                let footer = div()
+                    .id(SharedString::from(format!(
+                        "turn-footer-hover-{footer_turn_id}"
+                    )))
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .on_hover(move |hovered: &bool, _, cx| {
+                        let _ = footer_tide.update(cx, |this, cx| {
+                            if *hovered {
+                                this.set_turn_footer_hover_enter(
+                                    footer_turn_id,
+                                    TurnFooterHoverSource::Footer,
+                                    cx,
+                                );
+                            } else {
+                                this.set_turn_footer_hover_leave(
+                                    footer_turn_id,
+                                    TurnFooterHoverSource::Footer,
+                                    cx,
+                                );
+                            }
+                        });
+                    })
+                    .child(
+                        footer.when(tide.turn_footer_hover != Some(turn_data.id), |footer| {
+                            footer.opacity(0.0)
+                        }),
+                    );
                 // A failed turn carries its error card above the footer's
                 // divider — inside the footer row's flow, no new row kind.
                 // Interrupted is a user stop, not an error; the pure fn
@@ -1661,10 +1767,16 @@ fn timeline_v2_row(
                     }),
                     None => None,
                 };
-                match error_block {
-                    Some(block) => div().flex().flex_col().child(block).child(footer),
-                    None => footer,
-                }
+                let footer = div().child(match error_block {
+                    Some(block) => div()
+                        .flex()
+                        .flex_col()
+                        .child(block)
+                        .child(footer)
+                        .into_any_element(),
+                    None => footer.into_any_element(),
+                });
+                footer
             }
             None => div(),
         },
@@ -1743,13 +1855,51 @@ fn timeline_v2_row(
     // that justifies its bounded child to center (`mx_auto` is not honored
     // inside the list's stretch column). `min_w_0` keeps the row honest
     // about long content so the cards inside can contain their overflow.
-    div()
+    // Every row also reports which turn it belongs to on hover: the footer
+    // row reads that to reveal exactly one turn's footer at a time.
+    let row_turn_id = match row {
+        TimelineV2Row::Message { index } => session
+            .and_then(|s| s.messages.get(index))
+            .and_then(|message| message.turn_id),
+        TimelineV2Row::ActivityGroup { block } => session
+            .and_then(|s| s.transcript_blocks.get(block))
+            .and_then(|block| block.turn_id),
+        TimelineV2Row::TurnFooter { turn } | TimelineV2Row::ChangedFiles { turn } => {
+            session.and_then(|s| s.turns.get(turn)).map(|turn| turn.id)
+        }
+        TimelineV2Row::Working => None,
+    };
+    let hover_tide = cx.entity().downgrade();
+    // The footer row is excluded here: it claims the hover through its own
+    // strip as the Footer surface. Letting its generic wrapper claim Block
+    // flapped the claim every frame — parent-enter(Block) over
+    // strip-enter(Footer) — and the deferred clear then fired on a claim
+    // that was never the strip's.
+    let claims_block_hover =
+        row_turn_id.is_some() && !matches!(row, TimelineV2Row::TurnFooter { .. });
+    let mut wrapper = div()
+        .id(SharedString::from(format!("turn-row-hover-{ix}")))
         .w_full()
         .min_w_0()
         .flex()
         .justify_center()
         .px(px(20.0))
-        .when(top_spacing > Pixels::ZERO, |row| row.mt(top_spacing))
+        .when(top_spacing > Pixels::ZERO, |row| row.mt(top_spacing));
+    if claims_block_hover {
+        let Some(turn_id) = row_turn_id else {
+            unreachable!("claims_block_hover implies a known turn");
+        };
+        wrapper = wrapper.on_hover(move |hovered: &bool, _, cx| {
+            let _ = hover_tide.update(cx, |this, cx| {
+                if *hovered {
+                    this.set_turn_footer_hover_enter(turn_id, TurnFooterHoverSource::Block, cx);
+                } else {
+                    this.set_turn_footer_hover_leave(turn_id, TurnFooterHoverSource::Block, cx);
+                }
+            });
+        });
+    }
+    wrapper
         .child(
             div()
                 .w_full()
@@ -1937,6 +2087,40 @@ fn render_user_message(
         })
         .collect::<Vec<_>>();
 
+    // The mention pills' hover labels: an `@path` resolves to its absolute
+    // file path under the session's workspace, a `/skill` to the skill's
+    // SKILL.md location from the settings catalog. Pure joins and lookups —
+    // no filesystem probes in the frame path.
+    let mention_resolver: super::parts::user_bubble::MentionResolver = {
+        let root: Option<PathBuf> =
+            session.and_then(|session| session.workspace.path().map(Path::to_path_buf));
+        let skills = tide.skills_catalog.clone();
+        Arc::new(move |token: &str| match token.chars().next() {
+            Some('@') => {
+                let raw = token[1..].trim_matches('"');
+                if raw.is_empty() {
+                    return None;
+                }
+                let path = Path::new(raw);
+                let resolved = match &root {
+                    Some(root) if path.is_relative() => root.join(path),
+                    _ => PathBuf::from(raw),
+                };
+                Some(resolved.to_string_lossy().into_owned())
+            }
+            Some('/') => {
+                let name = &token[1..];
+                let catalog = skills.as_ref()?;
+                let entry = catalog
+                    .skills
+                    .iter()
+                    .find(|skill| skill.enabled && skill.name == name)?;
+                Some(entry.primary().skill_file.to_string_lossy().into_owned())
+            }
+            _ => None,
+        })
+    };
+
     render_user_bubble(
         message_id,
         &content,
@@ -1945,9 +2129,11 @@ fn render_user_message(
         editable,
         editing,
         &attachments,
+        tide.transcript_selection.clone(),
         theme,
         actions,
         toggle,
+        Some(mention_resolver),
     )
 }
 

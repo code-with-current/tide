@@ -1186,10 +1186,9 @@ fn validate_message_rewind(source: &AgentSession, turn_count: usize) -> anyhow::
     }) {
         bail!("the selected user message is unavailable");
     }
-    let rollback_turns = source.provider_turns_after(turn_count.saturating_sub(1));
-    if rollback_turns > 0 && source.provider_cursor.is_none() {
-        bail!("the provider conversation is unavailable");
-    }
+    // Tide rebuilds its native conversation from the stored transcript
+    // (`rebuild_history`), so a missing persisted cursor never blocks a
+    // rewind — the driver re-establishes the cursor from the rollback.
     Ok(())
 }
 
@@ -1793,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn message_rewind_requires_a_settled_user_turn_and_provider_cursor() {
+    fn message_rewind_requires_a_settled_user_turn() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
         session.begin_turn("change it");
         session.mark_active_turn_provider_started();
@@ -1808,9 +1807,11 @@ mod tests {
         busy.status = SessionStatus::Working;
         assert!(validate_message_rewind(&busy, 1).is_err());
 
+        // Tide rebuilds the native conversation from the transcript, so a
+        // missing cursor rewinds instead of failing.
         let mut missing_cursor = session.clone();
         missing_cursor.provider_cursor = None;
-        assert!(validate_message_rewind(&missing_cursor, 1).is_err());
+        assert!(validate_message_rewind(&missing_cursor, 1).is_ok());
 
         let mut missing_message = session;
         missing_message.messages.clear();

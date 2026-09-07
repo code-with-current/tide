@@ -575,6 +575,44 @@ impl Checkpoint {
     }
 }
 
+/// One settled turn's own usage snapshot, folded in the client from the
+/// turn's `UsageUpdated` deltas and persisted on the turn so footer
+/// triggers survive relaunches. Token classes mirror [`UsageBreakdown`]'s
+/// cumulative reading; `llm_ms` sums the turn's model-stream time and
+/// `ttft_ms` keeps the turn's first reported sample.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsageSnapshot {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub reasoning_tokens: u64,
+    pub calls: u64,
+    pub llm_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttft_ms: Option<u64>,
+}
+
+impl TurnUsageSnapshot {
+    /// Fold one step's delta. The first reported TTFT sample in the turn
+    /// stays the turn's TTFT — later steps start their streams further
+    /// from the user's wait, so their latencies answer a different
+    /// question.
+    pub fn fold(&mut self, step: &UsageBreakdown) {
+        self.input_tokens += step.input_tokens;
+        self.output_tokens += step.output_tokens;
+        self.cache_read += step.cache_read;
+        self.cache_write += step.cache_write;
+        self.reasoning_tokens += step.reasoning_tokens;
+        self.calls += step.calls;
+        self.llm_ms += step.llm_ms.unwrap_or(0);
+        if self.ttft_ms.is_none() {
+            self.ttft_ms = step.ttft_ms;
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct AgentTurn {
     pub id: Uuid,
@@ -588,6 +626,11 @@ pub struct AgentTurn {
     pub completed_at: Option<u64>,
     #[serde(default)]
     pub checkpoint: Option<Checkpoint>,
+    /// The turn's own usage, folded while it runs and persisted with the
+    /// session. Turns that settled before the field existed deserialize it
+    /// as `None` and their footers show no usage trigger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TurnUsageSnapshot>,
 }
 
 /// How full the provider's context window is, from the latest main-thread
@@ -1157,6 +1200,7 @@ impl AgentSession {
                 started_at,
                 completed_at: Some(completed_at),
                 checkpoint: None,
+                usage: None,
             });
         }
     }
@@ -1183,6 +1227,7 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            usage: None,
         });
         self.messages.push(
             Message::new_for_turn(MessageRole::User, prompt, id)
@@ -1210,6 +1255,7 @@ impl AgentSession {
             started_at: now,
             completed_at: None,
             checkpoint: None,
+            usage: None,
         });
         self.last_reply_at = Some(now);
         self.updated_at = now;
@@ -1773,13 +1819,21 @@ pub struct BackgroundWorkItem {
     /// `output` log remains the fallback rendering.
     #[serde(default)]
     pub subagent_blocks: Vec<SubagentBlock>,
+    /// The settled sub-agent run's own token usage — the child's turn total
+    /// across all its steps, kept out of the session's usage aggregates.
+    /// Reuses the per-step [`UsageBreakdown`] shape, but every field here is
+    /// the run's cumulative total, not a delta; the timing fields stay
+    /// `None` because the child loop does not measure them. `None` while
+    /// the work runs and for items persisted before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageBreakdown>,
 }
 
 /// One settled dispatched sub-agent run, persisted with its session — the
 /// durable record the agents panel rehydrates from after a restart. Keyed
 /// by the driver's child id, which also serves as the work-item key so the
 /// streaming registry and the persisted run stay matched.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SubagentRun {
     /// The durable child identity: the work item's `key.provider_id` and
@@ -1799,6 +1853,10 @@ pub struct SubagentRun {
     /// The transcript activity of the dispatch call that last touched this
     /// run — the Bot button's link back into the transcript.
     pub origin_activity_id: Option<String>,
+    /// The last settled run's own token usage, mirroring the work item's
+    /// [`BackgroundWorkItem::usage`]; `None` until a run settles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageBreakdown>,
 }
 
 /// How one tool block of a sub-agent's timeline ended.
@@ -1831,6 +1889,15 @@ pub enum SubagentBlock {
         target: Option<String>,
         status: SubagentToolStatus,
         duration_ms: Option<u64>,
+        /// The tool's input, pretty-printed — feeds the timeline card's
+        /// expandable body (arguments section, diff extraction). Absent on
+        /// blocks persisted before the field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arguments: Option<String>,
+        /// The tool's display output — the card body's content viewport.
+        /// Set when the call settles.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
     },
     Text {
         content: String,
@@ -1875,6 +1942,7 @@ impl BackgroundWorkItem {
             status,
             task: None,
             subagent_blocks: Vec::new(),
+            usage: None,
         }
     }
 }
@@ -3406,6 +3474,8 @@ mod tests {
                     target: Some("cargo test -p tide".to_owned()),
                     status: SubagentToolStatus::Done,
                     duration_ms: Some(1_240),
+                    arguments: None,
+                    output: None,
                 },
                 SubagentBlock::Text {
                     content: "found it".to_owned(),
@@ -3439,6 +3509,8 @@ mod tests {
                 target: Some("cargo test -p tide".to_owned()),
                 status: SubagentToolStatus::Done,
                 duration_ms: Some(1_240),
+                arguments: None,
+                output: None,
             }
         );
     }

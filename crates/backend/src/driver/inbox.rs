@@ -252,8 +252,8 @@ mod tests {
     #[test]
     fn turn_prompts_claim_in_order_and_step_input_waits_for_its_boundary() {
         let inbox = TurnInbox::new();
-        inbox.push_turn("first".into());
-        inbox.push_turn("second".into());
+        inbox.push_turn_message(step("first"));
+        inbox.push_turn_message(step("second"));
         assert_eq!(inbox.pop_turn().unwrap().text, "first");
         assert_eq!(inbox.pop_turn().unwrap().text, "second");
         assert_eq!(inbox.pop_turn(), None);
@@ -381,7 +381,7 @@ mod tests {
 
         // Turn lane: user prompt vs a job notice pushed by the lost-claim
         // wake lane.
-        inbox.push_turn("user prompt".into());
+        inbox.push_turn_message(step("user prompt"));
         inbox.push_turn_message(StepMessage::job("job notice".into()));
         assert_eq!(inbox.pop_turn().unwrap().source, StepSource::User);
         assert_eq!(inbox.pop_turn().unwrap().source, StepSource::Job);
