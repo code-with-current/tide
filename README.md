@@ -88,13 +88,6 @@ natively on Linux and Windows. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
 development workflow and checks, and [RELEASING.md](RELEASING.md) for cutting
 releases.
 
-## About this fork
-
-Tide is an independent fork of [Waku](https://github.com/egoist/waku) by
-[EGOIST](https://github.com/egoist) and contributors, rebranded with
-attribution preserved. It is not affiliated with the Waku project; upstream
-credit and the GPL-3.0-only license carry forward — see [NOTICE](NOTICE).
-
 ## License
 
 [GNU General Public License v3.0 only](LICENSE)
