@@ -1459,6 +1459,18 @@ pub struct Tide {
     /// scrollbar and land at the top when the selection moves.
     skills_detail_scroll: ScrollHandle,
     skills_detail_scrollbar: Rc<ScrollbarState>,
+    /// Filter query over the Projects settings page's rows.
+    projects_settings_search: Entity<TextInput>,
+    /// Virtualized list over the filtered project rows.
+    projects_settings_list: ListState,
+    projects_settings_scrollbar: Rc<ScrollbarState>,
+    /// The rows the list currently draws, refreshed once per frame rather
+    /// than per row.
+    projects_settings_rows: RefCell<Vec<projects_page::ProjectsRow>>,
+    /// The project the detail panel shows. `None` falls back to the first
+    /// visible row, so the panel never opens empty.
+    projects_settings_selected: Option<Uuid>,
+    projects_detail_scroll: ScrollHandle,
     /// Source the list is narrowed to; `None` shows every ecosystem.
     skills_source_filter: Option<crate::skills::SkillSource>,
     /// The skill directory whose delete button is armed for its confirming
@@ -1687,6 +1699,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 use inspector::{InspectorState, StreamLogEntry};
 use navigation_rail::{ConversationNavigationRail, TranscriptNavigationTurn};
+pub use projects_page::init as init_projects_keys;
 pub use settings::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
@@ -2045,6 +2058,11 @@ impl Tide {
             TextInput::new(window, cx)
                 .clear_on_escape()
                 .placeholder(tr!("skills.search"))
+        });
+        let projects_settings_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("projects.search"))
         });
         let session_rename_input = cx.new(|cx| TextInput::new(window, cx));
         let usage_project_filter =
@@ -2577,6 +2595,15 @@ impl Tide {
             })
             .detach();
             cx.subscribe(
+                &projects_settings_search,
+                |_: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.commit_session_rename(cx),
@@ -2930,6 +2957,12 @@ impl Tide {
                 skills_selection: TranscriptSelection::default(),
                 skills_detail_scroll: ScrollHandle::new(),
                 skills_detail_scrollbar: ScrollbarState::new(),
+                projects_settings_search,
+                projects_settings_list: ListState::new(0, ListAlignment::Top, px(512.0)),
+                projects_settings_scrollbar: ScrollbarState::new(),
+                projects_settings_rows: RefCell::new(Vec::new()),
+                projects_settings_selected: None,
+                projects_detail_scroll: ScrollHandle::new(),
                 skills_source_filter: None,
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),

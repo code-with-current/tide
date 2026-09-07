@@ -69,6 +69,14 @@ settings.git: Git
 settings.git_keywords: git 身份 标识 github 提交 署名 归属 共同作者 签名 ssh
 settings.projects: 项目
 settings.projects_keywords: 项目 工作区 文件夹 身份 图标 操作 模型 删除
+projects.search: 搜索项目…
+projects.empty_title: 暂无项目
+projects.empty_description: 打开文件夹即可添加项目。
+projects.no_match: 没有符合条件的项目。
+projects.count_one: 1 个项目
+projects.count_many: "%{count} 个项目"
+projects.filter_caption: 显示 %{total} 个项目中的 %{shown} 个
+projects.select_placeholder: 选择要配置的项目。
 git.caption: GitHub 账号与提交身份。
 git.loading: 正在加载…
 git.op_failed: Git 操作失败

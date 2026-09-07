@@ -73,6 +73,14 @@ settings.git: Git
 settings.git_keywords: git アイデンティティ GitHub コミット 属性 共著 署名 ssh
 settings.projects: プロジェクト
 settings.projects_keywords: プロジェクト ワークスペース フォルダ アイデンティティ アイコン アクション モデル 削除
+projects.search: プロジェクトを検索…
+projects.empty_title: プロジェクトがありません
+projects.empty_description: フォルダを開くとプロジェクトが追加されます。
+projects.no_match: 一致するプロジェクトがありません。
+projects.count_one: 1 件のプロジェクト
+projects.count_many: "%{count} 件のプロジェクト"
+projects.filter_caption: "%{total} 件中 %{shown} 件を表示"
+projects.select_placeholder: 設定するプロジェクトを選択してください。
 git.caption: GitHub アカウントとコミット署名。
 git.loading: 読み込み中…
 git.op_failed: Git 操作に失敗しました

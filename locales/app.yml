@@ -1119,6 +1119,72 @@ command_scope.builtin:
 
 skills.search:
   en: Search skills…
+projects.search:
+  en: Search projects…
+projects.empty_title:
+  en: No projects
+projects.empty_description:
+  en: Open a folder to add a project.
+projects.no_match:
+  en: No projects match your search.
+projects.count_one:
+  en: 1 project
+projects.count_many:
+  en: "%{count} projects"
+projects.filter_caption:
+  en: "%{shown} of %{total} projects"
+projects.select_placeholder:
+  en: Select a project to configure it.
+projects.section_general:
+  en: General
+projects.icon:
+  en: Icon
+projects.icon_auto:
+  en: Auto
+projects.icon_upload:
+  en: Upload…
+projects.icon_upload_failed:
+  en: Could not use that image. Pick a PNG, JPG, or WebP under 2 MB.
+projects.icon_color:
+  en: Background
+projects.default_model:
+  en: Default model for new chats
+projects.default_model_global:
+  en: Global default
+projects.actions:
+  en: Actions
+projects.action_name:
+  en: Action name
+projects.action_command:
+  en: Command
+projects.action_add:
+  en: Add action
+projects.actions_empty:
+  en: Run a command in this project with one click.
+projects.git_identity:
+  en: Git identity
+projects.git_identity_global:
+  en: Global
+projects.memory_rag:
+  en: Memory & RAG
+projects.remove:
+  en: Remove project…
+projects.remove_title:
+  en: Remove project
+projects.remove_body:
+  en: "\"%{name}\" will no longer open in Tide."
+projects.remove_history:
+  en: Also delete its sessions and history
+projects.remove_confirm:
+  en: Remove
+projects.remove_cancel:
+  en: Cancel
+projects.rename_commit_hint:
+  en: Press Enter to rename
+projects.directory_missing:
+  en: This folder is missing on disk. Settings stay editable.
+projects.directory_unavailable:
+  en: Available when the project folder exists.
 skills.count_one:
   en: 1 skill
 skills.count_many:
