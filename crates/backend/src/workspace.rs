@@ -293,6 +293,17 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::GitCurrentIdentity { cwd } => WorkspaceResult::GitCurrentIdentityDone {
             identity: crate::git_identities::GitIdentities::shared().current_identity(&cwd),
         },
+        WorkspaceOperation::GitWorktreeList { cwd } => WorkspaceResult::GitWorktrees {
+            worktrees: crate::worktree::list(&cwd),
+        },
+        WorkspaceOperation::GitWorktreeRemove {
+            cwd,
+            path,
+            delete_branch,
+            force,
+        } => WorkspaceResult::GitOp {
+            result: crate::worktree::remove(&cwd, &path, delete_branch, force),
+        },
     })
 }
 

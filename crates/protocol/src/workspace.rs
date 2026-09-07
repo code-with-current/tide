@@ -9,7 +9,7 @@ use crate::git::{AgentInvocation, BranchSnapshot, CommitSnapshot, CreatedWorktre
 use crate::git_panel::{
     PanelAheadBehind, PanelBranchInfo, PanelCommit, PanelCommitResult, PanelConflict,
     PanelCurrentIdentity, PanelDiffHunk, PanelFileChange, PanelMergeResult, PanelOpResult,
-    PanelRevertResult, PanelStash,
+    PanelRevertResult, PanelStash, PanelWorktree,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -340,6 +340,22 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    /// Lists every working tree linked to the repository at `cwd`.
+    GitWorktreeList {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Removes a linked working tree. The repository's main working tree
+    /// is refused; `delete_branch` only ever deletes `tide/*` branches;
+    /// `force` covers dirty and locked trees.
+    GitWorktreeRemove {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        #[ts(type = "string")]
+        path: PathBuf,
+        delete_branch: bool,
+        force: bool,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -455,5 +471,9 @@ pub enum WorkspaceResult {
     /// The identity the next commit at the requested path would use.
     GitCurrentIdentityDone {
         identity: PanelCurrentIdentity,
+    },
+    /// Linked working trees for the git panel's Worktrees tab.
+    GitWorktrees {
+        worktrees: Vec<PanelWorktree>,
     },
 }

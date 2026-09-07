@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use anyhow::{Context as _, anyhow, bail};
+use protocol::git_panel::{PanelOpResult, PanelWorktree};
 use uuid::Uuid;
 
 const DEFAULT_SLUG: &str = "new-worktree";
@@ -137,6 +138,174 @@ fn create_in(
 /// the default branch without fetching or mutating the user's ordinary
 /// checkout. Repositories without that metadata fall back to their current
 /// branch, then detached `HEAD`.
+/// One raw `git worktree list --porcelain` entry before enrichment.
+struct RawWorktree {
+    path: PathBuf,
+    head: String,
+    branch: Option<String>,
+    detached: bool,
+    bare: bool,
+    locked: bool,
+}
+
+fn parse_porcelain(output: &str) -> Vec<RawWorktree> {
+    let mut entries = Vec::new();
+    for line in output.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            entries.push(RawWorktree {
+                path: PathBuf::from(path),
+                head: String::new(),
+                branch: None,
+                detached: false,
+                bare: false,
+                locked: false,
+            });
+            continue;
+        }
+        let Some(entry) = entries.last_mut() else {
+            continue;
+        };
+        if let Some(head) = line.strip_prefix("HEAD ") {
+            entry.head = head.to_owned();
+        } else if let Some(reference) = line.strip_prefix("branch ") {
+            entry.branch = Some(
+                reference.strip_prefix("refs/heads/").unwrap_or(reference).to_owned(),
+            );
+        } else if line == "detached" {
+            entry.detached = true;
+        } else if line == "bare" {
+            entry.bare = true;
+        } else if line.starts_with("locked") {
+            entry.locked = true;
+        }
+    }
+    entries
+}
+
+/// List every working tree of the repository at `cwd`, main first, in the
+/// panel's wire shape. List-shaped like the rest of the git panel service:
+/// a non-repository answers empty.
+pub fn list(cwd: &Path) -> Vec<PanelWorktree> {
+    let repository = match git_stdout(cwd, &["rev-parse", "--show-toplevel"]) {
+        Ok(repository) => PathBuf::from(repository.trim()),
+        Err(_) => return Vec::new(),
+    };
+    let output = match git_stdout(&repository, &["worktree", "list", "--porcelain"]) {
+        Ok(output) => output,
+        Err(_) => return Vec::new(),
+    };
+    parse_porcelain(&output)
+        .into_iter()
+        .enumerate()
+        .map(|(index, raw)| {
+            let path = fs::canonicalize(&raw.path).unwrap_or_else(|_| raw.path.clone());
+            let dirty = !raw.bare && worktree_is_dirty(&raw.path);
+            PanelWorktree {
+                path,
+                head: raw.head.chars().take(7).collect(),
+                branch: raw.branch,
+                detached: raw.detached,
+                bare: raw.bare,
+                locked: raw.locked,
+                dirty,
+                main: index == 0,
+            }
+        })
+        .collect()
+}
+
+fn worktree_is_dirty(path: &Path) -> bool {
+    match crate::command_env::plain_command("git")
+        .args(["status", "--porcelain"])
+        .current_dir(path)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// Remove a linked working tree. The target must be registered with the
+/// repository resolved from `cwd`, the main working tree is refused, and
+/// `delete_branch` only ever deletes `tide/*` branches — checked before
+/// anything runs so a refused policy leaves the tree untouched.
+pub fn remove(cwd: &Path, target: &Path, delete_branch: bool, force: bool) -> PanelOpResult {
+    let repository = match git_stdout(cwd, &["rev-parse", "--show-toplevel"]) {
+        Ok(repository) => PathBuf::from(repository.trim()),
+        Err(_) => return PanelOpResult::err("not a Git repository"),
+    };
+    let output = match git_stdout(&repository, &["worktree", "list", "--porcelain"]) {
+        Ok(output) => output,
+        Err(_) => return PanelOpResult::err("could not list the repository's worktrees"),
+    };
+    let target = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    let entries = parse_porcelain(&output);
+    let canonical = |path: &PathBuf| fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+    if entries.first().is_some_and(|first| canonical(&first.path) == target) {
+        return PanelOpResult::err("the repository's main working tree cannot be removed");
+    }
+    let Some(entry) = entries
+        .iter()
+        .find(|entry| canonical(&entry.path) == target)
+    else {
+        return PanelOpResult::err("that path is not a working tree of this repository");
+    };
+    if delete_branch
+        && let Some(branch) = entry.branch.as_deref()
+        && !branch.starts_with("tide/")
+    {
+        return PanelOpResult::err(format!(
+            "refusing to delete branch `{branch}` — only tide/* branches are removable here"
+        ));
+    }
+
+    let mut command = crate::command_env::plain_command("git");
+    command.args(["worktree", "remove"]);
+    if force {
+        // A doubled --force also covers locked trees, like the CLI's own
+        // guidance for refusing-to-remove complaints.
+        command.args(["--force", "--force"]);
+    }
+    let output = command
+        .arg(&target)
+        .current_dir(&repository)
+        .output()
+        .context("failed to execute git worktree remove");
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => return PanelOpResult::err(error.to_string()),
+    };
+    if !output.status.success() {
+        return PanelOpResult::err(command_error(&output));
+    }
+    if delete_branch
+        && let Some(branch) = entry.branch.as_deref()
+    {
+        let branch_output = crate::command_env::plain_command("git")
+            .args(["branch", "-D"])
+            .arg(branch)
+            .current_dir(&repository)
+            .output()
+            .context("failed to execute git branch");
+        match branch_output {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                return PanelOpResult::err(format!(
+                    "the worktree was removed, but its branch stayed: {}",
+                    command_error(&output)
+                ))
+            }
+            Err(error) => {
+                return PanelOpResult::err(format!(
+                    "the worktree was removed, but its branch stayed: {error}"
+                ))
+            }
+        }    }
+    PanelOpResult { ok: true, error: None }
+}
+
 fn default_base_ref(repository: &Path) -> anyhow::Result<String> {
     if let Some(remote_default) = git_optional_stdout(
         repository,
@@ -348,6 +517,94 @@ mod tests {
             fs::read_to_string(from_feature.path.join("README.md")).unwrap(),
             "feature\n"
         );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn lists_and_removes_worktrees() {
+        let root = std::env::temp_dir().join(format!("tide-worktree-test-{}", Uuid::new_v4()));
+        let repository = root.join("repository");
+        fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, &["init", "-b", "main"]);
+        run_git(&repository, &["config", "core.autocrlf", "false"]);
+        fs::write(repository.join("README.md"), "main\n").unwrap();
+        run_git(&repository, &["add", "."]);
+        run_git(
+            &repository,
+            &[
+                "-c",
+                "user.name=Tide Tests",
+                "-c",
+                "user.email=tide@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+
+        let linked = root.join("linked");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "tide/linked",
+                linked.to_str().unwrap(),
+                "main",
+            ],
+        );
+        let foreign = root.join("foreign");
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature/foreign",
+                foreign.to_str().unwrap(),
+                "main",
+            ],
+        );
+
+        let listed = list(&repository);
+        assert_eq!(listed.len(), 3);
+        assert!(listed[0].main);
+        assert_eq!(listed[0].branch.as_deref(), Some("main"));
+        let linked_entry = listed
+            .iter()
+            .find(|entry| entry.path == fs::canonicalize(&linked).unwrap())
+            .unwrap();
+        assert_eq!(linked_entry.branch.as_deref(), Some("tide/linked"));
+        assert!(!linked_entry.dirty);
+
+        fs::write(linked.join("README.md"), "edited\n").unwrap();
+        let listed = list(&repository);
+        let linked_entry = listed
+            .iter()
+            .find(|entry| entry.path == fs::canonicalize(&linked).unwrap())
+            .unwrap();
+        assert!(linked_entry.dirty);
+
+        // The main working tree is never removable.
+        assert!(!remove(&repository, &repository, false, false).ok);
+        // Unregistered paths are refused.
+        assert!(!remove(&repository, &root, false, false).ok);
+        // Non-tide branches stay put even when asked.
+        assert!(!remove(&repository, &foreign, true, false).ok);
+        // A dirty tree needs force.
+        assert!(!remove(&repository, &linked, true, false).ok);
+        assert!(linked.join("README.md").exists());
+        assert!(remove(&repository, &linked, true, true).ok);
+        assert!(!linked.exists());
+        let branches = git_stdout(&repository, &["branch", "--list"]).unwrap();
+        assert!(!branches.contains("tide/linked"));
+        assert!(branches.contains("feature/foreign"));
+
+        // A clean linked tree removes without force.
+        assert!(remove(&repository, &foreign, false, false).ok);
+        assert_eq!(list(&repository).len(), 1);
 
         fs::remove_dir_all(&root).ok();
     }

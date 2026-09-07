@@ -1,6 +1,8 @@
 //! Wire types for the Git panel port, mirroring tide's `shared/rpc.ts`
 //! git section and the mirror structs in tide's `commands/git.rs`.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -66,6 +68,25 @@ pub struct PanelConflict {
 pub struct PanelBranchInfo {
     pub branch: Option<String>,
     pub head_commit: Option<String>,
+}
+
+/// One linked working tree of the repository, for the panel's Worktrees tab.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelWorktree {
+    #[ts(type = "string")]
+    pub path: PathBuf,
+    /// Short HEAD sha; empty when unknown.
+    pub head: String,
+    /// Checked-out branch name; `None` for detached or bare entries.
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub bare: bool,
+    pub locked: bool,
+    /// Whether the worktree holds uncommitted changes.
+    pub dirty: bool,
+    /// The repository's primary working tree (never removable).
+    pub main: bool,
 }
 
 /// Ahead/behind counts against the branch's upstream.
