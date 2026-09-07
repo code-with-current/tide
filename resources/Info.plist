@@ -25,13 +25,13 @@
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <!-- Sparkle auto-update configuration. The appcast feed lives in the
-         tide-releases Cloudflare R2 bucket behind releases.tide.codes, and the
-         private half of SUPublicEDKey signs each archive from the login
-         keychain during `bun run release` (see RELEASING.md). -->
+         appcast asset of the latest published GitHub release, and the
+         private half of SUPublicEDKey signs each archive during the release
+         build (see RELEASING.md). -->
     <key>SUFeedURL</key>
-    <string>https://releases.tide.codes/appcast.xml</string>
+    <string>https://github.com/code-with-current/tide/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>sInjzXFckSm9t7rf23NKs5RruX3xiBgdhj9pitSfXAQ=</string>
+    <string>2BpZErSo1c6UVgpQqJuAj5SdYFf14ykuVdvTXTV/JVE=</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>

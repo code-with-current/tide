@@ -372,6 +372,10 @@ jobs:
           TIDE_ANALYTICS_ENDPOINT: ${{ secrets.TIDE_ANALYTICS_ENDPOINT }}
           TIDE_ANALYTICS_WEBSITE_ID: ${{ secrets.TIDE_ANALYTICS_WEBSITE_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          # Enclosure and release-notes URLs point at this very GitHub
+          # release's assets; the workflow_dispatch flow has no tag yet, so
+          # the resolved tag is used directly.
+          TIDE_DOWNLOAD_URL_PREFIX: https://github.com/code-with-current/tide/releases/download/v${{ needs.version.outputs.version }}/
         run: |
           args=(--local --output \
             "dist/tide-v${{ needs.version.outputs.version }}-mac-${{ matrix.arch }}.dmg")
@@ -449,12 +453,13 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          TIDE_DOWNLOAD_URL_PREFIX: https://github.com/code-with-current/tide/releases/download/v${{ needs.version.outputs.version }}/
         run: |
           # Merge into the live feeds so previously published releases keep
           # their entries; a first run simply starts from nothing.
           for arch in x86_64 aarch64; do
             curl -fsSL --max-time 30 \
-              "https://releases.tide.codes/appcast-windows-$arch.xml" \
+              "https://github.com/code-with-current/tide/releases/latest/download/appcast-windows-$arch.xml" \
               -o "artifacts/appcast-windows-$arch.xml" || true
           done
           bun scripts/appcast-windows.ts artifacts "$VERSION"

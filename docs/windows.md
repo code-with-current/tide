@@ -3,13 +3,13 @@
 ## Install
 
 Download `Tide-<version>-x86_64-Setup.exe` (or the `aarch64` installer on an
-Arm device) from [releases.tide.codes](https://releases.tide.codes) or the
+Arm device) from [the GitHub releases](https://github.com/code-with-current/tide/releases) or the
 [GitHub release](https://github.com/code-with-current/page/releases) and run it. It
 installs per-user into `%LOCALAPPDATA%\Programs\Tide`, so it never asks for
 administrator rights — which is also what lets Tide update itself later
 without a UAC prompt.
 
-`https://releases.tide.codes/latest-windows.txt` names the current version if you
+`https://github.com/code-with-current/tide/releases/latest/download/latest-windows.txt` names the current version if you
 want to script the download.
 
 ### Portable
@@ -51,8 +51,8 @@ Updates…** in the app menu still works either way.
 Updates are the same signed feed macOS uses, with one appcast per
 architecture:
 
-- `https://releases.tide.codes/appcast-windows-x86_64.xml`
-- `https://releases.tide.codes/appcast-windows-aarch64.xml`
+- `https://github.com/code-with-current/tide/releases/latest/download/appcast-windows-x86_64.xml`
+- `https://github.com/code-with-current/tide/releases/latest/download/appcast-windows-aarch64.xml`
 
 Every installer carries an EdDSA signature, and Tide refuses one that does not
 verify against the public key built into it — so a compromised mirror or a
@@ -134,7 +134,7 @@ shim on `PATH`. If the shell finds it but Tide does not, set the binary path in
 Windows and make sure `git --version` works in a new terminal.
 
 **The update never arrives.** Tide reaches the feed with the `curl.exe` in
-System32; a proxy or filter that blocks `releases.tide.codes` blocks updates too.
+System32; a proxy or filter that blocks `github.com` blocks updates too.
 **Check for Updates…** reports the reason, where the once-per-launch check
 stays quiet. Downloading the installer by hand and running it is always
 equivalent.

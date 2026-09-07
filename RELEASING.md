@@ -1,11 +1,14 @@
 # Releasing Tide
 
-Tide auto-updates with [Sparkle](https://sparkle-project.org). Releases live in
-a **Cloudflare R2** bucket served at **`https://releases.tide.codes`**. New users
-download a notarized **`.dmg`**; existing users get smaller in-app updates
-(binary deltas when available) via Sparkle, which reads the appcast at
-`https://releases.tide.codes/appcast.xml`, verifies each build's EdDSA signature,
-and installs it. One release command produces and publishes both.
+Tide auto-updates with [Sparkle](https://sparkle-project.org). Releases live
+as assets of the **GitHub releases** of `code-with-current/tide`. New users
+download a notarized **`.dmg`** from the release page; existing users get
+in-app updates via Sparkle, which reads the appcast at
+`https://github.com/code-with-current/tide/releases/latest/download/appcast.xml`,
+verifies each build's EdDSA signature, and installs it. The CI workflow builds
+every platform and attaches the assets, including the appcasts, to a draft
+release; publishing the draft is what opens the update channel (draft assets
+are unreachable through `releases/latest`).
 
 Once set up, cutting a release is:
 
@@ -31,17 +34,15 @@ bun run release
 - GitHub Actions: [`.github/workflows/release.yml`](.github/workflows/release.yml)
   builds Linux (x86_64, arm64), Windows (x86_64, arm64), and macOS archives on
   a `v*` tag — or on a manual **Run workflow**, which takes the version from
-  `Cargo.toml` — and opens a draft GitHub release;
-  [`.github/workflows/sync-release.yml`](.github/workflows/sync-release.yml)
-  copies published assets into the R2 bucket.
+  `Cargo.toml` — and opens a draft GitHub release with every asset attached.
 
 ---
 
 ## One-time setup
 
 The release runs on [Bun](https://bun.sh) and needs
-[`create-dmg`](https://github.com/create-dmg/create-dmg) and
-[rclone](https://rclone.org) (`brew install bun create-dmg rclone`).
+[`create-dmg`](https://github.com/create-dmg/create-dmg)
+(`brew install bun create-dmg`).
 
 ### 1. Sparkle signing keys
 
@@ -98,21 +99,12 @@ xcrun notarytool store-credentials NOTARY \
 Override the environment with `--signing-identity`, or change the notary
 profile with `--notary-profile` / `TIDE_NOTARY_PROFILE`.
 
-### 3. Cloudflare R2 bucket + domain  ← **still to do once**
+### 3. Release hosting  ← **GitHub Releases, nothing to set up**
 
-1. Create the bucket **`tide-releases`** (Cloudflare dashboard → R2 → Create
-   bucket). The release script will not create it — a bucket-scoped API token
-   can't.
-2. Attach the custom domain **`releases.tide.codes`** to the bucket (bucket →
-   Settings → Custom Domains). This serves objects publicly at
-   `https://releases.tide.codes/<file>`.
-3. Make sure the R2 API token behind the `r2` rclone remote covers this bucket
-   (R2 → Manage API Tokens → Object Read & Write). The remote already exists
-   for kero; if `rclone lsf r2:tide-releases --s3-no-check-bucket` returns
-   *AccessDenied* after the bucket exists, extend the token's bucket list.
-
-The rclone remote itself (`~/.config/rclone/rclone.conf`, type S3, provider
-Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
+Binaries, update feeds, and the `latest-*.txt` pointers are all attached to the
+GitHub draft release the CI workflow creates; `releases/latest/download/<file>`
+is the stable URL each channel reads. There is no bucket to create — publishing
+the draft (which also creates the `v<version>` tag) is the only manual step.
 
 ---
 
@@ -131,22 +123,19 @@ Cloudflare, `no_check_bucket = true`) is shared with kero and needs no change.
    bun run release
    ```
 
-The script checks R2 up front (bucket reachable, version not already
-published), builds and signs the app via `scripts/bundle.sh release`, verifies
-the bundled JS REPL and computer-use helper, builds the styled DMG, notarizes
-and staples DMG + app, zips the app for Sparkle, pulls the recent archives
-from R2 so `generate_appcast` can build binary deltas, attaches the changelog
-section as release notes, regenerates the signed `appcast.xml`, and uploads
-everything with immutable cache headers (the appcast itself stays
-`max-age=300`). When it finishes:
+The CI workflow is the publisher: it builds, signs, generates the signed
+`appcast.xml`, and attaches everything to a draft GitHub release. Locally,
+`bun run release --local --adhoc` produces the same DMG + zip + appcast for
+testing without any credentials (the full-publish path that uploaded to the
+retired R2 bucket no longer has a destination). When the draft finishes:
 
-- **Download link**: `https://releases.tide.codes/Tide-<version>.dmg`
-- **In-app updates**: served from the same origin via the appcast.
+- **Download link**: the `v<version>` GitHub release page
+- **In-app updates**: the same release's appcast assets via `releases/latest`
 
 Test by keeping an older build around, launching it, and choosing
 **Check for Updates…**.
 
-### GitHub draft release + R2 sync
+### GitHub draft release
 
 The Release workflow runs two ways:
 
@@ -218,18 +207,12 @@ distribution Tide can start on (2.35 — Ubuntu 22.04, Debian 12, Fedora 36).
 Moving those jobs to a newer runner silently drops support for everything
 older.
 
-The workflow opens (or updates) a **draft** GitHub release with those files and
-the matching `CHANGELOG.md` section. Publishing the GitHub release syncs the
-assets — including the signed `appcast.xml` — to R2.
-
-`appcast.xml`, `latest-linux.txt`, and `latest-windows.txt` are the bucket's
-mutable pointers and upload with a short cache lifetime; everything else is
-versioned and cached forever. Linux users install from that bucket via
-[`website/public/install.sh`](website/public/install.sh), served at
-`https://tide.codes/install.sh` — see [docs/linux.md](docs/linux.md).
-
-Publishing that GitHub release (or running **Sync release** from Actions)
-uploads the assets to the `tide-releases` R2 bucket. Configure these repository
+The workflow opens (or updates) a **draft** GitHub release with those files
+and the matching `CHANGELOG.md` section. **Publishing the draft is the whole
+switch**: it creates the `v<version>` tag and makes every asset — including
+the signed `appcast.xml`, `latest-linux.txt`, and `latest-windows.txt` —
+reachable through `releases/latest/download/<file>`, which is what the
+in-app updaters and the Linux docs point at. Configure these repository
 secrets first:
 
 | Secret | Purpose |
@@ -242,28 +225,19 @@ secrets first:
 | `APPLE_ID` | Apple ID used by `notarytool` |
 | `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password for that Apple ID |
 | `APPLE_TEAM_ID` | Developer Team ID |
-| `SPARKLE_PRIVATE_KEY` | EdDSA private key for `generate_appcast` |
+| `SPARKLE_PRIVATE_KEY` | Sparkle EdDSA key for `generate_appcast`, base64 of the 64-byte seed+public (from `generate_keys`; the seed half feeds the mac appcast, both halves the Windows feed signer) |
 | `WINDOWS_CERTIFICATE` | optional; base64-encoded Authenticode `.pfx` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | optional; password for that `.pfx` |
-| `R2_ACCOUNT_ID` | Cloudflare account id for the R2 API |
-| `R2_ACCESS_KEY_ID` | R2 Object Read & Write token |
-| `R2_SECRET_ACCESS_KEY` | matching secret |
-| `R2_BUCKET` | optional; defaults to `tide-releases` |
 
 ### Options
 
 | Flag / Env | Default | Purpose |
 | --- | --- | --- |
 | `--local` | — | build, notarize, and write the DMG + zip without publishing |
-| `--force` | — | re-publish a version that already exists in R2 |
 | `--adhoc`, `--skip-notarize` | — | no-Apple-Program / local test builds (imply `--local`; `--adhoc` skips the signing identity entirely) |
 | `--skip-build` | — | reuse existing release binaries |
 | `--build-number <n>` / `TIDE_BUILD_NUMBER` | derived | `CFBundleVersion` override |
-| `TIDE_R2_REMOTE` | `r2` | rclone remote name |
-| `TIDE_R2_BUCKET` | `tide-releases` | R2 bucket |
-| `TIDE_DOWNLOAD_URL_PREFIX` | `https://releases.tide.codes/` | base URL in the appcast |
-| `TIDE_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
-| `TIDE_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
+| `TIDE_DOWNLOAD_URL_PREFIX` | `releases/latest/download` base | base URL in the appcast |
 | `SPARKLE_BIN` | the `.tide-cache` copy | Sparkle tools directory |
 
 ---
@@ -297,17 +271,17 @@ secrets first:
   `bundle.sh` strips them (plus headers/modules) from the embedded framework
   and re-signs the rest with the app's identity — hardened-runtime library
   validation requires the identities to match.
-- **Old archives stay in R2** so far-behind users can still be served; only
-  the recent history is staged locally under `dist/updates/` (git-ignored).
-- **Platform artifacts:** keep the bucket layout flat and platform-tagged by
-  artifact name/extension — today's macOS names
-  (`Tide-<v>.dmg`, `Tide-<v>.zip`, `appcast.xml`) must keep their URLs.
-  Linux CI releases produce `tide-<v>-<target>.tar.gz` with
-  `scripts/bundle-linux.sh`, Windows CI produces `tide-<v>-<target>.zip` with
-  `scripts/bundle-windows.ts`, and both land in GitHub Releases, then R2 via
-  the sync workflow. Windows also ships `Tide-<v>-<arch>-Setup.exe` and updates
-  itself from `appcast-windows-<arch>.xml`. Automatic Linux updates are still
-  not wired — re-running `install.sh` is the upgrade path, and
+- **Old release assets stay published** so far-behind users can still be
+  served; only the recent history is staged locally under `dist/updates/`
+  (git-ignored).
+- **Platform artifacts:** keep asset names flat and platform-tagged — today's
+  macOS names (`Tide-<v>.dmg`, `Tide-<v>.zip`, `appcast.xml`) must keep their
+  URLs. Linux CI releases produce `.deb`/`.rpm`/`.AppImage` with
+  `scripts/bundle-linux.sh`, Windows CI produces the portable zip and
+  `Tide-<v>-<arch>-Setup.exe` with `scripts/bundle-windows.ts`, all attached to
+  the GitHub release. Windows also updates itself from
+  `appcast-windows-<arch>.xml`. Automatic Linux updates are still
+  not wired — installing the new package is the upgrade path, and
   `latest-linux.txt` is how a client learns what "latest" means.
   `src/updater.rs` is the per-platform seam, and everything
   mac-specific in the existing release pipeline lives behind the Darwin guard

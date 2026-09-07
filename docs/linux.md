@@ -29,7 +29,7 @@ Set `TIDE_VERSION` to install a specific version rather than the latest.
 
 The script is a convenience, not a requirement. Download
 `tide-<version>-<target>.tar.gz` from
-[releases.tide.codes](https://releases.tide.codes) or the
+[the GitHub releases](https://github.com/code-with-current/tide/releases) or the
 [GitHub release](https://github.com/code-with-current/page/releases), then unpack it
 wherever you like:
 
