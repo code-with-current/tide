@@ -183,14 +183,23 @@ pub(crate) fn run_todo_write(
         return ToolOutcome::failed("Missing or empty required arg: todos");
     }
 
-    let in_progress = todos
-        .iter()
-        .filter(|t| t.status == TodoStatus::InProgress)
-        .count();
-    if in_progress > 1 {
-        return ToolOutcome::failed(format!(
-            "At most one todo can be in_progress at a time; got {in_progress}. Fix and retry."
-        ));
+    // The model occasionally marks several items in_progress despite the
+    // one-active-item contract. Normalizing (keep the first, demote the rest
+    // to pending) instead of rejecting keeps the full-replacement update
+    // from being discarded — a hard fail loses every status change in the
+    // call, and retries tend to repeat the same mistake.
+    let mut todos = todos;
+    let mut demoted = 0usize;
+    let mut seen_active = false;
+    for t in todos.iter_mut() {
+        if t.status == TodoStatus::InProgress {
+            if seen_active {
+                t.status = TodoStatus::Pending;
+                demoted += 1;
+            } else {
+                seen_active = true;
+            }
+        }
     }
 
     let sid = if session_id.is_empty() {
@@ -227,7 +236,14 @@ pub(crate) fn run_todo_write(
         .collect::<Vec<_>>()
         .join("\n");
 
-    ToolOutcome::executed(format!("Todo list updated ({summary})."))
+    let mut output = format!("Todo list updated ({summary}).");
+    if demoted > 0 {
+        output.push_str(&format!(
+            " Note: demoted {demoted} extra in_progress item(s) to pending — at most one todo can be in_progress at a time."
+        ));
+    }
+
+    ToolOutcome::executed(output)
         .with_display(ToolDisplay::Text { text })
         .with_meta(summary)
 }
@@ -411,22 +427,32 @@ mod tests {
     }
 
     #[test]
-    fn multiple_in_progress_rejected() {
+    fn multiple_in_progress_normalized() {
         let state = TodoState::default();
         let out = run_todo_write(
             vec![
-                item("a", TodoStatus::InProgress),
+                item("a", TodoStatus::Completed),
                 item("b", TodoStatus::InProgress),
+                item("c", TodoStatus::InProgress),
+                item("d", TodoStatus::InProgress),
             ],
             "s1",
             &state,
         );
-        assert_eq!(out.status, OutcomeStatus::Failed);
+        assert_eq!(out.status, OutcomeStatus::Executed);
         assert_eq!(
             out.output,
-            "At most one todo can be in_progress at a time; got 2. Fix and retry."
+            "Todo list updated (1/4 done · next: b). Note: demoted 2 extra in_progress item(s) to pending — at most one todo can be in_progress at a time."
         );
-        assert!(state.todos("s1").is_empty());
+        assert_eq!(
+            state.todos("s1"),
+            vec![
+                item("a", TodoStatus::Completed),
+                item("b", TodoStatus::InProgress),
+                item("c", TodoStatus::Pending),
+                item("d", TodoStatus::Pending),
+            ]
+        );
     }
 
     #[test]
