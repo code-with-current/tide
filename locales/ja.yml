@@ -627,6 +627,7 @@ branches.create_and_checkout: 新しいブランチを作成してチェック�
 branches.create_hint: Return キーで作成 · Esc キーでキャンセル
 branches.none_found: ブランチが見つかりません
 branches.create_and_checkout_ellipsis: 新しいブランチを作成してチェックアウト…
+branches.work_in_new_worktree: 新しいワークツリーで作業する
 branches.title: ブランチ
 branches.choose: ブランチを選択
 branches.checked_out_elsewhere: 別のワークツリーでチェックアウトされています
@@ -1194,6 +1195,18 @@ right_panel.git: Git
 right_panel.git_description: 変更と履歴を追跡します
 git_panel.changes: 変更
 git_panel.history: 履歴
+git_panel.worktrees: ワークツリー
+git_panel.worktrees_empty: ワーキングツリーがありません
+git_panel.worktrees_empty_description: このリポジトリに紐付くチェックアウトがすべてここに表示されます。
+git_panel.worktree_main: メイン
+git_panel.worktree_current: このタスク
+git_panel.worktree_dirty: 未コミットの変更
+git_panel.worktree_locked: ロック中
+git_panel.worktree_detached: "%{sha} の detached"
+git_panel.worktree_bare: bare
+git_panel.worktree_in_use: "%{title} が使用中"
+git_panel.worktree_in_use_busy: このワークツリーのタスクはまだ実行中です
+git_panel.worktree_remove: このワークツリーと tide/* ブランチを削除
 git_panel.loading: リポジトリを読み込んでいます…
 git_panel.loading_description: ワークスペースの git 状態がここに表示されます。
 git_panel.not_a_repository: git リポジトリではありません
@@ -1204,7 +1217,6 @@ git_panel.changes_count: "%{count} 件の変更ファイル"
 git_panel.history_count: "%{count} 件のコミット"
 git_panel.error: Git エラー
 git_panel.more_actions: その他の git 操作
-git_panel.refresh: git ステータスを更新
 git_panel.branch: 現在のブランチ
 git_panel.stage_all: すべてステージ
 git_panel.unstage_all: すべてステージ解除
@@ -1230,12 +1242,9 @@ git_panel.no_identity: "ユーザー身元が未設定"
 git_panel.identity_override: "上書き"
 git_panel.manage_identities: "身元を管理…"
 git_panel.summary_placeholder: "コミットメッセージ"
-git_panel.description_placeholder: "説明…"
 git_panel.amend: "⌥ 修正"
 git_panel.amend_last_commit: "前回のコミットを修正"
 git_panel.commit: "コミット"
-git_panel.stage_all_and_commit: "すべてステージしてコミット"
-git_panel.staged_count: "%{count} 件ステージ済み"
 git_panel.conflicts_hint: "コミット前にマージコンフリクトを解決してください。"
 
 git_panel.refresh_history: 履歴を更新
@@ -1271,6 +1280,7 @@ git_panel.recent_branches: 最近
 git_panel.create_branch: ブランチを作成
 git_panel.fetch: フェッチ
 git_panel.pull: プル
+git_panel.pull_rebase: プル（リベース）
 git_panel.push: プッシュ
 git_panel.fetched: フェッチしました
 git_panel.pulled: プルしました

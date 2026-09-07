@@ -1320,6 +1320,8 @@ branches.none_found:
   en: No branches found
 branches.create_and_checkout_ellipsis:
   en: Create and checkout new branch…
+branches.work_in_new_worktree:
+  en: Work in a new worktree
 branches.title:
   en: Branches
 branches.choose:
@@ -2602,6 +2604,30 @@ git_panel.changes:
   en: Changes
 git_panel.history:
   en: History
+git_panel.worktrees:
+  en: Worktrees
+git_panel.worktrees_empty:
+  en: No working trees
+git_panel.worktrees_empty_description:
+  en: Every checkout linked to this repository will appear here.
+git_panel.worktree_main:
+  en: Main
+git_panel.worktree_current:
+  en: This task
+git_panel.worktree_dirty:
+  en: Uncommitted changes
+git_panel.worktree_locked:
+  en: Locked
+git_panel.worktree_detached:
+  en: "Detached at %{sha}"
+git_panel.worktree_bare:
+  en: Bare
+git_panel.worktree_in_use:
+  en: "In use by %{title}"
+git_panel.worktree_in_use_busy:
+  en: This worktree's task is still running
+git_panel.worktree_remove:
+  en: Remove this worktree and its tide/* branch
 git_panel.loading:
   en: Reading the repository…
 git_panel.loading_description:
@@ -2623,8 +2649,6 @@ git_panel.error:
 
 git_panel.more_actions:
   en: More git actions
-git_panel.refresh:
-  en: Refresh
 git_panel.branch:
   en: Current branch
 git_panel.stage_all:
@@ -2675,18 +2699,12 @@ git_panel.manage_identities:
   en: Manage identities…
 git_panel.summary_placeholder:
   en: Commit Message
-git_panel.description_placeholder:
-  en: Description…
 git_panel.amend:
   en: "⌥ Amend"
 git_panel.amend_last_commit:
   en: Amend last commit
 git_panel.commit:
   en: Commit
-git_panel.stage_all_and_commit:
-  en: Stage all & commit
-git_panel.staged_count:
-  en: "%{count} staged"
 git_panel.conflicts_hint:
   en: Resolve merge conflicts before committing.
 
@@ -2756,6 +2774,8 @@ git_panel.fetch:
   en: Fetch
 git_panel.pull:
   en: Pull
+git_panel.pull_rebase:
+  en: Pull (Rebase)
 git_panel.push:
   en: Push
 git_panel.fetched:

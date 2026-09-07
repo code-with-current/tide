@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::branches::{BranchPickerContext, BranchPickerSurface};
@@ -8,6 +9,21 @@ use super::*;
 use crate::query::Query;
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use protocol::git_panel::{PanelCommit, PanelConflict, PanelFileChange};
+
+/// A tiny rounded label for a worktree row's status bits.
+fn worktree_badge(label: String, color: gpui::Hsla) -> Div {
+    div()
+        .h(px(16.0))
+        .px(px(5.0))
+        .rounded(px(4.0))
+        .flex()
+        .flex_none()
+        .items_center()
+        .bg(color.opacity(0.12))
+        .text_size(sp(10.0))
+        .text_color(color)
+        .child(single_line_label(&label))
+}
 
 /// One bulk-action menu row: label, icon, and the wire op it dispatches.
 fn bulk_item(
@@ -24,6 +40,31 @@ fn bulk_item(
     .icon(icon_path)
     .disabled(busy)
 }
+
+/// One remote-sync menu row: `op` is "fetch", "pull", or "pull-rebase".
+fn remote_item(
+    weak: &WeakEntity<Tide>,
+    icon_path: &'static str,
+    label: String,
+    op: &'static str,
+    fetch: bool,
+    rebase: bool,
+    busy: bool,
+) -> MenuItem {
+    let weak = weak.clone();
+    MenuItem::new(label, move |_, cx| {
+        let _ =
+            weak.update(cx, |this, cx| this.run_git_panel_remote(op, fetch, rebase, cx));
+    })
+    .icon(icon_path)
+    .disabled(busy)
+}
+
+/// The git panel's vertical rhythm: every one-line bar — tab bar, top
+/// bar, branch bar, identity bar — shares this height and horizontal
+/// padding so the Top/Mid/Bottom sections read as evenly spaced bands.
+const GIT_BAR_H: f32 = 32.0;
+const GIT_BAR_PAD_X: f32 = 10.0;
 
 /// The branch chip as drawn before the picker was shared — the fallback
 /// while the shared branch snapshot has not landed (and for workspaces
@@ -3822,8 +3863,6 @@ impl Tide {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = Theme::current(cx);
-
         // Snapshot everything the body reads before the header borrows `cx`
         // for its click listeners.
         let tab = self.git_panel.tab;
@@ -3837,11 +3876,52 @@ impl Tide {
             _ => None,
         };
 
-        let mut header = div()
+        let header = self.render_git_panel_tab_bar(branch, cx);
+
+        let body = if let Some(error) = error {
+            self.render_right_panel_empty_message(tr!("git_panel.error"), error, cx)
+        } else if not_a_repository {
+            self.render_right_panel_empty_message(
+                tr!("git_panel.not_a_repository"),
+                tr!("git_panel.not_a_repository_description"),
+                cx,
+            )
+        } else {
+            match tab {
+                GitPanelTab::Changes => self.render_git_panel_changes(window, cx),
+                GitPanelTab::History => self.render_git_panel_history(cx),
+                GitPanelTab::Worktrees => self.render_git_panel_worktrees(cx),
+            }
+        };
+
+        div()
+            .id("right-panel-git")
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(body)
+            .when(self.git_panel.stash_dialog_open, |panel| {
+                panel.child(self.render_git_stash_dialog(cx))
+            })
+            .into_any_element()
+    }
+
+    /// Top section, first row: the Changes/History/Worktrees tab switcher,
+    /// with the current branch as a quiet right-aligned label.
+    fn render_git_panel_tab_bar(
+        &mut self,
+        branch: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let tab = self.git_panel.tab;
+        let mut bar = div()
             .id("git-panel-tabs")
-            .h(px(42.0))
+            .h(px(GIT_BAR_H))
             .flex_none()
-            .px(px(12.0))
+            .px(px(GIT_BAR_PAD_X))
             .flex()
             .items_center()
             .gap(px(4.0))
@@ -3850,13 +3930,14 @@ impl Tide {
         for (candidate, key) in [
             (GitPanelTab::Changes, "git_panel.changes"),
             (GitPanelTab::History, "git_panel.history"),
+            (GitPanelTab::Worktrees, "git_panel.worktrees"),
         ] {
             let active = tab == candidate;
-            header = header.child(
+            bar = bar.child(
                 div()
                     .id(key)
                     .px(px(10.0))
-                    .h(px(26.0))
+                    .h(px(24.0))
                     .rounded(px(6.0))
                     .flex()
                     .items_center()
@@ -3883,7 +3964,7 @@ impl Tide {
         if let Some(branch) = branch
             && !branch.is_empty()
         {
-            header = header.child(
+            bar = bar.child(
                 div().flex_1().min_w_0().flex().justify_end().child(
                     div()
                         .min_w_0()
@@ -3894,34 +3975,7 @@ impl Tide {
                 ),
             );
         }
-
-        let body = if let Some(error) = error {
-            self.render_right_panel_empty_message(tr!("git_panel.error"), error, cx)
-        } else if not_a_repository {
-            self.render_right_panel_empty_message(
-                tr!("git_panel.not_a_repository"),
-                tr!("git_panel.not_a_repository_description"),
-                cx,
-            )
-        } else {
-            match tab {
-                GitPanelTab::Changes => self.render_git_panel_changes(window, cx),
-                GitPanelTab::History => self.render_git_panel_history(cx),
-            }
-        };
-
-        div()
-            .id("right-panel-git")
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(body)
-            .when(self.git_panel.stash_dialog_open, |panel| {
-                panel.child(self.render_git_stash_dialog(cx))
-            })
-            .into_any_element()
+        bar
     }
 
     /// The stash viewer dialog — port of tide's "View Stash" dialog: the
@@ -5217,6 +5271,251 @@ impl Tide {
     /// The Changes tab: identity bar, branch toolbar, summary + bulk row,
     /// conflict band, the staged/unstaged sections over one virtualized row
     /// list, and the commit bar footer.
+    /// The Worktrees tab: every working tree linked to the session's
+    /// repository, main first, with the session that owns each linked tree
+    /// and a two-step armed removal (tide/* branches go with their tree).
+    fn render_git_panel_worktrees(&mut self, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let worktrees = match &self.git_panel.worktrees {
+            Query::Ready(worktrees) => Some(worktrees.clone()),
+            Query::Pending | Query::Missing(_) => None,
+        };
+        let busy = self.git_panel.busy.is_some();
+        let armed = self.git_panel.confirm_remove_worktree.clone();
+        let cwd = self.selected_workspace_path().map(Path::to_path_buf);
+
+        let body: AnyElement = match worktrees {
+            None => self.render_git_panel_loading_rows(&theme).into_any_element(),
+            Some(worktrees) if worktrees.is_empty() => self
+                .render_right_panel_empty_message(
+                    tr!("git_panel.worktrees_empty"),
+                    tr!("git_panel.worktrees_empty_description"),
+                    cx,
+                )
+                .into_any_element(),
+            Some(worktrees) => {
+                let mut list_div = div()
+                    .id("git-worktree-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col();
+                for entry in worktrees.iter() {
+                    let is_armed = armed.as_deref() == Some(entry.path.as_path());
+                    let is_current = cwd
+                        .as_deref()
+                        .is_some_and(|cwd| fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) == entry.path);
+                    let owner = self.worktree_session(&entry.path);
+                    let owner_busy = owner.is_some_and(|session| session.is_busy());
+                    let removable = !entry.main && !busy && !owner_busy;
+
+                    let name = if let Some(branch) = entry.branch.as_deref() {
+                        branch.to_owned()
+                    } else if entry.bare {
+                        tr!("git_panel.worktree_bare")
+                    } else {
+                        tr!("git_panel.worktree_detached", sha = entry.head.clone())
+                    };
+                    let mut badges = div().flex().flex_none().items_center().gap(px(6.0));
+                    if is_current {
+                        badges = badges.child(worktree_badge(
+                            tr!("git_panel.worktree_current"),
+                            theme.accent,
+                        ));
+                    }
+                    if entry.main {
+                        badges = badges.child(worktree_badge(
+                            tr!("git_panel.worktree_main"),
+                            theme.text_tertiary,
+                        ));
+                    }
+                    if entry.dirty {
+                        badges = badges.child(worktree_badge(
+                            tr!("git_panel.worktree_dirty"),
+                            theme.warning,
+                        ));
+                    }
+                    if entry.locked {
+                        badges = badges.child(worktree_badge(
+                            tr!("git_panel.worktree_locked"),
+                            theme.text_tertiary,
+                        ));
+                    }
+
+                    let detail = match owner {
+                        Some(session) if !entry.main => tr!(
+                            "git_panel.worktree_in_use",
+                            title = session.display_title().to_owned()
+                        ),
+                        _ => compact_path(&entry.path),
+                    };
+
+                    let action: AnyElement = if entry.main {
+                        div().into_any_element()
+                    } else if is_armed {
+                        let cancel_path = entry.path.clone();
+                        let entry = entry.clone();
+                        div()
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .id("git-worktree-remove-confirm")
+                                    .tab_index(0)
+                                    .focus_visible(|style| {
+                                        style.border_1().border_color(theme.danger)
+                                    })
+                                    .h(px(22.0))
+                                    .px(px(7.0))
+                                    .rounded(px(6.0))
+                                    .border_1()
+                                    .border_color(theme.danger)
+                                    .bg(theme.danger.opacity(0.12))
+                                    .flex()
+                                    .items_center()
+                                    .cursor_default()
+                                    .text_size(sp(11.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.danger)
+                                    .child(tr!("common.confirm"))
+                                    .on_activation(cx, move |this, _, cx| {
+                                        this.remove_worktree(&entry, cx);
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .id("git-worktree-remove-cancel")
+                                    .tab_index(0)
+                                    .focus_visible(|style| {
+                                        style.border_1().border_color(theme.accent)
+                                    })
+                                    .h(px(22.0))
+                                    .px(px(7.0))
+                                    .rounded(px(6.0))
+                                    .border_1()
+                                    .border_color(theme.border_strong)
+                                    .flex()
+                                    .items_center()
+                                    .cursor_default()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("common.cancel"))
+                                    .on_activation(cx, move |this, _, cx| {
+                                        this.toggle_worktree_removal(cancel_path.clone(), cx);
+                                    }),
+                            )
+                            .into_any_element()
+                    } else {
+                        let remove_path = entry.path.clone();
+                        div()
+                            .id("git-worktree-remove")
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .size(px(24.0))
+                            .rounded(px(6.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(removable, |element| {
+                                element
+                                    .cursor_default()
+                                    .hover(|style| style.bg(theme.overlay))
+                                    .on_activation(cx, move |this, _, cx| {
+                                        this.toggle_worktree_removal(remove_path.clone(), cx);
+                                    })
+                            })
+                            .child(icon(
+                                "icons/trash.svg",
+                                13.0,
+                                if removable {
+                                    theme.text_tertiary
+                                } else {
+                                    theme.text_ghost
+                                },
+                            ))
+                            .tooltip({
+                                let tooltip = if owner_busy {
+                                    tr!("git_panel.worktree_in_use_busy")
+                                } else {
+                                    tr!("git_panel.worktree_remove")
+                                };
+                                move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx)
+                            })
+                            .into_any_element()
+                    };
+
+                    list_div = list_div.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "git-worktree-{}",
+                                entry.path.display()
+                            )))
+                            .px(px(12.0))
+                            .py(px(8.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .font_family(".SystemUITMonospaced")
+                                                    .text_size(sp(11.5))
+                                                    .text_color(theme.text_secondary)
+                                                    .child(single_line_label(&name)),
+                                            )
+                                            .child(badges),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(11.0))
+                                            .text_color(
+                                                if owner.is_some() && !entry.main {
+                                                    theme.accent.opacity(0.8)
+                                                } else {
+                                                    theme.text_tertiary
+                                                },
+                                            )
+                                            .child(single_line_label(&detail)),
+                                    ),
+                            )
+                            .child(action),
+                    );
+                }
+                list_div.into_any_element()
+            }
+        };
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(body)
+            .into()
+    }
+
     fn render_git_panel_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         // The two sub-views own the whole Changes body: an open file diff or
         // a last-turn review replaces the branch bar and the list, each with
@@ -5228,6 +5527,33 @@ impl Tide {
             return self.render_git_file_diff_sub_view(cx);
         }
         let theme = Theme::current(cx);
+
+        // The panel's three sections share one vertical rhythm
+        // (GIT_BAR_H / GIT_BAR_PAD_X): Top = tab bar + toolbar, Mid = the
+        // main list, Bottom = branch / commit / identity bars.
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            // Top: the toolbar under the tab bar (the tab bar itself is
+            // rendered by the surface header).
+            .child(self.render_git_panel_top_bar(cx))
+            // Mid: the changes list/tree.
+            .child(self.render_git_panel_main_view(&theme, cx))
+            // Bottom: branch, commit, and identity bars — the branch bar
+            // always renders, even on a clean tree: its bulk menu is also
+            // where the stash actions live.
+            .child(self.render_git_panel_branch_bar(cx))
+            .child(self.render_git_panel_commit_bar(window, cx))
+            .child(self.render_git_panel_identity_bar(cx))
+    }
+
+    /// Mid section: the main list/tree view of working-tree changes, with
+    /// the loading and clean-tree placeholders.
+    fn render_git_panel_main_view(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let status_pending = matches!(self.git_panel.status, Query::Pending | Query::Missing(_));
         let changes = match &self.git_panel.status {
             Query::Ready(changes) => Some(changes.clone()),
@@ -5237,76 +5563,52 @@ impl Tide {
             Query::Ready(conflicts) => conflicts.is_empty(),
             Query::Pending | Query::Missing(_) => true,
         };
-        let (total_additions, total_deletions) = changes.as_ref().map_or((0, 0), |changes| {
-            changes.iter().fold((0, 0), |(add, del), change| {
-                (add + change.additions, del + change.deletions)
-            })
-        });
         let changes_count = changes.as_ref().map_or(0, |changes| changes.len());
-
-        let body = if status_pending {
-            self.render_git_panel_loading_rows(&theme)
-                .into_any_element()
-        } else if changes_count == 0 && conflicts_empty {
-            self.render_right_panel_empty_message(
-                tr!("git_panel.clean_tree"),
-                tr!("git_panel.clean_tree_description"),
-                cx,
-            )
-            .into_any_element()
-        } else {
-            let entity = cx.entity().downgrade();
-            div()
-                .flex_1()
-                .min_h_0()
-                .min_w_0()
-                .relative()
-                .child(
-                    list(
-                        self.git_panel_changes_list_state.clone(),
-                        move |index, _window, cx| {
-                            entity
-                                .upgrade()
-                                .map(|entity| {
-                                    entity.update(cx, |this, cx| {
-                                        this.render_git_changes_row(index, cx)
-                                    })
-                                })
-                                .unwrap_or_else(|| div().into_any_element())
-                        },
-                    )
-                    .size_full(),
+        if status_pending {
+            return self.render_git_panel_loading_rows(theme).into_any_element();
+        }
+        if changes_count == 0 && conflicts_empty {
+            return self
+                .render_right_panel_empty_message(
+                    tr!("git_panel.clean_tree"),
+                    tr!("git_panel.clean_tree_description"),
+                    cx,
                 )
-                .child(scrollbar::vertical(
-                    &self.git_panel_changes_list_state,
-                    &self.git_panel_changes_scrollbar,
-                ))
-                .into_any_element()
-        };
-
+                .into_any_element();
+        }
+        let entity = cx.entity().downgrade();
         div()
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .flex()
-            .flex_col()
-            .child(self.render_git_panel_identity_bar(cx))
-            .child(self.render_git_panel_branch_bar(window, cx))
-            // Always rendered, even on a clean tree: the bulk menu it carries
-            // is also where the stash actions live, and a stash is most often
-            // managed right after "Stash All" leaves the tree clean.
-            .child(self.render_git_panel_summary_row(total_additions, total_deletions, cx))
-            .child(body)
-            .child(self.render_git_panel_commit_bar(window, cx))
+            .relative()
+            .child(
+                list(
+                    self.git_panel_changes_list_state.clone(),
+                    move |index, _window, cx| {
+                        entity
+                            .upgrade()
+                            .map(|entity| {
+                                entity.update(cx, |this, cx| this.render_git_changes_row(index, cx))
+                            })
+                            .unwrap_or_else(|| div().into_any_element())
+                    },
+                )
+                .size_full(),
+            )
+            .child(scrollbar::vertical(
+                &self.git_panel_changes_list_state,
+                &self.git_panel_changes_scrollbar,
+            ))
+            .into_any_element()
     }
 
-    /// The "Committing as" strip above the Changes list — port of tide's
-    /// CommitIdentityBar. The resolved identity renders with the matched
-    /// profile's dot color (settings snapshot when loaded, neutral
-    /// otherwise); amber when nothing resolves anywhere. The dropdown
-    /// applies identities through the same GitSetIdentity dispatch the
-    /// settings page uses.
-    fn render_git_panel_identity_bar(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// Bottom section, last row — the identity bar: the "Committing as"
+    /// dropdown, port of tide's CommitIdentityBar, compressed to a chip
+    /// (profile dot, resolved identity, chevron). The dropdown applies
+    /// identities through the same GitSetIdentity dispatch the settings
+    /// page uses.
+    fn render_git_panel_identity_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let identity = match &self.git_panel.current_identity {
             Query::Ready(identity) => Some(identity.clone()),
@@ -5386,7 +5688,7 @@ impl Tide {
             trigger,
             "git-panel-identity-menu",
             &handle,
-            MenuAlign::BelowLeft,
+            MenuAlign::AboveLeft,
             move |_| {
                 let mut items = vec![
                     MenuItem::new(tr!("git.projects.global"), {
@@ -5476,29 +5778,19 @@ impl Tide {
 
         div()
             .id("git-panel-identity-bar")
-            .h(px(30.0))
             .flex_none()
-            .px(px(10.0))
+            .h(px(GIT_BAR_H))
+            .px(px(GIT_BAR_PAD_X))
             .flex()
             .items_center()
-            .gap(px(6.0))
             .min_w_0()
-            .border_b_1()
-            .border_color(theme.border)
             .child(menu)
-            .when(applied_dot.is_some(), |bar| {
-                bar.child(
-                    div()
-                        .text_size(sp(9.5))
-                        .text_color(theme.text_ghost)
-                        .child(tr!("git_panel.identity_override")),
-                )
-            })
+            .child(div().flex_1())
+            .into_any_element()
     }
 
-    /// The commit bar footer — port of tide's CommitBar: summary + ✨,
-    /// description, amend toggle / staged counter / primary action, and the
-    /// attribution trailer preview.
+    /// Bottom section, second row — the commit bar: one boxed message
+    /// editor with the generate and commit actions floating in its corner.
     fn render_git_panel_commit_bar(
         &mut self,
         window: &mut Window,
@@ -5509,32 +5801,18 @@ impl Tide {
         let Some(draft) = self.git_panel_commit_draft() else {
             return div().id("git-panel-commit-bar");
         };
-        let summary = draft.summary.clone();
-        let description = draft.description.clone();
+        let message = draft.message.clone();
         let amend = draft.amend;
-        let summary_text = draft.summary.read(cx).content().trim().to_owned();
+        let message_text = draft.message.read(cx).content().trim().to_owned();
         let busy = self.git_panel.busy.is_some();
         let generating = self.git_panel.generating_message;
         let flash_sha = self.git_panel.flash_sha.clone();
         let has_conflicts =
             matches!(&self.git_panel.conflicts, Query::Ready(conflicts) if !conflicts.is_empty());
-        let (staged_count, staged_add, staged_del, has_changes) = match &self.git_panel.status {
-            Query::Ready(changes) => changes.iter().fold(
-                (0usize, 0u64, 0u64, false),
-                |(count, add, del, _), change| {
-                    (
-                        count + usize::from(change.staged),
-                        add + change.additions * u64::from(change.staged),
-                        del + change.deletions * u64::from(change.staged),
-                        true,
-                    )
-                },
-            ),
-            Query::Pending | Query::Missing(_) => (0, 0, 0, false),
-        };
-        let trailer = self.git_panel.trailer.clone();
+        let has_changes =
+            matches!(&self.git_panel.status, Query::Ready(changes) if !changes.is_empty());
         let can_submit =
-            !summary_text.is_empty() && !has_conflicts && !busy && (amend || has_changes);
+            !message_text.is_empty() && !has_conflicts && !busy && (amend || has_changes);
 
         let generate_focus = self.transcript_control_focus("git-commit-generate", cx);
         let generate = div()
@@ -5563,52 +5841,22 @@ impl Tide {
                 })
             });
 
-        let summary_row = div()
-            .key_context("GitPanelCommitSummary")
+        let message_field = div()
+            .key_context("GitPanelCommitMessage")
             .on_action(
                 cx.listener(|this, _: &super::git_panel::ConfirmGitPanelCommit, _, cx| {
                     this.confirm_git_panel_commit(cx);
                 }),
             )
             .flex()
-            .items_center()
-            .gap(px(4.0))
+            .flex_col()
             .min_w_0()
-            .child(div().flex_1().min_w_0().child(summary))
-            .child(generate);
-
-        let amend_focus = self.transcript_control_focus("git-commit-amend", cx);
-        let amend_button = div()
-            .id("git-commit-amend")
-            .track_focus(&amend_focus)
-            .tab_index(0)
-            .h(px(22.0))
-            .px(px(7.0))
-            .rounded(px(6.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .cursor_default()
-            .text_size(sp(11.0))
-            .font_weight(if amend {
-                FontWeight::MEDIUM
-            } else {
-                FontWeight::NORMAL
-            })
-            .text_color(if amend {
-                theme.danger
-            } else {
-                theme.text_tertiary
-            })
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .when(!amend, |button| {
-                button.hover(|style| style.bg(theme.overlay).text_color(theme.text))
-            })
-            .when(amend, |button| button.bg(theme.danger.opacity(0.12)))
-            .child(tr!("git_panel.amend"))
-            .on_activation(cx, move |this, _, cx| {
-                this.toggle_git_panel_amend(cx);
-            });
+            // Three visible lines at the 22px auto-height metric (66px),
+            // plus a reserved strip so the floating actions never cover
+            // text; the field itself grows to five lines before scrolling.
+            .min_h(px(96.0))
+            .pb(px(30.0))
+            .child(message);
 
         let primary_focus = self.transcript_control_focus("git-commit-primary", cx);
         let primary_label = if flash_sha.is_some() {
@@ -5617,10 +5865,8 @@ impl Tide {
             String::new()
         } else if amend {
             tr!("git_panel.amend_last_commit")
-        } else if staged_count > 0 {
-            tr!("git_panel.commit")
         } else {
-            tr!("git_panel.stage_all_and_commit")
+            tr!("git_panel.commit")
         };
         let primary_enabled = can_submit && flash_sha.is_none();
         let primary = div()
@@ -5684,117 +5930,66 @@ impl Tide {
                 })
             });
 
+        // The branch bar above draws the bottom region's top hairline, so
+        // the commit box itself stays borderless — its boxed editor card
+        // is the visual boundary.
         div()
             .id("git-panel-commit-bar")
             .flex_none()
-            .px(px(10.0))
-            .py(px(8.0))
+            .px(px(GIT_BAR_PAD_X))
+            .py(px(6.0))
             .flex()
             .flex_col()
-            .gap(px(5.0))
             .min_w_0()
-            .border_t_1()
-            .border_color(theme.border)
-            .child(summary_row)
-            .child(description)
+            // The message editor: one boxed card, at least five lines tall,
+            // with the actions floating in its bottom-right corner.
             .child(
                 div()
+                    .relative()
+                    .rounded(px(9.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.surface)
+                    .px(px(8.0))
+                    .py(px(6.0))
                     .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .min_w_0()
-                    .child(amend_button)
+                    .flex_col()
+                    .child(message_field)
                     .child(
                         div()
-                            .flex_none()
+                            .absolute()
+                            .bottom_1()
+                            .right_1()
                             .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .font_family(".SystemUIFontMonospaced")
-                            .text_size(sp(10.5))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("git_panel.staged_count", count = staged_count))
+                            .flex_col()
+                            .items_end()
+                            .gap(px(3.0))
                             .child(
-                                div()
-                                    .text_color(theme.success)
-                                    .child(format!("+{staged_add}")),
+                                div().flex().items_center().gap(px(4.0)).child(generate),
                             )
-                            .child(
-                                div()
-                                    .text_color(theme.danger)
-                                    .child(format!("−{staged_del}")),
-                            ),
-                    )
-                    .child(div().flex_1())
-                    .child(primary),
-            )
-            .when_some(
-                if has_conflicts {
-                    Some(tr!("git_panel.conflicts_hint"))
-                } else {
-                    trailer.filter(|_| true)
-                },
-                |bar, line| {
-                    bar.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .min_w_0()
-                            .text_size(sp(10.5))
-                            .text_color(if has_conflicts {
-                                theme.danger
-                            } else {
-                                theme.text_ghost
-                            })
-                            .child(icon(
-                                if has_conflicts {
-                                    "icons/triangle-alert.svg"
-                                } else {
-                                    "icons/corner-down-right.svg"
-                                },
-                                10.0,
-                                if has_conflicts {
-                                    theme.danger
-                                } else {
-                                    theme.text_ghost
-                                },
-                            ))
-                            .child(div().min_w_0().truncate().child(single_line_label(&line))),
-                    )
-                },
+                            .child(primary),
+                    ),
             )
     }
 
-    /// Branch toolbar: the shared branch picker popover over the branch chip
-    /// (the same browse + create + keyboard flow the composer uses), the
-    /// ahead/behind pill when an upstream exists, fetch/pull/push icon
-    /// buttons, and refresh.
-    fn render_git_panel_branch_bar(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    /// The branch selector fragment the footer carries: the shared branch
+    /// picker chip (with its static fallback while the snapshot loads) and
+    /// the ahead/behind pill when an upstream exists.
+    fn render_git_panel_branch_selector(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let branch = match &self.git_panel.branch_info {
             Query::Ready(info) => info.branch.clone(),
             _ => None,
         };
         let ahead_behind = self.git_panel.ahead_behind.clone();
-        let refreshing = self.git_panel.refresh_in_flight;
         let busy = self.git_panel.busy;
 
-        let mut bar = div()
-            .id("git-panel-branch-bar")
-            .h(px(32.0))
-            .flex_none()
-            .px(px(10.0))
+        let mut row = div()
+            .id("git-panel-branch-selector")
             .flex()
             .items_center()
             .gap(px(6.0))
-            .min_w_0()
-            .border_b_1()
-            .border_color(theme.border);
+            .min_w_0();
         if let Some(branch_label) = branch
             && !branch_label.is_empty()
         {
@@ -5832,18 +6027,18 @@ impl Tide {
                                 .disabled(busy.is_some())
                                 .selected(open)
                         },
-                        MenuAlign::BelowLeft,
+                        MenuAlign::AboveLeft,
                         cx,
                     )
                     .unwrap_or_else(|| static_chip(&static_label, &theme).into_any_element())
                 }
             };
-            bar = bar.child(chip);
+            row = row.child(chip);
         }
         if let Some(ahead_behind) = ahead_behind
             && ahead_behind.ahead + ahead_behind.behind > 0
         {
-            bar = bar.child(
+            row = row.child(
                 div()
                     .id("git-panel-ahead-behind")
                     .flex_none()
@@ -5868,17 +6063,21 @@ impl Tide {
                     ),
             );
         }
-        bar = bar.child(div().flex_1());
-        // One menu for every toolbar action: refresh, the three remote ops,
-        // and — when a checkpoint-ready turn exists — the last-turn review.
-        // Keeping the bar to the branch chip, ahead/behind, and this menu
-        // leaves room for the branch label on narrow panels.
+        row
+    }
+
+    /// The ellipsis actions menu — refresh, the three remote ops, and —
+    /// when a checkpoint-ready turn exists — the last-turn review.
+    fn render_git_panel_actions_menu(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let refreshing = self.git_panel.refresh_in_flight;
+        let busy = self.git_panel.busy;
         let review_source = self.latest_review_turn_source();
         let actions_handle = self.menu_handle("git-panel-actions", cx);
         let weak = cx.entity().downgrade();
         let remote_busy = busy.is_some();
         let refreshing_now = refreshing;
-        bar.child(dropdown_menu(
+        dropdown_menu(
             div()
                 .id("git-panel-actions")
                 .h(px(24.0))
@@ -5902,19 +6101,13 @@ impl Tide {
             &actions_handle,
             MenuAlign::BelowRight,
             move |_| {
-                let refresh = MenuItem::new(tr!("git_panel.refresh"), {
-                    let weak = weak.clone();
-                    move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| this.refresh_git_panel(cx));
-                    }
-                })
-                .icon("icons/rotate-cw.svg")
-                .disabled(refreshing_now);
                 let fetch = MenuItem::new(tr!("git_panel.fetch"), {
                     let weak = weak.clone();
                     move |_, cx| {
                         let _ = weak
-                            .update(cx, |this, cx| this.run_git_panel_remote("fetch", true, cx));
+                            .update(cx, |this, cx| {
+                                this.run_git_panel_remote("fetch", true, false, cx)
+                            });
                     }
                 })
                 .icon("icons/download.svg")
@@ -5923,7 +6116,9 @@ impl Tide {
                     let weak = weak.clone();
                     move |_, cx| {
                         let _ = weak
-                            .update(cx, |this, cx| this.run_git_panel_remote("pull", false, cx));
+                            .update(cx, |this, cx| {
+                                this.run_git_panel_remote("pull", false, false, cx)
+                            });
                     }
                 })
                 .icon("icons/arrow-down.svg")
@@ -5936,7 +6131,7 @@ impl Tide {
                 })
                 .icon("icons/cloud-upload.svg")
                 .disabled(remote_busy);
-                let mut items = vec![refresh, MenuItem::Separator, fetch, pull, push];
+                let mut items = vec![fetch, pull, push];
                 if let Some(source) = review_source {
                     items.push(MenuItem::Separator);
                     items.push(
@@ -5953,26 +6148,15 @@ impl Tide {
                 }
                 items
             },
-        ))
+        )
     }
 
-    /// The summary + bulk row: total numstat, the tree/list toggle, and the
-    /// bulk action menu (stage/unstage/discard/stash) with its armed
-    /// two-step discard confirmation.
-    fn render_git_panel_summary_row(
-        &mut self,
-        total_additions: u64,
-        total_deletions: u64,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    /// Top section, second row — the toolbar: the actions menu (remote ops,
+    /// last-turn review) and the tree/list view toggle side by side,
+    /// pushed to the row's end.
+    fn render_git_panel_top_bar(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let busy = self.git_panel.busy.is_some();
         let tree_mode = self.git_panel.tree_mode;
-        let armed = self.git_panel.confirm_discard_all;
-        let stash_count = match &self.git_panel.stashes {
-            Query::Ready(stashes) => stashes.len(),
-            Query::Pending | Query::Missing(_) => 0,
-        };
 
         let toggle_focus = self.transcript_control_focus("git-panel-view-toggle", cx);
         let view_toggle = div()
@@ -6008,6 +6192,36 @@ impl Tide {
             .on_activation(cx, move |this, _, cx| {
                 this.set_git_panel_tree_mode(!tree_mode, cx);
             });
+
+        let actions_menu = self.render_git_panel_actions_menu(cx);
+
+        div()
+            .id("git-panel-top-bar")
+            .h(px(GIT_BAR_H))
+            .flex_none()
+            .px(px(GIT_BAR_PAD_X))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .min_w_0()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(div().flex_1())
+            .child(actions_menu)
+            .child(view_toggle)
+    }
+
+    /// Bottom section, first row — the branch bar: the branch selector on
+    /// the left, the staged numstat and the Stage all menu (with its armed
+    /// two-step discard confirmation and the stash actions) on the right.
+    fn render_git_panel_branch_bar(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let busy = self.git_panel.busy.is_some();
+        let armed = self.git_panel.confirm_discard_all;
+        let stash_count = match &self.git_panel.stashes {
+            Query::Ready(stashes) => stashes.len(),
+            Query::Pending | Query::Missing(_) => 0,
+        };
 
         let right_side: AnyElement = if armed {
             let confirm_focus = self.transcript_control_focus("git-panel-discard-all-confirm", cx);
@@ -6054,7 +6268,7 @@ impl Tide {
                     .disabled(busy),
                 "git-panel-bulk-menu",
                 &handle,
-                MenuAlign::BelowRight,
+                MenuAlign::AboveRight,
                 move |_| {
                     let stage = bulk_item(
                         &weak,
@@ -6107,6 +6321,8 @@ impl Tide {
                         }
                     })
                     .icon("icons/eye.svg");
+                    // The remote group rides the same menu: fetch, both
+                    // pull flavors, and push.
                     vec![
                         stage,
                         unstage,
@@ -6115,48 +6331,87 @@ impl Tide {
                         stash,
                         stash_pop,
                         view_stash,
+                        MenuItem::Separator,
+                        remote_item(
+                            &weak,
+                            "icons/download.svg",
+                            tr!("git_panel.fetch"),
+                            "fetch",
+                            true,
+                            false,
+                            busy,
+                        ),
+                        remote_item(
+                            &weak,
+                            "icons/arrow-down.svg",
+                            tr!("git_panel.pull"),
+                            "pull",
+                            false,
+                            false,
+                            busy,
+                        ),
+                        remote_item(
+                            &weak,
+                            "icons/corner-down-right.svg",
+                            tr!("git_panel.pull_rebase"),
+                            "pull-rebase",
+                            false,
+                            true,
+                            busy,
+                        ),
+                        {
+                            let weak = weak.clone();
+                            MenuItem::new(tr!("git_panel.push"), move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| this.run_git_panel_push(cx));
+                            })
+                            .icon("icons/cloud-upload.svg")
+                            .disabled(busy)
+                        },
                     ]
                 },
             )
             .into_any_element()
         };
 
-        div()
-            .id("git-panel-summary-row")
-            .h(px(34.0))
+        let branch_selector = self.render_git_panel_branch_selector(cx);
+
+        // The staged numstat rides beside the Stage All menu, hiding when
+        // nothing is staged yet.
+        let (staged_add, staged_del) = match &self.git_panel.status {
+            Query::Ready(changes) => changes.iter().fold((0u64, 0u64), |(add, del), change| {
+                (
+                    add + change.additions * u64::from(change.staged),
+                    del + change.deletions * u64::from(change.staged),
+                )
+            }),
+            Query::Pending | Query::Missing(_) => (0, 0),
+        };
+        let staged_counts = div()
+            .id("git-panel-staged-counts")
+            .flex()
             .flex_none()
-            .px(px(10.0))
+            .items_center()
+            .gap(px(3.0))
+            .font_family(".SystemUIFontMonospaced")
+            .text_size(sp(10.5))
+            .when(staged_add + staged_del > 0, |counts| counts
+                .child(div().text_color(theme.success).child(format!("+{staged_add}")))
+                .child(div().text_color(theme.danger).child(format!("−{staged_del}"))));
+
+        div()
+            .id("git-panel-branch-bar")
+            .flex_none()
+            .h(px(GIT_BAR_H))
+            .px(px(GIT_BAR_PAD_X))
             .flex()
             .items_center()
             .gap(px(6.0))
             .min_w_0()
-            .border_b_1()
+            .border_t_1()
             .border_color(theme.border)
-            .child(
-                div()
-                    .id("git-panel-summary-counts")
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .font_family(".SystemUIFontMonospaced")
-                    .text_size(sp(11.5))
-                    .when(total_additions + total_deletions > 0, |counts| {
-                        counts
-                            .child(
-                                div()
-                                    .text_color(theme.success)
-                                    .child(format!("+{total_additions}")),
-                            )
-                            .child(
-                                div()
-                                    .text_color(theme.danger)
-                                    .child(format!("−{total_deletions}")),
-                            )
-                    }),
-            )
+            .child(branch_selector)
             .child(div().flex_1())
-            .child(view_toggle)
+            .child(staged_counts)
             .child(right_side)
     }
 
