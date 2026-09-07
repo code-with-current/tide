@@ -6,9 +6,13 @@
 //! All project data is already in memory (`state.projects`); frames never
 //! touch the filesystem.
 
+use std::path::{Path, PathBuf};
+
 use gpui::KeyBinding;
 
 use super::composer::next_picker_highlight;
+use super::image_preview::image_format_for_name;
+use crate::ui::card::{card_body, settings_group_head};
 
 use super::*;
 
@@ -21,6 +25,73 @@ const PROJECTS_PANE_CONTEXT: &str = "ProjectsPane";
 const PROJECTS_SEARCH_CONTEXT: &str = "ProjectsPane > TextInput";
 
 const PROJECTS_LIST_WIDTH: f32 = 264.0;
+
+/// Well-known repo-root icon files, in precedence order.
+const WELL_KNOWN_ICONS: [&str; 4] = ["icon.png", "favicon.png", "logo.svg", "logo.png"];
+
+/// Embedded glyphs the icon picker offers, as asset paths.
+const PRESET_ICONS: [&str; 10] = [
+    "icons/projects/rocket.svg",
+    "icons/projects/bolt.svg",
+    "icons/projects/star.svg",
+    "icons/projects/heart.svg",
+    "icons/projects/globe.svg",
+    "icons/projects/terminal.svg",
+    "icons/projects/box.svg",
+    "icons/projects/flame.svg",
+    "icons/projects/leaf.svg",
+    "icons/projects/wrench.svg",
+];
+
+/// Fixed background palette for the icon tile, as hex.
+const ICON_COLORS: [&str; 8] = [
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899",
+];
+
+const MAX_UPLOAD_BYTES: u64 = 2 * 1024 * 1024;
+
+fn uploaded_icon_path(project_id: &Uuid, name: &str) -> PathBuf {
+    store::paths::data_dir().join("project-icons").join(name)
+}
+
+/// Initials for the auto fallback: the first character of up to two words.
+fn auto_initials(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
+}
+
+/// Deterministic hue (0..360) for the auto fallback tile.
+fn auto_hue(name: &str) -> f32 {
+    let hash = name
+        .bytes()
+        .fold(0u32, |acc, byte| acc.wrapping_add((byte as u32) * 31));
+    (hash % 360) as f32
+}
+
+/// The tile background in every icon mode: the picked color when set, the
+/// name-derived hue otherwise.
+fn icon_tile_background(project: &Project) -> Hsla {
+    if let Some(hex) = project
+        .icon_color
+        .as_deref()
+        .and_then(|hex| u32::from_str_radix(hex.trim_start_matches('#'), 16).ok())
+    {
+        return rgb(hex & 0xFF_FF_FF).into();
+    }
+    gpui::hsla(auto_hue(&project.name) / 360.0, 0.55, 0.5, 1.0)
+}
+
+/// One landed background probe: the root it ran against, whether the
+/// directory is on disk, and the best well-known icon file, if any.
+#[derive(Clone, Debug)]
+pub(super) struct ProjectIconProbe {
+    pub(super) root: PathBuf,
+    pub(super) dir_exists: bool,
+    pub(super) well_known: Option<PathBuf>,
+}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -57,11 +128,100 @@ impl Tide {
 
     fn select_settings_project(&mut self, id: Uuid, cx: &mut Context<Self>) {
         self.projects_settings_selected = Some(id);
+        self.projects_icon_error = None;
         // Each project's detail starts at its own top; a scroll position
         // carried over would land mid-panel.
         self.projects_detail_scroll
             .set_offset(gpui::Point::default());
+        if let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == id)
+            .cloned()
+        {
+            let name = project.name.clone();
+            self.projects_name_input.update(cx, |input, cx| {
+                let len = input.content().len();
+                input.replace_range(0..len, &name, cx);
+            });
+            self.ensure_project_icon_probe(project.id, project.path, cx);
+        }
         cx.notify();
+    }
+
+    /// Start a background probe of the project directory unless a
+    /// current-enough one (for the same root) already landed.
+    pub(super) fn ensure_project_icon_probe(
+        &mut self,
+        project_id: Uuid,
+        root: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .projects_icon_probes
+            .borrow()
+            .get(&project_id)
+            .is_some_and(|probe| probe.root == root)
+        {
+            return;
+        }
+        self.projects_icon_probe_generation += 1;
+        let generation = self.projects_icon_probe_generation;
+        let probe_root = root.clone();
+        cx.spawn(async move |this, cx| {
+            let probe = cx
+                .background_executor()
+                .spawn(async move {
+                    let dir_exists = probe_root.is_dir();
+                    let well_known = if dir_exists {
+                        WELL_KNOWN_ICONS
+                            .iter()
+                            .map(|name| probe_root.join(name))
+                            .find(|candidate| candidate.is_file())
+                    } else {
+                        None
+                    };
+                    ProjectIconProbe {
+                        root: probe_root,
+                        dir_exists,
+                        well_known,
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.projects_icon_probe_generation != generation {
+                    // A newer probe superseded this one.
+                    return;
+                }
+                this.projects_icon_probes
+                    .borrow_mut()
+                    .insert(project_id, probe);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Probe for whichever project the detail panel will show.
+    pub(super) fn ensure_selected_project_probe(&mut self, cx: &mut Context<Self>) {
+        let selected = self.projects_settings_selected.or_else(|| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| !project.is_projectless())
+                .map(|project| project.id)
+        });
+        let target = selected.and_then(|id| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == id)
+                .map(|project| (project.id, project.path.clone()))
+        });
+        if let Some((id, path)) = target {
+            self.ensure_project_icon_probe(id, path, cx);
+        }
     }
 
     /// Walk the selection through the visible rows, the way a mailbox walks
@@ -406,42 +566,471 @@ impl Tide {
 
     /// The selected project's configuration panel. Sections land in the next
     /// changes; until then the panel carries the identity header only.
+    // ── Mutations ──────────────────────────────────────────────────────────
+
+    fn set_project_icon(&mut self, project_id: Uuid, icon: ProjectIcon, cx: &mut Context<Self>) {
+        if let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+        {
+            project.icon = icon;
+        }
+        self.projects_icon_error = None;
+        cx.notify();
+    }
+
+    fn set_project_icon_color(
+        &mut self,
+        project_id: Uuid,
+        color: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+        {
+            project.icon_color = color;
+        }
+        cx.notify();
+    }
+
+    fn start_icon_upload(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        if self.daemon.is_remote() {
+            self.show_toast(tr!("errors.remote_project_picker"));
+            return;
+        }
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| this.finish_icon_upload(project_id, path, cx));
+            }
+        })
+        .detach();
+    }
+
+    fn finish_icon_upload(&mut self, project_id: Uuid, picked: PathBuf, cx: &mut Context<Self>) {
+        if image_format_for_name(&picked.to_string_lossy()).is_none() {
+            // Keep the previous icon; surface why, inline.
+            self.projects_icon_error = Some(project_id);
+            cx.notify();
+            return;
+        }
+        let extension = picked
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .unwrap_or_else(|| "png".to_owned());
+        let file_name = format!("{project_id}.{extension}");
+        let dest = uploaded_icon_path(&project_id, &file_name);
+        let source = picked;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let size_ok = std::fs::metadata(&source)
+                        .map(|meta| meta.len() <= MAX_UPLOAD_BYTES)
+                        .unwrap_or(false);
+                    if !size_ok {
+                        return Err("too large");
+                    }
+                    if let Some(parent) = dest.parent() {
+                        std::fs::create_dir_all(parent).ok();
+                    }
+                    std::fs::copy(&source, &dest)
+                        .map(|_| ())
+                        .map_err(|_| "copy")
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        if let Some(project) = this
+                            .state
+                            .projects
+                            .iter_mut()
+                            .find(|project| project.id == project_id)
+                        {
+                            project.icon = ProjectIcon::Uploaded(file_name);
+                        }
+                        this.projects_icon_error = None;
+                    }
+                    Err(_) => {
+                        this.projects_icon_error = Some(project_id);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The Enter-commit for the name field. Empty or unchanged text is a
+    /// no-op; the value stages locally until the settings round-trip lands.
+    pub(super) fn commit_project_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.projects_settings_selected else {
+            return;
+        };
+        let name = self
+            .projects_name_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == id)
+        {
+            if project.name != name {
+                project.name = name;
+                cx.notify();
+            }
+        }
+    }
+
     fn render_project_detail(
         &self,
         project: &Project,
         theme: &Theme,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
+        let missing = self
+            .projects_icon_probes
+            .borrow()
+            .get(&project.id)
+            .is_some_and(|probe| probe.root == project.path && !probe.dir_exists);
         div()
             .id("project-detail-scroll")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .child(project_detail_placeholder(project, theme))
+            .child(
+                div()
+                    .px(px(24.0))
+                    .pt(px(22.0))
+                    .pb(px(24.0))
+                    .max_w(px(640.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(20.0))
+                    .child(self.render_project_header(project, missing, theme, cx))
+                    .child(self.render_project_general_card(project, theme, cx)),
+            )
             .into_any_element()
     }
-}
 
-fn project_detail_placeholder(project: &Project, theme: &Theme) -> Div {
-    div()
-        .px(px(24.0))
-        .pt(px(22.0))
-        .child(
+    fn render_project_header(
+        &self,
+        project: &Project,
+        missing: bool,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(self.render_project_icon_tile(project, 40.0, 14.0))
+                    .child(
+                        TextField::new("project-name-input", self.projects_name_input.clone())
+                            .w_full(),
+                    ),
+            )
+            .child(if missing {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.warning)
+                    .child(icon("icons/alert.svg", 13.0, theme.warning))
+                    .child(tr!("projects.directory_missing"))
+            } else {
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(
+                        project.path.to_string_lossy().into_owned(),
+                    ))
+            })
+            .into_any_element()
+    }
+
+    /// The project's icon tile in every mode: preset glyph, uploaded image,
+    /// well-known repo file, or the initials fallback.
+    fn render_project_icon_tile(&self, project: &Project, size: f32, font: f32) -> AnyElement {
+        let tile = |child: AnyElement| {
             div()
-                .text_size(sp(15.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.text)
-                .child(SharedString::from(project.name.clone())),
-        )
-        .child(
+                .w(px(size))
+                .h(px(size))
+                .flex_none()
+                .rounded(px(size * 0.24))
+                .bg(icon_tile_background(project))
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(child)
+                .into_any_element()
+        };
+        match &project.icon {
+            ProjectIcon::Preset(path) => tile(
+                PRESET_ICONS
+                    .iter()
+                    .copied()
+                    .find(|candidate| *candidate == path.as_str())
+                    .map(|static_path| {
+                        icon(static_path, size * 0.5, rgb(0xFF_FF_FF).into()).into_any_element()
+                    })
+                    .unwrap_or_else(|| div().into_any_element()),
+            ),
+            ProjectIcon::Uploaded(name) => tile(
+                img(uploaded_icon_path(&project.id, name))
+                    .size_full()
+                    .object_fit(gpui::ObjectFit::Cover)
+                    .into_any_element(),
+            ),
+            ProjectIcon::Auto => {
+                let well_known = {
+                    let probes = self.projects_icon_probes.borrow();
+                    probes
+                        .get(&project.id)
+                        .filter(|probe| probe.root == project.path)
+                        .and_then(|probe| probe.well_known.clone())
+                };
+                match well_known {
+                    Some(path) => tile(
+                        img(path)
+                            .size_full()
+                            .object_fit(gpui::ObjectFit::Cover)
+                            .into_any_element(),
+                    ),
+                    None => tile(
+                        div()
+                            .text_size(sp(font))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xFF_FF_FF))
+                            .child(SharedString::from(auto_initials(&project.name)))
+                            .into_any_element(),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn render_project_general_card(
+        &self,
+        project: &Project,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let project_id = project.id;
+        let upload_failed = self.projects_icon_error == Some(project_id);
+        let current_preset = match &project.icon {
+            ProjectIcon::Preset(path) => Some(path.clone()),
+            _ => None,
+        };
+        let auto_selected = matches!(project.icon, ProjectIcon::Auto);
+
+        let mut swatches = div().flex().flex_wrap().items_center().gap(px(6.0));
+        swatches = swatches.child(
             div()
-                .mt(px(2.0))
+                .id(SharedString::from(format!(
+                    "project-icon-auto-{}",
+                    project_row_key(project_id)
+                )))
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .h(px(26.0))
+                .px(px(8.0))
+                .rounded(px(8.0))
+                .cursor_default()
+                .when(auto_selected, |element| {
+                    element.bg(theme.sidebar_item_background)
+                })
+                .when(!auto_selected, |element| {
+                    element.hover(|element| element.bg(theme.overlay))
+                })
+                .flex()
+                .items_center()
                 .text_size(sp(12.5))
-                .text_color(theme.text_tertiary)
-                .child(SharedString::from(
-                    project.path.to_string_lossy().into_owned(),
-                )),
-        )
+                .text_color(theme.text_secondary)
+                .child(tr!("projects.icon_auto"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_project_icon(project_id, ProjectIcon::Auto, cx);
+                })),
+        );
+        for preset in PRESET_ICONS {
+            let selected = current_preset.as_deref() == Some(preset);
+            swatches = swatches.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "project-icon-{}-{}",
+                        project_row_key(project_id),
+                        preset
+                    )))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .w(px(26.0))
+                    .h(px(26.0))
+                    .rounded(px(8.0))
+                    .cursor_default()
+                    .bg(theme.overlay)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(selected, |element| {
+                        element
+                            .border_1()
+                            .border_color(theme.accent)
+                            .bg(theme.sidebar_item_background)
+                    })
+                    .when(!selected, |element| {
+                        element.hover(|element| element.bg(theme.sidebar_item_background))
+                    })
+                    .child(icon(preset, 14.0, theme.text_secondary))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_project_icon(
+                            project_id,
+                            ProjectIcon::Preset(preset.to_owned()),
+                            cx,
+                        );
+                    })),
+            );
+        }
+        swatches = swatches.child(
+            div()
+                .id(SharedString::from(format!(
+                    "project-icon-upload-{}",
+                    project_row_key(project_id)
+                )))
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .h(px(26.0))
+                .px(px(8.0))
+                .rounded(px(8.0))
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(icon("icons/cloud-upload.svg", 12.0, theme.text_secondary))
+                .child(tr!("projects.icon_upload"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.start_icon_upload(project_id, cx);
+                })),
+        );
+
+        let mut colors = div().flex().flex_wrap().items_center().gap(px(6.0));
+        let color_selected = |hex: Option<&str>| project.icon_color.as_deref() == hex;
+        let auto_color = color_selected(None);
+        colors = colors.child(
+            div()
+                .id(SharedString::from(format!(
+                    "project-color-auto-{}",
+                    project_row_key(project_id)
+                )))
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .w(px(18.0))
+                .h(px(18.0))
+                .rounded_full()
+                .cursor_default()
+                .bg(icon_tile_background(project))
+                .when(auto_color, |element| {
+                    element.border_1().border_color(theme.accent)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_project_icon_color(project_id, None, cx);
+                })),
+        );
+        for hex in ICON_COLORS {
+            let selected = color_selected(Some(hex));
+            let value = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
+            colors = colors.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "project-color-{}-{hex}",
+                        project_row_key(project_id)
+                    )))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .w(px(18.0))
+                    .h(px(18.0))
+                    .rounded_full()
+                    .cursor_default()
+                    .bg(rgb(value))
+                    .when(selected, |element| {
+                        element.border_1().border_color(theme.accent)
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_project_icon_color(project_id, Some(hex.to_owned()), cx);
+                    })),
+            );
+        }
+
+        div()
+            .child(settings_group_head(
+                &theme,
+                tr!("projects.section_general"),
+                Vec::new(),
+            ))
+            .child(
+                card_body(&theme)
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .when(upload_failed, |element| {
+                        element.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .text_size(sp(12.5))
+                                .text_color(theme.warning)
+                                .child(icon("icons/alert.svg", 13.0, theme.warning))
+                                .child(tr!("projects.icon_upload_failed")),
+                        )
+                    })
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("projects.icon")),
+                    )
+                    .child(swatches)
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("projects.icon_color")),
+                    )
+                    .child(colors),
+            )
+            .into_any_element()
+    }
 }
 
 fn projects_detail_placeholder(theme: &Theme) -> Div {
@@ -512,5 +1101,16 @@ mod tests {
         let b = Uuid::from_u128(2);
         assert_eq!(project_row_key(a), project_row_key(a));
         assert_ne!(project_row_key(a), project_row_key(b));
+    }
+
+    #[test]
+    fn auto_icon_falls_back_to_initials_and_a_stable_hue() {
+        assert_eq!(auto_initials("foo bar"), "FB");
+        assert_eq!(auto_initials("waku"), "W");
+        assert_eq!(auto_initials("  spaced   out  "), "SO");
+        assert_eq!(auto_hue("waku"), auto_hue("waku"));
+        assert!((0.0..360.0).contains(&auto_hue("anything")));
+        assert_eq!(WELL_KNOWN_ICONS[0], "icon.png");
+        assert_eq!(WELL_KNOWN_ICONS.len(), 4);
     }
 }

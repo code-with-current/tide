@@ -33,11 +33,11 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderModelOption,
-    ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus,
-    SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun, SubagentToolStatus,
-    TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time,
-    unix_time_millis,
+    MessageRole, PendingPermission, Project, ProjectAction, ProjectIcon, ProviderKind,
+    ProviderModel, ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock,
+    RuntimeMode, SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
+    SubagentToolStatus, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
+    compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1471,6 +1471,15 @@ pub struct Tide {
     /// visible row, so the panel never opens empty.
     projects_settings_selected: Option<Uuid>,
     projects_detail_scroll: ScrollHandle,
+    /// Landed icon probes, keyed by project id.
+    projects_icon_probes: RefCell<HashMap<Uuid, projects_page::ProjectIconProbe>>,
+    /// Bumped per probe; a result from a superseded probe is discarded.
+    projects_icon_probe_generation: u64,
+    /// The project whose last icon upload failed validation; drives the
+    /// detail panel's inline error.
+    projects_icon_error: Option<Uuid>,
+    /// Backing field for the selected project's name edit.
+    projects_name_input: Entity<TextInput>,
     /// Source the list is narrowed to; `None` shows every ecosystem.
     skills_source_filter: Option<crate::skills::SkillSource>,
     /// The skill directory whose delete button is armed for its confirming
@@ -2064,6 +2073,7 @@ impl Tide {
                 .clear_on_escape()
                 .placeholder(tr!("projects.search"))
         });
+        let projects_name_input = cx.new(|cx| TextInput::new(window, cx));
         let session_rename_input = cx.new(|cx| TextInput::new(window, cx));
         let usage_project_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
@@ -2604,6 +2614,15 @@ impl Tide {
             )
             .detach();
             cx.subscribe(
+                &projects_name_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.commit_project_rename(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.commit_session_rename(cx),
@@ -2963,6 +2982,10 @@ impl Tide {
                 projects_settings_rows: RefCell::new(Vec::new()),
                 projects_settings_selected: None,
                 projects_detail_scroll: ScrollHandle::new(),
+                projects_icon_probes: RefCell::new(HashMap::new()),
+                projects_icon_probe_generation: 0,
+                projects_icon_error: None,
+                projects_name_input,
                 skills_source_filter: None,
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
