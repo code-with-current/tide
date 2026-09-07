@@ -1208,6 +1208,10 @@ impl StateStore {
         session.usage_totals = stored.usage_totals;
         session.last_compaction = stored.last_compaction;
         session.runtime_event_cursor = stored.runtime_event_cursor;
+        // Sub-agent runs ride the same blob (the write-through in the app
+        // serializes the whole session), but the list row starts empty —
+        // without this copy the agents panel is blank after a restart.
+        session.subagent_runs = stored.subagent_runs;
 
         let mut statement = connection
             .prepare(
@@ -1770,7 +1774,8 @@ fn normalize_computer_app_grants(grants: &mut Vec<ComputerAppGrant>) {
 mod tests {
     use super::*;
     use crate::model::{
-        ActivityItem, ActivityKind, FavoriteModel, MessageRole, ReasoningBlock, TranscriptBlock,
+        ActivityItem, ActivityKind, BackgroundWorkStatus, FavoriteModel, MessageRole,
+        ReasoningBlock, SubagentBlock, SubagentRun, TranscriptBlock,
     };
     use base64::Engine as _;
 
@@ -2156,6 +2161,42 @@ mod tests {
                 .iter()
                 .any(|message| message.content == "an answer")
         );
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn hydrate_restores_subagent_runs_for_the_agents_panel() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let run = SubagentRun {
+            child_id: "child-1".into(),
+            agent_name: "code-reviewer".into(),
+            title: "Review auth".into(),
+            task: Some("review the auth flow".into()),
+            blocks: vec![SubagentBlock::Text {
+                content: "scanned 3 files".into(),
+                streaming: false,
+            }],
+            report: Some("looks fine".into()),
+            status: BackgroundWorkStatus::Completed,
+            duration_ms: Some(4_200),
+            origin_activity_id: Some("activity-1".into()),
+            usage: None,
+        };
+        state.sessions[0].begin_turn("Ask");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].subagent_runs.push(run.clone());
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        // The list row does not carry runs; only the detail blob does.
+        assert!(restored.sessions[0].subagent_runs.is_empty());
+
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].subagent_runs, vec![run]);
 
         fs::remove_dir_all(directory).ok();
     }

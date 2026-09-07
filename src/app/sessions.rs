@@ -117,6 +117,14 @@ impl Tide {
                 tide.session_hydrations.remove(&session_id);
                 match result {
                     Ok(session) => {
+                        // The agents panel reads the background-work
+                        // registry, not the session, and a settled task
+                        // reattaches no runtime — so this hydrate pass is
+                        // the only chance to rebuild the panel's sub-agent
+                        // items after a restart. Snapshot the runs before
+                        // the session moves into the catalog below.
+                        let subagent_runs = session.subagent_runs.clone();
+                        let session_busy = session.status.is_busy();
                         let replaced = if let Some(existing) = tide
                             .state
                             .sessions
@@ -128,6 +136,16 @@ impl Tide {
                         } else {
                             false
                         };
+                        if replaced && !subagent_runs.is_empty() {
+                            let registry = tide.background_work.entry(session_id).or_default();
+                            if session_busy || tide.runtimes.contains_key(&session_id) {
+                                // A live driver (or one on its way) replays
+                                // the run statuses itself.
+                                registry.rehydrate_subagent_runs(&subagent_runs);
+                            } else {
+                                registry.rehydrate_subagent_runs_without_runtime(&subagent_runs);
+                            }
+                        }
                         let pending = tide
                             .pending_session_activation
                             .filter(|pending| pending.session_id == session_id);

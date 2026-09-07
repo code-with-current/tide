@@ -142,6 +142,7 @@ fn a_terminal_supplied_id_is_replaced_a_live_one_collides() {
             status: SettledStatus::Stopped,
             detail: None,
             output: None,
+            usage: None,
         },
     );
 
@@ -226,6 +227,7 @@ fn stopping_occupies_capacity_and_terminals_release_it() {
             status: SettledStatus::Stopped,
             detail: None,
             output: None,
+            usage: None,
         },
     );
     let third = start_streaming(&session, "sub", "three").unwrap();
@@ -313,6 +315,7 @@ fn settlement_is_first_wins_against_a_late_outcome() {
             status: SettledStatus::Completed,
             detail: Some("first".into()),
             output: Some("done".into()),
+            usage: None,
         },
     );
     registry.settle(
@@ -322,6 +325,7 @@ fn settlement_is_first_wins_against_a_late_outcome() {
             status: SettledStatus::Failed,
             detail: Some("late".into()),
             output: None,
+            usage: None,
         },
     );
 
@@ -371,6 +375,7 @@ fn kill_marks_stopping_and_emits_stop_requested() {
             status: SettledStatus::Stopped,
             detail: Some("terminated".into()),
             output: None,
+            usage: None,
         },
     );
     assert_eq!(
@@ -422,6 +427,7 @@ fn wait_settles_timeouts_out_and_honors_abort() {
             status: SettledStatus::Completed,
             detail: None,
             output: Some("final".into()),
+            usage: None,
         },
     );
     let snapshot = registry
@@ -449,6 +455,7 @@ fn wake_listener_panics_are_contained() {
             status: SettledStatus::Completed,
             detail: None,
             output: None,
+            usage: None,
         },
     );
     let item = global_job_registry()
@@ -503,6 +510,7 @@ fn settle_during_start_cannot_reorder_events() {
                     status: SettledStatus::Completed,
                     detail: None,
                     output: Some("fast".into()),
+                    usage: None,
                 });
                 Ok(JobHooks {
                     cancel: Box::new(|_| {}),
@@ -535,6 +543,7 @@ fn final_output_jobs_read_from_outcome_and_never_from_a_buffer() {
             status: SettledStatus::Completed,
             detail: None,
             output: Some("the report".into()),
+            usage: None,
         },
     );
 

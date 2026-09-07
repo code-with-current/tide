@@ -106,6 +106,11 @@ pub struct JobOutcome {
     pub detail: Option<String>,
     /// Final output for jobs without a stream buffer.
     pub output: Option<String>,
+    /// The producer's own usage totals, when the job measures one — a
+    /// dispatched sub-agent's turn total, carried onto the terminal work
+    /// item so the agents panel can show it. `None` for jobs that never
+    /// call a model (processes, shells).
+    pub usage: Option<protocol::model::UsageBreakdown>,
 }
 
 /// The subset of status values a producer settles with.
@@ -603,7 +608,8 @@ impl JobRegistry {
                 record.output = Some(output.clone());
             }
             record.finished_at_ms = Some(unix_ms());
-            let snapshot = record.snapshot();
+            let mut snapshot = record.snapshot();
+            snapshot.usage = outcome.usage.clone();
             let notice = (!record.reported).then(|| JobNotice {
                 text: render_notice(&snapshot),
                 snapshot: snapshot.clone(),
@@ -661,6 +667,7 @@ impl JobRegistry {
                     status: SettledStatus::Failed,
                     detail: Some("cancel returned during teardown; work may be orphaned".into()),
                     output: None,
+                    usage: None,
                 });
                 registry.settle(&session, &key, outcome);
             }

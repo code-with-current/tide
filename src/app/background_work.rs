@@ -1,5 +1,6 @@
 use super::git_panel::GitPanelTab;
 use super::*;
+use crate::app::timeline_v2::rows::turn_item::TurnFooterUsage;
 use gpui::{Anchor, anchored, deferred};
 
 /// Width of the background-jobs popup card.
@@ -25,6 +26,10 @@ pub(super) struct BackgroundWorkRegistry {
     dirty_output: HashSet<BackgroundWorkKey>,
     last_output_cache_refresh: Option<Instant>,
     output_viewports: HashMap<BackgroundWorkKey, BackgroundOutputViewport>,
+    /// The detail surface's scroll viewport, per item — the follow-tail
+    /// machine's handle. Created with the item, dropped with it, so a
+    /// switched-to item always opens at its own remembered offset.
+    surface_viewports: HashMap<BackgroundWorkKey, SurfaceViewport>,
     selection: TranscriptSelection,
 }
 
@@ -39,6 +44,27 @@ impl Default for BackgroundOutputViewport {
         Self {
             scroll_handle: ScrollHandle::new(),
             scrollbar: ScrollbarState::new(),
+        }
+    }
+}
+
+/// The follow-tail state of one detail surface (the transcript pane's
+/// FollowState, minus the send-anchor machinery a panel never needs):
+/// pinned to the tail while the item streams, released by an upward wheel,
+/// re-engaged by resting back on the bottom (or the jump chip).
+#[derive(Clone)]
+struct SurfaceViewport {
+    scroll_handle: ScrollHandle,
+    scrollbar: Rc<ScrollbarState>,
+    following: Cell<bool>,
+}
+
+impl Default for SurfaceViewport {
+    fn default() -> Self {
+        Self {
+            scroll_handle: ScrollHandle::new(),
+            scrollbar: ScrollbarState::new(),
+            following: Cell::new(true),
         }
     }
 }
@@ -104,6 +130,7 @@ fn subagent_run_from_event(event: &BackgroundWorkEvent) -> SubagentRun {
             status: item.status,
             duration_ms: item.duration_ms,
             origin_activity_id: item.origin_activity_id.clone(),
+            usage: item.usage,
         },
         BackgroundWorkEvent::SubagentBlocks { key, blocks } => SubagentRun {
             child_id: key.provider_id.clone(),
@@ -115,6 +142,7 @@ fn subagent_run_from_event(event: &BackgroundWorkEvent) -> SubagentRun {
             status: BackgroundWorkStatus::Running,
             duration_ms: None,
             origin_activity_id: None,
+            usage: None,
         },
         _ => SubagentRun {
             child_id: String::new(),
@@ -126,6 +154,7 @@ fn subagent_run_from_event(event: &BackgroundWorkEvent) -> SubagentRun {
             status: BackgroundWorkStatus::Completed,
             duration_ms: None,
             origin_activity_id: None,
+            usage: None,
         },
     }
 }
@@ -161,6 +190,9 @@ fn upsert_subagent_run(runs: &mut Vec<SubagentRun>, run: SubagentRun) {
         }
         if run.origin_activity_id.is_some() {
             existing.origin_activity_id = run.origin_activity_id;
+        }
+        if run.usage.is_some() {
+            existing.usage = run.usage;
         }
         if authoritative {
             existing.status = run.status;
@@ -220,6 +252,7 @@ impl BackgroundWorkRegistry {
 
         bound_output(&mut incoming);
         self.output_viewports.entry(key.clone()).or_default();
+        self.surface_viewports.entry(key.clone()).or_default();
         let output_changed;
         let blocks_changed;
         if let Some(current) = self.items.get_mut(&incoming.key) {
@@ -253,6 +286,7 @@ impl BackgroundWorkRegistry {
             merge_option(&mut current.role, incoming.role);
             merge_option(&mut current.model, incoming.model);
             merge_option(&mut current.parent_id, incoming.parent_id);
+            merge_option(&mut current.usage, incoming.usage);
             current.started_at_ms = current.started_at_ms.min(incoming.started_at_ms);
             current.updated_at_ms = current.updated_at_ms.max(incoming.updated_at_ms);
             current.background |= incoming.background;
@@ -302,6 +336,7 @@ impl BackgroundWorkRegistry {
             return;
         };
         self.output_viewports.entry(key.clone()).or_default();
+        self.surface_viewports.entry(key.clone()).or_default();
         item.output.get_or_insert_with(String::new).push_str(delta);
         item.updated_at_ms = unix_time_millis();
         bound_output(item);
@@ -331,6 +366,7 @@ impl BackgroundWorkRegistry {
         self.rendered_output.remove(key);
         self.dirty_output.remove(key);
         self.output_viewports.remove(key);
+        self.surface_viewports.remove(key);
         self.order.retain(|entry| entry != key);
     }
 
@@ -389,10 +425,21 @@ impl BackgroundWorkRegistry {
             item.duration_ms = run.duration_ms;
             item.origin_activity_id = run.origin_activity_id.clone();
             item.subagent_blocks = run.blocks.clone();
+            item.usage = run.usage;
             item.background = false;
             item.updated_at_ms = unix_time_millis();
             self.upsert(item);
         }
+    }
+
+    /// [`Self::rehydrate_subagent_runs`] for a session that came back from
+    /// the store without a runtime attached — the normal case for a settled
+    /// task after a restart. A run persisted mid-flight has no driver left
+    /// to finish it, so it demotes to [`BackgroundWorkStatus::Lost`] instead
+    /// of showing `Running` forever; settled runs are untouched.
+    pub(super) fn rehydrate_subagent_runs_without_runtime(&mut self, runs: &[SubagentRun]) {
+        self.rehydrate_subagent_runs(runs);
+        self.mark_live_lost();
     }
 
     fn settle_foreground(&mut self, status: BackgroundWorkStatus) {
@@ -483,7 +530,7 @@ impl BackgroundWorkRegistry {
         self.selection.selection.borrow().selected_text()
     }
 
-    fn refresh_output_cache(&mut self) -> bool {
+    fn refresh_output_cache(&mut self, visible_key: Option<&BackgroundWorkKey>) -> bool {
         if self.dirty_output.is_empty()
             || self
                 .last_output_cache_refresh
@@ -499,6 +546,23 @@ impl BackgroundWorkRegistry {
                 if let Some(viewport) = self.output_viewports.get(&key) {
                     viewport.scroll_handle.scroll_to_bottom();
                 }
+            }
+            // The block timeline's growth rides the same wake: a following
+            // surface pins to its tail (the handle resolves the pin against
+            // the fresh layout at paint). Only the surface on screen and
+            // only a live child — a settled run's rehydrate/reconcile
+            // upserts mark it dirty without anything to follow, and a pin
+            // parked on a hidden item's handle would yank the first paint
+            // after switching to it.
+            if let Some(viewport) = self.surface_viewports.get(&key)
+                && viewport.following.get()
+                && visible_key == Some(&key)
+                && self
+                    .items
+                    .get(&key)
+                    .is_some_and(|item| item.status.is_live() && renders_subagent_timeline(item))
+            {
+                viewport.scroll_handle.scroll_to_bottom();
             }
         }
         self.last_output_cache_refresh = Some(Instant::now());
@@ -769,9 +833,16 @@ impl Tide {
             self.composer_jobs_popup_pinned = false;
             cx.notify();
         }
+        let visible_key = (self.right_panel_visible && self.state.selected_session.is_some())
+            .then(|| self.active_right_panel_surface())
+            .flatten()
+            .and_then(|surface| match surface {
+                RightPanelSurface::BackgroundWork { key, .. } => Some(key.clone()),
+                _ => None,
+            });
         let mut output_changed = false;
         for registry in self.background_work.values_mut() {
-            output_changed |= registry.refresh_output_cache();
+            output_changed |= registry.refresh_output_cache(visible_key.as_ref());
         }
         if output_changed {
             cx.notify();
@@ -1257,34 +1328,40 @@ impl Tide {
         &self,
         key: &BackgroundWorkKey,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let session_id = self.state.selected_session;
         let registry = session_id.and_then(|session_id| self.background_work.get(&session_id));
         let item = registry.and_then(|registry| registry.items.get(key));
         let Some(item) = item else {
             return div()
-                .id("background-work-surface")
-                .tab_group()
                 .flex_1()
                 .min_h_0()
-                .flex()
-                .items_center()
-                .justify_center()
                 .child(
                     div()
+                        .id("background-work-surface")
+                        .tab_group()
+                        .flex_1()
+                        .min_h_0()
                         .flex()
-                        .flex_col()
                         .items_center()
-                        .gap(px(7.0))
-                        .child(icon(work_kind_icon(key.kind), 22.0, theme.text_ghost))
+                        .justify_center()
                         .child(
                             div()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(tr!("background.no_work")),
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon(work_kind_icon(key.kind), 22.0, theme.text_ghost))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("background.no_work")),
+                                ),
                         ),
-                );
+                )
+                .into_any_element();
         };
         let output = registry
             .and_then(|registry| registry.rendered_output.get(key))
@@ -1354,15 +1431,20 @@ impl Tide {
                     })
             })
         });
-        let card = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .rounded(px(9.0))
-            .border_1()
-            .border_color(theme.border)
-            .overflow_hidden()
-            .bg(theme.surface)
+        // The card chrome is the process surface's; a sub-agent's timeline
+        // renders flush — full-bleed rows on the panel, the transcript
+        // pane's own treatment — with no rounded container around it.
+        let subagent_timeline = renders_subagent_timeline(item);
+        let mut card = div().w_full().flex().flex_col();
+        if !subagent_timeline {
+            card = card
+                .rounded(px(9.0))
+                .border_1()
+                .border_color(theme.border)
+                .overflow_hidden()
+                .bg(theme.surface);
+        }
+        card = card
             .child(
                 div()
                     .min_h(px(54.0))
@@ -1420,14 +1502,131 @@ impl Tide {
                 selection,
                 cx,
             ));
-        div()
+        // The follow-tail machine: a tracked, per-item scroll handle, so the
+        // surface pins to the tail while the item streams (the pin itself
+        // rides the wake in `refresh_output_cache`), releases when the
+        // reader wheels away, and re-engages on returning to the bottom —
+        // the transcript pane's FollowState semantics on a plain surface.
+        let surface_viewport = registry
+            .and_then(|registry| registry.surface_viewports.get(key))
+            .cloned();
+        if let Some(viewport) = surface_viewport.as_ref() {
+            let handle = &viewport.scroll_handle;
+            let max_offset = handle.max_offset().y;
+            // Two-way sync with the painted scroll state: `offset` and
+            // `max_offset` always come from the same paint, so a consistent
+            // off-tail pair means the reader moved the surface — wheel,
+            // scrollbar drag, anything — and following releases (the chip
+            // appears, the pin stops). Resting on the tail re-engages
+            // (ScrollSignal::AtBottom).
+            let at_tail = max_offset <= px(0.5) || -handle.offset().y >= max_offset - px(2.0);
+            viewport.following.set(at_tail);
+        }
+        let mut surface = div()
             .id("background-work-surface")
             .tab_group()
+            // `size_full` bounds the scroll viewport to its wrapper (gpui
+            // divs default to `Display::Block`, so flex sizing on this div
+            // would be ignored and its height would collapse to its
+            // content's — no internal overflow, nothing to scroll). The
+            // column layout then lets the card size to its content so the
+            // content actually overflows the viewport.
+            .size_full()
+            .flex()
+            .flex_col()
+            .overflow_y_scroll()
+            .p(px(12.0));
+        if let Some(viewport) = surface_viewport.as_ref() {
+            surface = surface
+                .track_scroll(&viewport.scroll_handle)
+                .on_scroll_wheel({
+                    let viewport = viewport.clone();
+                    move |event: &gpui::ScrollWheelEvent, window, _| {
+                        // A wheel toward the top releases the tail
+                        // (ScrollSignal::ScrolledUp).
+                        if event.delta.pixel_delta(window.line_height()).y > px(0.0) {
+                            viewport.following.set(false);
+                        }
+                    }
+                });
+        }
+        let surface = surface.child(card);
+        // The re-pin affordance: the pane's own centered jump pill, shown
+        // exactly while following is released and the surface overflows;
+        // the click re-pins through the handle, and the render sync above
+        // re-engages following once the pin lands.
+        // The scrollbar mounts before the jump chain, which consumes the
+        // viewport option via `filter`.
+        let scrollbar_overlay = surface_viewport
+            .as_ref()
+            .map(|viewport| scrollbar::vertical(&viewport.scroll_handle, &viewport.scrollbar));
+        let jump = surface_viewport
+            .filter(|viewport| !viewport.following.get())
+            .filter(|_| subagent_timeline)
+            .filter(|viewport| viewport.scroll_handle.max_offset().y > px(0.5))
+            .map(|viewport| {
+                let weak = cx.entity().downgrade();
+                let handle = viewport.scroll_handle.clone();
+                let focus = self.transcript_control_focus("background-work-jump-tail", cx);
+                div()
+                    .id("background-work-jump-tail-layer")
+                    .absolute()
+                    .left_0()
+                    .bottom(px(8.0))
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .id("background-work-jump-tail")
+                            .track_focus(&focus)
+                            .tab_index(0)
+                            .size(px(32.0))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(theme.border_strong)
+                            .bg(theme.composer)
+                            .shadow_xs()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .focus_visible(|style| style.border_color(theme.accent))
+                            .hover(|style| style.bg(theme.raised))
+                            .active(|style| style.bg(theme.overlay_strong))
+                            .child(icon("icons/arrow-down.svg", 16.0, theme.text))
+                            .on_click({
+                                let handle = handle.clone();
+                                let weak = weak.clone();
+                                move |_, _, cx| {
+                                    handle.scroll_to_bottom();
+                                    let _ = weak.update(cx, |_, cx| cx.notify());
+                                }
+                            })
+                            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    handle.scroll_to_bottom();
+                                    let _ = weak.update(cx, |_, cx| cx.notify());
+                                    cx.stop_propagation();
+                                }
+                            }),
+                    )
+            });
+        div()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
-            .p(px(12.0))
-            .child(card)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(surface)
+                    .children(scrollbar_overlay)
+                    .children(jump),
+            )
+            .into_any_element()
     }
 
     fn render_background_work_detail(
@@ -1585,44 +1784,42 @@ fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoE
 //
 // The agents-panel detail for a sub-agent with a block stream: the dispatch
 // task as a right-aligned prompt bubble (the user-bubble grammar), then the
-// child's real blocks in the main timeline's visual grammar — reasoning
-// disclosures, static tool-card header rows, markdown narration — and the
-// final report in a bordered Result card. tide's agents-tab anatomy, on this
-// app's own parts.
+// child's real blocks rendered by the main timeline's own row renderers —
+// reasoning disclosures, expandable tool cards, markdown narration — and the
+// settled run closed by the turn footer, the files card, and the bordered
+// Result card. tide's agents-tab anatomy, on this app's own parts.
 
-use crate::app::timeline_v2::parts::reasoning_part::reasoning_summary;
+use crate::app::timeline_v2::parts::reasoning_part::ReasoningMarkdown;
 use crate::app::timeline_v2::parts::tool_part::{
-    HEADER_GAP, HEADER_H, HEADER_ICON, HEADER_ICON_COL, HEADER_LINE_HEIGHT, HEADER_PAD, HEADER_TEXT,
+    HEADER_GAP, HEADER_ICON, HEADER_LINE_HEIGHT, HEADER_PAD,
 };
 use crate::app::timeline_v2::parts::user_bubble::{CLAMP_MAX_HEIGHT, clamp_needed};
-use crate::app::timeline_v2::{
-    Status, label_for, status_color, tools_description, tools_dim, tools_title,
-};
+use crate::app::timeline_v2::rows::activity_group::{GroupToggle, render_activities};
+use crate::app::timeline_v2::rows::changed_files::{render_changed_files, summarize_changes};
+use crate::app::timeline_v2::rows::turn_item::render_turn_footer;
+use crate::app::timeline_v2::rows::working_footer::render_working_footer;
+use crate::app::timeline_v2::{TranscriptActions, tools_description, tools_dim, tools_title};
+use crate::model::{ActivityItem, ActivityKind, ReasoningBlock};
 use crate::ui::icon_button;
 
 /// Height cap of a settled reasoning block's scroll viewport — the same
-/// budget the main timeline's reasoning part keeps.
-const SUBAGENT_REASONING_MAX_HEIGHT: f32 = 400.0;
-/// The clamp fade's height — how far the mask gradient reaches up the task
-/// bubble (user_bubble keeps its own private copy at the same number).
+/// budget the main timeline's reasoning part keeps. The shared renderer
+/// owns the number now.
 const SUBAGENT_TASK_FADE_HEIGHT: f32 = 28.0;
-
-/// Duration label a settled tool block trails with: sub-second in
-/// milliseconds, else tenths of a second — the d62bae5 log line's format,
-/// now fed from the block's own `duration_ms`.
-fn subagent_tool_duration(duration_ms: u64) -> String {
-    if duration_ms < 1_000 {
-        format!("{duration_ms}ms")
-    } else {
-        format!("{:.1}s", duration_ms as f32 / 1_000.0)
-    }
-}
 
 /// The disclosure key for one timeline element. `task` names the prompt
 /// bubble's clamp, `r{index}` a reasoning block, `t{index}` a narration
 /// block's markdown view, `report` the Result card's view.
 fn subagent_timeline_key(provider_id: &str, block: &str) -> String {
     format!("{provider_id}:{block}")
+}
+
+/// The deterministic `Uuid` one block's markdown view is cached under —
+/// `new_v5` over the stable key, so parse state survives repaints and the
+/// shared reasoning renderer's `Uuid`-keyed view map finds the same entry
+/// frame after frame.
+fn subagent_block_uuid(key: &str) -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, key.as_bytes())
 }
 
 /// The tool-count segment the detail header's meta row appends: "3 tools".
@@ -1648,6 +1845,78 @@ fn subagent_tool_count_label(blocks: &[SubagentBlock]) -> Option<String> {
 fn renders_subagent_timeline(item: &BackgroundWorkItem) -> bool {
     item.key.kind == BackgroundWorkKind::Subagent
         && (!item.subagent_blocks.is_empty() || item.task.is_some())
+}
+
+/// One block lifted into the activity shape the main timeline's row
+/// renderers consume: reasoning keeps its dim disclosure treatment, tools
+/// become the same expandable cards the transcript renders — arguments,
+/// output, diffs, and failure text all derive through the shared
+/// normalization (`with_arguments` / `with_output`), so a sub-agent's card
+/// matches the transcript's down to the body sections. `None` for the
+/// blocks that are not activities (narration, delivered messages).
+///
+/// The id pair is deterministic (`new_v5` over the stable key): the
+/// disclosure ids and the reasoning view cache must survive repaints, and
+/// the activity layer keys both off them.
+fn subagent_block_activity(
+    provider_id: &str,
+    index: usize,
+    block: &SubagentBlock,
+) -> Option<ActivityItem> {
+    let (suffix, mut activity) = match block {
+        SubagentBlock::Reasoning { text, streaming } => {
+            let reasoning = ActivityItem::from_reasoning(
+                ReasoningBlock {
+                    content: text.clone(),
+                    started_at_ms: 0,
+                    finished_at_ms: 0,
+                },
+                !streaming,
+            );
+            (format!("r{index}"), reasoning)
+        }
+        SubagentBlock::Tool {
+            name,
+            target,
+            status,
+            arguments,
+            output,
+            ..
+        } => {
+            let failed = *status == SubagentToolStatus::Failed;
+            // The header's failure line: the same first-non-empty-line rule
+            // the transcript's tool activities apply.
+            let detail = failed.then(|| {
+                output
+                    .as_deref()?
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                    .map(str::to_owned)
+            });
+            let mut card = ActivityItem::new(
+                None,
+                ActivityKind::from_tool_name(name),
+                name.clone(),
+                detail.flatten(),
+                *status != SubagentToolStatus::Running,
+            )
+            .with_arguments(arguments.clone())
+            .with_output(output.clone())
+            .with_failed(failed);
+            // Blocks persisted before arguments rode along still name their
+            // target on the block itself.
+            if card.display_target.is_none() {
+                card.display_target = target.clone();
+            }
+            (format!("tool{index}"), card)
+        }
+        SubagentBlock::Text { .. } | SubagentBlock::Message { .. } => return None,
+    };
+    let key = subagent_timeline_key(provider_id, &suffix);
+    activity.id = subagent_block_uuid(&key);
+    activity.source_id = Some(key);
+    Some(activity)
 }
 
 impl Tide {
@@ -1713,26 +1982,88 @@ impl Tide {
             timeline = timeline.child(self.render_subagent_task(item, task, cx));
         }
         let mut blocks = div().w_full().flex().flex_col().gap(px(2.0));
-        for (index, block) in item.subagent_blocks.iter().enumerate() {
-            blocks = blocks.child(match block {
-                SubagentBlock::Reasoning { text, streaming } => self
-                    .render_subagent_reasoning(item, index, text, *streaming, selection.clone(), cx)
-                    .into_any_element(),
-                SubagentBlock::Tool { .. } => {
-                    render_subagent_tool_row(block, &theme).into_any_element()
+        // Consecutive reasoning/tool blocks render through the main
+        // timeline's group renderer, in runs between the narration and
+        // delivered-message rows — the same bare 2px column, so the whole
+        // stream reads as one continuous block. Conversions happen once up
+        // front; runs are slices of the converted list.
+        let provider_id = item.key.provider_id.clone();
+        let workspace: &Path = item
+            .cwd
+            .as_deref()
+            .map(Path::new)
+            .or_else(|| self.selected_workspace_path())
+            .unwrap_or_else(|| Path::new(""));
+        let actions = self.subagent_transcript_actions(cx);
+        let toggle = self.subagent_disclosure_toggle(cx);
+        let converted: Vec<Option<ActivityItem>> = item
+            .subagent_blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| subagent_block_activity(&provider_id, index, block))
+            .collect();
+        let mut run_start: Option<usize> = None;
+        for (index, block) in converted.iter().enumerate() {
+            if block.is_some() {
+                run_start.get_or_insert(index);
+                continue;
+            }
+            // A non-activity block: the run before it flushes first, so the
+            // interleaved order the child produced survives.
+            if let Some(start) = run_start.take() {
+                let refs: Vec<&ActivityItem> = converted[start..index].iter().flatten().collect();
+                blocks = blocks.child(self.render_subagent_activities(
+                    &refs,
+                    workspace,
+                    &selection,
+                    &actions,
+                    &theme,
+                    toggle.clone(),
+                    cx,
+                ));
+            }
+            blocks = match &item.subagent_blocks[index] {
+                SubagentBlock::Text { content, streaming } => {
+                    blocks.child(self.render_subagent_text(
+                        item,
+                        index,
+                        content,
+                        *streaming,
+                        selection.clone(),
+                        cx,
+                    ))
                 }
-                SubagentBlock::Text { content, streaming } => self
-                    .render_subagent_text(item, index, content, *streaming, selection.clone(), cx)
-                    .into_any_element(),
                 SubagentBlock::Message { from, text } => {
-                    render_subagent_message_row(from, text, &theme).into_any_element()
+                    blocks.child(render_subagent_message_row(from, text, &theme))
                 }
-            });
+                _ => blocks,
+            };
         }
+        if let Some(start) = run_start.take() {
+            let refs: Vec<&ActivityItem> = converted[start..].iter().flatten().collect();
+            blocks = blocks.child(self.render_subagent_activities(
+                &refs,
+                workspace,
+                &selection,
+                &actions,
+                &theme,
+                toggle.clone(),
+                cx,
+            ));
+        }
+        let live = item.status.is_live();
         timeline = timeline.child(blocks);
-        // The report rides `output` and lands there only at completion, so
-        // its presence is the settled signal — the answer element of the
-        // timeline, the way tide's agents tab renders the dispatch report.
+        // While the child works, the main timeline's live closing row — the
+        // working footer's orbit loader and elapsed ticker. The settled run
+        // closes the way a settled turn does: answer, meta footer, files.
+        if live {
+            timeline = timeline.child(render_working_footer(
+                Some(item.started_at_ms / 1000),
+                unix_time(),
+                &theme,
+            ));
+            return timeline;
+        }
         if let Some(report) = item
             .output
             .as_deref()
@@ -1741,7 +2072,198 @@ impl Tide {
         {
             timeline = timeline.child(self.render_subagent_result(item, report, selection, cx));
         }
+        timeline = timeline.child(self.render_subagent_turn_footer(item, cx));
+        // The files card: the same changed-files summary the main timeline
+        // trails a turn with, folded from every tool card's edit metadata.
+        let changes: Vec<_> = converted
+            .iter()
+            .flatten()
+            .flat_map(|activity| activity.file_changes.iter())
+            .collect();
+        if !changes.is_empty() {
+            let summary = summarize_changes(changes);
+            let id = format!("files-{provider_id}");
+            timeline = timeline.child(render_changed_files(
+                &summary,
+                workspace,
+                &actions,
+                &theme,
+                self.subagent_disclosures.contains(&id),
+                &id,
+                toggle,
+            ));
+        }
         timeline
+    }
+
+    /// The panel's row actions: the same weak-entity handlers the v2 pane
+    /// mounts — open file, open the Review diff, jump to the dispatched
+    /// agent — so the tool cards' and files card's affordances work from
+    /// this surface exactly as they do from the transcript.
+    fn subagent_transcript_actions(&self, cx: &Context<Self>) -> TranscriptActions {
+        let weak = cx.entity().downgrade();
+        let view_file = {
+            let weak = weak.clone();
+            std::sync::Arc::new(
+                move |path: &str, _: &mut gpui::Window, cx: &mut gpui::App| {
+                    let Some(entity) = weak.upgrade() else {
+                        return;
+                    };
+                    let path = path.to_owned();
+                    entity.update(cx, |this, cx| this.open_activity_file(&path, cx));
+                },
+            )
+        };
+        let view_diff = {
+            let weak = weak.clone();
+            std::sync::Arc::new(
+                move |path: &str, _: &mut gpui::Window, cx: &mut gpui::App| {
+                    let Some(entity) = weak.upgrade() else {
+                        return;
+                    };
+                    let path = path.to_owned();
+                    entity.update(cx, |this, cx| this.open_activity_diff(&path, cx));
+                },
+            )
+        };
+        let open_dispatch =
+            std::sync::Arc::new(move |id: &str, _: &mut gpui::Window, cx: &mut gpui::App| {
+                let Some(entity) = weak.upgrade() else {
+                    return;
+                };
+                let id = id.to_owned();
+                entity.update(cx, |this, cx| this.open_dispatch_activity(&id, cx));
+            });
+        TranscriptActions {
+            view_file,
+            view_diff,
+            open_dispatch,
+        }
+    }
+
+    /// The group renderer's disclosure toggle, parked on the panel's own
+    /// disclosure set (task clamp, reasoning rows, tool cards, the files
+    /// card share it).
+    fn subagent_disclosure_toggle(&self, cx: &Context<Self>) -> GroupToggle {
+        let entity = cx.entity().downgrade();
+        std::sync::Arc::new(
+            move |id: &str, _: &gpui::ClickEvent, _: &mut gpui::Window, cx: &mut gpui::App| {
+                let Some(entity) = entity.upgrade() else {
+                    return;
+                };
+                entity.update(cx, |this, cx| {
+                    if !this.subagent_disclosures.remove(id) {
+                        this.subagent_disclosures.insert(id.to_owned());
+                    }
+                    cx.notify();
+                });
+            },
+        )
+    }
+
+    /// One run of reasoning/tool blocks through the main timeline's group
+    /// renderer — the exact rows the transcript pane paints, borrowing this
+    /// surface's markdown view cache for the reasoning bodies.
+    #[allow(clippy::too_many_arguments)]
+    fn render_subagent_activities(
+        &self,
+        activities: &[&ActivityItem],
+        workspace: &Path,
+        selection: &TranscriptSelection,
+        actions: &TranscriptActions,
+        theme: &Theme,
+        toggle: GroupToggle,
+        cx: &Context<Self>,
+    ) -> Div {
+        let metrics = self.scaled_markdown_metrics(MarkdownMetrics::COMPACT);
+        let link_handler = self.markdown_link_handler.clone();
+        let mermaid_handler = self.markdown_mermaid_handler.clone();
+        let mermaid_host = self.markdown_mermaid_host.clone();
+        let mut views = self.subagent_markdown.borrow_mut();
+        let mut markdown = ReasoningMarkdown {
+            views: &mut views,
+            metrics,
+            selection: selection.clone(),
+            link_handler: Some(link_handler),
+            mermaid_handler: Some(mermaid_handler),
+            mermaid_host: Some(mermaid_host),
+            reduce_motion: cx.reduce_motion(),
+        };
+        render_activities(
+            activities,
+            &self.subagent_disclosures,
+            workspace,
+            selection,
+            actions,
+            theme,
+            &mut markdown,
+            toggle,
+        )
+    }
+
+    /// The settled run's meta strip — the turn footer's anatomy reading the
+    /// run's model, wall-clock duration, and start clock, with the
+    /// hover-revealed Copy for the report (the run's answer).
+    fn render_subagent_turn_footer(
+        &self,
+        item: &BackgroundWorkItem,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let turn_id = subagent_block_uuid(&subagent_timeline_key(&item.key.provider_id, "turn"));
+        let report = item
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|report| !report.is_empty())
+            .map(str::to_owned);
+        let report_for_copy = report.clone();
+        // A child run has no session to fork into, so the branch action is
+        // absent; its usage trigger shows the run's settled totals, with no
+        // speed facts — the child loop does not measure stream time.
+        let usage_menu = self.menu_handle(
+            SharedString::from(format!("subagent-usage-{}", item.key.provider_id)),
+            cx,
+        );
+        let time_menu = self.menu_handle(
+            SharedString::from(format!("subagent-time-{}", item.key.provider_id)),
+            cx,
+        );
+        let usage = item.usage.map(|usage| {
+            let llm_ms = usage.llm_ms.unwrap_or(0);
+            let tps = (llm_ms > 0 && usage.output_tokens > 0)
+                .then(|| usage.output_tokens as f64 / (llm_ms as f64 / 1000.0));
+            let ttft_ms = usage.ttft_ms;
+            // The child runs the owning session's engine, so the panel's
+            // "Provider / model" row resolves through the same catalog —
+            // `Zai/GLM-5.3`, never the bare engine id.
+            let routes = self
+                .model_route_label(item.model.as_deref())
+                .map(SharedString::from);
+            TurnFooterUsage {
+                usage,
+                routes,
+                tps,
+                ttft_ms,
+            }
+        });
+        render_turn_footer(
+            turn_id,
+            item.duration_ms.map(|ms| ms / 1000),
+            item.started_at_ms / 1000,
+            &usage_menu,
+            &time_menu,
+            usage,
+            None,
+            |_, _, _| {},
+            report.as_deref(),
+            &theme,
+            move |_, _, cx| {
+                if let Some(report) = report_for_copy.clone() {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(report));
+                }
+            },
+        )
     }
 
     /// The dispatch task as the timeline's prompt header: the user-bubble
@@ -1834,160 +2356,6 @@ impl Tide {
         column
     }
 
-    /// One reasoning block: the main timeline's dim disclosure anatomy —
-    /// brain glyph, "Thinking"/"Thinking…", the 80-char collapsed summary,
-    /// the reveal chevron — and, expanded, the full trace as markdown in
-    /// the dimmed palette, unbounded while streaming and in the 400px
-    /// scroll viewport once settled.
-    #[allow(clippy::too_many_arguments)]
-    fn render_subagent_reasoning(
-        &self,
-        item: &BackgroundWorkItem,
-        index: usize,
-        text: &str,
-        streaming: bool,
-        selection: TranscriptSelection,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let theme = Theme::current(cx);
-        let provider_id = item.key.provider_id.clone();
-        let key = subagent_timeline_key(&provider_id, &format!("r{index}"));
-        let expanded = self.subagent_disclosures.contains(&key);
-        let content = text.trim();
-        let togglable = !content.is_empty();
-        let mut header = div()
-            .id(SharedString::from(format!(
-                "subagent-reasoning-{provider_id}-{index}"
-            )))
-            .h(px(HEADER_H))
-            .w_full()
-            .min_w_0()
-            .overflow_hidden()
-            .line_height(sp(HEADER_LINE_HEIGHT))
-            .flex()
-            .items_center()
-            .gap(px(HEADER_GAP))
-            .pl(px(HEADER_PAD))
-            .pr(px(HEADER_PAD))
-            .rounded(px(6.0))
-            .when(togglable, |row| row.cursor_pointer())
-            .hover(|style| style.bg(theme.overlay))
-            .child(
-                div()
-                    .w(px(HEADER_ICON_COL))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon("icons/brain.svg", HEADER_ICON, tools_dim(&theme))),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(HEADER_TEXT))
-                    .text_color(tools_dim(&theme))
-                    .child(if streaming {
-                        SharedString::from("Thinking…")
-                    } else {
-                        SharedString::from("Thinking")
-                    }),
-            );
-        // The collapsed summary rides the remaining width; expanded, the
-        // body already shows the whole trace.
-        let summary = (!expanded && !content.is_empty())
-            .then(|| SharedString::from(reasoning_summary(content)));
-        header = header.child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(sp(12.0))
-                .text_color(tools_description(&theme))
-                .when_some(summary, |column, text| column.child(text)),
-        );
-        if togglable {
-            header = header.child(icon(
-                if expanded {
-                    "icons/chevron-down.svg"
-                } else {
-                    "icons/chevron-right.svg"
-                },
-                11.0,
-                tools_dim(&theme),
-            ));
-            let toggle_key = key.clone();
-            header = header.on_click(cx.listener(move |this, _, _, cx| {
-                if !this.subagent_disclosures.remove(&toggle_key) {
-                    this.subagent_disclosures.insert(toggle_key.clone());
-                }
-                cx.notify();
-            }));
-        }
-        let mut column = div().w_full().flex().flex_col().child(header);
-        if expanded && togglable {
-            let animate = streaming && !cx.reduce_motion();
-            let trace = {
-                let mut palette = MarkdownPalette::from_theme(&theme);
-                palette.text = theme.text_secondary;
-                palette.secondary = theme.text_tertiary;
-                let metrics = self.scaled_markdown_metrics(MarkdownMetrics::COMPACT);
-                let mut views = self.subagent_markdown.borrow_mut();
-                let view = views.entry(key.clone()).or_default();
-                view.set_text(content, streaming);
-                let ctx = MarkdownCtx::new(
-                    format!("subagent-reasoning-{key}"),
-                    &palette,
-                    metrics,
-                    selection,
-                )
-                .with_streaming_animation(animate)
-                .with_link_handler(self.markdown_link_handler.clone())
-                .with_mermaid_handler(self.markdown_mermaid_handler.clone())
-                .with_mermaid_host(self.markdown_mermaid_host.clone());
-                md::render::markdown(view, &ctx).unwrap_or_else(|| {
-                    md::render::plain_text(
-                        content.to_owned(),
-                        md::render::SANS_FAMILY,
-                        FontWeight::NORMAL,
-                        theme.text_secondary,
-                        &ctx,
-                    )
-                })
-            };
-            column = column.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .pl(px(HEADER_PAD + HEADER_ICON_COL + HEADER_GAP))
-                    .pr(px(4.0))
-                    .pb(px(4.0))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "subagent-reasoning-scroll-{provider_id}-{index}"
-                            )))
-                            .w_full()
-                            .min_w_0()
-                            .rounded(px(6.0))
-                            .bg(theme.raised)
-                            .px(px(8.0))
-                            .py(px(6.0))
-                            .when(!streaming, |viewport| {
-                                viewport
-                                    .max_h(px(SUBAGENT_REASONING_MAX_HEIGHT))
-                                    .overflow_y_scroll()
-                            })
-                            .child(trace),
-                    ),
-            );
-        }
-        column
-    }
-
     /// One narration block: the child's streamed text as markdown at the
     /// assistant body metrics — the same call shape the v2 pane's assistant
     /// body uses, on the detail surface's own per-block view cache. Rendered
@@ -2011,11 +2379,12 @@ impl Tide {
             return div();
         }
         let key = subagent_timeline_key(&item.key.provider_id, &format!("t{index}"));
+        let view_id = subagent_block_uuid(&key);
         let body = {
             let palette = MarkdownPalette::from_theme(&theme);
             let metrics = self.scaled_markdown_metrics(MarkdownMetrics::BODY);
             let mut views = self.subagent_markdown.borrow_mut();
-            let view = views.entry(key.clone()).or_default();
+            let view = views.entry(view_id).or_default();
             view.set_text(trimmed, streaming);
             let ctx =
                 MarkdownCtx::new(format!("subagent-text-{key}"), &palette, metrics, selection)
@@ -2051,11 +2420,12 @@ impl Tide {
         let theme = Theme::current(cx);
         let provider_id = item.key.provider_id.clone();
         let key = subagent_timeline_key(&provider_id, "report");
+        let view_id = subagent_block_uuid(&key);
         let body = {
             let palette = MarkdownPalette::from_theme(&theme);
             let metrics = self.scaled_markdown_metrics(MarkdownMetrics::BODY);
             let mut views = self.subagent_markdown.borrow_mut();
-            let view = views.entry(key.clone()).or_default();
+            let view = views.entry(view_id).or_default();
             view.set_text(report, false);
             let ctx = MarkdownCtx::new(
                 format!("subagent-report-{key}"),
@@ -2151,103 +2521,6 @@ fn render_subagent_message_row(from: &str, text: &str, theme: &Theme) -> Div {
                 .text_color(tools_description(theme))
                 .child(SharedString::from(text)),
         )
-}
-
-/// One tool block as a static header row — the tool-card header anatomy
-/// exactly (label glyph and display name, the one-line target, trailing
-/// status), with no body or disclosure: the block stream's v1 grammar.
-fn render_subagent_tool_row(block: &SubagentBlock, theme: &Theme) -> Div {
-    let SubagentBlock::Tool {
-        name,
-        target,
-        status,
-        duration_ms,
-        ..
-    } = block
-    else {
-        return div();
-    };
-    let label = label_for(name);
-    let failed = *status == SubagentToolStatus::Failed;
-    let running = *status == SubagentToolStatus::Running;
-    let trailing = match status {
-        SubagentToolStatus::Running => {
-            motion::spin(icon("icons/loader-circle.svg", 12.0, tools_dim(theme)))
-        }
-        SubagentToolStatus::Done => icon(
-            "icons/check.svg",
-            12.0,
-            status_color(theme, Status::Success),
-        )
-        .into_any_element(),
-        SubagentToolStatus::Failed => {
-            icon("icons/x.svg", 12.0, status_color(theme, Status::Error)).into_any_element()
-        }
-    };
-    let mut row = div()
-        .h(px(HEADER_H))
-        .w_full()
-        .min_w_0()
-        .overflow_hidden()
-        .line_height(sp(HEADER_LINE_HEIGHT))
-        .flex()
-        .items_center()
-        .gap(px(HEADER_GAP))
-        .pl(px(HEADER_PAD))
-        .pr(px(HEADER_PAD))
-        .rounded(px(6.0))
-        .child(
-            div()
-                .w(px(HEADER_ICON_COL))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon(label.icon, HEADER_ICON, tools_dim(theme))),
-        )
-        .child(
-            div()
-                .flex_none()
-                .max_w(px(160.0))
-                .min_w_0()
-                .truncate()
-                .text_size(sp(HEADER_TEXT))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(if failed {
-                    status_color(theme, Status::Error)
-                } else {
-                    tools_title(theme)
-                })
-                .child(label.display_name),
-        );
-    match target
-        .as_deref()
-        .map(str::trim)
-        .filter(|target| !target.is_empty())
-    {
-        Some(target) => {
-            row = row.child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(HEADER_TEXT))
-                    .text_color(tools_description(theme))
-                    .child(SharedString::from(target)),
-            );
-        }
-        None => row = row.child(div().flex_1()),
-    }
-    if !running && let Some(duration) = duration_ms {
-        row = row.child(
-            div()
-                .flex_none()
-                .text_size(sp(10.5))
-                .text_color(tools_dim(theme))
-                .child(SharedString::from(subagent_tool_duration(*duration))),
-        );
-    }
-    row.child(div().flex_none().flex().items_center().child(trailing))
 }
 
 // ── Agents tab ──────────────────────────────────────────────────────────────
@@ -3541,6 +3814,7 @@ fn render_header_jobs_popup_card(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::UsageBreakdown;
 
     fn subagent_upsert(child_id: &str, title: &str, status: BackgroundWorkStatus) -> SubagentRun {
         SubagentRun {
@@ -3553,6 +3827,7 @@ mod tests {
             status,
             duration_ms: Some(1200),
             origin_activity_id: Some("call-1".to_owned()),
+            usage: None,
         }
     }
 
@@ -3580,6 +3855,7 @@ mod tests {
                 status: BackgroundWorkStatus::Running,
                 duration_ms: None,
                 origin_activity_id: None,
+                usage: None,
             },
         );
         assert_eq!(runs.len(), 1);
@@ -3605,6 +3881,7 @@ mod tests {
                 status: BackgroundWorkStatus::Completed,
                 duration_ms: None,
                 origin_activity_id: None,
+                usage: None,
             },
         );
         assert_eq!(runs.len(), 1);
@@ -3619,7 +3896,17 @@ mod tests {
             streaming: false,
         }];
         run.report = Some("looks fine".to_owned());
+        run.usage = Some(UsageBreakdown {
+            input_tokens: 1_000,
+            output_tokens: 200,
+            calls: 3,
+            ..Default::default()
+        });
         registry.rehydrate_subagent_runs(&[run]);
+        // The persisted usage survives the restart's item rebuild — the
+        // panel's footer reads it.
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "child-1");
+        assert!(registry.items.get(&key).unwrap().usage.is_some());
         let listed = registry
             .subagent_items()
             .into_iter()
@@ -3629,6 +3916,70 @@ mod tests {
             listed,
             vec![("child-1".to_owned(), BackgroundWorkStatus::Completed)]
         );
+    }
+
+    #[test]
+    fn rehydrate_without_runtime_settles_only_the_runs_persisted_midflight() {
+        let mut registry = BackgroundWorkRegistry::default();
+        let mut live = subagent_upsert("child-1", "Review auth", BackgroundWorkStatus::Running);
+        live.blocks = vec![SubagentBlock::Text {
+            content: "scanned 3 files".to_owned(),
+            streaming: false,
+        }];
+        live.report = Some("partial so far".to_owned());
+        let done = subagent_upsert("child-2", "Run tests", BackgroundWorkStatus::Completed);
+        registry.rehydrate_subagent_runs_without_runtime(&[live, done]);
+        // The run persisted mid-flight lost its driver with the previous
+        // process: it shows Lost instead of Running forever, while the run
+        // that had already settled keeps its status...
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "child-1");
+        assert_eq!(registry.items[&key].status, BackgroundWorkStatus::Lost);
+        let done_key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "child-2");
+        assert_eq!(
+            registry.items[&done_key].status,
+            BackgroundWorkStatus::Completed
+        );
+        // ...and the timeline the detail panel renders still survives.
+        assert_eq!(
+            registry.items[&key].subagent_blocks,
+            vec![SubagentBlock::Text {
+                content: "scanned 3 files".to_owned(),
+                streaming: false,
+            }]
+        );
+        assert_eq!(
+            registry.items[&key].output.as_deref(),
+            Some("partial so far")
+        );
+    }
+
+    #[test]
+    fn registry_upsert_keeps_the_settled_usage_total() {
+        // The terminal upsert arrives while the item is already stored from
+        // its Running phase; the selective merge must not drop its usage.
+        let mut registry = BackgroundWorkRegistry::default();
+        registry.upsert(BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "child-1",
+            "Review auth",
+            BackgroundWorkStatus::Running,
+        ));
+        let mut settled = BackgroundWorkItem::new(
+            BackgroundWorkKind::Subagent,
+            "child-1",
+            "Review auth",
+            BackgroundWorkStatus::Completed,
+        );
+        settled.usage = Some(UsageBreakdown {
+            input_tokens: 1_000,
+            output_tokens: 200,
+            calls: 3,
+            ..Default::default()
+        });
+        registry.upsert(settled);
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Subagent, "child-1");
+        let item = registry.items.get(&key).unwrap();
+        assert_eq!(item.usage.map(|usage| usage.calls), Some(3));
     }
 
     fn item(id: &str, status: BackgroundWorkStatus, background: bool) -> BackgroundWorkItem {
@@ -3870,7 +4221,7 @@ mod tests {
         registry.upsert(item("one", BackgroundWorkStatus::Running, true));
         registry.append_output(&key, "\u{1b}");
         registry.append_output(&key, "[31mred\u{1b}[0m");
-        assert!(registry.refresh_output_cache());
+        assert!(registry.refresh_output_cache(None));
         assert_eq!(registry.rendered_output[&key].as_ref(), "red");
     }
 
@@ -3881,7 +4232,7 @@ mod tests {
         registry.upsert(item("one", BackgroundWorkStatus::Running, true));
         registry.append_output(&key, "first");
         assert_eq!(registry.output_refresh_delay(), Some(Duration::ZERO));
-        assert!(registry.refresh_output_cache());
+        assert!(registry.refresh_output_cache(None));
         assert_eq!(registry.output_refresh_delay(), None);
 
         registry.append_output(&key, " second");
@@ -3889,7 +4240,7 @@ mod tests {
             .output_refresh_delay()
             .expect("new output should request one cache refresh");
         assert!(delay <= OUTPUT_CACHE_REFRESH_INTERVAL);
-        assert!(!registry.refresh_output_cache());
+        assert!(!registry.refresh_output_cache(None));
     }
 
     #[test]
@@ -3898,7 +4249,7 @@ mod tests {
         let mut process = item("one", BackgroundWorkStatus::Running, true);
         process.output = Some("same output".to_owned());
         registry.upsert(process.clone());
-        assert!(registry.refresh_output_cache());
+        assert!(registry.refresh_output_cache(None));
 
         registry.upsert(process);
         assert_eq!(registry.output_refresh_delay(), None);
@@ -3951,7 +4302,7 @@ mod tests {
         );
 
         // A duplicate snapshot is a no-op: it must not re-wake the cache.
-        assert!(registry.refresh_output_cache());
+        assert!(registry.refresh_output_cache(None));
         assert_eq!(registry.output_refresh_delay(), None);
         registry.apply(BackgroundWorkEvent::SubagentBlocks {
             key: key.clone(),
@@ -4025,7 +4376,7 @@ mod tests {
         let key = item.key.clone();
         registry.upsert(item);
         registry.append_output(&key, "legacy log line\nmore");
-        assert!(registry.refresh_output_cache());
+        assert!(registry.refresh_output_cache(None));
         let item = &registry.items[&key];
         assert_eq!(
             agent_output_preview(Some(&registry), item).as_deref(),
@@ -4047,11 +4398,94 @@ mod tests {
                 target: None,
                 status: SubagentToolStatus::Running,
                 duration_ms: None,
+                arguments: None,
+                output: None,
             },
         ];
         assert_eq!(
             subagent_tool_count_label(&blocks).as_deref(),
             Some("1 tool")
+        );
+    }
+
+    #[test]
+    fn subagent_block_activity_maps_tools_to_transcript_cards() {
+        let block = SubagentBlock::Tool {
+            id: "t1".into(),
+            name: "bash".into(),
+            target: None,
+            status: SubagentToolStatus::Done,
+            duration_ms: Some(950),
+            arguments: Some("{\"command\": \"cargo test\"}".into()),
+            output: Some("test result: ok".into()),
+        };
+        let activity =
+            subagent_block_activity("child-1", 3, &block).expect("a tool block is an activity");
+        assert_eq!(activity.kind, ActivityKind::Command);
+        assert!(activity.complete);
+        assert!(!activity.failed);
+        // The same normalization the transcript's cards ride: display target
+        // and command text derive from the arguments.
+        assert_eq!(activity.display_target.as_deref(), Some("cargo test"));
+        assert_eq!(activity.output.as_deref(), Some("test result: ok"));
+        // The id pair is deterministic and namespaced per child, so
+        // disclosures and markdown views survive repaints.
+        let again = subagent_block_activity("child-1", 3, &block).unwrap();
+        assert_eq!(activity.id, again.id);
+        assert_eq!(activity.source_id.as_deref(), Some("child-1:tool3"));
+        let other = subagent_block_activity("child-2", 3, &block).unwrap();
+        assert_ne!(activity.source_id, other.source_id);
+
+        // A failed call carries the failure detail (first non-empty line)
+        // the card body renders.
+        let failed = SubagentBlock::Tool {
+            id: "t2".into(),
+            name: "bash".into(),
+            target: None,
+            status: SubagentToolStatus::Failed,
+            duration_ms: Some(9),
+            arguments: None,
+            output: Some("error: boom\n".into()),
+        };
+        let activity = subagent_block_activity("child-1", 4, &failed).unwrap();
+        assert!(activity.failed);
+        assert!(activity.complete, "a failed call has settled");
+        assert_eq!(activity.detail.as_deref(), Some("error: boom"));
+    }
+
+    #[test]
+    fn subagent_block_activity_reasoning_maps_and_narration_skips() {
+        let reasoning = SubagentBlock::Reasoning {
+            text: "thinking".into(),
+            streaming: true,
+        };
+        let activity = subagent_block_activity("child-1", 0, &reasoning).unwrap();
+        assert_eq!(activity.kind, ActivityKind::Reasoning);
+        assert!(!activity.complete, "a streaming thought is not settled");
+        assert_eq!(activity.source_id.as_deref(), Some("child-1:r0"));
+
+        // Narration and delivered messages render through their own rows.
+        assert!(
+            subagent_block_activity(
+                "child-1",
+                1,
+                &SubagentBlock::Text {
+                    content: "note".into(),
+                    streaming: false,
+                }
+            )
+            .is_none()
+        );
+        assert!(
+            subagent_block_activity(
+                "child-1",
+                2,
+                &SubagentBlock::Message {
+                    from: "main".into(),
+                    text: "hand off".into(),
+                }
+            )
+            .is_none()
         );
     }
 

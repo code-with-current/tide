@@ -50,6 +50,7 @@ pub(crate) fn spawn_bash_job(
                 status,
                 detail: Some(format!("exit code: {}", code.unwrap_or(-1))),
                 output: None,
+                usage: None,
             });
         });
     if watcher.is_err() {
