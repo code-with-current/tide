@@ -19,7 +19,8 @@ import { join, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dir, "..");
 
-export const defaultDownloadUrlPrefix = "https://releases.tide.codes/";
+export const defaultDownloadUrlPrefix =
+  "https://github.com/code-with-current/tide/releases/latest/download/";
 
 /** Locate Sparkle's `generate_appcast`: SPARKLE_BIN first, then the pinned
  *  distribution scripts/bundle.sh caches under .tide-cache, then PATH. */
@@ -61,7 +62,21 @@ export async function generateAppcast(
   // Same prefix for both: archives and the Tide-<version>.md release notes are
   // served from the same origin. The notes prefix makes generate_appcast emit
   // <sparkle:releaseNotesLink> for any notes file matching an archive name.
-  const privateKey = process.env.SPARKLE_PRIVATE_KEY?.trim();
+  // Sparkle's key file format (`generate_keys -x`) is the base64 of the
+  // 32-byte seed alone; the secret stores seed||public (64 bytes) so the
+  // Windows feed signer (Node crypto) keeps its simpler decoding. Only the
+  // seed half is handed to generate_appcast here.
+  const secret = process.env.SPARKLE_PRIVATE_KEY?.trim();
+  let privateKey: string | undefined;
+  if (secret) {
+    const raw = Buffer.from(secret, "base64");
+    if (raw.length !== 64) {
+      throw new Error(
+        `SPARKLE_PRIVATE_KEY decodes to ${raw.length} bytes; expected 64.`,
+      );
+    }
+    privateKey = raw.subarray(0, 32).toString("base64");
+  }
   const command = [
     generator,
     "--download-url-prefix",

@@ -141,6 +141,7 @@ async function stageOnnxRuntime(packageDirectory: string): Promise<void> {
   }
   await writeFile(zip, Buffer.from(await response.arrayBuffer()));
   const extract = join(staging, "onnxruntime");
+  await mkdir(extract, { recursive: true });
   await $`tar -xf ${zip} -C ${extract}`;
   const extractedRoot = join(
     extract,
