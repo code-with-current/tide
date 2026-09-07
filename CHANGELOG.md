@@ -16,6 +16,14 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Sub-agent runs survive an app restart. The agents panel rebuilds each
+  session's run history from the store when the session is opened, including
+  the timeline, task, and report the detail panel renders, and a run that was
+  still in flight at quit shows as lost instead of running forever.
+- `todo_write` updates no longer fail outright when the agent marks more than
+  one item in progress. The list is accepted with the extra in-progress items
+  demoted to pending (and a note telling the agent why), so a malformed update
+  no longer discards every status change in the call.
 - Tide can no longer end up with more than one window. The single-instance
   lock is now kernel-arbitrated instead of a pid-file check two launches could
   both win, a second launch activates the running app and quits, and clicking
