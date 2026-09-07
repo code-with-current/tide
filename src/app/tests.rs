@@ -1,6 +1,7 @@
 use super::chat_composer::{ComposerSubmitAction, composer_submit_action};
 use super::composer::{
-    dropped_file_mention, merged_submission, next_picker_highlight, visible_branch_entries,
+    dropped_file_mention, latest_todo_plan, merged_submission, next_picker_highlight,
+    pasted_text_attachment_name, visible_branch_entries,
 };
 use super::navigation_rail::{
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, active_navigation_turn_index,
@@ -301,6 +302,31 @@ fn whitespace_mentions_are_quoted_into_one_token() {
     assert_eq!(
         merged_submission("look", &mentions).as_deref(),
         Some("look @\"/tmp/shot 2.png\"")
+    );
+}
+
+#[test]
+fn pasted_text_names_sort_by_the_minute_and_escape_collisions() {
+    // `with_ymd_and_hms` lives on the `TimeZone` trait in current chrono.
+    use chrono::TimeZone;
+    let now = chrono::Local
+        .with_ymd_and_hms(2026, 9, 6, 17, 15, 0)
+        .unwrap();
+    let fresh = pasted_text_attachment_name(now, |_| false);
+    assert_eq!(fresh, "pasted-2026-09-06-1715.txt");
+
+    // A draft that already claims the stamp — a staged chip or a paste whose
+    // upload is still in flight — bumps the suffix until the name is free.
+    let taken = |name: &str| name == "pasted-2026-09-06-1715.txt";
+    assert_eq!(
+        pasted_text_attachment_name(now, taken),
+        "pasted-2026-09-06-1715-2.txt"
+    );
+    let taken =
+        |name: &str| name == "pasted-2026-09-06-1715.txt" || name == "pasted-2026-09-06-1715-2.txt";
+    assert_eq!(
+        pasted_text_attachment_name(now, taken),
+        "pasted-2026-09-06-1715-3.txt"
     );
 }
 
@@ -2042,4 +2068,63 @@ fn model_picker_subtitle_deduplicates_the_provider_name() {
         model_picker_subtitle(ProviderKind::Tide, Some("OpenRouter"), Some(&model)),
         "OpenRouter · 200K ctx · $3 / $15 per Mtok"
     );
+}
+
+#[test]
+fn latest_todo_plan_reads_the_newest_parsable_todo_card() {
+    use super::timeline_v2::parts::tool_part::TodoState;
+
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
+    let mut older = ActivityItem::new(None, ActivityKind::Plan, "todo_write", None, true);
+    older.output = Some("[ ] 1. old".into());
+    let mut newer = ActivityItem::new(None, ActivityKind::Tool, "todo_write", None, true);
+    newer.output = Some("[x] 1. new one\n[~] 2. new two".into());
+    session.transcript_blocks = vec![
+        TranscriptBlock {
+            after_message: 0,
+            turn_id: None,
+            activities: vec![older],
+        },
+        TranscriptBlock {
+            after_message: 0,
+            turn_id: None,
+            activities: vec![
+                ActivityItem::new(None, ActivityKind::Command, "Ran tests", None, true),
+                newer,
+            ],
+        },
+    ];
+
+    assert_eq!(
+        latest_todo_plan(&session),
+        Some(vec![
+            (TodoState::Done, "new one".to_owned()),
+            (TodoState::InProgress, "new two".to_owned()),
+        ])
+    );
+}
+
+#[test]
+fn latest_todo_plan_keeps_the_last_known_list_while_a_card_is_in_flight() {
+    use super::timeline_v2::parts::tool_part::TodoState;
+
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
+    let mut settled = ActivityItem::new(None, ActivityKind::Plan, "todo_write", None, true);
+    settled.output = Some("[ ] 1. known".into());
+    // The newest call has started but produced no output yet — its card
+    // carries no parseable list, so the previous one still shows.
+    let in_flight = ActivityItem::new(None, ActivityKind::Plan, "todo_write", None, false);
+    session.transcript_blocks = vec![TranscriptBlock {
+        after_message: 0,
+        turn_id: None,
+        activities: vec![settled, in_flight],
+    }];
+
+    assert_eq!(
+        latest_todo_plan(&session),
+        Some(vec![(TodoState::Pending, "known".to_owned())])
+    );
+
+    session.transcript_blocks[0].activities.clear();
+    assert_eq!(latest_todo_plan(&session), None);
 }

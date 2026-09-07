@@ -1,5 +1,8 @@
 use super::branches::{BranchPickerContext, BranchPickerSurface};
 use super::model_picker::ModelPickerConfig;
+use super::timeline_v2::parts::tool_part::{
+    TodoState, is_todo_write, parse_todo_output, todo_checkbox, todo_row,
+};
 use super::*;
 
 use anyhow::Context as _;
@@ -1323,6 +1326,8 @@ impl Tide {
     /// Stage the clipboard's primary image/file representation. On-disk paths
     /// reuse drop handling immediately; raw image bytes are copied into Tide's
     /// durable blob store on the background executor before their chip appears.
+    /// Oversized text pastes arrive as String payloads and stage as text
+    /// attachments (see [`Tide::stage_pasted_text`]).
     pub(super) fn stage_pasted_attachments(
         &mut self,
         entries: Vec<ClipboardEntry>,
@@ -1336,7 +1341,10 @@ impl Tide {
                 ClipboardEntry::ExternalPaths(external) => {
                     paths.extend(external.paths().iter().cloned())
                 }
-                ClipboardEntry::String(_) | ClipboardEntry::Image(_) => {}
+                // The clipboard entry now carries a `ClipboardString`; the
+                // staged-paste path wants the plain text.
+                ClipboardEntry::String(text) => self.stage_pasted_text(text.text, cx),
+                ClipboardEntry::Image(_) => {}
             }
         }
         self.stage_attachment_paths(&paths, cx);
@@ -1409,6 +1417,87 @@ impl Tide {
                 }
                 Err(error) => {
                     tide.show_toast(tr!("errors.store_pasted_image", error = error));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Stage an oversized text paste as a daemon-side attachment. The field
+    /// gains an `@<name>` mention at the caret immediately — naming is pure —
+    /// while the content upload rides the background executor, like every
+    /// other attachment path.
+    ///
+    /// Delivery route: the text crosses the existing `ImportAttachment` RPC
+    /// and is materialized inside the daemon's attachment store, exactly as a
+    /// dropped file is. That store is one of the driver's read-annex roots,
+    /// so the `@<path>` mention the submission appends resolves there and the
+    /// model reads the pasted content with its ordinary read tools. Nothing
+    /// is inlined into the prompt — one file, one mention, the same shape as
+    /// any other attachment.
+    pub(super) fn stage_pasted_text(&mut self, text: String, cx: &mut Context<Self>) {
+        // Claim the name synchronously against both staged chips and mentions
+        // still sitting in the field, so a paste whose upload is still in
+        // flight cannot collide with the next one.
+        let content = self.composer.read(cx).content(cx).to_owned();
+        let staged_names = self
+            .composer_attachments
+            .iter()
+            .map(|attachment| attachment.name.clone())
+            .collect::<Vec<_>>();
+        let name = pasted_text_attachment_name(chrono::Local::now(), |candidate| {
+            staged_names
+                .iter()
+                .any(|staged| staged.as_ref() == candidate)
+                || content.contains(&format!("@{candidate}"))
+        });
+        let cursor = self.composer.read(cx).cursor(cx);
+        self.composer.update(cx, |composer, cx| {
+            composer.replace_range(cursor..cursor, &format!("@{name} "), cx);
+        });
+        self.schedule_composer_draft_save(cx);
+        cx.notify();
+
+        let upload = client::attachments::AttachmentUpload::File {
+            data_base64: base64::engine::general_purpose::STANDARD.encode(text.as_bytes()),
+        };
+        let daemon = self.daemon.clone();
+        let draft_owner = self.selected_composer_draft_key();
+        cx.spawn(async move |tide, cx| {
+            let stored = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = daemon.client().request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        client::Command::ImportAttachment { name, upload },
+                    )?;
+                    let client::ResponsePayload::AttachmentStored { attachment } = response else {
+                        anyhow::bail!("the daemon returned an invalid attachment response");
+                    };
+                    Ok::<_, anyhow::Error>(attachment)
+                })
+                .await;
+            let _ = tide.update(cx, |tide, cx| match stored {
+                Ok(attachment) => {
+                    if tide.selected_composer_draft_key() != draft_owner {
+                        return;
+                    }
+                    if tide.stage_daemon_attachment(
+                        attachment.path,
+                        attachment.name,
+                        false,
+                        false,
+                        attachment.reference,
+                        None,
+                    ) {
+                        tide.schedule_composer_draft_save(cx);
+                        cx.notify();
+                    }
+                }
+                Err(error) => {
+                    tide.show_toast(tr!("errors.store_pasted_text", error = error.to_string()));
                     cx.notify();
                 }
             });
@@ -1763,6 +1852,107 @@ impl Tide {
                             .overflow_hidden()
                             .child(list),
                     ),
+            ),
+        )
+    }
+
+    /// The floating plan card above the composer: the agent's live todo
+    /// list, mirrored from the newest `todo_write` card in the transcript
+    /// so the current plan stays visible no matter how far the transcript
+    /// has scrolled. The header toggles collapse; collapsed, the card is
+    /// one line naming the in-progress task.
+    pub(super) fn render_composer_todo(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let session = self.selected_session()?;
+        let items = latest_todo_plan(session)?;
+        let theme = Theme::current(cx);
+        let total = items.len();
+        let done = items
+            .iter()
+            .filter(|(state, _)| *state == TodoState::Done)
+            .count();
+        let collapsed = self.composer_todo_collapsed;
+        let current = items
+            .iter()
+            .find(|(state, _)| *state == TodoState::InProgress)
+            .map(|(_, label)| label.clone());
+        let (leading, title) = match (collapsed, current) {
+            (true, Some(task)) => (
+                todo_checkbox(TodoState::InProgress, &theme).into_any_element(),
+                task,
+            ),
+            _ => (
+                icon("icons/list.svg", 12.0, theme.text_tertiary).into_any_element(),
+                tr!("composer.plan"),
+            ),
+        };
+        let header = div()
+            .id("composer-todo-header")
+            .when(collapsed, |row| row.rounded(px(12.0)))
+            .when(!collapsed, |row| {
+                row.rounded_tl(px(12.0)).rounded_tr(px(12.0))
+            })
+            .px(px(12.0))
+            .pt(px(6.0))
+            .pb(px(if collapsed { 6.0 } else { 4.0 }))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_default()
+            .hover(|row| row.bg(theme.overlay))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.composer_todo_collapsed = !this.composer_todo_collapsed;
+                cx.notify();
+            }))
+            .child(leading)
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .child(title),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(format!("{done}/{total}"))),
+            )
+            .child(icon(
+                if collapsed {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-up.svg"
+                },
+                12.0,
+                theme.text_tertiary,
+            ));
+        let card = div()
+            .rounded(px(12.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.composer)
+            .overflow_hidden()
+            .child(header);
+        Some(
+            div().flex_none().px(px(20.0)).pb(px(6.0)).child(
+                div()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .mx_auto()
+                    .child(if collapsed {
+                        card
+                    } else {
+                        card.child(
+                            div().flex().flex_col().px(px(12.0)).pb(px(6.0)).children(
+                                items
+                                    .into_iter()
+                                    .map(|(state, label)| todo_row(state, label, &theme)),
+                            ),
+                        )
+                    }),
             ),
         )
     }
@@ -2145,6 +2335,21 @@ fn attachment_upload_from_path(
     ))
 }
 
+/// The newest todo list the session's transcript carries, as checklist
+/// rows. Transcript cards hold every `todo_write` result; scanning back
+/// finds the last one whose output parses, so a newer call supersedes
+/// older ones, and while the newest card is still in flight (no output
+/// yet) the last known list stays visible.
+pub(super) fn latest_todo_plan(session: &AgentSession) -> Option<Vec<(TodoState, String)>> {
+    session
+        .transcript_blocks
+        .iter()
+        .rev()
+        .flat_map(|block| block.activities.iter().rev())
+        .filter(|activity| is_todo_write(activity))
+        .find_map(|activity| activity.output.as_deref().and_then(parse_todo_output))
+}
+
 #[cfg(test)]
 pub(super) fn dropped_file_mention(
     root: Option<&std::path::Path>,
@@ -2162,6 +2367,24 @@ pub(super) fn dropped_file_mention(
     } else {
         mention
     }
+}
+
+/// The attachment name for a staged paste: sortable to the minute, in the
+/// shape `pasted-2026-09-06-1715.txt`. `is_taken` decides the numeric-suffix
+/// escape hatch — two pastes in one draft must not blur into one tile even
+/// when they land in the same minute (or before the first upload resolved).
+pub(super) fn pasted_text_attachment_name(
+    now: chrono::DateTime<chrono::Local>,
+    is_taken: impl Fn(&str) -> bool,
+) -> String {
+    let stamp = now.format("%Y-%m-%d-%H%M");
+    let mut name = format!("pasted-{stamp}.txt");
+    let mut suffix = 2;
+    while is_taken(&name) {
+        name = format!("pasted-{stamp}-{suffix}.txt");
+        suffix += 1;
+    }
+    name
 }
 
 fn is_image_attachment_path(path: &Path) -> bool {

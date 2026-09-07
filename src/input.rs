@@ -535,10 +535,12 @@ pub enum InputEvent {
     BackspaceOnEmpty,
 }
 
-/// Clipboard payloads whose primary representation is an image or file list,
-/// emitted instead of a text splice by fields that opted in via
-/// [`TextInput::media_paste`]. The composer persists them and presents
-/// them as attachment chips.
+/// Clipboard payloads the owner stages rather than splices into the field:
+/// image and file lists from fields that opted in via
+/// [`TextInput::media_paste`], plus — from fields that also opted in via
+/// [`TextInput::set_text_paste_attachments`] — oversized text pastes as a
+/// [`ClipboardEntry::String`] payload. The composer persists the entries and
+/// presents them as attachment chips.
 #[derive(Clone)]
 pub struct MediaPaste(pub Vec<ClipboardEntry>);
 
@@ -593,6 +595,19 @@ fn pasted_text_for_mode(mode: FieldMode, text: &str) -> String {
     }
 }
 
+/// A text paste taller than this stops being composer prose: fields that opt
+/// in via [`TextInput::set_text_paste_attachments`] hand the content to their
+/// owner as an attachment payload instead of splicing it into the text.
+/// Counted in lines, not bytes — a long single line still reads as prose —
+/// and high enough that ordinary multi-line pastes (config snippets, short
+/// logs) stay inline.
+pub(crate) const PASTE_ATTACHMENT_MIN_LINES: usize = 50;
+
+/// Whether clipboard `text` crosses the attachment threshold.
+pub(crate) fn paste_becomes_attachment(text: &str) -> bool {
+    text.lines().count() > PASTE_ATTACHMENT_MIN_LINES
+}
+
 /// Tallest an [`auto_height`](TextInput::auto_height) field grows before
 /// its text scrolls under an overlay scrollbar instead of growing the card.
 const AUTO_HEIGHT_MAX: Pixels = px(300.);
@@ -617,6 +632,10 @@ pub struct TextInput {
     /// Image and file pastes surface as [`MediaPaste`] instead of being
     /// swallowed by the text path.
     accepts_media_paste: bool,
+    /// Text pastes taller than [`PASTE_ATTACHMENT_MIN_LINES`] surface as a
+    /// [`MediaPaste`] String payload for the owner to stage as a text
+    /// attachment, instead of being spliced into the field.
+    converts_large_text_pastes: bool,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -717,6 +736,7 @@ impl TextInput {
             auto_height: false,
             auto_height_cap: None,
             accepts_media_paste: false,
+            converts_large_text_pastes: false,
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -868,6 +888,14 @@ impl TextInput {
     pub fn media_paste(mut self) -> Self {
         self.accepts_media_paste = true;
         self
+    }
+
+    /// Route oversized text pastes (see [`PASTE_ATTACHMENT_MIN_LINES`]) to
+    /// the owner as a [`MediaPaste`] String payload for attachment staging.
+    /// A `&mut` setter because it is forwarded through a wrapper entity that
+    /// no longer owns a builder chain (the composer's card).
+    pub fn set_text_paste_attachments(&mut self) {
+        self.converts_large_text_pastes = true;
     }
 
     /// Make Escape clear the field first, the filter-field convention: only
@@ -1417,6 +1445,13 @@ impl TextInput {
             return;
         };
         let text = pasted_text_for_mode(self.mode, &text);
+        // A paste taller than the inline limit is attachment vocabulary: the
+        // payload leaves the same door an image paste uses, and the owner
+        // stages the text as a file, leaving an `@` mention in the field.
+        if self.converts_large_text_pastes && paste_becomes_attachment(&text) {
+            cx.emit(MediaPaste(vec![ClipboardEntry::String(text.into())]));
+            return;
+        }
         // A paste is its own undo step, never part of the typing around it —
         // the native NSTextView boundary, stricter than Zed's time grouping.
         self.history.seal();
@@ -2596,10 +2631,11 @@ mod tests {
 
     use super::TokenClass;
     use super::{
-        EditHistory, FieldMode, SearchPaint, TextInput, UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP,
-        cursor_should_be_visible, input_text_runs, media_paste_entries, next_word_boundary,
-        pasted_text_for_mode, previous_word_boundary, single_line_scroll, trimmed_splice,
-        visual_row_count, word_range_at,
+        EditHistory, FieldMode, PASTE_ATTACHMENT_MIN_LINES, SearchPaint, TextInput,
+        UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, cursor_should_be_visible, input_text_runs,
+        media_paste_entries, next_word_boundary, paste_becomes_attachment, pasted_text_for_mode,
+        previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
+        word_range_at,
     };
 
     struct InputHarness {
@@ -2739,6 +2775,24 @@ mod tests {
             pasted_text_for_mode(FieldMode::SingleLine, "first\r\nsecond"),
             "first  second"
         );
+    }
+
+    #[test]
+    fn only_pastes_past_the_line_threshold_become_attachments() {
+        assert!(!paste_becomes_attachment(""));
+        assert!(!paste_becomes_attachment("one line"));
+        assert!(!paste_becomes_attachment("first\nsecond\nthird"));
+
+        // Exactly the threshold stays inline; one more line crosses it.
+        let at_threshold = "line\n".repeat(PASTE_ATTACHMENT_MIN_LINES);
+        assert_eq!(at_threshold.lines().count(), PASTE_ATTACHMENT_MIN_LINES);
+        assert!(!paste_becomes_attachment(&at_threshold));
+        let past_threshold = "line\n".repeat(PASTE_ATTACHMENT_MIN_LINES + 1);
+        assert!(paste_becomes_attachment(&past_threshold));
+
+        // A trailing break does not count its phantom empty last line.
+        let one_real_line = format!("{}\n", "word ".repeat(2000));
+        assert!(!paste_becomes_attachment(&one_real_line));
     }
 
     #[gpui::test]

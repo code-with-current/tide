@@ -45,7 +45,8 @@ pub enum ChatComposerEvent {
     Focus,
     /// Backspace with nothing left to delete; Tide pops an attachment chip.
     BackspaceOnEmpty,
-    /// A clipboard image/file paste. Text pastes never surface here.
+    /// A clipboard image/file paste, or — from a field opted into it — an
+    /// oversized text paste routed here for attachment staging.
     MediaPasted(Vec<ClipboardEntry>),
 }
 
@@ -101,6 +102,16 @@ impl ChatComposer {
     pub fn padding_x(self, padding: Pixels, cx: &mut Context<Self>) -> Self {
         self.field
             .update(cx, |field, _| field.set_padding_x(padding));
+        self
+    }
+
+    /// Route oversized text pastes into [`ChatComposerEvent::MediaPasted`]
+    /// so Tide stages them as text attachments instead of the field splicing
+    /// them inline. Off for the message-edit composer, whose submission path
+    /// carries only the edited message's retained attachments.
+    pub fn text_paste_attachments(self, cx: &mut Context<Self>) -> Self {
+        self.field
+            .update(cx, |field, _| field.set_text_paste_attachments());
         self
     }
 
