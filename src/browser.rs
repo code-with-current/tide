@@ -967,7 +967,7 @@ mod host {
         parent: isize,
         surface: Rc<dyn PlatformNativeSurface>,
         transparent: bool,
-        environment: ICoreWebView2Environment3,
+        environment: ICoreWebView2Environment,
         callbacks: Callbacks,
         ready: Ready,
     ) {

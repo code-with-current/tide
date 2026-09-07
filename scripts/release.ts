@@ -403,7 +403,6 @@ try {
   await $`env TIDE_CODESIGN_IDENTITY=${identity} TIDE_ANALYTICS_ENDPOINT=${analyticsEndpoint ?? ""} TIDE_ANALYTICS_WEBSITE_ID=${analyticsWebsiteId ?? ""} TIDE_SKIP_CARGO_BUILD=${values["skip-build"] ? "1" : "0"} ${join(projectRoot, "scripts", "bundle.sh")} release`;
   for (const artifact of [
     join(contentsDirectory, "MacOS", executableName),
-    bundledDaemonExecutable,
     bundledJsReplExecutable,
     bundledComputerUseSkill,
     bundledComputerUseHelper,
@@ -416,7 +415,6 @@ try {
   await $`xattr -cr ${appBundle}`;
 
   await $`codesign --verify --strict --verbose=2 ${bundledJsReplExecutable}`;
-  await $`codesign --verify --strict --verbose=2 ${bundledDaemonExecutable}`;
   await $`codesign --verify --deep --strict --verbose=2 ${bundledComputerUseHelper}`;
   await verifyJavaScriptRepl(bundledJsReplExecutable);
   logStep(
