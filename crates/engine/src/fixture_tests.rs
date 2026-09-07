@@ -301,6 +301,14 @@ fn anthropic_plain_text_stream_and_request() {
         None,
         "thinking must be absent when off"
     );
+    // Automatic prompt caching marks every native-host request, thinking on
+    // or off: the API advances the breakpoint as the conversation grows, so
+    // each step after the first re-reads the stable prefix from cache.
+    assert_eq!(
+        body["cache_control"],
+        serde_json::json!({ "type": "ephemeral" }),
+        "automatic prompt caching must mark native-host requests"
+    );
     assert_eq!(body["system"][0]["text"], want["system"][0]["text"]);
     assert_eq!(body["messages"], want["messages"]);
     assert_eq!(body["stream"], want["stream"]);

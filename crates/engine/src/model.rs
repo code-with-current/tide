@@ -13,10 +13,28 @@
 //! `read_timeout` — per response-body read, reset on every chunk: the SSE
 //! chunk-idle watchdog, scoped to the response body.
 
+use std::sync::LazyLock;
+use std::time::Duration;
+
 use rig_core::client::CompletionClient;
 
-use crate::quirk::SSE_READ_TIMEOUT;
+use crate::quirk::{is_native_anthropic_host, SSE_READ_TIMEOUT};
 use crate::EngineError;
+
+/// One process-wide HTTP client shared by every engine stream — root turns,
+/// dispatched sub-agents, and resumed children alike. Connection pools
+/// (TCP + TLS + HTTP/2 sessions) live on the client, so building a fresh one
+/// per turn would put a fresh provider handshake in front of every turn's
+/// first request; here the pool survives across turns and concurrent
+/// sub-agents. The idle timeout keeps a connection warm across a typical
+/// pause between turns (reqwest's 90 s default tears it down sooner).
+static SHARED_HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .read_timeout(SSE_READ_TIMEOUT)
+        .pool_idle_timeout(Duration::from_secs(300))
+        .build()
+        .expect("the shared engine HTTP client builds")
+});
 
 /// TS `ApiStyle` — dispatches the wire protocol, never sniffed at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -84,10 +102,7 @@ impl EngineModel {
         config: &EngineModelConfig,
         transport_base_url: &str,
     ) -> Result<Self, EngineError> {
-        let http = reqwest::Client::builder()
-            .read_timeout(SSE_READ_TIMEOUT)
-            .build()
-            .map_err(|e| EngineError::Config(e.to_string()))?;
+        let http = SHARED_HTTP.clone();
         match config.api_style {
             ProviderApiStyle::Anthropic => {
                 let base = normalize_base(&config.base_url, ANTHROPIC_DEFAULT_BASE_URL);
@@ -98,12 +113,24 @@ impl EngineModel {
                     .http_client(http)
                     .build()
                     .map_err(|e| EngineError::Config(e.to_string()))?;
+                let mut completion_model = client.completion_model(config.model_id.clone());
+                // Anthropic's automatic prompt caching stamps a top-level
+                // `cache_control` on every request; the API places the
+                // breakpoint on the last cacheable block and advances it as
+                // the conversation grows, so every step after the first
+                // re-reads the stable tools + system + history prefix from
+                // cache instead of re-prefilling it — the dominant
+                // first-token cost once a session gets long, on root loops
+                // and dispatched children alike. Same native-host gate the
+                // quirk layer uses for its wire `cache_control`:
+                // OpenRouter-style proxies reject the field with a 400.
+                if is_native_anthropic_host(Some(base)) {
+                    completion_model = completion_model.with_automatic_caching();
+                }
                 Ok(Self {
                     provider_base_url: base.to_owned(),
                     model_id: config.model_id.clone(),
-                    inner: EngineModelInner::Anthropic(
-                        client.completion_model(config.model_id.clone()),
-                    ),
+                    inner: EngineModelInner::Anthropic(completion_model),
                 })
             }
             ProviderApiStyle::OpenAi => {
