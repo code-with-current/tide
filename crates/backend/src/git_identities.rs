@@ -1359,6 +1359,11 @@ mod tests {
             name: "repo".into(),
             path: path.to_path_buf(),
             created_at: 0,
+            icon: Default::default(),
+            icon_color: None,
+            default_provider: None,
+            default_model: None,
+            actions: Vec::new(),
         }
     }
 

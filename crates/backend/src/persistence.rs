@@ -31,7 +31,7 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, FavoriteModel, InteractionMode, Message, MessageAttachment, MessageRole, Project,
-    ProviderKind, RuntimeMode, SessionWorkspace,
+    ProjectIcon, ProviderKind, RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemePreference;
 pub use protocol::persistence::{
@@ -1079,6 +1079,11 @@ impl StateStore {
                     name,
                     path: PathBuf::from(path),
                     created_at: created_at as u64,
+                    icon: ProjectIcon::default(),
+                    icon_color: None,
+                    default_provider: None,
+                    default_model: None,
+                    actions: Vec::new(),
                 })
             })
             .collect();

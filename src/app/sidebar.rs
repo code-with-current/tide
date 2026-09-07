@@ -2517,12 +2517,14 @@ mod tests {
             name: "Task".to_owned(),
             path: root.join("2026-08-23/task"),
             created_at: 0,
+            ..Project::from_path(root.join("2026-08-23/task"))
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
             name: "Ordinary".to_owned(),
             path: PathBuf::from("/tmp/dev/ordinary"),
             created_at: 0,
+            ..Project::from_path(PathBuf::from("/tmp/dev/ordinary"))
         };
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));
         assert!(!sidebar_project_is_projectless(&ordinary, Some(root)));

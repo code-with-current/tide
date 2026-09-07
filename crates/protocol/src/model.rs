@@ -378,7 +378,26 @@ pub fn parse_cli_version(output: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectAction {
+    pub name: String,
+    pub command: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+pub enum ProjectIcon {
+    /// Initials + deterministic color; well-known repo files win when present.
+    #[default]
+    Auto,
+    /// Path inside the embedded asset set, e.g. "icons/projects/rocket.svg".
+    Preset(String),
+    /// File name under the Tide assets dir, keyed by project id.
+    Uploaded(String),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct Project {
     pub id: Uuid,
     pub name: String,
@@ -386,6 +405,17 @@ pub struct Project {
     /// When the project was added, unix seconds.
     #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
+    pub icon: ProjectIcon,
+    /// Background tint applied in every icon mode, as hex (e.g. "#7c3aed").
+    #[serde(default)]
+    pub icon_color: Option<String>,
+    #[serde(default)]
+    pub default_provider: Option<ProviderKind>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub actions: Vec<ProjectAction>,
 }
 
 /// Filesystem context a task runs in.
@@ -455,6 +485,25 @@ impl Project {
             name,
             path,
             created_at: unix_time(),
+            icon: ProjectIcon::default(),
+            icon_color: None,
+            default_provider: None,
+            default_model: None,
+            actions: Vec::new(),
+        }
+    }
+
+    pub fn session_start_defaults(
+        &self,
+        last_provider: ProviderKind,
+        last_model: Option<&str>,
+    ) -> (ProviderKind, Option<String>) {
+        match (self.default_provider, self.default_model.as_deref()) {
+            (Some(provider), model) => (provider, model.map(str::to_owned)),
+            // A model-only override rides the remembered provider; with the
+            // current single-provider catalog that pair is always valid.
+            (None, Some(model)) => (last_provider, Some(model.to_owned())),
+            (None, None) => (last_provider, last_model.map(str::to_owned)),
         }
     }
 
@@ -4651,5 +4700,90 @@ mod tests {
         assert!(projection.transcript_blocks.is_empty());
         assert!(projection.turns.is_empty());
         assert!(projection.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn project_settings_default_on_old_snapshots() {
+        let json = serde_json::json!({
+            "id": "0194883a-0000-7000-8000-000000000001",
+            "name": "waku",
+            "path": "/tmp/waku",
+        });
+        let project: Project = serde_json::from_value(json).unwrap();
+
+        assert_eq!(project.icon, ProjectIcon::Auto);
+        assert_eq!(project.icon_color, None);
+        assert_eq!(project.default_provider, None);
+        assert_eq!(project.default_model, None);
+        assert!(project.actions.is_empty());
+    }
+
+    #[test]
+    fn project_settings_round_trip() {
+        let project = Project {
+            icon: ProjectIcon::Preset("icons/projects/rocket.svg".into()),
+            icon_color: Some("#7c3aed".into()),
+            default_provider: Some(ProviderKind::Tide),
+            default_model: Some("claude-opus-4-5".into()),
+            actions: vec![ProjectAction {
+                name: "run".into(),
+                command: "bun run dev".into(),
+            }],
+            ..serde_json::from_value::<Project>(serde_json::json!({
+                "id": "0194883a-0000-7000-8000-000000000001",
+                "name": "waku",
+                "path": "/tmp/waku",
+            }))
+            .unwrap()
+        };
+
+        let json = serde_json::to_value(&project).unwrap();
+        assert_eq!(json["icon"]["kind"], "preset");
+        assert_eq!(json["icon"]["value"], "icons/projects/rocket.svg");
+        assert_eq!(json["icon_color"], "#7c3aed");
+        assert_eq!(json["default_provider"], "tide");
+        assert_eq!(json["actions"][0]["command"], "bun run dev");
+
+        let parsed: Project = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, project);
+    }
+
+    #[test]
+    fn session_start_defaults_prefer_the_project_overrides() {
+        let base = Project {
+            ..serde_json::from_value::<Project>(serde_json::json!({
+                "id": "0194883a-0000-7000-8000-000000000001",
+                "name": "waku",
+                "path": "/tmp/waku",
+            }))
+            .unwrap()
+        };
+
+        // No overrides: the remembered pair wins.
+        assert_eq!(
+            base.session_start_defaults(ProviderKind::Tide, Some("gpt-5")),
+            (ProviderKind::Tide, Some("gpt-5".into()))
+        );
+
+        // Model-only override: rides the remembered provider.
+        let model_only = Project {
+            default_model: Some("claude-opus-4-5".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            model_only.session_start_defaults(ProviderKind::Tide, Some("gpt-5")),
+            (ProviderKind::Tide, Some("claude-opus-4-5".into()))
+        );
+
+        // Full override: project pair wins outright.
+        let full = Project {
+            default_provider: Some(ProviderKind::Tide),
+            default_model: Some("claude-opus-4-5".into()),
+            ..base
+        };
+        assert_eq!(
+            full.session_start_defaults(ProviderKind::Tide, None),
+            (ProviderKind::Tide, Some("claude-opus-4-5".into()))
+        );
     }
 }
