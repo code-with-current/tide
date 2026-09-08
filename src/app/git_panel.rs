@@ -1028,7 +1028,8 @@ impl Tide {
     /// Whether the worktree's owning session is mid-turn — removal stays
     /// blocked until it settles.
     pub(super) fn worktree_session_is_busy(&self, path: &Path) -> bool {
-        self.worktree_session(path).is_some_and(|session| session.is_busy())
+        self.worktree_session(path)
+            .is_some_and(|session| session.is_busy())
     }
 
     /// Opens the per-file diff sub-view for a clicked change and requests

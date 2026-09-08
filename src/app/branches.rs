@@ -769,11 +769,7 @@ impl Tide {
                                     .child(tr!("branches.work_in_new_worktree")),
                             )
                             .when(planned_worktree, |element| {
-                                element.child(icon(
-                                    "icons/check.svg",
-                                    11.0,
-                                    theme.text_secondary,
-                                ))
+                                element.child(icon("icons/check.svg", 11.0, theme.text_secondary))
                             })
                             // The picker stays open: flipping the workspace
                             // on is usually followed by picking the base

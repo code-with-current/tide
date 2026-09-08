@@ -365,9 +365,10 @@ impl Backend for TideBackend {
                 name,
                 kind,
                 location,
+                project_id,
             } => {
-                let source =
-                    crate::rag::add_source(&name, &kind, &location).map_err(anyhow::Error::msg)?;
+                let source = crate::rag::add_source(&name, &kind, &location, project_id.as_deref())
+                    .map_err(anyhow::Error::msg)?;
                 let _ = source;
                 Ok(ResponsePayload::Sources {
                     sources: crate::rag::list_sources(),

@@ -1477,6 +1477,8 @@ pub struct Tide {
     projects_icon_probe_generation: u64,
     /// The remove-project confirmation, when open.
     projects_remove_dialog: Option<projects_page::RemoveProjectDialog>,
+    /// Live action runs: one dedicated terminal per running action.
+    action_runs: RefCell<Vec<right_panel::ActionRun>>,
     /// The project whose last icon upload failed validation; drives the
     /// detail panel's inline error.
     projects_icon_error: Option<Uuid>,
@@ -3005,6 +3007,7 @@ impl Tide {
                 projects_icon_probes: RefCell::new(HashMap::new()),
                 projects_icon_probe_generation: 0,
                 projects_remove_dialog: None,
+                action_runs: RefCell::new(Vec::new()),
                 projects_icon_error: None,
                 projects_name_input,
                 projects_action_name,

@@ -1661,6 +1661,37 @@ mod tests {
     // and are covered by its own tests; this module only consumes them.
 }
 
+pub(super) struct ActionRun {
+    pub(super) project_id: Uuid,
+    pub(super) action_name: String,
+    pub(super) terminal_id: Uuid,
+    /// The dev-server port the run's output advertised, when scanned.
+    pub(super) exposed_port: Option<u16>,
+    pub(super) last_port_scan: Option<std::time::Instant>,
+}
+
+/// A dev-server port the run's visible output advertised (`localhost:5173`
+/// and friends). Pure so the threshold lives next to its test.
+fn scan_exposed_port(text: &str) -> Option<u16> {
+    for line in text.lines() {
+        for needle in ["localhost:", "127.0.0.1:", "0.0.0.0:"] {
+            let Some(index) = line.find(needle) else {
+                continue;
+            };
+            let digits: String = line[index + needle.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(port) = digits.parse::<u16>() {
+                if port != 0 {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
 impl Tide {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         match transcript_link_route(target, self.selected_workspace_path()) {
@@ -1951,23 +1982,182 @@ impl Tide {
     /// nothing but the CDN script ever touches the network. The browser view
     /// itself only exists once the tab renders, so the URL waits in
     /// [`Self::right_panel_pending_browser_urls`] until then.
-    /// Run a project action: open (or reuse) the session's terminal tab at
-    /// the workspace path and type the command in. Interactive commands keep
-    /// running in that tab; the transcript is never involved.
-    pub(super) fn run_project_action(&mut self, command: String, cx: &mut Context<Self>) {
+    /// workspace path and type the command in. The run is registered so its
+    /// row can flip Play/Stop and scan for an advertised port; the shared
+    /// session terminal is never involved and output never reaches the
+    /// transcript.
+    pub(super) fn run_project_action(
+        &mut self,
+        project_id: Uuid,
+        action_name: String,
+        command: String,
+        cx: &mut Context<Self>,
+    ) {
         if self.daemon.is_remote() || self.selected_workspace_path().is_none() {
             self.show_toast(tr!("projects.action_unavailable"));
             return;
         }
-        let terminal_id = self
-            .right_panel_surfaces
-            .iter()
-            .find_map(RightPanelSurface::terminal_id)
-            .unwrap_or_else(Uuid::new_v4);
-        self.open_right_panel_surface(RightPanelSurface::Terminal(terminal_id), cx);
+        // A still-registered run means it's live: just focus its tab. A run
+        // whose process exited is stale — drop it and start fresh.
+        let stale = {
+            let runs = self.action_runs.borrow();
+            runs.iter()
+                .find(|run| run.project_id == project_id && run.action_name == action_name)
+                .map(|run| {
+                    self.right_panel_terminals
+                        .get(&run.terminal_id)
+                        .is_none_or(|view| view.read(cx).exited())
+                })
+        }; // Option<bool>: Some(false) => live run exists
+        if stale == Some(false) {
+            let terminal_id = self
+                .action_runs
+                .borrow()
+                .iter()
+                .find(|run| run.project_id == project_id && run.action_name == action_name)
+                .map(|run| run.terminal_id)
+                .expect("checked above");
+            self.open_right_panel_surface(RightPanelSurface::Terminal(terminal_id), cx);
+            return;
+        }
+        self.action_runs
+            .borrow_mut()
+            .retain(|run| !(run.project_id == project_id && run.action_name == action_name));
+
+        let working_directory = self
+            .selected_workspace_path()
+            .map(|path| path.to_path_buf())
+            .expect("checked above");
+        let terminal_id = Uuid::new_v4();
+        self.right_panel_terminals.insert(
+            terminal_id,
+            cx.new(|cx| TerminalView::new(working_directory, cx)),
+        );
         if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
+            let command = command.clone();
             view.update(cx, |view, cx| view.run_command(command, cx));
         }
+        self.action_runs.borrow_mut().push(ActionRun {
+            project_id,
+            action_name,
+            terminal_id,
+            exposed_port: None,
+            last_port_scan: None,
+        });
+        self.open_right_panel_surface(RightPanelSurface::Terminal(terminal_id), cx);
+    }
+
+    /// Stop a running action: Ctrl+C for a clean shutdown, then close the
+    /// run's tab and drop its PTY (SIGHUP ends the process group).
+    pub(super) fn stop_project_action(
+        &mut self,
+        project_id: Uuid,
+        action_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(terminal_id) = self
+            .action_runs
+            .borrow()
+            .iter()
+            .find(|run| run.project_id == project_id && run.action_name == action_name)
+            .map(|run| run.terminal_id)
+        else {
+            return;
+        };
+        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
+            view.update(cx, |view, cx| view.interrupt(cx));
+        }
+        self.action_runs
+            .borrow_mut()
+            .retain(|run| !(run.project_id == project_id && run.action_name == action_name));
+        if let Some(index) = self
+            .right_panel_surfaces
+            .iter()
+            .position(|surface| surface.terminal_id() == Some(terminal_id))
+        {
+            self.close_right_panel_surface(index, cx);
+        } else {
+            self.right_panel_terminals.remove(&terminal_id);
+        }
+        cx.notify();
+    }
+
+    /// (running, advertised port) for one action row. Runs whose terminal
+    /// vanished (tab closed) count as stopped.
+    pub(super) fn action_run_state(
+        &self,
+        project_id: Uuid,
+        action_name: &str,
+        cx: &App,
+    ) -> (bool, Option<u16>) {
+        let runs = self.action_runs.borrow();
+        let Some(run) = runs
+            .iter()
+            .find(|run| run.project_id == project_id && run.action_name == action_name)
+        else {
+            return (false, None);
+        };
+        let running = self
+            .right_panel_terminals
+            .get(&run.terminal_id)
+            .is_some_and(|view| !view.read(cx).exited());
+        (running, running.then(|| run.exposed_port).flatten())
+    }
+
+    /// Rescan a run's output for an advertised port at most every couple of
+    /// seconds; the result lands on the run so rows render without I/O.
+    pub(super) fn refresh_action_run_port(
+        &mut self,
+        project_id: Uuid,
+        action_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let (due, terminal_id) = {
+            let runs = self.action_runs.borrow();
+            let Some(run) = runs
+                .iter()
+                .find(|run| run.project_id == project_id && run.action_name == action_name)
+            else {
+                return;
+            };
+            let due = run
+                .last_port_scan
+                .is_none_or(|scanned| scanned.elapsed() >= std::time::Duration::from_secs(2));
+            (due, run.terminal_id)
+        };
+        if !due {
+            return;
+        }
+        let Some(view) = self.right_panel_terminals.get(&terminal_id) else {
+            return;
+        };
+        let text = view.read(cx).visible_text();
+        let port = scan_exposed_port(&text);
+        let mut changed = false;
+        {
+            let mut runs = self.action_runs.borrow_mut();
+            if let Some(run) = runs
+                .iter_mut()
+                .find(|run| run.project_id == project_id && run.action_name == action_name)
+            {
+                run.last_port_scan = Some(std::time::Instant::now());
+                if run.exposed_port != port {
+                    run.exposed_port = port;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Open an action's advertised URL in a right-panel browser tab.
+    pub(super) fn open_action_url(&mut self, port: u16, cx: &mut Context<Self>) {
+        let browser_id = Uuid::new_v4();
+        self.right_panel_pending_browser_urls
+            .insert(browser_id, format!("http://localhost:{port}"));
+        self.open_right_panel_surface(RightPanelSurface::Browser(browser_id), cx);
     }
 
     pub(super) fn open_mermaid_diagram(&mut self, source: &str, cx: &mut Context<Self>) {
@@ -7559,5 +7749,24 @@ impl Tide {
             }
             _ => tr!("diff.source_last_turn"),
         }
+    }
+}
+
+#[cfg(test)]
+mod action_run_tests {
+    use super::scan_exposed_port;
+
+    #[test]
+    fn exposed_ports_are_scanned_from_run_output() {
+        assert_eq!(
+            scan_exposed_port("Local: http://localhost:5173/"),
+            Some(5173)
+        );
+        assert_eq!(scan_exposed_port("ready on 127.0.0.1:3000"), Some(3000));
+        assert_eq!(scan_exposed_port("listening on 0.0.0.0:8080"), Some(8080));
+        // Port 0 is never a real server.
+        assert_eq!(scan_exposed_port("on localhost:0 now"), None);
+        assert_eq!(scan_exposed_port("compiled successfully"), None);
+        assert_eq!(scan_exposed_port(""), None);
     }
 }

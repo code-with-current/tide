@@ -98,6 +98,7 @@ projects.action_command: コマンド
 projects.action_add: アクションを追加
 projects.action_needs_command: コマンドは必須です。
 projects.action_run: 実行
+projects.action_stop: 停止
 projects.action_unavailable: このターミナルは利用できません。
 projects.remove_failed: "プロジェクトを削除できませんでした: %{error}"
 inspector.section_actions: アクション
@@ -1429,6 +1430,9 @@ settings.rag.add: 追加
 settings.rag.cancel: キャンセル
 settings.rag.add_source: ナレッジソースを追加
 settings.rag.dialog_description: インデックスされた内容はエージェントのメモリツールで検索できます。
+settings.rag.scope_global: グローバル
+settings.rag.scope_target: "スコープ: %{target}"
+settings.rag.dialog_browse: 参照…
 settings.rag.dialog_name: 名前
 settings.rag.dialog_name_placeholder: React ドキュメント
 settings.rag.dialog_kind: 種類

@@ -2010,9 +2010,9 @@ impl Tide {
                     .selected(branch_enabled && open)
                     .max_w(px(210.0))
             },
-        chips_align,
-        cx,
-    )
+            chips_align,
+            cx,
+        )
     }
 
     /// The workspace chips row: project, Local vs new worktree, and the

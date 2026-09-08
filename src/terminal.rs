@@ -709,6 +709,54 @@ impl TerminalView {
         &self.working_directory
     }
 
+    /// Whether the PTY's child process has exited. Driven by the terminal
+    /// layer's `Exited` event, drained on the view's own frames.
+    pub fn exited(&self) -> bool {
+        self.exited
+    }
+
+    /// Sends Ctrl+C — the graceful way to stop a foreground dev server.
+    pub fn interrupt(&mut self, cx: &mut Context<Self>) {
+        self.pause_cursor_blink(cx);
+        let Some(session) = &self.session else {
+            return;
+        };
+        session.write(vec![0x03]);
+    }
+
+    /// The visible grid as text, one line per row — used to scan an action
+    /// run's output for an advertised dev-server port.
+    pub fn visible_text(&self) -> String {
+        let Some(session) = &self.session else {
+            return String::new();
+        };
+        let term = session.term.lock();
+        let content = term.renderable_content();
+        let mut rows: Vec<String> = Vec::new();
+        let mut current_row: Option<i32> = None;
+        let mut line = String::new();
+        for indexed in content.display_iter {
+            let row = indexed.point.line.0 + content.display_offset as i32;
+            if current_row != Some(row) {
+                if current_row.take().is_some() {
+                    rows.push(std::mem::take(&mut line));
+                }
+                current_row = Some(row);
+            }
+            if indexed.cell.flags.contains(Flags::WIDE_CHAR_SPACER)
+                || indexed.cell.flags.contains(Flags::HIDDEN)
+            {
+                line.push(' ');
+            } else {
+                line.push(indexed.cell.c);
+            }
+        }
+        if current_row.is_some() {
+            rows.push(line);
+        }
+        rows.join("\n")
+    }
+
     /// Types `command` into the PTY and presses enter — the project actions
     /// runner hands shell commands over this way. Output stays in the
     /// terminal tab; the transcript is never involved.

@@ -235,6 +235,9 @@ pub enum Command {
         /// url | docs | crawl | repo
         kind: String,
         location: String,
+        /// None = global knowledge; Some = scoped to one project id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<String>,
     },
     SourcesRemove {
         source_id: String,

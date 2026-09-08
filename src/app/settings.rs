@@ -542,7 +542,6 @@ impl Tide {
                 Some(SharedString::from(tr!("settings.knowledge_description"))),
                 Some(self.rag_sources_add_button(theme, cx)),
             ))
-            .child(self.render_memory_rag_card(&theme, cx))
             .child(self.render_sources_card(&theme, cx))
             .into_any_element()
     }

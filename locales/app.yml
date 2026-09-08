@@ -419,6 +419,12 @@ settings.rag.add_source:
   en: Add knowledge source
 settings.rag.dialog_description:
   en: Indexed content is searchable by the agent's memory tool.
+settings.rag.scope_global:
+  en: Global
+settings.rag.scope_target:
+  en: "Scope: %{target}"
+settings.rag.dialog_browse:
+  en: Browse…
 settings.rag.dialog_name:
   en: Name
 settings.rag.dialog_name_placeholder:
@@ -1165,6 +1171,8 @@ projects.action_needs_command:
   en: A command is required.
 projects.action_run:
   en: Run
+projects.action_stop:
+  en: Stop
 projects.action_unavailable:
   en: No terminal is available for this task.
 projects.remove_failed:

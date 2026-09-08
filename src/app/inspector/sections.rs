@@ -1242,9 +1242,74 @@ impl Tide {
             return None;
         }
         let actions = project.actions.clone();
+        let project_id = project.id;
         let mut body = div().flex().flex_col().gap(px(6.0));
         for (index, action) in actions.iter().enumerate() {
+            self.refresh_action_run_port(project_id, &action.name, cx);
+            let (running, port) = self.action_run_state(project_id, &action.name, cx);
             let command = action.command.clone();
+            let action_name = action.name.clone();
+            let control = if running {
+                let stop_name = action_name.clone();
+                div()
+                    .id(SharedString::from(format!("inspector-action-stop-{index}")))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(theme.danger.opacity(0.5))
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .text_size(sp(10.0))
+                    .cursor_pointer()
+                    .hover(|element| element.bg(theme.overlay))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_color(theme.danger)
+                    .child(icon("icons/stop.svg", 9.0, theme.danger))
+                    .child(tr!("projects.action_stop"))
+                    .on_click({
+                        let weak = cx.entity().downgrade();
+                        move |_, _window, cx| {
+                            let _ = weak.update(cx, |tide, cx| {
+                                tide.stop_project_action(project_id, &stop_name, cx);
+                            });
+                        }
+                    })
+                    .into_any_element()
+            } else {
+                div()
+                    .id(SharedString::from(format!("inspector-action-play-{index}")))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .text_size(sp(10.0))
+                    .cursor_pointer()
+                    .hover(|element| element.bg(theme.overlay))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_color(theme.text_secondary)
+                    .child(icon("icons/play.svg", 9.0, theme.text_secondary))
+                    .child(tr!("projects.action_run"))
+                    .on_click({
+                        let weak = cx.entity().downgrade();
+                        let command = command.clone();
+                        let action_name = action_name.clone();
+                        move |_, _window, cx| {
+                            let _ = weak.update(cx, |tide, cx| {
+                                tide.run_project_action(
+                                    project_id,
+                                    action_name.clone(),
+                                    command.clone(),
+                                    cx,
+                                );
+                            });
+                        }
+                    })
+                    .into_any_element()
+            };
             body = body.child(
                 div()
                     .flex()
@@ -1259,27 +1324,29 @@ impl Tide {
                             .text_color(theme.text_tertiary)
                             .child(SharedString::from(action.name.clone())),
                     )
-                    .child(
+                    .children(port.map(|port| {
                         div()
-                            .id(SharedString::from(format!("inspector-action-run-{index}")))
-                            .rounded(px(5.0))
+                            .id(SharedString::from(format!("inspector-action-port-{index}")))
+                            .rounded(px(4.0))
                             .border_1()
                             .border_color(theme.border)
-                            .px(px(6.0))
-                            .py(px(2.0))
+                            .px(px(5.0))
+                            .py(px(1.0))
                             .text_size(sp(10.0))
                             .cursor_pointer()
                             .hover(|element| element.bg(theme.overlay))
-                            .child(tr!("projects.action_run"))
+                            .text_color(theme.success)
+                            .child(SharedString::from(format!(":{port}")))
                             .on_click({
                                 let weak = cx.entity().downgrade();
                                 move |_, _window, cx| {
                                     let _ = weak.update(cx, |tide, cx| {
-                                        tide.run_project_action(command.clone(), cx);
+                                        tide.open_action_url(port, cx);
                                     });
                                 }
-                            }),
-                    ),
+                            })
+                    }))
+                    .child(control),
             );
         }
         Some(render_section(

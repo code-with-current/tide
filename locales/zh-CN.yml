@@ -94,6 +94,7 @@ projects.action_command: 命令
 projects.action_add: 添加操作
 projects.action_needs_command: 必须填写命令。
 projects.action_run: 运行
+projects.action_stop: 停止
 projects.action_unavailable: 此任务没有可用的终端。
 projects.remove_failed: "无法删除项目：%{error}"
 inspector.section_actions: 操作
@@ -1377,6 +1378,9 @@ settings.rag.add: 添加
 settings.rag.cancel: 取消
 settings.rag.add_source: 添加知识来源
 settings.rag.dialog_description: 已索引的内容可被智能体的记忆工具搜索。
+settings.rag.scope_global: 全局
+settings.rag.scope_target: "范围：%{target}"
+settings.rag.dialog_browse: 浏览…
 settings.rag.dialog_name: 名称
 settings.rag.dialog_name_placeholder: React 文档
 settings.rag.dialog_kind: 类型
