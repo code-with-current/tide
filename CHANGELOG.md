@@ -23,6 +23,11 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Changed files in the Git panel now have a right-click menu: stage/unstage
+  and discard moved off the row's hover icons into the menu, alongside Copy
+  Path, Copy Relative Path, Add to .gitignore, Open Diff, and View File. The
+  menu's Add to .gitignore appends the path to the workspace's .gitignore
+  (creating it if absent) without leaving duplicates.
 - The new-session screen is now a single centered composition: the greeting,
   the chat composer, and the git workspace chips — project, Local vs new
   worktree, and the base-branch picker — sit together in the middle of the

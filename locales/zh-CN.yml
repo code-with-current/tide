@@ -1219,6 +1219,11 @@ git_panel.unstaged: 更改
 git_panel.stage: 暂存
 git_panel.unstage: 取消暂存
 git_panel.discard: 放弃更改
+git_panel.copy_path: 复制路径
+git_panel.copy_relative_path: 复制相对路径
+git_panel.ignore_file: 添加到 .gitignore
+git_panel.open_diff: 打开差异
+git_panel.view_file: 查看文件
 git_panel.conflicts: "解决冲突 — %{count} 个文件"
 git_panel.use_ours: 采用我们的
 git_panel.use_theirs: 采用他们的
@@ -1232,6 +1237,8 @@ git_panel.no_identity: "未配置用户身份"
 git_panel.identity_override: "覆盖"
 git_panel.manage_identities: "管理身份…"
 git_panel.summary_placeholder: "提交信息"
+git_panel.generate_message: "生成提交信息"
+git_panel.staged_changes: "已暂存的更改"
 git_panel.amend: "⌥ 修正"
 git_panel.amend_last_commit: "修正上次提交"
 git_panel.commit: "提交"

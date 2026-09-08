@@ -336,8 +336,6 @@ pub(crate) struct GitPanelState {
     /// Tree-mode directories the user has collapsed, keyed by
     /// "section:path" — the inverted set keeps every new directory open.
     pub closed_dirs: HashSet<String>,
-    /// The unstaged file whose discard button is armed for confirmation.
-    pub confirm_discard_file: Option<String>,
     /// Whether the Discard All action is armed for confirmation.
     pub confirm_discard_all: bool,
     pub status: GitQuery<Vec<PanelFileChange>>,
@@ -415,7 +413,6 @@ impl Default for GitPanelState {
             staged_open: true,
             unstaged_open: true,
             closed_dirs: HashSet::new(),
-            confirm_discard_file: None,
             confirm_discard_all: false,
             status: Query::Pending,
             conflicts: Query::Pending,

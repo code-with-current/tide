@@ -9,6 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io::Write as _;
 use std::path::Path;
 use std::process::Stdio;
@@ -667,6 +668,32 @@ pub fn stash_list(cwd: &Path) -> Vec<PanelStash> {
     Repository::open(cwd)
         .map(|mut repo| stash_entries(&mut repo))
         .unwrap_or_default()
+}
+
+/// `gitIgnoreFile` — append the path to the workspace's `.gitignore`,
+/// creating the file when absent, skipping entries already present.
+pub fn ignore_file(cwd: &Path, path: &str) -> PanelOpResult {
+    let result = contained_rel_path(cwd, path)
+        .map_err(|e| e.to_string())
+        .and_then(|rel| {
+            let ignore_path = cwd.join(".gitignore");
+            let existing = match fs::read_to_string(&ignore_path) {
+                Ok(content) => content,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(err) => return Err(err.to_string()),
+            };
+            if existing.lines().any(|line| line.trim() == rel) {
+                return Ok(());
+            }
+            let mut content = existing;
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&rel);
+            content.push('\n');
+            fs::write(&ignore_path, content).map_err(|e| e.to_string())
+        });
+    op_result(result)
 }
 
 /// `gitDiscardFile` — discard workdir-only changes for the path; the
@@ -2551,6 +2578,37 @@ mod tests {
             r.error.as_deref().unwrap().starts_with("stash pop: "),
             "{:?}",
             r.error
+        );
+
+        fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn ignore_file_appends_deduped_entries() {
+        let root = seeded_repo("ignore");
+
+        // First ignore creates .gitignore; a second, different path appends.
+        assert!(ignore_file(&root, "build.out").ok);
+        assert!(ignore_file(&root, "logs/dev.log").ok);
+        assert_eq!(
+            fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "build.out\nlogs/dev.log\n"
+        );
+
+        // The same path again is a no-op, and escaped paths error.
+        assert!(ignore_file(&root, "build.out").ok);
+        assert_eq!(
+            fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "build.out\nlogs/dev.log\n"
+        );
+        assert!(!ignore_file(&root, "../escape").ok);
+
+        // A file missing its trailing newline is still separated.
+        fs::write(root.join(".gitignore"), "no-newline").unwrap();
+        assert!(ignore_file(&root, "z.txt").ok);
+        assert_eq!(
+            fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "no-newline\nz.txt\n"
         );
 
         fs::remove_dir_all(root.parent().unwrap()).unwrap();
