@@ -96,7 +96,11 @@ pub(crate) fn render_activities(
                         .child(header)
                         .when(expanded, |card| {
                             card.child(parts::render_activity_body(
-                                activity, workspace, selection, theme,
+                                activity,
+                                workspace,
+                                selection,
+                                theme,
+                                markdown.link_handler.clone(),
                             ))
                         })
                         .into_any_element(),

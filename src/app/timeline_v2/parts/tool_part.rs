@@ -10,6 +10,8 @@ use super::super::{
     Status, ToolFamily, ToolLabel, TranscriptActions, bash_first_line, label_for, relative_display,
     status_color, tools_description, tools_dim, tools_rail, tools_title,
 };
+use std::rc::Rc;
+
 use super::diff_rows::{self, MAX_DIFF_ROWS};
 use crate::app::components::activity_file_change_stats;
 use crate::md;
@@ -1497,6 +1499,7 @@ pub(crate) fn render_activity_body(
     workspace: &Path,
     selection: &TranscriptSelection,
     theme: &Theme,
+    link_handler: Option<md::render::LinkHandler>,
 ) -> Div {
     let id = disclosure_id(activity);
     let key = |suffix: &str| TextKey::new(format!("tool-body-{id}-{suffix}"), 0);
@@ -1577,7 +1580,13 @@ pub(crate) fn render_activity_body(
                     .map(str::trim)
                     .filter(|text| !text.is_empty());
                 if let Some(description) = description {
-                    body = body.child(blockquote(description, key("desc"), selection, theme));
+                    body = body.child(blockquote(
+                        description,
+                        key("desc"),
+                        selection,
+                        theme,
+                        link_handler.clone(),
+                    ));
                 }
             }
         }
@@ -1616,7 +1625,13 @@ pub(crate) fn render_activity_body(
                         .map(str::trim)
                         .filter(|text| !text.is_empty()));
                 if let Some(description) = description {
-                    body = body.child(blockquote(description, key("desc"), selection, theme));
+                    body = body.child(blockquote(
+                        description,
+                        key("desc"),
+                        selection,
+                        theme,
+                        link_handler.clone(),
+                    ));
                 }
                 if let Some(arguments) = activity
                     .arguments
@@ -1643,7 +1658,13 @@ pub(crate) fn render_activity_body(
                     .map(str::trim)
                     .filter(|text| !text.is_empty()));
             if let Some(description) = description {
-                body = body.child(blockquote(description, key("desc"), selection, theme));
+                body = body.child(blockquote(
+                    description,
+                    key("desc"),
+                    selection,
+                    theme,
+                    link_handler.clone(),
+                ));
             }
             if let Some(arguments) = activity
                 .arguments
@@ -1699,16 +1720,19 @@ fn blockquote(
     key: TextKey,
     selection: &TranscriptSelection,
     theme: &Theme,
+    link_handler: Option<md::render::LinkHandler>,
 ) -> Div {
-    div()
-        .min_w_0()
-        .border_l_2()
-        .border_color(tools_rail(theme))
-        .pl(px(8.0))
-        .text_size(sp(11.5))
-        .line_height(sp(16.0))
-        .text_color(tools_description(theme))
-        .child(selectable_text(
+    // Bare URLs and paths in the quoted description are clickable like
+    // any other text: accent-painted, routed through the app's handler.
+    let flat = Rc::new(md::render::flatten_plain_with_links(
+        description,
+        md::render::SANS_FAMILY,
+        FontWeight::NORMAL,
+        tools_description(theme),
+        theme.accent,
+    ));
+    let text = if flat.links.is_empty() {
+        selectable_text(
             description,
             md::render::SANS_FAMILY,
             FontStyle::Italic,
@@ -1717,5 +1741,34 @@ fn blockquote(
             selection,
             theme,
             true,
-        ))
+        )
+    } else if let Some(handler) = link_handler {
+        md::render::selectable_linked_text(
+            &flat,
+            key,
+            selection.clone(),
+            gpui::transparent_black(),
+            theme.selection,
+            false,
+            handler,
+        )
+    } else {
+        md::render::selectable_flat_text(
+            &flat,
+            key,
+            selection.clone(),
+            gpui::transparent_black(),
+            theme.selection,
+            false,
+        )
+    };
+    div()
+        .min_w_0()
+        .border_l_2()
+        .border_color(tools_rail(theme))
+        .pl(px(8.0))
+        .text_size(sp(11.5))
+        .line_height(sp(16.0))
+        .text_color(tools_description(theme))
+        .child(text)
 }
