@@ -667,13 +667,8 @@ impl Tide {
     /// toggle and index status in the body; the model-state pill and the
     /// build action live in the card head. Degrades to a hint without a
     /// selected project.
-    pub(super) fn render_memory_rag_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let project = self.selected_project().cloned();
-        self.render_memory_rag_card_for(project, theme, cx)
-    }
-
-    /// The same card for an explicit project — the Projects settings page
-    /// renders it for the rail selection, not the window's active project.
+    /// The Memory & RAG card for an explicit project — the Projects settings
+    /// page renders it for the rail selection.
     pub(super) fn render_memory_rag_card_for(
         &self,
         project: Option<Project>,
