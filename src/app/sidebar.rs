@@ -1850,8 +1850,18 @@ impl Tide {
                     .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
                     .line_height(sp(15.0))
                     .when_some(detail_label, |element, label| {
+                        let project_avatar_element = if !grouped_by_project {
+                            project.and_then(|project| {
+                                let probe = self.landed_probe(project.id);
+                                Some(project_avatar(project, probe.as_ref(), 12.5))
+                            })
+                        } else {
+                            None
+                        };
                         element
-                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                            .child(project_avatar_element.unwrap_or_else(|| {
+                                icon(detail_icon, 12.5, theme.text_tertiary).into_any_element()
+                            }))
                             .child(
                                 div()
                                     .flex_1()

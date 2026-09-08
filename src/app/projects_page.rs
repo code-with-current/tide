@@ -12,6 +12,7 @@ use gpui::{KeyBinding, actions};
 
 use super::composer::next_picker_highlight;
 use super::image_preview::image_format_for_name;
+use super::model_picker::{ModelPickerClear, ModelPickerConfig, ModelPickerSelect};
 use crate::ui::card::{CardRow, card_body, card_rows, settings_group_head};
 
 use super::*;
@@ -699,13 +700,7 @@ impl Tide {
                                     .text_size(sp(12.5))
                                     .text_color(theme.text_tertiary)
                                     .child(SharedString::from(
-                                        project
-                                            .path
-                                            .file_name()
-                                            .map(|name| name.to_string_lossy().into_owned())
-                                            .unwrap_or_else(|| {
-                                                project.path.to_string_lossy().into_owned()
-                                            }),
+                                        project.path.to_string_lossy().into_owned(),
                                     )),
                             ),
                     )
@@ -978,73 +973,59 @@ impl Tide {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let project_id = project.id;
-        let current = project.default_model.clone();
-        let handle = self.menu_handle("projects-model-picker", cx);
-        let chip = MenuChip::new("projects-model-chip")
-            .icon("icons/boxes.svg", theme.text_tertiary)
-            .label(
-                current
-                    .clone()
-                    .unwrap_or_else(|| tr!("projects.default_model_global")),
-            )
-            .outlined()
-            .background(theme.raised)
-            .height(px(26.0))
-            .selected(handle.is_open());
-        let weak = cx.entity().downgrade();
-        let models = self.tide_models.clone();
-        let menu = dropdown_menu(
-            chip,
-            "projects-model-menu",
-            &handle,
+        let trigger_label = project
+            .default_model
+            .clone()
+            .unwrap_or_else(|| tr!("projects.default_model_global"));
+        let config = ModelPickerConfig {
+            active: project
+                .default_model
+                .as_ref()
+                .map(|model| (ProviderKind::Tide, model.clone())),
+            refocus_composer_on_close: false,
+        };
+        let on_select: ModelPickerSelect = Rc::new(move |this, _kind, model, cx| {
+            if let Some(project) = this
+                .state
+                .projects
+                .iter_mut()
+                .find(|project| project.id == project_id)
+            {
+                project.default_provider = Some(ProviderKind::Tide);
+                project.default_model = Some(model.clone());
+            }
+            this.dispatch_update_project_settings(project_id, cx);
+        });
+        let clear: ModelPickerClear = Rc::new(move |this, cx| {
+            if let Some(project) = this
+                .state
+                .projects
+                .iter_mut()
+                .find(|project| project.id == project_id)
+            {
+                project.default_provider = None;
+                project.default_model = None;
+            }
+            this.dispatch_update_project_settings(project_id, cx);
+        });
+        let menu = self.render_model_picker(
+            SharedString::from(format!("projects-model-picker-{project_id}")),
+            config,
+            Some((
+                SharedString::from(tr!("projects.default_model_global")),
+                clear,
+            )),
+            on_select,
             MenuAlign::BelowRight,
-            move |_| {
-                let mut items = Vec::new();
-                {
-                    let weak = weak.clone();
-                    let cleared = current.is_none();
-                    items.push(
-                        MenuItem::new(tr!("projects.default_model_global"), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                if let Some(project) = this
-                                    .state
-                                    .projects
-                                    .iter_mut()
-                                    .find(|project| project.id == project_id)
-                                {
-                                    project.default_provider = None;
-                                    project.default_model = None;
-                                }
-                                cx.notify();
-                            });
-                        })
-                        .selected(cleared),
-                    );
-                }
-                for model in &models {
-                    let weak = weak.clone();
-                    let model_id = model.id.clone();
-                    let selected = current.as_deref() == Some(model.id.as_str());
-                    items.push(
-                        MenuItem::new(model.name.clone(), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                if let Some(project) = this
-                                    .state
-                                    .projects
-                                    .iter_mut()
-                                    .find(|project| project.id == project_id)
-                                {
-                                    project.default_provider = Some(ProviderKind::Tide);
-                                    project.default_model = Some(model_id.clone());
-                                }
-                                cx.notify();
-                            });
-                        })
-                        .selected(selected),
-                    );
-                }
-                items
+            move |open| {
+                MenuChip::new(format!("projects-model-chip-{project_id}"))
+                    .label(trigger_label.clone())
+                    .outlined()
+                    .selected(open)
+                    .w(px(210.0))
+                    .justify_between()
             },
+            cx,
         );
         div()
             .child(settings_group_head(
