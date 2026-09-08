@@ -272,6 +272,12 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         path: String,
     },
+    /// Appends the path to the workspace's .gitignore.
+    GitIgnoreFile {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        path: String,
+    },
     /// Restores a single file to its contents in a specific commit.
     GitRestoreFileFrom {
         #[ts(type = "string")]

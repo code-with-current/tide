@@ -1271,6 +1271,11 @@ git_panel.unstaged: 変更
 git_panel.stage: ステージ
 git_panel.unstage: ステージ解除
 git_panel.discard: 変更を破棄
+git_panel.copy_path: パスをコピー
+git_panel.copy_relative_path: 相対パスをコピー
+git_panel.ignore_file: .gitignore に追加
+git_panel.open_diff: 差分を開く
+git_panel.view_file: ファイルを表示
 git_panel.conflicts: "競合を解決 — %{count} ファイル"
 git_panel.use_ours: 自分側を採用
 git_panel.use_theirs: 相手側を採用
@@ -1284,6 +1289,8 @@ git_panel.no_identity: "ユーザー身元が未設定"
 git_panel.identity_override: "上書き"
 git_panel.manage_identities: "身元を管理…"
 git_panel.summary_placeholder: "コミットメッセージ"
+git_panel.generate_message: "コミットメッセージを生成"
+git_panel.staged_changes: "ステージ済みの変更"
 git_panel.amend: "⌥ 修正"
 git_panel.amend_last_commit: "前回のコミットを修正"
 git_panel.commit: "コミット"

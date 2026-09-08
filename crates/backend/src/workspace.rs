@@ -257,6 +257,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::GitDiscardFile { cwd, path } => WorkspaceResult::GitOp {
             result: crate::git_panel::discard_file(&cwd, &path),
         },
+        WorkspaceOperation::GitIgnoreFile { cwd, path } => WorkspaceResult::GitOp {
+            result: crate::git_panel::ignore_file(&cwd, &path),
+        },
         WorkspaceOperation::GitRestoreFileFrom { cwd, path, sha } => WorkspaceResult::GitOp {
             result: crate::git_panel::restore_file_from(&cwd, &path, &sha),
         },
