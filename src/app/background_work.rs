@@ -1747,13 +1747,14 @@ impl Tide {
             );
         }
         let output = output.unwrap_or_else(|| SharedString::from(tr!("background.no_output")));
-        let output_flat = md::render::flatten_plain(
+        let output_flat = md::render::flatten_plain_with_links(
             output,
             md::render::MONO_FAMILY,
             FontWeight::NORMAL,
             theme.text_secondary,
+            theme.accent,
         );
-        let output_text = md::render::selectable_flat_text(
+        let output_text = md::render::selectable_linked_text(
             &output_flat,
             crate::md::selection::TextKey::new(
                 format!(
@@ -1766,6 +1767,7 @@ impl Tide {
             theme.code_wash,
             theme.selection,
             false,
+            self.markdown_link_handler.clone(),
         );
         detail.child(
             div()

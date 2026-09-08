@@ -2644,10 +2644,17 @@ impl Tide {
             .get(&terminal_id)
             .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
         if !matches_project {
-            self.right_panel_terminals.insert(
-                terminal_id,
-                cx.new(|cx| TerminalView::new(working_directory.clone(), cx)),
-            );
+            let view = cx.new(|cx| TerminalView::new(working_directory.clone(), cx));
+            // File links open in Tide's file viewer, not the file manager.
+            let weak = cx.entity().downgrade();
+            view.update(cx, |terminal, _| {
+                terminal.set_open_file_handler(std::rc::Rc::new(move |path, _window, cx| {
+                    let _ = weak.update(cx, |tide, cx| {
+                        tide.open_transcript_link(&path.to_string_lossy(), cx);
+                    });
+                }));
+            });
+            self.right_panel_terminals.insert(terminal_id, view);
         }
     }
 
