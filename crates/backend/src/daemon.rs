@@ -1,6 +1,7 @@
 //! Provider backend and driver-event wire translation for `tide-daemon`.
 
 use std::collections::{HashMap, HashSet};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -25,6 +26,7 @@ use crate::model::{
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
 use protocol::git_settings::GitOpResultWire;
+use tools::jobs::{JobHooks, JobOutcome, JobStart, SettledStatus, global_job_registry};
 
 pub struct TideBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
@@ -582,6 +584,105 @@ impl Backend for TideBackend {
                     default_cwd: self.default_cwd.clone(),
                     projectless_root: crate::projectless::workspace_root(),
                 })
+            }
+            Command::RunAction {
+                session_id,
+                project_path,
+                action_name,
+                command,
+            } => {
+                // The action becomes a session-scoped background job: it
+                // shows in the jobs pill, the popup, and the background-work
+                // surface, and `StopAction` signals its process group.
+                let started = global_job_registry().start(JobStart {
+                    kind: crate::model::BackgroundWorkKind::Process,
+                    // The registry only accepts its known prefixes; process
+                    // jobs are "bash" (they shell out the same way).
+                    prefix: "bash",
+                    id: None,
+                    label: format!("{action_name}: {command}"),
+                    owner_session: session_id.clone(),
+                    output_limit: None,
+                    streams: true,
+                    run: Box::new(move |handle| {
+                        let mut child = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&command)
+                            .current_dir(&project_path)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .process_group(0)
+                            .spawn()
+                            .map_err(|error| error.to_string())?;
+                        let sink = handle.output.clone();
+                        if let Some(stdout) = child.stdout.take() {
+                            let sink = sink.clone();
+                            std::thread::spawn(move || pump_job_output(&sink, stdout));
+                        }
+                        if let Some(stderr) = child.stderr.take() {
+                            let sink = sink.clone();
+                            std::thread::spawn(move || pump_job_output(&sink, stderr));
+                        }
+                        let pgid = child.id() as i32;
+                        let done = handle.done.clone();
+                        std::thread::spawn(move || {
+                            let status = child.wait();
+                            let outcome = match status {
+                                Ok(waited) if waited.code().is_some_and(|code| code == 0) => {
+                                    JobOutcome {
+                                        status: SettledStatus::Completed,
+                                        detail: None,
+                                        output: None,
+                                        usage: None,
+                                    }
+                                }
+                                Ok(waited) => JobOutcome {
+                                    status: SettledStatus::Failed,
+                                    detail: Some(format!(
+                                        "exit code: {}",
+                                        waited.code().unwrap_or(-1)
+                                    )),
+                                    output: None,
+                                    usage: None,
+                                },
+                                Err(error) => JobOutcome {
+                                    status: SettledStatus::Failed,
+                                    detail: Some(error.to_string()),
+                                    output: None,
+                                    usage: None,
+                                },
+                            };
+                            done.resolve(outcome);
+                        });
+                        Ok(JobHooks {
+                            cancel: Box::new(move |_| unsafe {
+                                libc::kill(-pgid, libc::SIGINT);
+                            }),
+                            done: handle.done.clone(),
+                        })
+                    }),
+                });
+                match started {
+                    Ok(key) => Ok(ResponsePayload::Cursor {
+                        cursor: Some(json!({ "jobId": key.provider_id })),
+                    }),
+                    Err(error) => Err(anyhow!(error)),
+                }
+            }
+            Command::StopAction { session_id, job_id } => {
+                let key = crate::model::BackgroundWorkKey::new(
+                    crate::model::BackgroundWorkKind::Process,
+                    job_id,
+                );
+                global_job_registry()
+                    .kill(
+                        &session_id,
+                        &key,
+                        Some("stopped from the actions row".into()),
+                    )
+                    .map_err(anyhow::Error::msg)?;
+                Ok(ResponsePayload::Ack)
             }
             Command::UpdateProjectSettings {
                 project_id,
@@ -1437,6 +1538,8 @@ fn handle_driver_command(
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }
+        | Command::RunAction { .. }
+        | Command::StopAction { .. }
         | Command::UpdateProjectSettings { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
@@ -1470,6 +1573,21 @@ fn ensure_shell_environment() {
     });
 }
 
+/// Forward one read of an action job's output stream into the job's ring
+/// buffer. Output lines land in the background-work surface and the jobs
+/// popup; the transcript is never involved.
+fn pump_job_output<R: std::io::Read>(sink: &tools::jobs::JobOutputSink, mut stream: R) {
+    let mut buffer = [0u8; 4096];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => sink.append(&String::from_utf8_lossy(&buffer[..read])),
+        }
+    }
+}
+
+/// Wire → stored profile conversion, field-for-field; only used by the
+/// daemon's `GitIdentitySave` arm.
 /// Wire → stored profile conversion, field-for-field; only used by the
 /// daemon's `GitIdentitySave` arm.
 fn stored_profile(
