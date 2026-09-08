@@ -33,9 +33,9 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProjectIcon, ProviderKind, ProviderModel,
-    ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode,
-    SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
+    MessageRole, PendingPermission, Project, ProjectAction, ProjectIcon, ProviderKind,
+    ProviderModel, ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock,
+    RuntimeMode, SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
     SubagentToolStatus, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
     compact_path, unix_time, unix_time_millis,
 };
@@ -1475,11 +1475,18 @@ pub struct Tide {
     projects_icon_probes: RefCell<HashMap<Uuid, projects_page::ProjectIconProbe>>,
     /// Bumped per probe; a result from a superseded probe is discarded.
     projects_icon_probe_generation: u64,
+    /// The remove-project confirmation, when open.
+    projects_remove_dialog: Option<projects_page::RemoveProjectDialog>,
     /// The project whose last icon upload failed validation; drives the
     /// detail panel's inline error.
     projects_icon_error: Option<Uuid>,
     /// Backing field for the selected project's name edit.
     projects_name_input: Entity<TextInput>,
+    /// The action editor's add-row fields.
+    projects_action_name: Entity<TextInput>,
+    projects_action_command: Entity<TextInput>,
+    /// The last add attempt lacked a command; drives the inline error.
+    projects_action_error: bool,
     /// Source the list is narrowed to; `None` shows every ecosystem.
     skills_source_filter: Option<crate::skills::SkillSource>,
     /// The skill directory whose delete button is armed for its confirming
@@ -2074,6 +2081,10 @@ impl Tide {
                 .placeholder(tr!("projects.search"))
         });
         let projects_name_input = cx.new(|cx| TextInput::new(window, cx));
+        let projects_action_name =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("projects.action_name")));
+        let projects_action_command =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("projects.action_command")));
         let session_rename_input = cx.new(|cx| TextInput::new(window, cx));
         let usage_project_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
@@ -2623,6 +2634,15 @@ impl Tide {
             )
             .detach();
             cx.subscribe(
+                &projects_action_name,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if let InputEvent::Submit(_) = event {
+                        this.add_project_action_from_selection(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.commit_session_rename(cx),
@@ -2984,8 +3004,12 @@ impl Tide {
                 projects_detail_scroll: ScrollHandle::new(),
                 projects_icon_probes: RefCell::new(HashMap::new()),
                 projects_icon_probe_generation: 0,
+                projects_remove_dialog: None,
                 projects_icon_error: None,
                 projects_name_input,
+                projects_action_name,
+                projects_action_command,
+                projects_action_error: false,
                 skills_source_filter: None,
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),

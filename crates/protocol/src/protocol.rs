@@ -11,7 +11,9 @@ use crate::git_settings::{
     GitDiscoveredCredentialWire, GitOpResultWire, GitProfileWire, GitSnapshotWire,
     GithubConnectPollWire, GithubDeviceStartWire,
 };
-use crate::model::{AgentSession, GoalOperation, Project, UserInputAnswer};
+use crate::model::{
+    AgentSession, GoalOperation, Project, ProjectAction, ProjectIcon, ProviderKind, UserInputAnswer,
+};
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
@@ -290,6 +292,18 @@ pub enum Command {
     RemoveProject {
         project_id: Uuid,
         delete_history: bool,
+    },
+    /// Persist one project's settings. The daemon replies with a fresh
+    /// task-state snapshot; clients stage edits optimistically and reconcile
+    /// when it lands.
+    UpdateProjectSettings {
+        project_id: Uuid,
+        name: String,
+        icon: ProjectIcon,
+        icon_color: Option<String>,
+        default_provider: Option<ProviderKind>,
+        default_model: Option<String>,
+        actions: Vec<ProjectAction>,
     },
     HydrateSession {
         session_id: Uuid,

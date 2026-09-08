@@ -53,8 +53,9 @@ fn remote_item(
 ) -> MenuItem {
     let weak = weak.clone();
     MenuItem::new(label, move |_, cx| {
-        let _ =
-            weak.update(cx, |this, cx| this.run_git_panel_remote(op, fetch, rebase, cx));
+        let _ = weak.update(cx, |this, cx| {
+            this.run_git_panel_remote(op, fetch, rebase, cx)
+        });
     })
     .icon(icon_path)
     .disabled(busy)
@@ -1950,6 +1951,25 @@ impl Tide {
     /// nothing but the CDN script ever touches the network. The browser view
     /// itself only exists once the tab renders, so the URL waits in
     /// [`Self::right_panel_pending_browser_urls`] until then.
+    /// Run a project action: open (or reuse) the session's terminal tab at
+    /// the workspace path and type the command in. Interactive commands keep
+    /// running in that tab; the transcript is never involved.
+    pub(super) fn run_project_action(&mut self, command: String, cx: &mut Context<Self>) {
+        if self.daemon.is_remote() || self.selected_workspace_path().is_none() {
+            self.show_toast(tr!("projects.action_unavailable"));
+            return;
+        }
+        let terminal_id = self
+            .right_panel_surfaces
+            .iter()
+            .find_map(RightPanelSurface::terminal_id)
+            .unwrap_or_else(Uuid::new_v4);
+        self.open_right_panel_surface(RightPanelSurface::Terminal(terminal_id), cx);
+        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
+            view.update(cx, |view, cx| view.run_command(command, cx));
+        }
+    }
+
     pub(super) fn open_mermaid_diagram(&mut self, source: &str, cx: &mut Context<Self>) {
         let browser_id = Uuid::new_v4();
         self.right_panel_pending_browser_urls.insert(
@@ -5285,7 +5305,9 @@ impl Tide {
         let cwd = self.selected_workspace_path().map(Path::to_path_buf);
 
         let body: AnyElement = match worktrees {
-            None => self.render_git_panel_loading_rows(&theme).into_any_element(),
+            None => self
+                .render_git_panel_loading_rows(&theme)
+                .into_any_element(),
             Some(worktrees) if worktrees.is_empty() => self
                 .render_right_panel_empty_message(
                     tr!("git_panel.worktrees_empty"),
@@ -5303,9 +5325,9 @@ impl Tide {
                     .flex_col();
                 for entry in worktrees.iter() {
                     let is_armed = armed.as_deref() == Some(entry.path.as_path());
-                    let is_current = cwd
-                        .as_deref()
-                        .is_some_and(|cwd| fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) == entry.path);
+                    let is_current = cwd.as_deref().is_some_and(|cwd| {
+                        fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) == entry.path
+                    });
                     let owner = self.worktree_session(&entry.path);
                     let owner_busy = owner.is_some_and(|session| session.is_busy());
                     let removable = !entry.main && !busy && !owner_busy;
@@ -5489,13 +5511,11 @@ impl Tide {
                                             .min_w_0()
                                             .truncate()
                                             .text_size(sp(11.0))
-                                            .text_color(
-                                                if owner.is_some() && !entry.main {
-                                                    theme.accent.opacity(0.8)
-                                                } else {
-                                                    theme.text_tertiary
-                                                },
-                                            )
+                                            .text_color(if owner.is_some() && !entry.main {
+                                                theme.accent.opacity(0.8)
+                                            } else {
+                                                theme.text_tertiary
+                                            })
                                             .child(single_line_label(&detail)),
                                     ),
                             )
@@ -5964,9 +5984,7 @@ impl Tide {
                             .flex_col()
                             .items_end()
                             .gap(px(3.0))
-                            .child(
-                                div().flex().items_center().gap(px(4.0)).child(generate),
-                            )
+                            .child(div().flex().items_center().gap(px(4.0)).child(generate))
                             .child(primary),
                     ),
             )
@@ -6104,10 +6122,9 @@ impl Tide {
                 let fetch = MenuItem::new(tr!("git_panel.fetch"), {
                     let weak = weak.clone();
                     move |_, cx| {
-                        let _ = weak
-                            .update(cx, |this, cx| {
-                                this.run_git_panel_remote("fetch", true, false, cx)
-                            });
+                        let _ = weak.update(cx, |this, cx| {
+                            this.run_git_panel_remote("fetch", true, false, cx)
+                        });
                     }
                 })
                 .icon("icons/download.svg")
@@ -6115,10 +6132,9 @@ impl Tide {
                 let pull = MenuItem::new(tr!("git_panel.pull"), {
                     let weak = weak.clone();
                     move |_, cx| {
-                        let _ = weak
-                            .update(cx, |this, cx| {
-                                this.run_git_panel_remote("pull", false, false, cx)
-                            });
+                        let _ = weak.update(cx, |this, cx| {
+                            this.run_git_panel_remote("pull", false, false, cx)
+                        });
                     }
                 })
                 .icon("icons/arrow-down.svg")
@@ -6394,9 +6410,19 @@ impl Tide {
             .gap(px(3.0))
             .font_family(".SystemUIFontMonospaced")
             .text_size(sp(10.5))
-            .when(staged_add + staged_del > 0, |counts| counts
-                .child(div().text_color(theme.success).child(format!("+{staged_add}")))
-                .child(div().text_color(theme.danger).child(format!("−{staged_del}"))));
+            .when(staged_add + staged_del > 0, |counts| {
+                counts
+                    .child(
+                        div()
+                            .text_color(theme.success)
+                            .child(format!("+{staged_add}")),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme.danger)
+                            .child(format!("−{staged_del}")),
+                    )
+            });
 
         div()
             .id("git-panel-branch-bar")

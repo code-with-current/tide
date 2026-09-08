@@ -582,6 +582,40 @@ impl Backend for TideBackend {
                     projectless_root: crate::projectless::workspace_root(),
                 })
             }
+            Command::UpdateProjectSettings {
+                project_id,
+                name,
+                icon,
+                icon_color,
+                default_provider,
+                default_model,
+                actions,
+            } => {
+                let mut state = self.task_state.lock();
+                if let Some(project) = state
+                    .projects
+                    .iter_mut()
+                    .find(|project| project.id == project_id)
+                {
+                    project.name = name;
+                    project.icon = icon;
+                    project.icon_color = icon_color;
+                    project.default_provider = default_provider;
+                    project.default_model = default_model;
+                    project.actions = actions;
+                }
+                self.task_store.save(&mut state)?;
+                Ok(ResponsePayload::TaskState {
+                    projects: state.projects.clone(),
+                    sessions: state
+                        .sessions
+                        .iter()
+                        .map(AgentSession::list_projection)
+                        .collect(),
+                    default_cwd: self.default_cwd.clone(),
+                    projectless_root: crate::projectless::workspace_root(),
+                })
+            }
             Command::RemoveSession => {
                 {
                     let mut state = self.task_state.lock();
@@ -1402,6 +1436,7 @@ fn handle_driver_command(
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }
+        | Command::UpdateProjectSettings { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::LoadComposerDrafts

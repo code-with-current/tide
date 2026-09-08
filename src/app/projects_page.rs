@@ -6,9 +6,9 @@
 //! All project data is already in memory (`state.projects`); frames never
 //! touch the filesystem.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use gpui::KeyBinding;
+use gpui::{KeyBinding, actions};
 
 use super::composer::next_picker_highlight;
 use super::image_preview::image_format_for_name;
@@ -54,6 +54,29 @@ fn uploaded_icon_path(name: &str) -> PathBuf {
     store::paths::data_dir().join("project-icons").join(name)
 }
 
+/// An action is only worth storing when its command is non-empty; a blank
+/// name falls back to the command's first word.
+fn normalize_project_action(name: String, command: &str) -> Option<ProjectAction> {
+    let command = command.trim();
+    if command.is_empty() {
+        return None;
+    }
+    let name = name.trim();
+    let name = if name.is_empty() {
+        command
+            .split_whitespace()
+            .next()
+            .unwrap_or("action")
+            .to_owned()
+    } else {
+        name.to_owned()
+    };
+    Some(ProjectAction {
+        name,
+        command: command.to_owned(),
+    })
+}
+
 /// Initials for the auto fallback: the first character of up to two words.
 fn auto_initials(name: &str) -> String {
     name.split_whitespace()
@@ -93,10 +116,37 @@ pub(super) struct ProjectIconProbe {
     pub(super) well_known: Option<PathBuf>,
 }
 
+/// The remove-project confirmation. `delete_history` mirrors the checkbox —
+/// sessions and their transcripts go with the project when set.
+pub(super) struct RemoveProjectDialog {
+    pub(super) project_id: Uuid,
+    pub(super) project_name: String,
+    pub(super) delete_history: bool,
+}
+
+/// The selection after a removal: the row that took the removed row's place
+/// (the last row when the tail was removed), kept when something else was
+/// selected, `None` when nothing remains.
+fn fallback_project_selection(ids: &[Uuid], removed: Uuid, current: Option<Uuid>) -> Option<Uuid> {
+    if current != Some(removed) {
+        return current;
+    }
+    let position = ids.iter().position(|id| *id == removed)?;
+    let index = position.min(ids.len().saturating_sub(2));
+    ids.get(index).copied()
+}
+
+/// Key context the remove-project dialog declares, so `escape` dismisses it
+/// without reaching other surfaces.
+const REMOVE_CONTEXT: &str = "ProjectsRemoveDialog";
+
+actions!(tide, [DismissRemoveProject]);
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("down", SelectNextEntry, Some(PROJECTS_SEARCH_CONTEXT)),
         KeyBinding::new("up", SelectPreviousEntry, Some(PROJECTS_SEARCH_CONTEXT)),
+        KeyBinding::new("escape", DismissRemoveProject, Some(REMOVE_CONTEXT)),
     ]);
 }
 
@@ -591,7 +641,7 @@ impl Tide {
             project.icon = icon;
         }
         self.projects_icon_error = None;
-        cx.notify();
+        self.dispatch_update_project_settings(project_id, cx);
     }
 
     fn set_project_icon_color(
@@ -608,7 +658,7 @@ impl Tide {
         {
             project.icon_color = color;
         }
-        cx.notify();
+        self.dispatch_update_project_settings(project_id, cx);
     }
 
     fn start_icon_upload(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
@@ -711,7 +761,8 @@ impl Tide {
         {
             if project.name != name {
                 project.name = name;
-                cx.notify();
+                self.dispatch_update_project_settings(id, cx);
+                return;
             }
         }
     }
@@ -722,6 +773,7 @@ impl Tide {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let project_id = project.id;
         let missing = self
             .projects_icon_probes
             .borrow()
@@ -744,11 +796,37 @@ impl Tide {
                     .child(self.render_project_header(project, missing, theme, cx))
                     .child(self.render_project_general_card(project, theme, cx))
                     .child(self.render_project_model_card(project, theme, cx))
+                    .child(self.render_project_actions_card(project, theme, cx))
                     .child(
                         self.render_memory_rag_card_for(Some(project.clone()), theme, cx)
                             .into_any_element(),
                     )
-                    .child(self.render_project_git_card(project, missing, theme, cx)),
+                    .child(self.render_project_git_card(project, missing, theme, cx))
+                    .child(
+                        div()
+                            .id("projects-remove-row")
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .mt(px(4.0))
+                            .px(px(14.0))
+                            .py(px(10.0))
+                            .rounded(px(13.0))
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.raised)
+                            .cursor_default()
+                            .hover(|element| element.bg(theme.overlay))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.danger)
+                            .child(icon("icons/block.svg", 13.0, theme.danger))
+                            .child(tr!("projects.remove"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_remove_project_dialog(project_id, cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
@@ -1076,6 +1154,439 @@ impl Tide {
             .into_any_element()
     }
 
+    /// Enter in the add-row's name field: resolve the rail selection and add.
+    pub(super) fn add_project_action_from_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some((id, _)) = self.projects_settings_target() {
+            self.add_project_action(id, cx);
+        }
+    }
+
+    fn add_project_action(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let name = self
+            .projects_action_name
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        let command = self
+            .projects_action_command
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        let Some(action) = normalize_project_action(name, &command) else {
+            self.projects_action_error = true;
+            cx.notify();
+            return;
+        };
+        if let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+        {
+            project.actions.push(action);
+        }
+        for input in [&self.projects_action_name, &self.projects_action_command] {
+            input.update(cx, |input, cx| {
+                let len = input.content().len();
+                input.replace_range(0..len, "", cx);
+            });
+        }
+        self.projects_action_error = false;
+        self.dispatch_update_project_settings(project_id, cx);
+    }
+
+    fn remove_project_action(&mut self, project_id: Uuid, index: usize, cx: &mut Context<Self>) {
+        if let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+        {
+            project.actions.remove(index);
+        }
+        self.dispatch_update_project_settings(project_id, cx);
+    }
+
+    fn render_project_actions_card(
+        &self,
+        project: &Project,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let project_id = project.id;
+        let mut rows = card_body(theme).flex().flex_col().gap(px(8.0)).when(
+            project.actions.is_empty(),
+            |element| {
+                element.child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("projects.actions_empty")),
+                )
+            },
+        );
+        for (index, action) in project.actions.iter().enumerate() {
+            let remove_id = SharedString::from(format!(
+                "project-action-remove-{}-{index}",
+                project_row_key(project_id)
+            ));
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .w(px(96.0))
+                            .flex_none()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(SharedString::from(action.name.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .font_family("Mono")
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(action.command.clone())),
+                    )
+                    .child(
+                        div()
+                            .id(remove_id)
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .w(px(22.0))
+                            .h(px(22.0))
+                            .rounded(px(6.0))
+                            .cursor_default()
+                            .hover(|element| element.bg(theme.overlay))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("icons/block.svg", 12.0, theme.text_tertiary))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_project_action(project_id, index, cx);
+                            })),
+                    ),
+            );
+        }
+
+        rows = rows.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .pt(px(2.0))
+                .child(
+                    TextField::new("project-action-name", self.projects_action_name.clone())
+                        .w(px(96.0)),
+                )
+                .child(
+                    TextField::new(
+                        "project-action-command",
+                        self.projects_action_command.clone(),
+                    )
+                    .flex_1()
+                    .min_w_0(),
+                )
+                .child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "project-action-add-{}",
+                            project_row_key(project_id)
+                        )))
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .h(px(26.0))
+                        .px(px(8.0))
+                        .rounded(px(8.0))
+                        .cursor_default()
+                        .hover(|element| element.bg(theme.overlay))
+                        .flex()
+                        .items_center()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("projects.action_add"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.add_project_action(project_id, cx);
+                        })),
+                ),
+        );
+        if self.projects_action_error {
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.warning)
+                    .child(icon("icons/alert.svg", 13.0, theme.warning))
+                    .child(tr!("projects.action_needs_command")),
+            );
+        }
+
+        div()
+            .child(settings_group_head(
+                theme,
+                tr!("projects.actions"),
+                Vec::new(),
+            ))
+            .child(rows)
+            .into_any_element()
+    }
+
+    // ── Removal ──────────────────────────────────────────────────────────────
+
+    fn open_remove_project_dialog(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+        else {
+            return;
+        };
+        self.projects_remove_dialog = Some(RemoveProjectDialog {
+            project_id,
+            project_name: project.name.clone(),
+            delete_history: false,
+        });
+        cx.notify();
+    }
+
+    fn confirm_remove_project(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.projects_remove_dialog.take() else {
+            return;
+        };
+        let removed = dialog.project_id;
+        self.projects_remove_dialog = None;
+        // The selection falls to the removed row's neighbor before the
+        // snapshot lands, so the rail never points at a vanished project.
+        let ids: Vec<Uuid> = self
+            .projects_rows_from("")
+            .iter()
+            .filter_map(|row| match row {
+                ProjectsRow::Project { id, .. } => Some(*id),
+            })
+            .collect();
+        self.projects_settings_selected =
+            fallback_project_selection(&ids, removed, self.projects_settings_selected);
+        let delete_history = dialog.delete_history;
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        client::Command::RemoveProject {
+                            project_id: removed,
+                            delete_history,
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(client::ResponsePayload::TaskState {
+                    projects,
+                    mut sessions,
+                    ..
+                }) => {
+                    for session in &mut sessions {
+                        session.detail_loaded = false;
+                    }
+                    sessions.retain(|session| session.provider == ProviderKind::Tide);
+                    this.apply_remote_task_state(
+                        RemoteTaskStateSnapshot { projects, sessions },
+                        cx,
+                    );
+                }
+                Err(error) => {
+                    this.show_toast(tr!("projects.remove_failed", error = error));
+                }
+                _ => {}
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(super) fn render_projects_remove_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let dialog = self.projects_remove_dialog.as_ref()?;
+        let theme = Theme::current(cx);
+        let delete_history = dialog.delete_history;
+        let card = div()
+            .id("projects-remove-card")
+            .key_context(REMOVE_CONTEXT)
+            .on_action(cx.listener(|this, _: &DismissRemoveProject, _, cx| {
+                this.projects_remove_dialog = None;
+                cx.notify();
+            }))
+            .tab_group()
+            .tab_stop(false)
+            .w_full()
+            .max_w(px(420.0))
+            .overflow_hidden()
+            .rounded(px(18.0))
+            .bg(theme.composer)
+            .shadow_xl()
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .px(px(20.0))
+                    .py(px(14.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(sp(15.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text)
+                            .child(tr!("projects.remove_title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!(
+                                "projects.remove_body",
+                                name = dialog.project_name.clone()
+                            )),
+                    ),
+            )
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(
+                div()
+                    .id("projects-remove-history")
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .cursor_default()
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(
+                        div()
+                            .size(px(15.0))
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(if delete_history {
+                                theme.border_strong
+                            } else {
+                                theme.border
+                            })
+                            .when(delete_history, |element| {
+                                element
+                                    .bg(theme.accent)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon("icons/check.svg", 11.0, rgb(0xFF_FF_FF).into()))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("projects.remove_history")),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(dialog) = this.projects_remove_dialog.as_mut() {
+                            dialog.delete_history = !dialog.delete_history;
+                            cx.notify();
+                        }
+                    })),
+            )
+            .child(
+                div()
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .bg(theme.overlay)
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .flex_none()
+                    .child(
+                        div()
+                            .id("projects-remove-cancel")
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .h(px(28.0))
+                            .px(px(12.0))
+                            .rounded(px(8.0))
+                            .cursor_default()
+                            .hover(|element| element.bg(theme.sidebar_item_background))
+                            .flex()
+                            .items_center()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("projects.remove_cancel"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.projects_remove_dialog = None;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("projects-remove-confirm")
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .h(px(28.0))
+                            .px(px(12.0))
+                            .rounded(px(8.0))
+                            .cursor_default()
+                            .bg(theme.danger)
+                            .hover(|element| element.bg(theme.danger.opacity(0.85)))
+                            .flex()
+                            .items_center()
+                            .text_size(sp(12.5))
+                            .text_color(rgb(0xFF_FF_FF))
+                            .child(tr!("projects.remove_confirm"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.confirm_remove_project(cx);
+                            })),
+                    ),
+            );
+        Some(
+            div()
+                .absolute()
+                .size_full()
+                .bg(gpui::hsla(0.0, 0.0, 0.0, 0.4))
+                .flex()
+                .items_start()
+                .justify_center()
+                .pt(px(120.0))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.projects_remove_dialog = None;
+                        cx.notify();
+                    }),
+                )
+                .child(card)
+                .into_any_element(),
+        )
+    }
+
     fn render_project_general_card(
         &self,
         project: &Project,
@@ -1350,5 +1861,51 @@ mod tests {
         assert!((0.0..360.0).contains(&auto_hue("anything")));
         assert_eq!(WELL_KNOWN_ICONS[0], "icon.png");
         assert_eq!(WELL_KNOWN_ICONS.len(), 4);
+    }
+
+    #[test]
+    fn removal_moves_the_selection_to_the_removed_rows_neighbor() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let c = Uuid::from_u128(3);
+        let ids = vec![a, b, c];
+
+        // Removing the first selects the next row.
+        assert_eq!(fallback_project_selection(&ids, a, Some(a)), Some(b));
+        // Removing the last falls back to the new last row.
+        assert_eq!(fallback_project_selection(&ids, c, Some(c)), Some(b));
+        // Removing the only row leaves nothing selected.
+        assert_eq!(fallback_project_selection(&[a], a, Some(a)), None);
+        // Removing something else keeps the current selection.
+        assert_eq!(fallback_project_selection(&ids, b, Some(c)), Some(c));
+    }
+
+    #[test]
+    fn project_actions_need_a_command_and_name_from_it() {
+        assert_eq!(
+            normalize_project_action("run".into(), "bun run dev"),
+            Some(ProjectAction {
+                name: "run".into(),
+                command: "bun run dev".into(),
+            })
+        );
+        // A blank name takes the command's first word.
+        assert_eq!(
+            normalize_project_action("  ".into(), "bun run dev"),
+            Some(ProjectAction {
+                name: "bun".into(),
+                command: "bun run dev".into(),
+            })
+        );
+        // Surrounding whitespace is trimmed on both fields.
+        assert_eq!(
+            normalize_project_action(" run ".into(), "  bun run dev  "),
+            Some(ProjectAction {
+                name: "run".into(),
+                command: "bun run dev".into(),
+            })
+        );
+        // No command, no action.
+        assert_eq!(normalize_project_action("run".into(), "   "), None);
     }
 }

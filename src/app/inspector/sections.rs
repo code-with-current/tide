@@ -1224,6 +1224,76 @@ impl Tide {
     /// per-project enable toggle, the index stats, and the Re-Index header
     /// action. Hidden without a selected session; rows degrade to dashes
     /// until the project's status has loaded.
+    /// One run button per configured project action. Hidden entirely when
+    /// the session's project has none — the section never shows an empty
+    /// frame.
+    pub(super) fn render_inspector_actions_section(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let theme = Theme::current(cx);
+        let session = self.selected_session()?;
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)?;
+        if project.is_projectless() || project.actions.is_empty() {
+            return None;
+        }
+        let actions = project.actions.clone();
+        let mut body = div().flex().flex_col().gap(px(6.0));
+        for (index, action) in actions.iter().enumerate() {
+            let command = action.command.clone();
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(action.name.clone())),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("inspector-action-run-{index}")))
+                            .rounded(px(5.0))
+                            .border_1()
+                            .border_color(theme.border)
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .text_size(sp(10.0))
+                            .cursor_pointer()
+                            .hover(|element| element.bg(theme.overlay))
+                            .child(tr!("projects.action_run"))
+                            .on_click({
+                                let weak = cx.entity().downgrade();
+                                move |_, _window, cx| {
+                                    let _ = weak.update(cx, |tide, cx| {
+                                        tide.run_project_action(command.clone(), cx);
+                                    });
+                                }
+                            }),
+                    ),
+            );
+        }
+        Some(render_section(
+            SectionId::Actions,
+            &tr!("inspector.section_actions"),
+            None,
+            None,
+            self.inspector.is_collapsed(SectionId::Actions),
+            body,
+            &theme,
+            cx,
+        ))
+    }
+
     pub(super) fn render_inspector_memory_rag_section(
         &mut self,
         cx: &mut Context<Self>,

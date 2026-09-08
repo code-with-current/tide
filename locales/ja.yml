@@ -92,6 +92,16 @@ projects.default_model_global: グローバル設定に従う
 projects.default_model_hint: このプロジェクトの新規チャットはこのモデルで開始します。
 projects.git_identity: Git アイデンティティ
 projects.memory_rag: メモリ & RAG
+projects.actions: アクション
+projects.action_name: アクション名
+projects.action_command: コマンド
+projects.action_add: アクションを追加
+projects.action_needs_command: コマンドは必須です。
+projects.action_run: 実行
+projects.action_unavailable: このターミナルは利用できません。
+projects.remove_failed: "プロジェクトを削除できませんでした: %{error}"
+inspector.section_actions: アクション
+projects.settings_save_failed: "プロジェクト設定を保存できませんでした: %{error}"
 projects.remove: プロジェクトを削除…
 projects.remove_title: プロジェクトを削除
 projects.remove_body: "「%{name}」は Tide で開けなくなります。"

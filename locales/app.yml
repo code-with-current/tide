@@ -1161,6 +1161,18 @@ projects.action_command:
   en: Command
 projects.action_add:
   en: Add action
+projects.action_needs_command:
+  en: A command is required.
+projects.action_run:
+  en: Run
+projects.action_unavailable:
+  en: No terminal is available for this task.
+projects.remove_failed:
+  en: "Could not remove the project: %{error}"
+inspector.section_actions:
+  en: Actions
+projects.settings_save_failed:
+  en: "Could not save project settings: %{error}"
 projects.actions_empty:
   en: Run a command in this project with one click.
 projects.git_identity:

@@ -709,6 +709,18 @@ impl TerminalView {
         &self.working_directory
     }
 
+    /// Types `command` into the PTY and presses enter — the project actions
+    /// runner hands shell commands over this way. Output stays in the
+    /// terminal tab; the transcript is never involved.
+    pub fn run_command(&mut self, command: String, cx: &mut Context<Self>) {
+        self.pause_cursor_blink(cx);
+        let Some(session) = &self.session else {
+            return;
+        };
+        session.term.lock().selection = None;
+        session.write(std::borrow::Cow::Owned(format!("{command}\n").into_bytes()));
+    }
+
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
     }

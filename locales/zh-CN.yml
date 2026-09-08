@@ -88,6 +88,16 @@ projects.default_model_global: 跟随全局默认
 projects.default_model_hint: 此项目的新会话将使用该模型开始。
 projects.git_identity: Git 身份
 projects.memory_rag: 记忆与 RAG
+projects.actions: 操作
+projects.action_name: 操作名称
+projects.action_command: 命令
+projects.action_add: 添加操作
+projects.action_needs_command: 必须填写命令。
+projects.action_run: 运行
+projects.action_unavailable: 此任务没有可用的终端。
+projects.remove_failed: "无法删除项目：%{error}"
+inspector.section_actions: 操作
+projects.settings_save_failed: "无法保存项目设置：%{error}"
 projects.remove: 删除项目…
 projects.remove_title: 删除项目
 projects.remove_body: "“%{name}”将无法在 Tide 中打开。"

@@ -674,7 +674,7 @@ impl Tide {
         }
     }
 
-    fn apply_remote_task_state(
+    pub(super) fn apply_remote_task_state(
         &mut self,
         snapshot: RemoteTaskStateSnapshot,
         cx: &mut Context<Self>,
@@ -3859,6 +3859,60 @@ impl Tide {
                     signal_event_pump(&event_wake);
                 }
             });
+    }
+
+    /// Ship the rail-selected project's current (already staged) settings to
+    /// the daemon. The local copy is the optimistic value; the snapshot that
+    /// comes back reconciles every editor.
+    pub(super) fn dispatch_update_project_settings(
+        &mut self,
+        project_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .cloned()
+        else {
+            return;
+        };
+        let command = client::Command::UpdateProjectSettings {
+            project_id,
+            name: project.name.clone(),
+            icon: project.icon.clone(),
+            icon_color: project.icon_color.clone(),
+            default_provider: project.default_provider,
+            default_model: project.default_model.clone(),
+            actions: project.actions.clone(),
+        };
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { daemon.request(Uuid::nil(), Uuid::nil(), command) })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(client::ResponsePayload::TaskState {
+                    projects,
+                    mut sessions,
+                    ..
+                }) => {
+                    for session in &mut sessions {
+                        session.detail_loaded = false;
+                    }
+                    sessions.retain(|session| session.provider == ProviderKind::Tide);
+                    this.apply_remote_task_state(
+                        RemoteTaskStateSnapshot { projects, sessions },
+                        cx,
+                    );
+                }
+                Err(error) => this.show_toast(tr!("projects.settings_save_failed", error = error)),
+                _ => {}
+            });
+        })
+        .detach();
     }
 
     pub(super) fn git_load_snapshot(&mut self) {
