@@ -428,10 +428,12 @@ impl JobRegistry {
         let bridge_session = spec.owner_session.clone();
         let _ = std::thread::Builder::new()
             .name(format!("jobs-settle-{}", key.provider_id))
-            .spawn(move || loop {
-                if let Some(outcome) = producer_done.wait_bounded(Duration::from_secs(60)) {
-                    bridge.settle(&bridge_session, &bridge_key, outcome);
-                    break;
+            .spawn(move || {
+                loop {
+                    if let Some(outcome) = producer_done.wait_bounded(Duration::from_secs(60)) {
+                        bridge.settle(&bridge_session, &bridge_key, outcome);
+                        break;
+                    }
                 }
             });
         Ok(key)
@@ -544,6 +546,26 @@ impl JobRegistry {
     }
 
     /// Snapshots in registration order — feeds `ReconcileLive`.
+    /// The job's recent output without advancing any reader cursor —
+    /// snapshot consumers (the action-jobs poll) use this instead of the
+    /// Model/Ui read cursors.
+    pub fn output_snapshot(
+        &self,
+        session: &str,
+        key: &BackgroundWorkKey,
+        max_bytes: usize,
+    ) -> Option<String> {
+        let state = state_lock();
+        let record = state
+            .sessions
+            .get(session)?
+            .items
+            .get(key)?
+            .buffer
+            .as_ref()?;
+        Some(record.snapshot_tail(max_bytes))
+    }
+
     pub fn list_session(&self, session: &str) -> Vec<BackgroundWorkItem> {
         let state = state_lock();
         state

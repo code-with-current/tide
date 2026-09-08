@@ -1829,6 +1829,20 @@ impl BackgroundWorkKey {
     }
 }
 
+/// One project-action run, for the UI's row-state seed: which job id
+/// belongs to which (session, project, action) triple.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionRunWire {
+    pub job_id: String,
+    pub session_id: String,
+    pub project_id: String,
+    pub action_name: String,
+    /// The OS-probed listening port, when discovered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundWorkItem {

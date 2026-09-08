@@ -12,7 +12,8 @@ use crate::git_settings::{
     GithubConnectPollWire, GithubDeviceStartWire,
 };
 use crate::model::{
-    AgentSession, GoalOperation, Project, ProjectAction, ProjectIcon, ProviderKind, UserInputAnswer,
+    AgentSession, BackgroundWorkItem, GoalOperation, Project, ProjectAction, ProjectIcon,
+    ProviderKind, UserInputAnswer,
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::settings::DaemonSettings;
@@ -296,16 +297,22 @@ pub enum Command {
         project_id: Uuid,
         delete_history: bool,
     },
-    /// Run a project action as a session-scoped background job (kind
-    /// `process`). The job streams output through the background-work
-    /// pipeline; stop it with `StopAction`.
+    /// The session's action jobs (registry poll — events need a runtime).
+    ListActionJobs {
+        session_id: String,
+    },
+    /// Run a project action as a background job owned by the session:
+    /// the orchestrator can list/probe it with job_list/job_output. Output
+    /// is file-backed and the run record persists, so a restarted daemon
+    /// re-adopts a still-running process into the same session.
     RunAction {
         session_id: String,
+        project_id: String,
         project_path: String,
         action_name: String,
         command: String,
     },
-    /// SIGINT a running action job's process group.
+    /// Stop a running action job: SIGINT the group, SIGKILL on timeout.
     StopAction {
         session_id: String,
         job_id: String,
@@ -633,6 +640,13 @@ pub enum ResponsePayload {
     },
     Sources {
         sources: Vec<KnowledgeSourceWire>,
+    },
+    /// The session's background action jobs (client polls; registry events
+    /// require an attached runtime). `runs` maps each job back to its
+    /// project + action so a freshly started UI can seed its row state.
+    ActionJobs {
+        jobs: Vec<BackgroundWorkItem>,
+        runs: Vec<crate::model::ActionRunWire>,
     },
     GitOp {
         result: GitOpResultWire,
