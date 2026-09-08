@@ -14,15 +14,36 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
-## [0.1.16]
+## [0.2.1]
 
-- Fixed anonymous product analytics never reaching the server: the background
-  analytics worker froze on its first request inside the running app, so no
-  events were collected. Sends now run on a dedicated multi-thread runtime and
-  report delivery failures to the console log.
-
-## [unreleased]
-
+- Projects get their own settings page (Settings → Projects): a searchable
+  rail with project avatars opens a detail panel per project, with the name
+  and path (missing-directory warning included), an icon — automatic from
+  the repo, one of ten presets, or an upload on a background color you
+  pick — a default model for new chats, the Memory & RAG toggle, a
+  repo-local git identity (moved off the Git page), and an actions editor.
+  Removing a project can optionally delete its session history. Avatars
+  render across the sidebar, session rows, and the empty-state project
+  menu.
+- Project actions now run as real background jobs instead of blocking the
+  turn: each run gets its own process group, file-backed logs
+  (`~/.tide/action-logs`), and a persisted run record. A run still in
+  flight when the app quits is re-adopted on restart and keeps streaming;
+  stop sends SIGINT with SIGKILL escalation; a detected `:port` becomes a
+  clickable pill that opens the URL. The jobs pill and popover fill in
+  before any message is sent, and Play is a no-op while a run is live.
+  Runs start in the session's workspace, not just the project root.
+- Links are clickable everywhere text renders — transcripts, tool output,
+  and the quoted descriptions on tool cards.
+- The accent color is now Material Blue, with inline-code tokens retuned
+  to match.
+- The Knowledge page gains a scope selector (Global vs Project) and a
+  file browser for local doc sources; dialog placeholders are translated.
+- The Git panel no longer shows the previous project's data after
+  switching sessions or workspaces.
+- Long user messages that clamp now end in an explicit ellipsis at the
+  cut, and the expand chevron sits in the footer row — visible without
+  hovering — so clamping no longer reads as text silently ending.
 - Changed files in the Git panel now have a right-click menu: stage/unstage
   and discard moved off the row's hover icons into the menu, alongside Copy
   Path, Copy Relative Path, Add to .gitignore, Open Diff, and View File. The
