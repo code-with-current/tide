@@ -15,20 +15,74 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use rag::{
-    ChunkRow, KnowledgeStore, RagConfigInput, RagStore, WorkspaceIngestInputs, knowledge_db_path,
-    rag_db_path,
+    ChunkRow, KnowledgeStore, RagStore, WorkspaceIngestInputs, knowledge_db_path, rag_db_path,
 };
 use rag::{
-    cloud_configured, default_entry, download_model, ingest_documents, ingest_workspace,
-    local_model_exists, resolve_embedder_for_build, resolve_embedder_for_query,
+    cloud_configured, default_entry, download_model, entry as catalog_entry, ingest_documents,
+    ingest_workspace, local_model_exists, resolve_embedder_for_build, resolve_embedder_for_query,
+    Embedder, EmbedUse, EmbeddingPlan, RagConfigInput,
 };
 use store::paths::{config_path, data_dir};
 use tools::{MemoryHit, MemoryIndex, rrf_fuse, set_shared_memory_index};
 
-/// The default embedder config (upstream's hydrated defaults; the app has
-/// no per-workspace ragConfig storage — cloud rides env vars only).
-fn default_rag_config() -> RagConfigInput {
-    RagConfigInput::default()
+/// Effective RAG settings at a config path (defaults when absent).
+fn effective_settings_at(cfg_path: &std::path::Path) -> store::config::EffectiveRagSettings {
+    store::config::load(cfg_path)
+        .ok()
+        .map(|c| c.rag_effective())
+        .unwrap_or_default()
+}
+
+/// The hydrated rag-crate config at a path. Custom endpoint keys are
+/// decrypted here, in-process — the rag crate never sees the secrets store.
+fn rag_config_at(cfg_path: &std::path::Path) -> RagConfigInput {
+    let eff = effective_settings_at(cfg_path);
+    let custom_endpoints = eff
+        .custom_endpoints
+        .iter()
+        .filter_map(|ep| {
+            let api_key = ep
+                .encrypted_key
+                .as_deref()
+                .and_then(|k| store::secrets::decrypt_stored(k).ok().flatten())?;
+            Some(rag::CustomEndpointSpec {
+                id: ep.id.clone(),
+                base_url: ep.base_url.clone(),
+                model_id: ep.model_id.clone(),
+                api_key,
+                dims: ep.dims,
+                max_tokens: ep.max_tokens.unwrap_or(8191) as usize,
+            })
+        })
+        .collect();
+    RagConfigInput {
+        embedder_id: eff.embedder_id.clone(),
+        cloud_allowed: eff.cloud_allowed,
+        cloud_model_id: eff.cloud_model_id.clone(),
+        custom_endpoints,
+    }
+}
+
+/// The hydrated global config (the daemon's own config path).
+fn effective_rag_config() -> RagConfigInput {
+    rag_config_at(&config_path())
+}
+
+/// The embedding plan an ingest run intends: the resolved embedder's id,
+/// MEASURED dimensions (remote embedders probe once here), and the
+/// configured chunking.
+fn intended_plan(
+    embedder: &dyn Embedder,
+    eff: &store::config::EffectiveRagSettings,
+) -> Result<EmbeddingPlan, String> {
+    let dims = embedder.ensure_dims()?;
+    Ok(EmbeddingPlan {
+        embedder_id: embedder.id().to_owned(),
+        dims,
+        chunk_size: eff.chunk_size,
+        chunk_overlap: eff.chunk_overlap,
+        created_at: rag::unix_ms_now(),
+    })
 }
 
 // ── memory tool index seam ─────────────────────────────────────────────────
@@ -70,14 +124,49 @@ impl RagMemoryIndex {
             .any(|id| id == project_id)
     }
 
-    /// Embed the query with the query-time-resolved embedder. `None` when
-    /// resolution fails (the seam degrades to empty vector rankings; FTS
-    /// needs no embedder).
-    fn embed_query(&self, query: &str) -> Option<Vec<f32>> {
-        let cfg = default_rag_config();
-        let (_, embedder) =
-            resolve_embedder_for_query(&cfg.embedder_id, &cfg, &self.data_dir).ok()?;
-        embedder.embed(&[query.to_owned()]).ok()?.into_iter().next()
+    /// The hydrated rag config at this index's config path.
+    fn rag_config(&self) -> RagConfigInput {
+        rag_config_at(&self.config_path)
+    }
+
+    /// The embedder id a project index is locked to — its embedding plan
+    /// when the db exists, the configured default otherwise.
+    fn project_index_id(&self, project_id: &str, cfg: &RagConfigInput) -> String {
+        let path = rag_db_path(&self.data_dir, project_id);
+        if path.is_file()
+            && let Ok(store) = RagStore::open_at(&path)
+        {
+            return store.plan().embedder_id.clone();
+        }
+        cfg.embedder_id.clone()
+    }
+
+    /// The embedder id the knowledge index is locked to.
+    fn knowledge_index_id(&self, cfg: &RagConfigInput) -> String {
+        let path = knowledge_db_path(&self.data_dir);
+        if path.is_file()
+            && let Ok(ks) = KnowledgeStore::open_at(&path)
+        {
+            return ks.rag.plan().embedder_id.clone();
+        }
+        cfg.embedder_id.clone()
+    }
+
+    /// Embed the query with the embedder the given index recorded.
+    /// `None` when resolution fails (the seam degrades to empty vector
+    /// rankings; FTS needs no embedder).
+    fn embed_query_with(
+        &self,
+        index_id: &str,
+        query: &str,
+        cfg: &RagConfigInput,
+    ) -> Option<Vec<f32>> {
+        let (_, embedder) = resolve_embedder_for_query(index_id, cfg, &self.data_dir).ok()?;
+        embedder
+            .embed_use(&[query.to_owned()], EmbedUse::Query)
+            .ok()?
+            .into_iter()
+            .next()
     }
 
     /// Open the knowledge store when its db exists — the existsSync guard
@@ -131,7 +220,9 @@ impl MemoryIndex for RagMemoryIndex {
         let enabled = self.enabled(project_id);
         let mut ws_hits = Vec::new();
         if enabled {
-            if let Some(vec) = self.embed_query(query) {
+            let cfg = self.rag_config();
+            let index_id = self.project_index_id(project_id, &cfg);
+            if let Some(vec) = self.embed_query_with(&index_id, query, &cfg) {
                 let path = rag_db_path(&self.data_dir, project_id);
                 if path.is_file()
                     && let Ok(store) = RagStore::open_at(&path)
@@ -206,22 +297,15 @@ impl RagMemoryIndex {
         if enabled_ids.is_empty() || visible == 0 {
             return vec![];
         }
-        // First-embedder-wins pinning: silently skip on mismatch — never
-        // cross vector spaces.
-        if let Some(pinned) = ks.rag.get_meta("embedderId").ok().flatten() {
-            let cfg = default_rag_config();
-            let resolved = resolve_embedder_for_query(&cfg.embedder_id, &cfg, &self.data_dir)
-                .ok()
-                .map(|(id, _)| id)
-                .unwrap_or_default();
-            if !resolved.is_empty() && pinned != resolved {
-                return vec![];
-            }
-        }
+        // Resolution is keyed on the index's recorded plan id — a stale
+        // index resolves ITS embedder (or fails, degrading this lane);
+        // it never borrows the newly configured one.
+        let cfg = self.rag_config();
         let over_fetch = k * 3;
         let hits: Vec<MemoryHit> = match mode {
             Mode::Vector => {
-                let Some(vec) = self.embed_query(query) else {
+                let index_id = self.knowledge_index_id(&cfg);
+                let Some(vec) = self.embed_query_with(&index_id, query, &cfg) else {
                     return vec![];
                 };
                 ks.rag
@@ -276,15 +360,18 @@ pub fn install_memory_writer() {
 
 // ── status / enable / init ─────────────────────────────────────────────────
 
-/// (chunk count, last ingested at) for a project's index; `None` count
-/// when no index exists yet.
-fn read_ingest_state(data_dir: &std::path::Path, project_id: &str) -> (Option<u64>, Option<i64>) {
+/// (chunk count, last ingested at, plan embedder id) for a project's
+/// index; `None` count when no index exists yet.
+fn read_ingest_state(
+    data_dir: &std::path::Path,
+    project_id: &str,
+) -> (Option<u64>, Option<i64>, Option<String>) {
     let path = rag_db_path(data_dir, project_id);
     if !path.is_file() {
-        return (None, None);
+        return (None, None, None);
     }
     let Ok(store) = RagStore::open_at(&path) else {
-        return (None, None);
+        return (None, None, None);
     };
     let chunks = store.chunk_count().unwrap_or(0).max(0) as u64;
     let last = store
@@ -292,7 +379,32 @@ fn read_ingest_state(data_dir: &std::path::Path, project_id: &str) -> (Option<u6
         .ok()
         .flatten()
         .and_then(|v| v.parse::<i64>().ok());
-    (Some(chunks), last)
+    (Some(chunks), last, Some(store.plan().embedder_id.clone()))
+}
+
+/// Does the project's recorded plan differ from the configured
+/// model/chunking? `false` with no index yet (nothing to be stale).
+fn plan_stale_at(
+    cfg_path: &std::path::Path,
+    data_dir: &std::path::Path,
+    project_id: &str,
+) -> bool {
+    let eff = effective_settings_at(cfg_path);
+    let path = rag_db_path(data_dir, project_id);
+    if !path.is_file() {
+        return false;
+    }
+    let Ok(store) = RagStore::open_at(&path) else {
+        return false;
+    };
+    let plan = store.plan();
+    plan.embedder_id != eff.embedder_id
+        || plan.chunk_size != eff.chunk_size
+        || plan.chunk_overlap != eff.chunk_overlap
+}
+
+fn plan_stale(data_dir: &std::path::Path, project_id: &str) -> bool {
+    plan_stale_at(&config_path(), data_dir, project_id)
 }
 
 /// Live ingestion progress per project — the last event each ingest thread
@@ -313,8 +425,9 @@ fn running_inits() -> &'static Mutex<HashSet<String>> {
     RUNNING.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// The state of the local embedding-model download (upstream streamed
-/// progress; the daemon records state the settings panel polls).
+/// The state of a local embedding-model download (upstream streamed
+/// progress; the daemon records state the settings panel polls). Keyed
+/// by catalog model id.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ModelDownloadState {
     NotStarted,
@@ -323,20 +436,40 @@ pub enum ModelDownloadState {
     Failed(String),
 }
 
-fn model_download_state() -> &'static Mutex<ModelDownloadState> {
-    static STATE: OnceLock<Mutex<ModelDownloadState>> = OnceLock::new();
-    STATE.get_or_init(|| {
-        Mutex::new(if local_model_exists(&data_dir()) {
-            ModelDownloadState::Ready
-        } else {
-            ModelDownloadState::NotStarted
-        })
-    })
+fn model_download_states() -> &'static Mutex<HashMap<String, ModelDownloadState>> {
+    static STATES: OnceLock<Mutex<HashMap<String, ModelDownloadState>>> = OnceLock::new();
+    STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn model_downloading() -> &'static Mutex<bool> {
-    static FLAG: OnceLock<Mutex<bool>> = OnceLock::new();
-    FLAG.get_or_init(|| Mutex::new(false))
+fn model_downloads_running() -> &'static Mutex<HashSet<String>> {
+    static RUNNING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    RUNNING.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// (state, error) for one model, in the wire shape; vendored models are
+/// always "ready".
+fn model_download_wire(model_id: &str) -> (String, Option<String>) {
+    let Some(entry) = catalog_entry(model_id) else {
+        return ("not-downloaded".to_owned(), None);
+    };
+    if entry.vendored {
+        return ("ready".to_owned(), None);
+    }
+    let states = model_download_states().lock().unwrap();
+    match states.get(model_id) {
+        Some(ModelDownloadState::Ready) => ("ready".to_owned(), None),
+        Some(ModelDownloadState::Downloading) => ("downloading".to_owned(), None),
+        Some(ModelDownloadState::Failed(error)) => ("failed".to_owned(), Some(error.clone())),
+        Some(ModelDownloadState::NotStarted) | None => {
+            // Never-started reads as ready when the files are already on
+            // disk (e.g. a restored data dir).
+            if rag::local_model_exists_for(entry, &data_dir()) {
+                ("ready".to_owned(), None)
+            } else {
+                ("not-downloaded".to_owned(), None)
+            }
+        }
+    }
 }
 
 /// Read one project's status (config + index + download state) straight
@@ -350,26 +483,20 @@ pub fn status(project_id: &str) -> protocol::RagStatusWire {
         .is_some_and(|ids| ids.iter().any(|id| id == project_id));
     let local_available = local_model_exists(&dir);
     let cloud = cloud_configured();
-    let (chunks, last_ingested) = read_ingest_state(&dir, project_id);
-    let downloading = *model_downloading().lock().unwrap();
-    let download = match &*model_download_state().lock().unwrap() {
-        ModelDownloadState::Ready => ("ready".to_owned(), None),
-        ModelDownloadState::Downloading => ("downloading".to_owned(), None),
-        ModelDownloadState::NotStarted => ("not-downloaded".to_owned(), None),
-        ModelDownloadState::Failed(error) => ("failed".to_owned(), Some(error.clone())),
-    };
-    let _ = downloading;
+    let (chunks, last_ingested, plan_id) = read_ingest_state(&dir, project_id);
+    let (download_state, download_error) = model_download_wire(default_entry().id);
     protocol::RagStatusWire {
         project_id: project_id.to_owned(),
         enabled,
         local_model_available: local_available,
         cloud_configured: cloud,
-        model_download: download.0,
-        model_download_error: download.1,
+        model_download: download_state,
+        model_download_error: download_error,
         chunk_count: chunks.unwrap_or(0),
         last_ingested_at: last_ingested,
         init_state: init_state_of(project_id, last_ingested),
-        embedder_id: "local-code-512".to_owned(),
+        embedder_id: plan_id.unwrap_or_else(|| effective_rag_config().embedder_id),
+        plan_stale: plan_stale(&dir, project_id),
         init_progress: init_progress_map()
             .lock()
             .unwrap()
@@ -398,34 +525,136 @@ fn init_state_of(project_id: &str, last_ingested: Option<i64>) -> String {
 /// Kick the embedding-model download on a background thread (idempotent;
 /// a no-op when the model already exists). Progress is state, not events —
 /// the panel polls.
-pub fn ensure_model_downloaded() {
-    if local_model_exists(&data_dir()) {
-        *model_download_state().lock().unwrap() = ModelDownloadState::Ready;
+pub fn ensure_model_downloaded(model_id: &str) {
+    let Some(entry) = catalog_entry(model_id) else {
+        return; // cloud/custom ids download nothing
+    };
+    if entry.vendored || rag::local_model_exists_for(entry, &data_dir()) {
+        model_download_states()
+            .lock()
+            .unwrap()
+            .insert(model_id.to_owned(), ModelDownloadState::Ready);
         return;
     }
-    let mut downloading = model_downloading().lock().unwrap();
-    if *downloading {
-        return;
+    {
+        let mut running = model_downloads_running().lock().unwrap();
+        if running.contains(model_id) {
+            return;
+        }
+        running.insert(model_id.to_owned());
     }
-    *downloading = true;
-    drop(downloading);
-    *model_download_state().lock().unwrap() = ModelDownloadState::Downloading;
+    model_download_states()
+        .lock()
+        .unwrap()
+        .insert(model_id.to_owned(), ModelDownloadState::Downloading);
     let dir = data_dir();
+    let id = model_id.to_owned();
     let spawned = std::thread::Builder::new()
-        .name("tide-rag-model".to_owned())
+        .name(format!("tide-rag-model-{id}"))
         .spawn(move || {
-            let result = download_model(&dir, default_entry(), |_progress| {});
-            let mut state = model_download_state().lock().unwrap();
+            let result = download_model(&dir, entry, |_progress| {});
+            let mut states = model_download_states().lock().unwrap();
             match result {
-                Ok(_) => *state = ModelDownloadState::Ready,
-                Err(error) => *state = ModelDownloadState::Failed(error),
+                Ok(_) => {
+                    states.insert(id.clone(), ModelDownloadState::Ready);
+                }
+                Err(error) => {
+                    states.insert(id.clone(), ModelDownloadState::Failed(error));
+                }
             }
-            *model_downloading().lock().unwrap() = false;
+            model_downloads_running().lock().unwrap().remove(&id);
         });
     if spawned.is_err() {
-        *model_downloading().lock().unwrap() = false;
-        *model_download_state().lock().unwrap() =
-            ModelDownloadState::Failed("could not spawn the download thread".to_owned());
+        model_downloads_running().lock().unwrap().remove(model_id);
+        model_download_states().lock().unwrap().insert(
+            model_id.to_owned(),
+            ModelDownloadState::Failed("could not spawn the download thread".to_owned()),
+        );
+    }
+}
+
+/// Make sure the CONFIGURED embedder's model is on its way down (the
+/// enable-path entry point; no-op for cloud/custom ids).
+fn ensure_configured_model_downloaded() {
+    ensure_model_downloaded(&effective_rag_config().embedder_id);
+}
+
+/// Delete a downloaded catalog model's files. Returns the affected
+/// projects first (indexes whose plan names the model — plus the global
+/// knowledge index) so callers can confirm; the delete itself refuses
+/// while an ingest is running. Vendored models cannot be deleted.
+pub fn delete_model(model_id: &str) -> Result<Vec<String>, String> {
+    let Some(entry) = catalog_entry(model_id) else {
+        return Err(format!("unknown model id {model_id:?}"));
+    };
+    if entry.vendored {
+        return Err(format!("{} ships with the app and cannot be deleted", entry.repo));
+    }
+    let dir = data_dir();
+    let mut affected: Vec<String> = Vec::new();
+    for project_id in enabled_project_ids() {
+        let path = rag_db_path(&dir, &project_id);
+        if path.is_file()
+            && let Ok(store) = RagStore::open_at(&path)
+            && store.plan().embedder_id == model_id
+        {
+            affected.push(project_id);
+        }
+    }
+    let knowledge_affected = knowledge_db_path(&dir).is_file()
+        && KnowledgeStore::open_at(&knowledge_db_path(&dir))
+            .map(|ks| ks.rag.plan().embedder_id == model_id)
+            .unwrap_or(false);
+    if knowledge_affected {
+        affected.push("*".to_owned()); // the global knowledge index
+    }
+    let model_dir = rag::models_dir_for(&dir).join(entry.repo);
+    if model_dir.is_dir() {
+        let running = running_inits().lock().unwrap();
+        if !running.is_empty() {
+            return Err("an indexing run is in progress — try again after it finishes".into());
+        }
+        drop(running);
+        std::fs::remove_dir_all(&model_dir).map_err(|e| e.to_string())?;
+    }
+    model_download_states().lock().unwrap().remove(model_id);
+    Ok(affected)
+}
+
+/// Enabled project ids straight from config.
+fn enabled_project_ids() -> Vec<String> {
+    store::config::load(&config_path())
+        .ok()
+        .and_then(|cfg| cfg.rag_enabled_workspaces)
+        .unwrap_or_default()
+}
+
+/// Warm the configured embedder at boot so the first memory query
+/// doesn't pay cold-model load. Fire-and-forget; failures log only
+/// (the first query retries naturally).
+pub fn prewarm() {
+    let dir = data_dir();
+    let spawned = std::thread::Builder::new()
+        .name("tide-rag-prewarm".to_owned())
+        .spawn(move || {
+            let cfg = store::config::load(&config_path()).ok();
+            let any_enabled = cfg
+                .as_ref()
+                .and_then(|c| c.rag_enabled_workspaces.as_deref())
+                .is_some_and(|ids| !ids.is_empty());
+            if !any_enabled && !knowledge_db_path(&dir).is_file() {
+                return;
+            }
+            let cfg_in = rag_config_at(&config_path());
+            let Ok((_, embedder)) = resolve_embedder_for_build(&cfg_in, &dir) else {
+                return;
+            };
+            if let Err(e) = embedder.embed_use(&["prewarm".to_owned()], EmbedUse::Query) {
+                eprintln!("[tide-rag] prewarm skipped: {e}");
+            }
+        });
+    if spawned.is_err() {
+        eprintln!("[tide-rag] could not spawn the prewarm thread");
     }
 }
 
@@ -433,7 +662,7 @@ pub fn ensure_model_downloaded() {
 /// write under the crate's config lock) and make sure the model download
 /// is on its way.
 pub fn enable_project(project_id: &str) -> Result<(), String> {
-    ensure_model_downloaded();
+    ensure_configured_model_downloaded();
     let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     cfg.rag_enabled_workspaces
@@ -471,7 +700,10 @@ pub fn init_project(project_id: &str, project_path: &std::path::Path) -> Result<
         .name(format!("tide-rag-ingest-{id}"))
         .spawn(move || {
             let result = (|| {
-                let (_, embedder) = resolve_embedder_for_build(&default_rag_config(), &dir)?;
+                let cfg = effective_rag_config();
+                let eff = effective_settings_at(&config_path());
+                let (_, embedder) = resolve_embedder_for_build(&cfg, &dir)?;
+                let plan = intended_plan(embedder.as_ref(), &eff)?;
                 ingest_workspace(
                     WorkspaceIngestInputs {
                         workspace_id: &id,
@@ -480,6 +712,7 @@ pub fn init_project(project_id: &str, project_path: &std::path::Path) -> Result<
                         data_dir: &dir,
                     },
                     embedder.as_ref(),
+                    &plan,
                     |progress| {
                         init_progress_map()
                             .lock()
@@ -700,7 +933,10 @@ fn reindex_source_sync(source_id: &str) {
     let dir = data_dir();
     let result = (|| -> Result<usize, String> {
         let docs = fetch_documents(&source)?;
-        let (_, embedder) = resolve_embedder_for_build(&default_rag_config(), &dir)?;
+        let (_, embedder) = resolve_embedder_for_build(&effective_rag_config(), &dir)?;
+        // Measure remote dims up front so the plan check in
+        // ingest_documents compares reality, not the pre-probe default.
+        embedder.ensure_dims()?;
         let count = ingest_documents(&ks, embedder.as_ref(), source_id, &docs, |progress| {
             source_progress_map()
                 .lock()
@@ -779,7 +1015,8 @@ pub fn remember_fact(project_id: &str, fact: &str) -> Result<(), String> {
             .map_err(|e| e.to_string())?,
     };
     let dir = data_dir();
-    let (_, embedder) = resolve_embedder_for_build(&default_rag_config(), &dir)?;
+    let (_, embedder) = resolve_embedder_for_build(&effective_rag_config(), &dir)?;
+    embedder.ensure_dims()?;
     // Chunk ids derive from the origin — a unique origin per fact
     // accumulates; the same origin would overwrite.
     let fact_id = format!("{}{}", fact.len(), rag::unix_ms_now());
@@ -823,5 +1060,92 @@ mod tests {
                 .unwrap_or_default()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn rag_config_at_hydrates_and_decrypts_custom_endpoints() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.json");
+        let encrypted = store::secrets::encrypt_stored("sk-real-key").unwrap();
+        let mut cfg = store::config::Config::default();
+        cfg.rag = Some(store::config::RagSettings {
+            embedder_id: Some("custom-x".into()),
+            cloud_allowed: Some(true),
+            cloud_model_id: Some("text-embedding-3-small".into()),
+            custom_endpoints: vec![store::config::RagCustomEndpoint {
+                id: "custom-x".into(),
+                name: "OpenAI".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                model_id: "text-embedding-3-small".into(),
+                dims: 1536,
+                max_tokens: Some(8191),
+                encrypted_key: Some(encrypted),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        store::config::save(&cfg_path, &cfg).unwrap();
+
+        let input = super::rag_config_at(&cfg_path);
+        assert_eq!(input.embedder_id, "custom-x");
+        assert!(input.cloud_allowed);
+        assert_eq!(input.cloud_model_id.as_deref(), Some("text-embedding-3-small"));
+        assert_eq!(input.custom_endpoints.len(), 1);
+        assert_eq!(input.custom_endpoints[0].api_key, "sk-real-key");
+        assert_eq!(input.custom_endpoints[0].dims, 1536);
+        assert_eq!(input.custom_endpoints[0].max_tokens, 8191);
+    }
+
+    #[test]
+    fn rag_config_at_defaults_when_block_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.json");
+        store::config::save(&cfg_path, &store::config::Config::default()).unwrap();
+        let input = super::rag_config_at(&cfg_path);
+        assert_eq!(input.embedder_id, "local-code-512");
+        assert!(!input.cloud_allowed);
+        assert!(input.custom_endpoints.is_empty());
+    }
+
+    #[test]
+    fn plan_stale_tracks_the_configured_model_and_chunking() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.json");
+        store::config::save(&cfg_path, &store::config::Config::default()).unwrap();
+        let data = tmp.path().join("data");
+
+        // No index yet → nothing to be stale.
+        assert!(!super::plan_stale_at(&cfg_path, &data, "p1"));
+
+        // Index under a different model (same dims — the id must catch it).
+        let plan = rag::EmbeddingPlan {
+            embedder_id: "local-mle5-small".into(),
+            dims: 384,
+            chunk_size: None,
+            chunk_overlap: None,
+            created_at: 0,
+        };
+        rag::RagStore::open_at_with_plan(&rag::rag_db_path(&data, "p1"), &plan).unwrap();
+        assert!(super::plan_stale_at(&cfg_path, &data, "p1"));
+
+        // Matching index → fresh.
+        let plan = rag::EmbeddingPlan {
+            embedder_id: "local-code-512".into(),
+            dims: 384,
+            chunk_size: None,
+            chunk_overlap: None,
+            created_at: 0,
+        };
+        rag::RagStore::open_at_with_plan(&rag::rag_db_path(&data, "p2"), &plan).unwrap();
+        assert!(!super::plan_stale_at(&cfg_path, &data, "p2"));
+
+        // A chunking change in config makes the matching index stale.
+        let mut cfg = store::config::load(&cfg_path).unwrap();
+        cfg.rag = Some(store::config::RagSettings {
+            chunk_size: Some(800),
+            ..Default::default()
+        });
+        store::config::save(&cfg_path, &cfg).unwrap();
+        assert!(super::plan_stale_at(&cfg_path, &data, "p2"));
     }
 }

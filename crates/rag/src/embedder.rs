@@ -44,6 +44,11 @@ pub trait Embedder: Send + Sync {
     fn dim(&self) -> usize;
     fn max_tokens(&self) -> usize;
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String>;
+    /// Confirm the output dimensions — remote embedders measure with a
+    /// probe so the embedding plan records reality, locals know theirs.
+    fn ensure_dims(&self) -> Result<usize, String> {
+        Ok(self.dim())
+    }
     /// Embed for a specific use. Model families trained with instruction
     /// prefixes (e5) apply different prefixes to queries and passages;
     /// everything else ignores the distinction.
@@ -381,7 +386,7 @@ impl RemoteEmbedder {
     /// cache them, so the embedding plan records what the endpoint
     /// actually returns rather than a guess. Callers that already probed
     /// (custom endpoints) get the stored value for free.
-    pub fn ensure_dims(&self) -> Result<usize, String> {
+    fn ensure_dims_impl(&self) -> Result<usize, String> {
         if let Some(dims) = *self.dims.lock().map_err(|_| "dims state poisoned")? {
             return Ok(dims);
         }
@@ -418,6 +423,9 @@ impl Embedder for RemoteEmbedder {
     }
     fn max_tokens(&self) -> usize {
         self.max_tokens
+    }
+    fn ensure_dims(&self) -> Result<usize, String> {
+        self.ensure_dims_impl()
     }
 
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
