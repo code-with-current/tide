@@ -2033,7 +2033,7 @@ impl Tide {
                 .background_executor()
                 .spawn(async move {
                     daemon.request(
-                        session_id,
+                        Uuid::nil(),
                         Uuid::nil(),
                         client::Command::RunAction {
                             session_id: session_id.to_string(),
@@ -2091,7 +2091,7 @@ impl Tide {
                 .background_executor()
                 .spawn(async move {
                     daemon.request(
-                        session_id,
+                        Uuid::nil(),
                         Uuid::nil(),
                         client::Command::StopAction {
                             session_id: session_id.to_string(),
