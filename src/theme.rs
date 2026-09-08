@@ -148,12 +148,12 @@ impl Theme {
             text_tertiary: rgb(0x7D7D7D).into(),
             text_ghost: rgb(0x575757).into(),
 
-            accent: rgb(0xE2795B).into(),
+            accent: rgb(0x2196F3).into(),
             resize_handle: rgb(0x3B82F6).into(),
             gauge: rgb(0x3B82F6).into(),
 
             selection: hsla(211.0 / 360.0, 1.0, 0.50, 0.55),
-            code_text: rgb(0xE0A882).into(),
+            code_text: rgb(0x8FB8D9).into(),
             code_wash: hsla(220.0 / 360.0, 0.10, 0.90, 0.08),
 
             inverse: rgb(0xE7E9EC).into(),
@@ -195,12 +195,12 @@ impl Theme {
             text_tertiary: rgb(0x858585).into(),
             text_ghost: rgb(0xA4A4A4).into(),
 
-            accent: rgb(0xC85F44).into(),
+            accent: rgb(0x1976D2).into(),
             resize_handle: rgb(0x2563EB).into(),
             gauge: rgb(0x2563EB).into(),
 
             selection: hsla(211.0 / 360.0, 1.0, 0.50, 0.35),
-            code_text: rgb(0x9A5528).into(),
+            code_text: rgb(0x2F6690).into(),
             code_wash: hsla(220.0 / 360.0, 0.10, 0.12, 0.07),
 
             inverse: rgb(0x202227).into(),
