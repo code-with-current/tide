@@ -44,10 +44,10 @@ the original feature bullet instead of adding separate entries for them.
 - Long user messages that clamp now end in an explicit ellipsis at the
   cut, and the expand chevron sits in the footer row — visible without
   hovering — so clamping no longer reads as text silently ending.
-- Changed files in the Git panel now have a right-click menu: stage/unstage
-  and discard moved off the row's hover icons into the menu, alongside Copy
-  Path, Copy Relative Path, Add to .gitignore, Open Diff, and View File. The
-  menu's Add to .gitignore appends the path to the workspace's .gitignore
+- Changed files in the Git panel now have a right-click menu: discard moved
+  off the row's hover icon into it, alongside Stage/Unstage, Copy Path, Copy
+  Relative Path, Add to .gitignore, Open Diff, and View File. The menu's
+  Add to .gitignore appends the path to the workspace's .gitignore
   (creating it if absent) without leaving duplicates.
 - The new-session screen is now a single centered composition: the greeting,
   the chat composer, and the git workspace chips — project, Local vs new

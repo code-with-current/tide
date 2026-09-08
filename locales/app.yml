@@ -2767,6 +2767,20 @@ git_panel.unstage:
   en: Unstage
 git_panel.discard:
   en: Discard changes
+git_panel.copy_path:
+  en: Copy Path
+git_panel.copy_relative_path:
+  en: Copy Relative Path
+git_panel.ignore_file:
+  en: Add to .gitignore
+git_panel.open_diff:
+  en: Open Diff
+git_panel.view_file:
+  en: View File
+git_panel.generate_message:
+  en: Generate Commit Message
+git_panel.staged_changes:
+  en: Staged Changes
 git_panel.conflicts:
   en: "Resolve conflicts — %{count} files"
 git_panel.use_ours:

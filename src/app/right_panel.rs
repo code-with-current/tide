@@ -62,6 +62,147 @@ fn remote_item(
     .disabled(busy)
 }
 
+/// The changed-file row's context menu: the row actions that used to sit on
+/// the hover icons, plus the file utilities. Rebuilt on every open, so the
+/// items always reflect the section the row is in.
+fn file_menu_items(
+    cwd: Option<PathBuf>,
+    path: String,
+    staged: bool,
+    tide: &gpui::WeakEntity<Tide>,
+    cx: &mut App,
+) -> Vec<MenuItem> {
+    let stage_label = if staged {
+        tr!("git_panel.unstage")
+    } else {
+        tr!("git_panel.stage")
+    };
+    let absolute = cwd.as_deref().map(|cwd| cwd.join(&path));
+    let mut items = vec![
+        MenuItem::new(stage_label, {
+            let tide = tide.clone();
+            let path = path.clone();
+            move |_, cx| {
+                let _ = tide.update(cx, |this, cx| {
+                    let Some(cwd) = this
+                        .selected_workspace_path()
+                        .map(std::path::Path::to_path_buf)
+                    else {
+                        return;
+                    };
+                    this.run_git_panel_op(
+                        "stage",
+                        client::WorkspaceOperation::GitStageFile {
+                            cwd,
+                            path: path.clone(),
+                            stage: !staged,
+                        },
+                        cx,
+                    );
+                });
+            }
+        })
+        .icon(if staged { "icons/x.svg" } else { "icons/plus.svg" }),
+    ];
+    if !staged {
+        items.push(
+            MenuItem::new(tr!("git_panel.discard"), {
+                let tide = tide.clone();
+                let path = path.clone();
+                move |_, cx| {
+                    let _ = tide.update(cx, |this, cx| {
+                        let Some(cwd) = this
+                            .selected_workspace_path()
+                            .map(std::path::Path::to_path_buf)
+                        else {
+                            return;
+                        };
+                        this.run_git_panel_op(
+                            "discard",
+                            client::WorkspaceOperation::GitDiscardFile {
+                                cwd,
+                                path: path.clone(),
+                            },
+                            cx,
+                        );
+                    });
+                }
+            })
+            .icon("icons/rewind.svg"),
+        );
+    }
+    items.push(MenuItem::Separator);
+    if let Some(absolute) = absolute {
+        items.push(
+            MenuItem::new(tr!("git_panel.copy_path"), move |_, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(
+                    absolute.to_string_lossy().to_string(),
+                ));
+            })
+            .icon("icons/copy.svg"),
+        );
+    }
+    items.push(
+        MenuItem::new(tr!("git_panel.copy_relative_path"), {
+            let path = path.clone();
+            move |_, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+            }
+        })
+        .icon("icons/copy.svg"),
+    );
+    items.push(
+        MenuItem::new(tr!("git_panel.ignore_file"), {
+            let tide = tide.clone();
+            let path = path.clone();
+            move |_, cx| {
+                let _ = tide.update(cx, |this, cx| {
+                    let Some(cwd) = this
+                        .selected_workspace_path()
+                        .map(std::path::Path::to_path_buf)
+                    else {
+                        return;
+                    };
+                    this.run_git_panel_op(
+                        "ignore",
+                        client::WorkspaceOperation::GitIgnoreFile {
+                            cwd,
+                            path: path.clone(),
+                        },
+                        cx,
+                    );
+                });
+            }
+        })
+        .icon("icons/eye-off.svg"),
+    );
+    items.push(MenuItem::Separator);
+    items.push(
+        MenuItem::new(tr!("git_panel.open_diff"), {
+            let tide = tide.clone();
+            let path = path.clone();
+            move |_, cx| {
+                let _ = tide.update(cx, |this, cx| {
+                    this.open_git_panel_file_diff(path.clone(), staged, cx);
+                });
+            }
+        })
+        .icon("icons/diff.svg"),
+    );
+    items.push(
+        MenuItem::new(tr!("git_panel.view_file"), {
+            let tide = tide.clone();
+            let path = path.clone();
+            move |_, cx| {
+                let _ = tide
+                    .update(cx, |this, cx| this.open_right_panel_file(path.clone(), cx));
+            }
+        })
+        .icon("icons/file.svg"),
+    );
+    items
+}
+
 /// The git panel's vertical rhythm: every one-line bar — tab bar, top
 /// bar, branch bar, identity bar — shares this height and horizontal
 /// padding so the Top/Mid/Bottom sections read as evenly spaced bands.
@@ -7571,79 +7712,6 @@ impl Tide {
             );
         }
 
-        // Discard (unstaged only) — armed per path, one click to confirm.
-        if !staged {
-            let armed = self.git_panel.confirm_discard_file.as_deref() == Some(&change.path);
-            let focus = self.transcript_control_focus(format!("{row_id}-discard"), cx);
-            let path = change.path.clone();
-            row = row.child(
-                div()
-                    .id(SharedString::from(format!("{row_id}-discard")))
-                    .track_focus(&focus)
-                    .tab_index(0)
-                    .h(px(20.0))
-                    .flex_none()
-                    .px(px(if armed { 6.0 } else { 0.0 }))
-                    .rounded(px(5.0))
-                    .when(armed, |button| {
-                        button
-                            .border_1()
-                            .border_color(theme.danger)
-                            .bg(theme.danger.opacity(0.12))
-                    })
-                    .flex()
-                    .items_center()
-                    .gap(px(3.0))
-                    .cursor_default()
-                    .text_size(sp(10.5))
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|style| style.bg(theme.danger.opacity(0.1)))
-                    .child(icon(
-                        "icons/rewind.svg",
-                        12.0,
-                        if armed {
-                            theme.danger
-                        } else {
-                            theme.text_tertiary
-                        },
-                    ))
-                    .when(armed, |button| {
-                        button
-                            .text_color(theme.danger)
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(tr!("common.confirm"))
-                    })
-                    .tooltip(|window, cx| Tooltip::new(tr!("git_panel.discard")).build(window, cx))
-                    .on_activation(cx, move |this, _, cx| {
-                        if this.git_panel.confirm_discard_file.as_deref() == Some(&path) {
-                            this.git_panel.confirm_discard_file = None;
-                            let Some(cwd) = this
-                                .selected_workspace_path()
-                                .map(std::path::Path::to_path_buf)
-                            else {
-                                return;
-                            };
-                            this.run_git_panel_op(
-                                "discard",
-                                client::WorkspaceOperation::GitDiscardFile {
-                                    cwd,
-                                    path: path.clone(),
-                                },
-                                cx,
-                            );
-                        } else {
-                            this.git_panel.confirm_discard_file = Some(path.clone());
-                            cx.notify();
-                        }
-                    })
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        if this.git_panel.confirm_discard_file.take().is_some() {
-                            cx.notify();
-                        }
-                    })),
-            );
-        }
-
         // Stage/unstage toggle.
         let toggle_focus = self.transcript_control_focus(format!("{row_id}-stage"), cx);
         let path = change.path.clone();
@@ -7707,6 +7775,22 @@ impl Tide {
             .on_activation(cx, move |this, _, cx| {
                 this.open_git_panel_file_diff(click_path.clone(), staged, cx);
             });
+        // The row's right-click menu: stage/unstage and discard — which used
+        // to be hover icons — plus the file utilities.
+        let file_menu = self.menu_handle_with(
+            SharedString::from(format!("git-file-menu-{row_id}")),
+            cx,
+            |_, _, _| {},
+        );
+        let menu_cwd = self.selected_workspace_path().map(Path::to_path_buf);
+        let menu_path = change.path.clone();
+        let tide = cx.entity().downgrade();
+        let row = context_menu(
+            row,
+            SharedString::from(format!("git-file-menu-{row_id}")),
+            &file_menu,
+            move |cx| file_menu_items(menu_cwd.clone(), menu_path.clone(), staged, &tide, cx),
+        );
         // Tree leaves get the same per-ancestor vertical guides as directory
         // rows, on a relative wrapper so the absolute lines span the row.
         if show_path {
