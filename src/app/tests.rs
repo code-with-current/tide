@@ -1949,6 +1949,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::General,
         SettingsPage::Appearance,
         SettingsPage::Git,
+        SettingsPage::Projects,
         SettingsPage::Tide,
         SettingsPage::Knowledge,
         SettingsPage::Skills,

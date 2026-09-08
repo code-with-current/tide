@@ -132,8 +132,15 @@ fn fallback_project_selection(ids: &[Uuid], removed: Uuid, current: Option<Uuid>
         return current;
     }
     let position = ids.iter().position(|id| *id == removed)?;
-    let index = position.min(ids.len().saturating_sub(2));
-    ids.get(index).copied()
+    // The next row, or the previous one when the tail was removed. If that
+    // is still the removed row, nothing remains.
+    let index = if position + 1 < ids.len() {
+        position + 1
+    } else {
+        position.saturating_sub(1)
+    };
+    let candidate = ids.get(index).copied();
+    candidate.filter(|id| *id != removed)
 }
 
 /// Key context the remove-project dialog declares, so `escape` dismisses it
