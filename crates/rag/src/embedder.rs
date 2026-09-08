@@ -363,7 +363,8 @@ impl RemoteEmbedder {
     }
 
     /// A user-configured custom endpoint (dims measured by the add-time
-    /// probe and persisted with the endpoint).
+    /// probe and persisted with the endpoint). Pass `dims = 0` for
+    /// not-yet-measured — `ensure_dims` then probes.
     pub fn custom(
         id: &str,
         base_url: &str,
@@ -377,7 +378,7 @@ impl RemoteEmbedder {
             base_url: base_url.trim_end_matches('/').to_owned(),
             model: model_id.to_owned(),
             api_key: api_key.to_owned(),
-            dims: Mutex::new(Some(dims)),
+            dims: Mutex::new((dims > 0).then_some(dims)),
             max_tokens,
         }
     }
@@ -436,7 +437,11 @@ impl Embedder for RemoteEmbedder {
             ));
         }
         let request = serde_json::json!({ "model": self.model, "input": texts });
-        let response = reqwest::blocking::Client::new()
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default();
+        let response = client
             .post(format!("{}/embeddings", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&request)

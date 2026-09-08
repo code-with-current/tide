@@ -230,6 +230,42 @@ pub enum Command {
     RagInitWorkspace {
         project_id: String,
     },
+    /// Global Memory & RAG configuration (the settings page's model
+    /// picker / retrieval / advanced cards).
+    RagConfigGet,
+    /// Merge a partial settings update; the reply lists workspaces whose
+    /// indexes no longer match (embedder or chunking changed) so the UI
+    /// can offer a rebuild.
+    RagConfigUpdate {
+        patch: RagConfigPatchWire,
+    },
+    /// The local model catalog joined with on-disk download state.
+    RagModelsList,
+    RagModelDownload {
+        model_id: String,
+    },
+    /// Returns affected indexes before/after deleting — vendored models
+    /// are refused.
+    RagModelDelete {
+        model_id: String,
+    },
+    /// Probes the endpoint with one test embedding (measuring dims)
+    /// BEFORE anything is persisted; upstream errors surface verbatim.
+    RagEndpointAdd {
+        name: String,
+        base_url: String,
+        model_id: String,
+        api_key: String,
+        max_tokens: Option<u64>,
+    },
+    RagEndpointSetKey {
+        endpoint_id: String,
+        api_key: String,
+    },
+    /// Returns affected indexes if any still use the endpoint.
+    RagEndpointRemove {
+        endpoint_id: String,
+    },
     SourcesList,
     SourcesAdd {
         name: String,
@@ -537,12 +573,94 @@ pub struct RagStatusWire {
     pub init_progress: Option<InitProgressWire>,
 }
 
+/// The effective global RAG settings (no secrets).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RagConfigWire {
+    pub embedder_id: String,
+    pub cloud_allowed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_model_id: Option<String>,
+    pub top_k: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_similarity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_overlap: Option<u64>,
+}
+
+/// A partial settings update — `None` fields keep their stored value.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RagConfigPatchWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedder_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_allowed: Option<bool>,
+    /// Empty string clears the stored value; absent keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_similarity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_overlap: Option<u64>,
+}
+
+/// A custom embeddings endpoint. The key never rides back — only whether
+/// one is stored.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RagEndpointWire {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model_id: String,
+    pub dims: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+    pub has_key: bool,
+}
+
+/// One catalog local model joined with its on-disk state. `name` is the
+/// original HuggingFace repo — the user-facing display string.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RagModelWire {
+    pub id: String,
+    pub name: String,
+    pub dims: usize,
+    pub max_tokens: u64,
+    /// "en" | "multilingual"
+    pub languages: String,
+    pub vendored: bool,
+    pub downloaded: bool,
+    pub download_size: u64,
+    /// "ready" | "downloading" | "not-downloaded" | "failed"
+    pub download_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_error: Option<String>,
+}
+
+/// An index left behind by a settings change (or a delete) — the rebuild
+/// dialog's rows. `project_id` is `"*"` for the global knowledge index.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RagAffectedWorkspaceWire {
+    pub project_id: String,
+    /// The embedder the index is currently locked to.
+    pub built_with: String,
+}
+
 /// Live workspace-indexing progress riding the status (the poll's payload):
 /// phase-labeled, determinate during embedding.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct InitProgressWire {
-    /// "walking" | "chunking" | "embedding" | "done" | "failed"
+pub struct InitProgressWire {    /// "walking" | "chunking" | "embedding" | "done" | "failed"
     pub phase: String,
     pub files_seen: u64,
     pub chunks_total: u64,
@@ -638,6 +756,20 @@ pub enum ResponsePayload {
     },
     RagStatus {
         status: RagStatusWire,
+    },
+    RagConfig {
+        config: RagConfigWire,
+        endpoints: Vec<RagEndpointWire>,
+        cloud_configured: bool,
+    },
+    RagAffected {
+        workspaces: Vec<RagAffectedWorkspaceWire>,
+    },
+    RagModels {
+        models: Vec<RagModelWire>,
+    },
+    RagEndpoint {
+        endpoint: RagEndpointWire,
     },
     RagInit {
         ok: bool,

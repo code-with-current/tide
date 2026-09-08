@@ -361,6 +361,45 @@ impl Backend for TideBackend {
                     }),
                 }
             }
+            Command::RagConfigGet => {
+                let (config, endpoints, cloud_configured) = crate::rag::config_wire();
+                Ok(ResponsePayload::RagConfig {
+                    config,
+                    endpoints,
+                    cloud_configured,
+                })
+            }
+            Command::RagConfigUpdate { patch } => crate::rag::update_config(&patch)
+                .map(|workspaces| ResponsePayload::RagAffected { workspaces })
+                .map_err(anyhow::Error::msg),
+            Command::RagModelsList => Ok(ResponsePayload::RagModels {
+                models: crate::rag::models_list(),
+            }),
+            Command::RagModelDownload { model_id } => {
+                crate::rag::ensure_model_downloaded(&model_id);
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RagModelDelete { model_id } => crate::rag::delete_model(&model_id)
+                .map(|workspaces| ResponsePayload::RagAffected { workspaces })
+                .map_err(anyhow::Error::msg),
+            Command::RagEndpointAdd {
+                name,
+                base_url,
+                model_id,
+                api_key,
+                max_tokens,
+            } => crate::rag::endpoint_add(&name, &base_url, &model_id, &api_key, max_tokens)
+                .map(|endpoint| ResponsePayload::RagEndpoint { endpoint })
+                .map_err(anyhow::Error::msg),
+            Command::RagEndpointSetKey {
+                endpoint_id,
+                api_key,
+            } => crate::rag::endpoint_set_key(&endpoint_id, &api_key)
+                .map(|_| ResponsePayload::Ack)
+                .map_err(anyhow::Error::msg),
+            Command::RagEndpointRemove { endpoint_id } => crate::rag::endpoint_remove(&endpoint_id)
+                .map(|workspaces| ResponsePayload::RagAffected { workspaces })
+                .map_err(anyhow::Error::msg),
             Command::SourcesList => Ok(ResponsePayload::Sources {
                 sources: crate::rag::list_sources(),
             }),
@@ -1443,6 +1482,14 @@ fn handle_driver_command(
         | Command::RagEnableWorkspace { .. }
         | Command::RagDisableWorkspace { .. }
         | Command::RagInitWorkspace { .. }
+        | Command::RagConfigGet
+        | Command::RagConfigUpdate { .. }
+        | Command::RagModelsList
+        | Command::RagModelDownload { .. }
+        | Command::RagModelDelete { .. }
+        | Command::RagEndpointAdd { .. }
+        | Command::RagEndpointSetKey { .. }
+        | Command::RagEndpointRemove { .. }
         | Command::SourcesList
         | Command::SourcesAdd { .. }
         | Command::SourcesRemove { .. }

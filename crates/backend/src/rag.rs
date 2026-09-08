@@ -583,31 +583,15 @@ fn ensure_configured_model_downloaded() {
 /// projects first (indexes whose plan names the model — plus the global
 /// knowledge index) so callers can confirm; the delete itself refuses
 /// while an ingest is running. Vendored models cannot be deleted.
-pub fn delete_model(model_id: &str) -> Result<Vec<String>, String> {
+pub fn delete_model(model_id: &str) -> Result<Vec<protocol::RagAffectedWorkspaceWire>, String> {
     let Some(entry) = catalog_entry(model_id) else {
         return Err(format!("unknown model id {model_id:?}"));
     };
     if entry.vendored {
         return Err(format!("{} ships with the app and cannot be deleted", entry.repo));
     }
+    let affected = affected_workspaces_by_id(model_id);
     let dir = data_dir();
-    let mut affected: Vec<String> = Vec::new();
-    for project_id in enabled_project_ids() {
-        let path = rag_db_path(&dir, &project_id);
-        if path.is_file()
-            && let Ok(store) = RagStore::open_at(&path)
-            && store.plan().embedder_id == model_id
-        {
-            affected.push(project_id);
-        }
-    }
-    let knowledge_affected = knowledge_db_path(&dir).is_file()
-        && KnowledgeStore::open_at(&knowledge_db_path(&dir))
-            .map(|ks| ks.rag.plan().embedder_id == model_id)
-            .unwrap_or(false);
-    if knowledge_affected {
-        affected.push("*".to_owned()); // the global knowledge index
-    }
     let model_dir = rag::models_dir_for(&dir).join(entry.repo);
     if model_dir.is_dir() {
         let running = running_inits().lock().unwrap();
@@ -627,6 +611,373 @@ fn enabled_project_ids() -> Vec<String> {
         .ok()
         .and_then(|cfg| cfg.rag_enabled_workspaces)
         .unwrap_or_default()
+}
+
+// ── global config / models / endpoints (the settings cards) ────────────
+
+/// The effective settings + custom endpoints (no key material) + whether
+/// the system cloud connection is available — one read for the page.
+pub fn config_wire() -> (
+    protocol::RagConfigWire,
+    Vec<protocol::RagEndpointWire>,
+    bool,
+) {
+    let cfg = store::config::load(&config_path()).ok();
+    let eff = cfg
+        .as_ref()
+        .map(|c| c.rag_effective())
+        .unwrap_or_default();
+    let endpoints = eff
+        .custom_endpoints
+        .iter()
+        .map(|ep| protocol::RagEndpointWire {
+            id: ep.id.clone(),
+            name: ep.name.clone(),
+            base_url: ep.base_url.clone(),
+            model_id: ep.model_id.clone(),
+            dims: ep.dims,
+            max_tokens: ep.max_tokens,
+            has_key: ep.encrypted_key.is_some(),
+        })
+        .collect();
+    let wire = protocol::RagConfigWire {
+        embedder_id: eff.embedder_id.clone(),
+        cloud_allowed: eff.cloud_allowed,
+        cloud_model_id: eff.cloud_model_id.clone(),
+        top_k: eff.top_k,
+        min_similarity: eff.min_similarity,
+        chunk_size: eff.chunk_size,
+        chunk_overlap: eff.chunk_overlap,
+    };
+    (wire, endpoints, cloud_configured())
+}
+
+/// Indexes whose plan differs from (embedder id, chunking) — the rebuild
+/// dialog's rows. `project_id == "*"` marks the global knowledge index.
+fn affected_workspaces(
+    embedder_id: &str,
+    chunk_size: Option<u64>,
+    chunk_overlap: Option<u64>,
+) -> Vec<protocol::RagAffectedWorkspaceWire> {
+    affected_workspaces_for(data_dir(), &enabled_project_ids(), embedder_id, chunk_size, chunk_overlap)
+}
+
+/// The affected computation over explicit inputs (testable): every listed
+/// project index + the knowledge index whose plan differs.
+fn affected_workspaces_for(
+    dir: std::path::PathBuf,
+    enabled: &[String],
+    embedder_id: &str,
+    chunk_size: Option<u64>,
+    chunk_overlap: Option<u64>,
+) -> Vec<protocol::RagAffectedWorkspaceWire> {
+    let mut out = Vec::new();
+    for project_id in enabled {
+        let path = rag_db_path(&dir, &project_id);
+        if !path.is_file() {
+            continue;
+        }
+        if let Ok(store) = RagStore::open_at(&path) {
+            let plan = store.plan();
+            if plan.embedder_id != embedder_id
+                || plan.chunk_size != chunk_size
+                || plan.chunk_overlap != chunk_overlap
+            {
+                out.push(protocol::RagAffectedWorkspaceWire {
+                    project_id: project_id.clone(),
+                    built_with: plan.embedder_id.clone(),
+                });
+            }
+        }
+    }
+    let knowledge = knowledge_db_path(&dir)
+        .is_file()
+        .then(|| KnowledgeStore::open_at(&knowledge_db_path(&dir)).ok())
+        .flatten();
+    let _ = &knowledge;
+    if let Some(ks) = knowledge {
+        let plan = ks.rag.plan();
+        if plan.embedder_id != embedder_id
+            || plan.chunk_size != chunk_size
+            || plan.chunk_overlap != chunk_overlap
+        {
+            out.push(protocol::RagAffectedWorkspaceWire {
+                project_id: "*".to_owned(),
+                built_with: plan.embedder_id.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// Merge a partial settings update under the config lock, validate the
+/// embedder id resolves, kick the model download when it's a catalog id,
+/// and return which indexes the change left behind.
+pub fn update_config(
+    patch: &protocol::RagConfigPatchWire,
+) -> Result<Vec<protocol::RagAffectedWorkspaceWire>, String> {
+    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
+    let rag = cfg.rag.get_or_insert_with(store::config::RagSettings::default);
+    merge_rag_patch(rag, patch)?;
+
+    let eff = rag.effective();
+    store::config::save(&config_path(), &cfg).map_err(|e| e.to_string())?;
+    drop(_guard);
+
+    // A newly-selected catalog model starts downloading immediately.
+    if rag::entry(&eff.embedder_id).is_some() {
+        ensure_model_downloaded(&eff.embedder_id);
+    }
+    Ok(affected_workspaces(
+        &eff.embedder_id,
+        eff.chunk_size,
+        eff.chunk_overlap,
+    ))
+}
+
+/// Validation + field merge for a settings patch (pure — testable without
+/// touching the daemon's config path).
+fn merge_rag_patch(
+    rag: &mut store::config::RagSettings,
+    patch: &protocol::RagConfigPatchWire,
+) -> Result<(), String> {
+    if let Some(id) = &patch.embedder_id {
+        let valid = rag::entry(id).is_some()
+            || id == "cloud-base"
+            || rag.custom_endpoints.iter().any(|e| &e.id == id);
+        if !valid {
+            return Err(format!(
+                "unknown embedder {id:?} — pick a catalog model, cloud, or an existing endpoint"
+            ));
+        }
+        rag.embedder_id = Some(id.clone());
+    }
+    if let Some(allowed) = patch.cloud_allowed {
+        rag.cloud_allowed = Some(allowed);
+    }
+    if let Some(model) = &patch.cloud_model_id {
+        rag.cloud_model_id = (!model.is_empty()).then(|| model.clone());
+    }
+    if let Some(top_k) = patch.top_k {
+        if top_k == 0 || top_k > 50 {
+            return Err("topK must be between 1 and 50".into());
+        }
+        rag.top_k = Some(top_k);
+    }
+    if let Some(min) = patch.min_similarity {
+        if !(-1.0..=1.0).contains(&min) {
+            return Err("minSimilarity must be within [-1, 1]".into());
+        }
+        rag.min_similarity = Some(min);
+    }
+    if let Some(size) = patch.chunk_size {
+        if !(64..=8192).contains(&size) {
+            return Err("chunkSize must be between 64 and 8192".into());
+        }
+        rag.chunk_size = Some(size);
+    }
+    if let Some(overlap) = patch.chunk_overlap {
+        if overlap >= 8192 {
+            return Err("chunkOverlap must be smaller than the chunk size range".into());
+        }
+        rag.chunk_overlap = Some(overlap);
+    }
+    Ok(())
+}
+
+/// The catalog joined with on-disk download state.
+pub fn models_list() -> Vec<protocol::RagModelWire> {
+    let dir = data_dir();
+    rag::CATALOG
+        .iter()
+        .map(|entry| {
+            let (state, error) = model_download_wire(entry.id);
+            protocol::RagModelWire {
+                id: entry.id.to_owned(),
+                name: entry.repo.to_owned(),
+                dims: entry.dims,
+                max_tokens: entry.max_tokens as u64,
+                languages: entry.languages.to_owned(),
+                vendored: entry.vendored,
+                downloaded: rag::local_model_exists_for(entry, &dir),
+                download_size: entry.download_size,
+                download_state: state,
+                download_error: error,
+            }
+        })
+        .collect()
+}
+
+fn endpoint_wire(ep: &store::config::RagCustomEndpoint) -> protocol::RagEndpointWire {
+    protocol::RagEndpointWire {
+        id: ep.id.clone(),
+        name: ep.name.clone(),
+        base_url: ep.base_url.clone(),
+        model_id: ep.model_id.clone(),
+        dims: ep.dims,
+        max_tokens: ep.max_tokens,
+        has_key: ep.encrypted_key.is_some(),
+    }
+}
+
+fn endpoint_slug(name: &str, taken: &[String]) -> String {
+    let base: String = name
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    // Collapse separator runs before trimming.
+    let base = base
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let base = base.trim_matches('-').to_string();
+    let base = if base.is_empty() { "endpoint".to_string() } else { base };
+    let mut candidate = format!("custom-{base}");
+    let mut n = 2;
+    while taken.contains(&candidate) {
+        candidate = format!("custom-{base}-{n}");
+        n += 1;
+    }
+    candidate
+}
+
+/// Add a custom endpoint: probe FIRST (one test embedding measures dims
+/// and validates the URL/key; upstream errors surface verbatim), persist
+/// only on success. A key from an existing provider can ride `api_key`
+/// the same way — the daemon never learns where it came from.
+pub fn endpoint_add(
+    name: &str,
+    base_url: &str,
+    model_id: &str,
+    api_key: &str,
+    max_tokens: Option<u64>,
+) -> Result<protocol::RagEndpointWire, String> {
+    if name.trim().is_empty() {
+        return Err("name is required".into());
+    }
+    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+        return Err("base URL must start with http:// or https://".into());
+    }
+    if model_id.trim().is_empty() {
+        return Err("model id is required".into());
+    }
+    if api_key.is_empty() {
+        return Err("API key is required".into());
+    }
+    let probe = rag::RemoteEmbedder::custom(
+        "probe",
+        base_url,
+        model_id,
+        api_key,
+        0, // unknown — force the probe
+        max_tokens.unwrap_or(8191) as usize,
+    );
+    let dims = probe.ensure_dims()?;
+    if dims == 0 {
+        return Err("endpoint returned zero-dimensional vectors".into());
+    }
+
+    let encrypted = store::secrets::encrypt_stored(api_key).map_err(|e| e.to_string())?;
+    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
+    let rag = cfg.rag.get_or_insert_with(store::config::RagSettings::default);
+    let id = endpoint_slug(
+        name,
+        &rag.custom_endpoints.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
+    );
+    let endpoint = store::config::RagCustomEndpoint {
+        id: id.clone(),
+        name: name.trim().to_owned(),
+        base_url: base_url.trim_end_matches('/').to_owned(),
+        model_id: model_id.trim().to_owned(),
+        dims,
+        max_tokens,
+        encrypted_key: Some(encrypted),
+        ..Default::default()
+    };
+    let wire = endpoint_wire(&endpoint);
+    rag.custom_endpoints.push(endpoint);
+    store::config::save(&config_path(), &cfg).map_err(|e| e.to_string())?;
+    Ok(wire)
+}
+
+/// Replace an endpoint's key, re-probing so a dead key can't silently
+/// become the plan's embedder.
+pub fn endpoint_set_key(endpoint_id: &str, api_key: &str) -> Result<(), String> {
+    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
+    let rag = cfg.rag.get_or_insert_with(store::config::RagSettings::default);
+    let ep = rag
+        .custom_endpoints
+        .iter_mut()
+        .find(|e| e.id == endpoint_id)
+        .ok_or_else(|| format!("unknown endpoint {endpoint_id:?}"))?;
+    let probe = rag::RemoteEmbedder::custom(
+        "probe",
+        &ep.base_url,
+        &ep.model_id,
+        api_key,
+        0,
+        ep.max_tokens.unwrap_or(8191) as usize,
+    );
+    probe.ensure_dims()?;
+    ep.encrypted_key = Some(
+        store::secrets::encrypt_stored(api_key)
+            .map_err(|e| e.to_string())?,
+    );
+    store::config::save(&config_path(), &cfg).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Remove an endpoint. Returns the indexes still locked to it (they will
+/// read as rebuild-required) before dropping the config entry.
+pub fn endpoint_remove(
+    endpoint_id: &str,
+) -> Result<Vec<protocol::RagAffectedWorkspaceWire>, String> {
+    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
+    let affected = affected_workspaces_by_id(endpoint_id);
+    if let Some(rag) = cfg.rag.as_mut() {
+        rag.custom_endpoints.retain(|e| e.id != endpoint_id);
+        if rag.embedder_id.as_deref() == Some(endpoint_id) {
+            rag.embedder_id = Some("local-code-512".to_owned());
+        }
+    }
+    store::config::save(&config_path(), &cfg).map_err(|e| e.to_string())?;
+    Ok(affected)
+}
+
+/// Affected computation for one embedder id (deletes/removals).
+fn affected_workspaces_by_id(
+    embedder_id: &str,
+) -> Vec<protocol::RagAffectedWorkspaceWire> {
+    let dir = data_dir();
+    let mut out = Vec::new();
+    for project_id in enabled_project_ids() {
+        let path = rag_db_path(&dir, &project_id);
+        if path.is_file()
+            && let Ok(store) = RagStore::open_at(&path)
+            && store.plan().embedder_id == embedder_id
+        {
+            out.push(protocol::RagAffectedWorkspaceWire {
+                project_id,
+                built_with: embedder_id.to_owned(),
+            });
+        }
+    }
+    if knowledge_db_path(&dir).is_file()
+        && let Ok(ks) = KnowledgeStore::open_at(&knowledge_db_path(&dir))
+        && ks.rag.plan().embedder_id == embedder_id
+    {
+        out.push(protocol::RagAffectedWorkspaceWire {
+            project_id: "*".to_owned(),
+            built_with: embedder_id.to_owned(),
+        });
+    }
+    out
 }
 
 /// Warm the configured embedder at boot so the first memory query
@@ -1147,5 +1498,112 @@ mod tests {
         });
         store::config::save(&cfg_path, &cfg).unwrap();
         assert!(super::plan_stale_at(&cfg_path, &data, "p2"));
+    }
+
+    #[test]
+    fn merge_rag_patch_validates_and_merges() {
+        let mut rag = store::config::RagSettings::default();
+        super::merge_rag_patch(
+            &mut rag,
+            &protocol::RagConfigPatchWire {
+                embedder_id: Some("local-bge-m3".into()),
+                cloud_allowed: Some(true),
+                top_k: Some(8),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(rag.embedder_id.as_deref(), Some("local-bge-m3"));
+        assert!(rag.cloud_allowed.unwrap());
+        assert_eq!(rag.top_k, Some(8));
+
+        // Unknown embedder ids are refused outright.
+        let err = super::merge_rag_patch(
+            &mut store::config::RagSettings::default(),
+            &protocol::RagConfigPatchWire {
+                embedder_id: Some("custom-missing".into()),
+                ..Default::default()
+            },
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("unknown embedder"), "was {err}");
+
+        // Out-of-range values are refused.
+        for bad in [
+            protocol::RagConfigPatchWire { top_k: Some(0), ..Default::default() },
+            protocol::RagConfigPatchWire { min_similarity: Some(2.0), ..Default::default() },
+            protocol::RagConfigPatchWire { chunk_size: Some(8), ..Default::default() },
+            protocol::RagConfigPatchWire { chunk_overlap: Some(9000), ..Default::default() },
+        ] {
+            assert!(super::merge_rag_patch(&mut store::config::RagSettings::default(), &bad).is_err());
+        }
+
+        // Empty string clears cloud_model_id; absent keeps it.
+        let mut rag = store::config::RagSettings {
+            cloud_model_id: Some("text-embedding-3-small".into()),
+            ..Default::default()
+        };
+        super::merge_rag_patch(
+            &mut rag,
+            &protocol::RagConfigPatchWire {
+                cloud_model_id: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(rag.cloud_model_id, None);
+    }
+
+    #[test]
+    fn affected_workspaces_flags_mismatched_plans() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().to_path_buf();
+        let mk_plan = |id: &str| rag::EmbeddingPlan {
+            embedder_id: id.into(),
+            dims: 384,
+            chunk_size: None,
+            chunk_overlap: None,
+            created_at: 0,
+        };
+        // p1 matches the default; p2 was built with e5 (same dims); p3
+        // matches but with chunking; knowledge pinned to e5.
+        rag::RagStore::open_at_with_plan(&rag::rag_db_path(&data, "p1"), &mk_plan("local-code-512")).unwrap();
+        rag::RagStore::open_at_with_plan(&rag::rag_db_path(&data, "p2"), &mk_plan("local-mle5-small")).unwrap();
+        rag::RagStore::open_at_with_plan(
+            &rag::rag_db_path(&data, "p3"),
+            &rag::EmbeddingPlan { chunk_size: Some(800), ..mk_plan("local-code-512") },
+        )
+        .unwrap();
+        // Pin the knowledge index to e5 by creating its db under that plan
+        // (KnowledgeStore::open_at then adopts the recorded plan).
+        rag::RagStore::open_at_with_plan(
+            &rag::knowledge_db_path(&data),
+            &mk_plan("local-mle5-small"),
+        )
+        .unwrap();
+
+        let affected = super::affected_workspaces_for(
+            data.clone(),
+            &["p1".to_owned(), "p2".to_owned(), "p3".to_owned()],
+            "local-code-512",
+            None,
+            None,
+        );
+        let ids: Vec<&str> = affected.iter().map(|a| a.project_id.as_str()).collect();
+        assert!(ids.contains(&"p2"), "was {ids:?}");
+        assert!(ids.contains(&"p3"), "was {ids:?}");
+        assert!(ids.contains(&"*"), "knowledge should count, was {ids:?}");
+        assert!(!ids.contains(&"p1"), "was {ids:?}");
+        let p2 = affected.iter().find(|a| a.project_id == "p2").unwrap();
+        assert_eq!(p2.built_with, "local-mle5-small");
+    }
+
+    #[test]
+    fn endpoint_slugs_are_stable_and_unique() {
+        let taken: Vec<String> = vec!["custom-openai".into()];
+        assert_eq!(super::endpoint_slug("OpenAI", &taken), "custom-openai-2");
+        assert_eq!(super::endpoint_slug("Ollama (local)", &[]), "custom-ollama-local");
+        assert_eq!(super::endpoint_slug("---", &[]), "custom-endpoint");
     }
 }
