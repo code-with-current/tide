@@ -202,6 +202,19 @@ fn upsert_subagent_run(runs: &mut Vec<SubagentRun>, run: SubagentRun) {
     }
 }
 
+/// Temporary diagnostics for the action-run path; appends to a file because
+/// the launched app's stderr is not captured by the dev watcher.
+fn action_debug(msg: impl std::fmt::Display) {
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tide-action-debug.log")
+    {
+        let _ = writeln!(file, "{msg}");
+    }
+}
+
 impl BackgroundWorkRegistry {
     fn apply(&mut self, event: BackgroundWorkEvent) {
         match event {
@@ -332,7 +345,9 @@ impl BackgroundWorkRegistry {
     /// URL, so no OS polling is needed.
     pub(super) fn action_job_state(&self, job_id: &str) -> Option<(bool, Option<u16>)> {
         let key = BackgroundWorkKey::new(BackgroundWorkKind::Process, job_id);
-        let item = self.items.get(&key)?;
+        let Some(item) = self.items.get(&key) else {
+            return None;
+        };
         let running = matches!(
             item.status,
             BackgroundWorkStatus::Starting
@@ -343,6 +358,11 @@ impl BackgroundWorkRegistry {
             .output
             .as_deref()
             .and_then(super::right_panel::scan_exposed_port);
+        action_debug(format!(
+            "state: job {job_id} status={:?} running={running} output_len={} port={port:?}",
+            item.status,
+            item.output.as_deref().map_or(0, str::len),
+        ));
         Some((running, running.then_some(port).flatten()))
     }
 
@@ -806,9 +826,27 @@ impl Tide {
     }
 
     pub(super) fn session_has_live_background_work(&self, session_id: Uuid) -> bool {
+        self.has_live_background_items(session_id) || self.has_live_action_runs(session_id)
+    }
+
+    fn has_live_background_items(&self, session_id: Uuid) -> bool {
         self.background_work
             .get(&session_id)
             .is_some_and(BackgroundWorkRegistry::has_live)
+    }
+
+    /// Project action runs count as live background work from dispatch
+    /// until their job settles — they light the same indicator.
+    fn has_live_action_runs(&self, session_id: Uuid) -> bool {
+        self.action_job_ids
+            .borrow()
+            .keys()
+            .any(|(run_session, _, _)| *run_session == session_id)
+            && self
+                .action_job_ids
+                .borrow()
+                .keys()
+                .any(|(run_session, _, _)| *run_session == session_id)
     }
 
     pub(super) fn session_has_live_detached_work(&self, session_id: Uuid) -> bool {
@@ -2783,11 +2821,8 @@ fn render_background_summary_card(
         .filter(|entry| entry.item.key.kind != BackgroundWorkKind::Subagent)
         .cloned()
         .collect::<Vec<_>>();
-    let agents = entries
-        .iter()
-        .filter(|entry| entry.item.key.kind == BackgroundWorkKind::Subagent)
-        .cloned()
-        .collect::<Vec<_>>();
+    // Sub-agent rows stay in the Agents panel (right panel) — the jobs
+    // popover lists processes only.
     let mut content = div()
         .id("background-summary-scroll")
         .max_h(px(420.0))
@@ -2797,7 +2832,7 @@ fn render_background_summary_card(
         .flex_col()
         .gap(px(8.0));
     let has_environment = environment.is_some();
-    let has_background = !processes.is_empty() || !agents.is_empty();
+    let has_background = !processes.is_empty();
     let has_identifiers = identifiers.is_some();
     if let Some(environment) = environment {
         content = content.child(render_environment_summary_section(
@@ -2814,16 +2849,6 @@ fn render_background_summary_card(
         content = content.child(render_background_summary_section(
             tr!("background.processes"),
             processes,
-            session_id,
-            handle.clone(),
-            weak.clone(),
-            &theme,
-        ));
-    }
-    if !agents.is_empty() {
-        content = content.child(render_background_summary_section(
-            tr!("background.agents"),
-            agents,
             session_id,
             handle.clone(),
             weak.clone(),
@@ -3643,7 +3668,12 @@ impl Tide {
                                     .text_size(px(11.0))
                                     .text_color(theme.text_secondary)
                                     .flex_none()
-                                    .child(item.key.provider_id.clone()),
+                                    // Only sub-agent rows carry a meaningful
+                                    // dispatch id; process rows would show
+                                    // an opaque job id next to the title.
+                                    .when(item.key.kind == BackgroundWorkKind::Subagent, |id| {
+                                        id.child(item.key.provider_id.clone())
+                                    }),
                             )
                             .child(
                                 div()

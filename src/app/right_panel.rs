@@ -1665,7 +1665,9 @@ mod tests {
 /// A dev-server port the run's visible output advertised (`localhost:5173`
 /// and friends). Pure so the threshold lives next to its test.
 pub(super) fn scan_exposed_port(text: &str) -> Option<u16> {
-    for line in text.lines() {
+    // Strip ANSI SGR sequences first — servers colorize their URL lines.
+    let stripped = strip_ansi(text);
+    for line in stripped.lines() {
         for needle in ["localhost:", "127.0.0.1:", "0.0.0.0:"] {
             let Some(index) = line.find(needle) else {
                 continue;
@@ -1682,6 +1684,24 @@ pub(super) fn scan_exposed_port(text: &str) -> Option<u16> {
         }
     }
     None
+}
+
+/// Remove ANSI escape sequences (`ESC [ ... m` and friends).
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 const MAX_ACTION_OUTPUT_BYTES: usize = 512 * 1024;
@@ -1704,6 +1724,19 @@ fn pump_action_output<R: std::io::Read>(mut stream: R, output: Arc<Mutex<String>
                 }
             }
         }
+    }
+}
+
+/// Temporary diagnostics for the action-run path; appends to a file because
+/// the launched app's stderr is not captured by the dev watcher.
+fn action_debug(msg: impl std::fmt::Display) {
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tide-action-debug.log")
+    {
+        let _ = writeln!(file, "{msg}");
     }
 }
 
@@ -2005,6 +2038,10 @@ impl Tide {
     /// `process`): it shows in the jobs pill, the jobs popup, and the
     /// background-work surface. No terminal is involved; output streams
     /// into the background job's log.
+
+    /// Run a project action: dispatch to the daemon, which starts it in
+    /// the session's job registry (kind `process`). The row flips to Stop
+    /// optimistically; the poller reconciles state from the registry.
     pub(super) fn run_project_action(
         &mut self,
         project_id: Uuid,
@@ -2012,17 +2049,7 @@ impl Tide {
         command: String,
         cx: &mut Context<Self>,
     ) {
-        eprintln!(
-            "[action-debug] run: enter project={project_id} action={action_name:?} command={command:?}"
-        );
-        // A registered live run means the action is already going: Play is a
-        // no-op (the row shows Stop while it runs). This keeps repeated
-        // clicks from piling up duplicate jobs against the admission limit.
-        if self.action_run_state(project_id, &action_name).0 {
-            return;
-        }
         let Some(session_id) = self.state.selected_session else {
-            eprintln!("[action-debug] no selected session");
             self.show_toast(tr!("projects.action_unavailable"));
             return;
         };
@@ -2035,9 +2062,15 @@ impl Tide {
         else {
             return;
         };
-        let daemon = self.daemon.client();
+        let run_key = (session_id, project_id, action_name.clone());
+        // Optimistic: the row flips to Stop immediately; the real job id
+        // replaces the pending marker when the daemon answers.
+        self.action_job_ids
+            .borrow_mut()
+            .insert(run_key.clone(), format!("pending-{}", Uuid::new_v4()));
         let action_name_for_job = action_name.clone();
         let action_name_for_key = action_name;
+        let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -2047,6 +2080,7 @@ impl Tide {
                         Uuid::nil(),
                         client::Command::RunAction {
                             session_id: session_id.to_string(),
+                            project_id: project_id.to_string(),
                             project_path,
                             action_name: action_name_for_job,
                             command,
@@ -2054,19 +2088,24 @@ impl Tide {
                     )
                 })
                 .await;
-            eprintln!("[action-debug] response: {result:?}");
             let _ = this.update(cx, |this, cx| match result {
                 Ok(client::ResponsePayload::Cursor {
                     cursor: Some(cursor),
                 }) => {
                     if let Some(job_id) = cursor.get("jobId").and_then(|value| value.as_str()) {
-                        this.action_job_ids
-                            .borrow_mut()
-                            .insert((project_id, action_name_for_key), job_id.to_owned());
+                        this.action_job_ids.borrow_mut().insert(
+                            (session_id, project_id, action_name_for_key),
+                            job_id.to_owned(),
+                        );
                     }
                     cx.notify();
                 }
                 Err(error) => {
+                    this.action_job_ids.borrow_mut().remove(&(
+                        session_id,
+                        project_id,
+                        action_name_for_key,
+                    ));
                     this.show_toast(tr!("projects.action_failed", error = error));
                 }
                 _ => {}
@@ -2085,17 +2124,11 @@ impl Tide {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
-        let Some(job_id) = self
-            .action_job_ids
-            .borrow()
-            .get(&(project_id, action_name.to_owned()))
-            .cloned()
-        else {
+        let map_key = (session_id, project_id, action_name.to_owned());
+        let Some(job_id) = self.action_job_ids.borrow().get(&map_key).cloned() else {
             return;
         };
-        self.action_job_ids
-            .borrow_mut()
-            .remove(&(project_id, action_name.to_owned()));
+        self.action_job_ids.borrow_mut().remove(&map_key);
         let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -2121,8 +2154,10 @@ impl Tide {
         .detach();
     }
 
-    /// (running, advertised port) for one action row, read from the
-    /// session's background-work registry.
+    /// (running, advertised port) for one action row, read from the polled
+    /// registry snapshot. Unknown job ids (dispatch in flight, or a poll
+    /// that has not seen the job yet) read as running so the row never
+    /// flickers back to Play mid-start.
     pub(super) fn action_run_state(
         &self,
         project_id: Uuid,
@@ -2134,15 +2169,104 @@ impl Tide {
         let Some(job_id) = self
             .action_job_ids
             .borrow()
-            .get(&(project_id, action_name.to_owned()))
+            .get(&(session_id, project_id, action_name.to_owned()))
             .cloned()
         else {
             return (false, None);
         };
-        self.background_work
+        if job_id.starts_with("pending-") {
+            return (true, None);
+        }
+        let (running, scanned) = self
+            .background_work
             .get(&session_id)
             .and_then(|registry| registry.action_job_state(&job_id))
-            .unwrap_or((false, None))
+            // Not landed in a poll yet — still starting.
+            .unwrap_or((true, None));
+        // The OS probe is authoritative; the log scan is the fast path.
+        let port = self
+            .action_job_ports
+            .borrow()
+            .get(&job_id)
+            .copied()
+            .or(scanned);
+        action_debug(format!(
+            "state: job={job_id} running={running} scanned={scanned:?} probed={:?} map_size={}",
+            self.action_job_ports.borrow().get(&job_id).copied(),
+            self.action_job_ports.borrow().len()
+        ));
+        (running, running.then_some(port).flatten())
+    }
+
+    pub(super) fn poll_action_jobs(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        if self
+            .action_jobs_poll_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+        {
+            return;
+        }
+        self.action_jobs_poll_at = Some(Instant::now());
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        client::Command::ListActionJobs {
+                            session_id: session_id.to_string(),
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(client::ResponsePayload::ActionJobs { jobs, runs }) => {
+                    action_debug(format!(
+                        "poll: {} jobs, {} runs; ports={:?}",
+                        jobs.len(),
+                        runs.len(),
+                        runs.iter()
+                            .map(|run| (run.job_id.clone(), run.port))
+                            .collect::<Vec<_>>()
+                    ));
+                    // Seed the row-state map first: a freshly started UI
+                    // (or a session visited after a restart) learns its
+                    // live runs from the wires.
+                    for run in runs {
+                        if let Some(port) = run.port {
+                            this.action_job_ports
+                                .borrow_mut()
+                                .insert(run.job_id.clone(), port);
+                        }
+                        this.action_job_ids
+                            .borrow_mut()
+                            .entry((
+                                session_id,
+                                run.project_id.parse().unwrap_or_default(),
+                                run.action_name.clone(),
+                            ))
+                            .or_insert(run.job_id.clone());
+                    }
+                    // Land the items exactly as the event stream would, so
+                    // the jobs pill, popup, and surface all list runs that
+                    // started before any runtime attached.
+                    for item in jobs {
+                        this.handle_background_work_event(
+                            session_id,
+                            BackgroundWorkEvent::Upsert(item),
+                        );
+                    }
+                    cx.notify();
+                }
+                Err(_) => {}
+                _ => {}
+            });
+        })
+        .detach();
     }
 
     pub(super) fn open_action_url(&mut self, port: u16, cx: &mut Context<Self>) {
@@ -7752,6 +7876,11 @@ mod action_run_tests {
     fn exposed_ports_are_scanned_from_run_output() {
         assert_eq!(
             scan_exposed_port("Local: http://localhost:5173/"),
+            Some(5173)
+        );
+        // Servers colorize the URL; ANSI sequences must not break the scan.
+        assert_eq!(
+            scan_exposed_port("\x1b[32m➜ Local:\x1b[0m http://localhost:\x1b[4m5173\x1b[0m/"),
             Some(5173)
         );
         assert_eq!(scan_exposed_port("ready on 127.0.0.1:3000"), Some(3000));

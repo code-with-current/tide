@@ -1477,8 +1477,11 @@ pub struct Tide {
     projects_icon_probe_generation: u64,
     /// The remove-project confirmation, when open.
     projects_remove_dialog: Option<projects_page::RemoveProjectDialog>,
-    /// Live action runs: (project id, action name) → daemon job id.
-    action_job_ids: RefCell<HashMap<(Uuid, String), String>>,
+    /// Live action runs: (session, project, action name) → daemon job id.
+    action_job_ids: RefCell<HashMap<(Uuid, Uuid, String), String>>,
+    /// OS-probed listening ports by action job id.
+    action_job_ports: RefCell<HashMap<String, u16>>,
+    action_jobs_poll_at: Option<Instant>,
     /// The project whose last icon upload failed validation; drives the
     /// detail panel's inline error.
     projects_icon_error: Option<Uuid>,
@@ -3008,6 +3011,8 @@ impl Tide {
                 projects_icon_probe_generation: 0,
                 projects_remove_dialog: None,
                 action_job_ids: RefCell::new(HashMap::new()),
+                action_job_ports: RefCell::new(HashMap::new()),
+                action_jobs_poll_at: None,
                 projects_icon_error: None,
                 projects_name_input,
                 projects_action_name,

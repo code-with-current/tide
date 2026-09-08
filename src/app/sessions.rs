@@ -17,6 +17,10 @@ impl Tide {
     }
 
     pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // Discover this session's live action runs right away: the poll
+        // seeds the row state and the jobs list after a restart or a
+        // switch into a session with runs started elsewhere.
+        self.poll_action_jobs(cx);
         self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
     }
 

@@ -1243,6 +1243,9 @@ impl Tide {
         }
         let actions = project.actions.clone();
         let project_id = project.id;
+        // Keep run state fresh while the section is visible: the poll is
+        // what carries runs that started before any runtime attached.
+        self.poll_action_jobs(cx);
         let mut body = div().flex().flex_col().gap(px(6.0));
         for (index, action) in actions.iter().enumerate() {
             let (running, port) = self.action_run_state(project_id, &action.name);
