@@ -81,6 +81,26 @@ projects.count_one: 1 件のプロジェクト
 projects.count_many: "%{count} 件のプロジェクト"
 projects.filter_caption: "%{total} 件中 %{shown} 件を表示"
 projects.select_placeholder: 設定するプロジェクトを選択してください。
+projects.section_general: 一般
+projects.icon: アイコン
+projects.icon_auto: 自動
+projects.icon_upload: アップロード…
+projects.icon_upload_failed: その画像は使用できません。2 MB 以下の PNG・JPG・WebP を選んでください。
+projects.icon_color: 背景
+projects.default_model: 新しいチャットのデフォルトモデル
+projects.default_model_global: グローバル設定に従う
+projects.default_model_hint: このプロジェクトの新規チャットはこのモデルで開始します。
+projects.git_identity: Git アイデンティティ
+projects.memory_rag: メモリ & RAG
+projects.remove: プロジェクトを削除…
+projects.remove_title: プロジェクトを削除
+projects.remove_body: "「%{name}」は Tide で開けなくなります。"
+projects.remove_history: セッションと履歴も削除する
+projects.remove_confirm: 削除
+projects.remove_cancel: キャンセル
+projects.rename_commit_hint: Enter で名前を変更
+projects.directory_missing: このフォルダはディスク上にありません。設定は編集できます。
+projects.directory_unavailable: プロジェクトフォルダが存在する場合に利用できます。
 git.caption: GitHub アカウントとコミット署名。
 git.loading: 読み込み中…
 git.op_failed: Git 操作に失敗しました

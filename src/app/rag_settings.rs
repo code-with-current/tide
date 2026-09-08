@@ -609,7 +609,19 @@ impl Tide {
     /// build action live in the card head. Degrades to a hint without a
     /// selected project.
     pub(super) fn render_memory_rag_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let Some(project) = self.selected_project() else {
+        let project = self.selected_project().cloned();
+        self.render_memory_rag_card_for(project, theme, cx)
+    }
+
+    /// The same card for an explicit project — the Projects settings page
+    /// renders it for the rail selection, not the window's active project.
+    pub(super) fn render_memory_rag_card_for(
+        &self,
+        project: Option<Project>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let Some(project) = project else {
             return div()
                 .child(settings_group_head(
                     theme,

@@ -4018,14 +4018,6 @@ impl Tide {
             match event {
                 super::git_settings::GitOpsEvent::Snapshot(result) => match result {
                     Ok(snapshot) => {
-                        // Grow the Workspaces picker handles to match the
-                        // fresh status rows; shrink is not needed — trailing
-                        // handles just go unused.
-                        while self.git_settings.project_menus.len() < snapshot.statuses.len() {
-                            self.git_settings
-                                .project_menus
-                                .push(crate::ui::menu::ContextMenuHandle::new(cx));
-                        }
                         self.git_settings.snapshot = Some(snapshot);
                         self.git_settings.loaded = true;
                         self.git_settings.saving_attribution = false;

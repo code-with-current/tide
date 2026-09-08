@@ -77,6 +77,26 @@ projects.count_one: 1 个项目
 projects.count_many: "%{count} 个项目"
 projects.filter_caption: 显示 %{total} 个项目中的 %{shown} 个
 projects.select_placeholder: 选择要配置的项目。
+projects.section_general: 常规
+projects.icon: 图标
+projects.icon_auto: 自动
+projects.icon_upload: 上传…
+projects.icon_upload_failed: 无法使用该图片。请选择 2 MB 以内的 PNG、JPG 或 WebP。
+projects.icon_color: 背景
+projects.default_model: 新会话默认模型
+projects.default_model_global: 跟随全局默认
+projects.default_model_hint: 此项目的新会话将使用该模型开始。
+projects.git_identity: Git 身份
+projects.memory_rag: 记忆与 RAG
+projects.remove: 删除项目…
+projects.remove_title: 删除项目
+projects.remove_body: "“%{name}”将无法在 Tide 中打开。"
+projects.remove_history: 同时删除其会话与历史记录
+projects.remove_confirm: 删除
+projects.remove_cancel: 取消
+projects.rename_commit_hint: 按 Enter 重命名
+projects.directory_missing: 此文件夹在磁盘上不存在。设置仍可编辑。
+projects.directory_unavailable: 项目文件夹存在时可用。
 git.caption: GitHub 账号与提交身份。
 git.loading: 正在加载…
 git.op_failed: Git 操作失败

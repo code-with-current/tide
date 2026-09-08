@@ -33,9 +33,9 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProjectAction, ProjectIcon, ProviderKind,
-    ProviderModel, ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock,
-    RuntimeMode, SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
+    MessageRole, PendingPermission, Project, ProjectIcon, ProviderKind, ProviderModel,
+    ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode,
+    SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
     SubagentToolStatus, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
     compact_path, unix_time, unix_time_millis,
 };

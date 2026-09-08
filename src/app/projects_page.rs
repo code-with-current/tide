@@ -12,7 +12,7 @@ use gpui::KeyBinding;
 
 use super::composer::next_picker_highlight;
 use super::image_preview::image_format_for_name;
-use crate::ui::card::{card_body, settings_group_head};
+use crate::ui::card::{CardRow, card_body, card_rows, settings_group_head};
 
 use super::*;
 
@@ -50,7 +50,7 @@ const ICON_COLORS: [&str; 8] = [
 
 const MAX_UPLOAD_BYTES: u64 = 2 * 1024 * 1024;
 
-fn uploaded_icon_path(project_id: &Uuid, name: &str) -> PathBuf {
+fn uploaded_icon_path(name: &str) -> PathBuf {
     store::paths::data_dir().join("project-icons").join(name)
 }
 
@@ -146,6 +146,14 @@ impl Tide {
                 input.replace_range(0..len, &name, cx);
             });
             self.ensure_project_icon_probe(project.id, project.path, cx);
+            if self
+                .rag_settings
+                .status
+                .as_ref()
+                .is_none_or(|status| status.project_id != id.to_string())
+            {
+                self.rag_refresh(&id.to_string());
+            }
         }
         cx.notify();
     }
@@ -205,23 +213,28 @@ impl Tide {
 
     /// Probe for whichever project the detail panel will show.
     pub(super) fn ensure_selected_project_probe(&mut self, cx: &mut Context<Self>) {
-        let selected = self.projects_settings_selected.or_else(|| {
+        if let Some((id, path)) = self.projects_settings_target() {
+            self.ensure_project_icon_probe(id, path, cx);
+        }
+    }
+
+    /// The project the detail panel will show: the rail selection, or the
+    /// first ordinary project. `(id, path)` so callers borrow nothing.
+    pub(super) fn projects_settings_target(&self) -> Option<(Uuid, PathBuf)> {
+        let id = self.projects_settings_selected.or_else(|| {
             self.state
                 .projects
                 .iter()
                 .find(|project| !project.is_projectless())
                 .map(|project| project.id)
-        });
-        let target = selected.and_then(|id| {
-            self.state
-                .projects
-                .iter()
-                .find(|project| project.id == id)
-                .map(|project| (project.id, project.path.clone()))
-        });
-        if let Some((id, path)) = target {
-            self.ensure_project_icon_probe(id, path, cx);
-        }
+        })?;
+        let path = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == id)
+            .map(|project| project.path.clone())?;
+        Some((id, path))
     }
 
     /// Walk the selection through the visible rows, the way a mailbox walks
@@ -632,7 +645,7 @@ impl Tide {
             .map(|extension| extension.to_ascii_lowercase())
             .unwrap_or_else(|| "png".to_owned());
         let file_name = format!("{project_id}.{extension}");
-        let dest = uploaded_icon_path(&project_id, &file_name);
+        let dest = uploaded_icon_path(&file_name);
         let source = picked;
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -729,7 +742,13 @@ impl Tide {
                     .flex_col()
                     .gap(px(20.0))
                     .child(self.render_project_header(project, missing, theme, cx))
-                    .child(self.render_project_general_card(project, theme, cx)),
+                    .child(self.render_project_general_card(project, theme, cx))
+                    .child(self.render_project_model_card(project, theme, cx))
+                    .child(
+                        self.render_memory_rag_card_for(Some(project.clone()), theme, cx)
+                            .into_any_element(),
+                    )
+                    .child(self.render_project_git_card(project, missing, theme, cx)),
             )
             .into_any_element()
     }
@@ -739,7 +758,7 @@ impl Tide {
         project: &Project,
         missing: bool,
         theme: &Theme,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .flex()
@@ -805,7 +824,7 @@ impl Tide {
                     .unwrap_or_else(|| div().into_any_element()),
             ),
             ProjectIcon::Uploaded(name) => tile(
-                img(uploaded_icon_path(&project.id, name))
+                img(uploaded_icon_path(name))
                     .size_full()
                     .object_fit(gpui::ObjectFit::Cover)
                     .into_any_element(),
@@ -836,6 +855,225 @@ impl Tide {
                 }
             }
         }
+    }
+
+    /// New chats in this project start on the picked model; the composer's
+    /// own picker still overrides per session.
+    fn render_project_model_card(
+        &self,
+        project: &Project,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let project_id = project.id;
+        let current = project.default_model.clone();
+        let handle = self.menu_handle("projects-model-picker", cx);
+        let chip = MenuChip::new("projects-model-chip")
+            .icon("icons/boxes.svg", theme.text_tertiary)
+            .label(
+                current
+                    .clone()
+                    .unwrap_or_else(|| tr!("projects.default_model_global")),
+            )
+            .outlined()
+            .background(theme.raised)
+            .height(px(26.0))
+            .selected(handle.is_open());
+        let weak = cx.entity().downgrade();
+        let models = self.tide_models.clone();
+        let menu = dropdown_menu(
+            chip,
+            "projects-model-menu",
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let mut items = Vec::new();
+                {
+                    let weak = weak.clone();
+                    let cleared = current.is_none();
+                    items.push(
+                        MenuItem::new(tr!("projects.default_model_global"), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                if let Some(project) = this
+                                    .state
+                                    .projects
+                                    .iter_mut()
+                                    .find(|project| project.id == project_id)
+                                {
+                                    project.default_provider = None;
+                                    project.default_model = None;
+                                }
+                                cx.notify();
+                            });
+                        })
+                        .selected(cleared),
+                    );
+                }
+                for model in &models {
+                    let weak = weak.clone();
+                    let model_id = model.id.clone();
+                    let selected = current.as_deref() == Some(model.id.as_str());
+                    items.push(
+                        MenuItem::new(model.name.clone(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                if let Some(project) = this
+                                    .state
+                                    .projects
+                                    .iter_mut()
+                                    .find(|project| project.id == project_id)
+                                {
+                                    project.default_provider = Some(ProviderKind::Tide);
+                                    project.default_model = Some(model_id.clone());
+                                }
+                                cx.notify();
+                            });
+                        })
+                        .selected(selected),
+                    );
+                }
+                items
+            },
+        );
+        div()
+            .child(settings_group_head(
+                theme,
+                tr!("projects.default_model"),
+                Vec::new(),
+            ))
+            .child(card_body(theme).child(card_rows(
+                theme,
+                vec![CardRow::new(tr!("projects.default_model"))
+                        .description(tr!("projects.default_model_hint"))
+                        .control(menu)],
+            )))
+            .into_any_element()
+    }
+
+    /// Repo-local git identity for this project — the picker that lived on
+    /// the Git page's per-project rows, remounted for one project.
+    fn render_project_git_card(
+        &self,
+        project: &Project,
+        missing: bool,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let head = || settings_group_head(theme, tr!("projects.git_identity"), Vec::new());
+        let unavailable = |theme: &Theme| {
+            div()
+                .child(head())
+                .child(
+                    card_body(theme).child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("projects.directory_unavailable")),
+                    ),
+                )
+                .into_any_element()
+        };
+        let Some(snapshot) = self.git_settings.snapshot.clone() else {
+            return div()
+                .child(head())
+                .child(
+                    card_body(theme).child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("git.loading")),
+                    ),
+                )
+                .into_any_element();
+        };
+        let status = snapshot
+            .statuses
+            .iter()
+            .find(|status| status.project_id == project.id);
+        if missing || status.is_none_or(|status| !status.is_repo) {
+            return unavailable(theme);
+        }
+        let status = status.expect("checked above");
+        let profile = status
+            .profile_id
+            .as_ref()
+            .and_then(|id| snapshot.profiles.iter().find(|profile| &profile.id == id));
+        let label = profile
+            .map(|profile| {
+                profile
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| profile.user_name.clone())
+            })
+            .unwrap_or_else(|| tr!("git.projects.global"));
+        let handle = self.menu_handle(
+            SharedString::from(format!("projects-git-{}", project.id)),
+            cx,
+        );
+        let chip = MenuChip::new(SharedString::from(format!(
+            "projects-git-chip-{}",
+            project.id
+        )))
+        .icon("icons/git-branch.svg", theme.text_tertiary)
+        .label(label)
+        .outlined()
+        .background(theme.raised)
+        .height(px(26.0))
+        .selected(handle.is_open());
+        let weak = cx.entity().downgrade();
+        let project_path = status.path.clone();
+        let active_profile_id = status.profile_id.clone();
+        let profiles = std::rc::Rc::new(snapshot.profiles.iter().cloned().collect::<Vec<_>>());
+        let menu = dropdown_menu(
+            chip,
+            SharedString::from(format!("projects-git-menu-{}", project.id)),
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let mut items = Vec::new();
+                {
+                    let weak = weak.clone();
+                    let path = project_path.clone();
+                    let no_override = active_profile_id.is_none();
+                    items.push(
+                        MenuItem::new(tr!("git.projects.global"), move |_, cx| {
+                            let _ = weak.update(cx, |this, _| {
+                                this.git_set_project_identity(path.clone(), "global".into());
+                            });
+                        })
+                        .icon("icons/globe.svg")
+                        .selected(no_override),
+                    );
+                }
+                for profile in profiles.iter() {
+                    let weak = weak.clone();
+                    let path = project_path.clone();
+                    let profile_id = profile.id.clone();
+                    let display = profile
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| profile.user_name.clone());
+                    let selected = active_profile_id.as_deref() == Some(profile.id.as_str());
+                    items.push(
+                        MenuItem::new(display, move |_, cx| {
+                            let _ = weak.update(cx, |this, _| {
+                                this.git_set_project_identity(path.clone(), profile_id.clone());
+                            });
+                        })
+                        .selected(selected),
+                    );
+                }
+                items
+            },
+        );
+        div()
+            .child(head())
+            .child(card_body(theme).child(card_rows(
+                theme,
+                vec![CardRow::new(tr!("projects.git_identity"))
+                        .description(SharedString::from(status.path.clone()))
+                        .control(menu)],
+            )))
+            .into_any_element()
     }
 
     fn render_project_general_card(

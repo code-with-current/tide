@@ -1151,6 +1151,8 @@ projects.default_model:
   en: Default model for new chats
 projects.default_model_global:
   en: Global default
+projects.default_model_hint:
+  en: New chats in this project start on this model.
 projects.actions:
   en: Actions
 projects.action_name:
