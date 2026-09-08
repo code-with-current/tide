@@ -2058,11 +2058,9 @@ impl Tide {
             return;
         };
         let Some(project_path) = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == project_id)
-            .map(|project| project.path.to_string_lossy().into_owned())
+            .selected_session()
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(|path| path.to_string_lossy().into_owned())
         else {
             return;
         };
