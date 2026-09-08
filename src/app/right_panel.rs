@@ -2012,7 +2012,17 @@ impl Tide {
         command: String,
         cx: &mut Context<Self>,
     ) {
+        eprintln!(
+            "[action-debug] run: enter project={project_id} action={action_name:?} command={command:?}"
+        );
+        // A registered live run means the action is already going: Play is a
+        // no-op (the row shows Stop while it runs). This keeps repeated
+        // clicks from piling up duplicate jobs against the admission limit.
+        if self.action_run_state(project_id, &action_name).0 {
+            return;
+        }
         let Some(session_id) = self.state.selected_session else {
+            eprintln!("[action-debug] no selected session");
             self.show_toast(tr!("projects.action_unavailable"));
             return;
         };
@@ -2044,6 +2054,7 @@ impl Tide {
                     )
                 })
                 .await;
+            eprintln!("[action-debug] response: {result:?}");
             let _ = this.update(cx, |this, cx| match result {
                 Ok(client::ResponsePayload::Cursor {
                     cursor: Some(cursor),
