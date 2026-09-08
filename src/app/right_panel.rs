@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use super::branches::{BranchPickerContext, BranchPickerSurface};
 use super::git_history::{self, GRAPH_WIDTH, HISTORY_ROW_H};
@@ -53,8 +54,9 @@ fn remote_item(
 ) -> MenuItem {
     let weak = weak.clone();
     MenuItem::new(label, move |_, cx| {
-        let _ =
-            weak.update(cx, |this, cx| this.run_git_panel_remote(op, fetch, rebase, cx));
+        let _ = weak.update(cx, |this, cx| {
+            this.run_git_panel_remote(op, fetch, rebase, cx)
+        });
     })
     .icon(icon_path)
     .disabled(busy)
@@ -1660,6 +1662,84 @@ mod tests {
     // and are covered by its own tests; this module only consumes them.
 }
 
+/// A dev-server port the run's visible output advertised (`localhost:5173`
+/// and friends). Pure so the threshold lives next to its test.
+pub(super) fn scan_exposed_port(text: &str) -> Option<u16> {
+    // Strip ANSI SGR sequences first — servers colorize their URL lines.
+    let stripped = strip_ansi(text);
+    for line in stripped.lines() {
+        for needle in ["localhost:", "127.0.0.1:", "0.0.0.0:"] {
+            let Some(index) = line.find(needle) else {
+                continue;
+            };
+            let digits: String = line[index + needle.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(port) = digits.parse::<u16>() {
+                if port != 0 {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Remove ANSI escape sequences (`ESC [ ... m` and friends).
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+const MAX_ACTION_OUTPUT_BYTES: usize = 512 * 1024;
+
+/// Append one read of an action run's output stream to the shared buffer,
+/// keeping only the tail of a huge log.
+fn pump_action_output<R: std::io::Read>(mut stream: R, output: Arc<Mutex<String>>) {
+    let mut buffer = [0u8; 4096];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                let mut out = output
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                out.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                let excess = out.len().saturating_sub(MAX_ACTION_OUTPUT_BYTES / 2);
+                if excess > 0 {
+                    out.drain(..excess);
+                }
+            }
+        }
+    }
+}
+
+/// Temporary diagnostics for the action-run path; appends to a file because
+/// the launched app's stderr is not captured by the dev watcher.
+fn action_debug(msg: impl std::fmt::Display) {
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tide-action-debug.log")
+    {
+        let _ = writeln!(file, "{msg}");
+    }
+}
+
 impl Tide {
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         match transcript_link_route(target, self.selected_workspace_path()) {
@@ -1763,6 +1843,10 @@ impl Tide {
         self.reset_file_search_for_session(cx);
         self.reload_clean_right_panel_file_editors(cx);
         self.state.right_panel_visible = self.right_panel_visible;
+        // The git panel's rows belong to the previous project; drop them
+        // before any render so nothing from the old workspace leaks, then
+        // refresh if the surface is showing.
+        self.reset_git_panel_for_workspace();
         if self.active_right_panel_surface() == Some(&RightPanelSurface::Git) {
             if self.git_settings.snapshot.is_none() {
                 self.git_load_snapshot();
@@ -1950,6 +2034,250 @@ impl Tide {
     /// nothing but the CDN script ever touches the network. The browser view
     /// itself only exists once the tab renders, so the URL waits in
     /// [`Self::right_panel_pending_browser_urls`] until then.
+    /// workspace path and type the command in. The run is registered so its
+    /// row can flip Play/Stop and scan for an advertised port; the shared
+    /// session terminal is never involved and output never reaches the
+    /// transcript.
+    /// Run a project action as a daemon-side background job (kind
+    /// `process`): it shows in the jobs pill, the jobs popup, and the
+    /// background-work surface. No terminal is involved; output streams
+    /// into the background job's log.
+
+    /// Run a project action: dispatch to the daemon, which starts it in
+    /// the session's job registry (kind `process`). The row flips to Stop
+    /// optimistically; the poller reconciles state from the registry.
+    pub(super) fn run_project_action(
+        &mut self,
+        project_id: Uuid,
+        action_name: String,
+        command: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_id) = self.state.selected_session else {
+            self.show_toast(tr!("projects.action_unavailable"));
+            return;
+        };
+        let Some(project_path) = self
+            .selected_session()
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(|path| path.to_string_lossy().into_owned())
+        else {
+            return;
+        };
+        let run_key = (session_id, project_id, action_name.clone());
+        // Optimistic: the row flips to Stop immediately; the real job id
+        // replaces the pending marker when the daemon answers.
+        self.action_job_ids
+            .borrow_mut()
+            .insert(run_key.clone(), format!("pending-{}", Uuid::new_v4()));
+        let action_name_for_job = action_name.clone();
+        let action_name_for_key = action_name;
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        client::Command::RunAction {
+                            session_id: session_id.to_string(),
+                            project_id: project_id.to_string(),
+                            project_path,
+                            action_name: action_name_for_job,
+                            command,
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(client::ResponsePayload::Cursor {
+                    cursor: Some(cursor),
+                }) => {
+                    if let Some(job_id) = cursor.get("jobId").and_then(|value| value.as_str()) {
+                        this.action_job_ids.borrow_mut().insert(
+                            (session_id, project_id, action_name_for_key),
+                            job_id.to_owned(),
+                        );
+                    }
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.action_job_ids.borrow_mut().remove(&(
+                        session_id,
+                        project_id,
+                        action_name_for_key,
+                    ));
+                    this.show_toast(tr!("projects.action_failed", error = error));
+                }
+                _ => {}
+            });
+        })
+        .detach();
+    }
+
+    /// SIGINT a running action job's process group.
+    pub(super) fn stop_project_action(
+        &mut self,
+        project_id: Uuid,
+        action_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let map_key = (session_id, project_id, action_name.to_owned());
+        let Some(job_id) = self.action_job_ids.borrow().get(&map_key).cloned() else {
+            return;
+        };
+        self.action_job_ids.borrow_mut().remove(&map_key);
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        client::Command::StopAction {
+                            session_id: session_id.to_string(),
+                            job_id,
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.show_toast(tr!("projects.action_failed", error = error));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// (running, advertised port) for one action row, read from the polled
+    /// registry snapshot. Unknown job ids (dispatch in flight, or a poll
+    /// that has not seen the job yet) read as running so the row never
+    /// flickers back to Play mid-start.
+    pub(super) fn action_run_state(
+        &self,
+        project_id: Uuid,
+        action_name: &str,
+    ) -> (bool, Option<u16>) {
+        let Some(session_id) = self.state.selected_session else {
+            return (false, None);
+        };
+        let Some(job_id) = self
+            .action_job_ids
+            .borrow()
+            .get(&(session_id, project_id, action_name.to_owned()))
+            .cloned()
+        else {
+            return (false, None);
+        };
+        if job_id.starts_with("pending-") {
+            return (true, None);
+        }
+        let (running, scanned) = self
+            .background_work
+            .get(&session_id)
+            .and_then(|registry| registry.action_job_state(&job_id))
+            // Not landed in a poll yet — still starting.
+            .unwrap_or((true, None));
+        // The OS probe is authoritative; the log scan is the fast path.
+        let port = self
+            .action_job_ports
+            .borrow()
+            .get(&job_id)
+            .copied()
+            .or(scanned);
+        action_debug(format!(
+            "state: job={job_id} running={running} scanned={scanned:?} probed={:?} map_size={}",
+            self.action_job_ports.borrow().get(&job_id).copied(),
+            self.action_job_ports.borrow().len()
+        ));
+        (running, running.then_some(port).flatten())
+    }
+
+    pub(super) fn poll_action_jobs(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        if self
+            .action_jobs_poll_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+        {
+            return;
+        }
+        self.action_jobs_poll_at = Some(Instant::now());
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        client::Command::ListActionJobs {
+                            session_id: session_id.to_string(),
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(client::ResponsePayload::ActionJobs { jobs, runs }) => {
+                    action_debug(format!(
+                        "poll: {} jobs, {} runs; ports={:?}",
+                        jobs.len(),
+                        runs.len(),
+                        runs.iter()
+                            .map(|run| (run.job_id.clone(), run.port))
+                            .collect::<Vec<_>>()
+                    ));
+                    // Seed the row-state map first: a freshly started UI
+                    // (or a session visited after a restart) learns its
+                    // live runs from the wires.
+                    for run in runs {
+                        if let Some(port) = run.port {
+                            this.action_job_ports
+                                .borrow_mut()
+                                .insert(run.job_id.clone(), port);
+                        }
+                        this.action_job_ids
+                            .borrow_mut()
+                            .entry((
+                                session_id,
+                                run.project_id.parse().unwrap_or_default(),
+                                run.action_name.clone(),
+                            ))
+                            .or_insert(run.job_id.clone());
+                    }
+                    // Land the items exactly as the event stream would, so
+                    // the jobs pill, popup, and surface all list runs that
+                    // started before any runtime attached.
+                    for item in jobs {
+                        this.handle_background_work_event(
+                            session_id,
+                            BackgroundWorkEvent::Upsert(item),
+                        );
+                    }
+                    cx.notify();
+                }
+                Err(_) => {}
+                _ => {}
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn open_action_url(&mut self, port: u16, cx: &mut Context<Self>) {
+        let browser_id = Uuid::new_v4();
+        self.right_panel_pending_browser_urls
+            .insert(browser_id, format!("http://localhost:{port}"));
+        self.open_right_panel_surface(RightPanelSurface::Browser(browser_id), cx);
+    }
+
     pub(super) fn open_mermaid_diagram(&mut self, source: &str, cx: &mut Context<Self>) {
         let browser_id = Uuid::new_v4();
         self.right_panel_pending_browser_urls.insert(
@@ -2316,10 +2644,17 @@ impl Tide {
             .get(&terminal_id)
             .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
         if !matches_project {
-            self.right_panel_terminals.insert(
-                terminal_id,
-                cx.new(|cx| TerminalView::new(working_directory.clone(), cx)),
-            );
+            let view = cx.new(|cx| TerminalView::new(working_directory.clone(), cx));
+            // File links open in Tide's file viewer, not the file manager.
+            let weak = cx.entity().downgrade();
+            view.update(cx, |terminal, _| {
+                terminal.set_open_file_handler(std::rc::Rc::new(move |path, _window, cx| {
+                    let _ = weak.update(cx, |tide, cx| {
+                        tide.open_transcript_link(&path.to_string_lossy(), cx);
+                    });
+                }));
+            });
+            self.right_panel_terminals.insert(terminal_id, view);
         }
     }
 
@@ -5285,7 +5620,9 @@ impl Tide {
         let cwd = self.selected_workspace_path().map(Path::to_path_buf);
 
         let body: AnyElement = match worktrees {
-            None => self.render_git_panel_loading_rows(&theme).into_any_element(),
+            None => self
+                .render_git_panel_loading_rows(&theme)
+                .into_any_element(),
             Some(worktrees) if worktrees.is_empty() => self
                 .render_right_panel_empty_message(
                     tr!("git_panel.worktrees_empty"),
@@ -5303,9 +5640,9 @@ impl Tide {
                     .flex_col();
                 for entry in worktrees.iter() {
                     let is_armed = armed.as_deref() == Some(entry.path.as_path());
-                    let is_current = cwd
-                        .as_deref()
-                        .is_some_and(|cwd| fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) == entry.path);
+                    let is_current = cwd.as_deref().is_some_and(|cwd| {
+                        fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) == entry.path
+                    });
                     let owner = self.worktree_session(&entry.path);
                     let owner_busy = owner.is_some_and(|session| session.is_busy());
                     let removable = !entry.main && !busy && !owner_busy;
@@ -5489,13 +5826,11 @@ impl Tide {
                                             .min_w_0()
                                             .truncate()
                                             .text_size(sp(11.0))
-                                            .text_color(
-                                                if owner.is_some() && !entry.main {
-                                                    theme.accent.opacity(0.8)
-                                                } else {
-                                                    theme.text_tertiary
-                                                },
-                                            )
+                                            .text_color(if owner.is_some() && !entry.main {
+                                                theme.accent.opacity(0.8)
+                                            } else {
+                                                theme.text_tertiary
+                                            })
                                             .child(single_line_label(&detail)),
                                     ),
                             )
@@ -5964,9 +6299,7 @@ impl Tide {
                             .flex_col()
                             .items_end()
                             .gap(px(3.0))
-                            .child(
-                                div().flex().items_center().gap(px(4.0)).child(generate),
-                            )
+                            .child(div().flex().items_center().gap(px(4.0)).child(generate))
                             .child(primary),
                     ),
             )
@@ -6104,10 +6437,9 @@ impl Tide {
                 let fetch = MenuItem::new(tr!("git_panel.fetch"), {
                     let weak = weak.clone();
                     move |_, cx| {
-                        let _ = weak
-                            .update(cx, |this, cx| {
-                                this.run_git_panel_remote("fetch", true, false, cx)
-                            });
+                        let _ = weak.update(cx, |this, cx| {
+                            this.run_git_panel_remote("fetch", true, false, cx)
+                        });
                     }
                 })
                 .icon("icons/download.svg")
@@ -6115,10 +6447,9 @@ impl Tide {
                 let pull = MenuItem::new(tr!("git_panel.pull"), {
                     let weak = weak.clone();
                     move |_, cx| {
-                        let _ = weak
-                            .update(cx, |this, cx| {
-                                this.run_git_panel_remote("pull", false, false, cx)
-                            });
+                        let _ = weak.update(cx, |this, cx| {
+                            this.run_git_panel_remote("pull", false, false, cx)
+                        });
                     }
                 })
                 .icon("icons/arrow-down.svg")
@@ -6394,9 +6725,19 @@ impl Tide {
             .gap(px(3.0))
             .font_family(".SystemUIFontMonospaced")
             .text_size(sp(10.5))
-            .when(staged_add + staged_del > 0, |counts| counts
-                .child(div().text_color(theme.success).child(format!("+{staged_add}")))
-                .child(div().text_color(theme.danger).child(format!("−{staged_del}"))));
+            .when(staged_add + staged_del > 0, |counts| {
+                counts
+                    .child(
+                        div()
+                            .text_color(theme.success)
+                            .child(format!("+{staged_add}")),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme.danger)
+                            .child(format!("−{staged_del}")),
+                    )
+            });
 
         div()
             .id("git-panel-branch-bar")
@@ -7533,5 +7874,29 @@ impl Tide {
             }
             _ => tr!("diff.source_last_turn"),
         }
+    }
+}
+
+#[cfg(test)]
+mod action_run_tests {
+    use super::scan_exposed_port;
+
+    #[test]
+    fn exposed_ports_are_scanned_from_run_output() {
+        assert_eq!(
+            scan_exposed_port("Local: http://localhost:5173/"),
+            Some(5173)
+        );
+        // Servers colorize the URL; ANSI sequences must not break the scan.
+        assert_eq!(
+            scan_exposed_port("\x1b[32m➜ Local:\x1b[0m http://localhost:\x1b[4m5173\x1b[0m/"),
+            Some(5173)
+        );
+        assert_eq!(scan_exposed_port("ready on 127.0.0.1:3000"), Some(3000));
+        assert_eq!(scan_exposed_port("listening on 0.0.0.0:8080"), Some(8080));
+        // Port 0 is never a real server.
+        assert_eq!(scan_exposed_port("on localhost:0 now"), None);
+        assert_eq!(scan_exposed_port("compiled successfully"), None);
+        assert_eq!(scan_exposed_port(""), None);
     }
 }

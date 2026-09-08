@@ -23,7 +23,7 @@ use crate::tools::proc::{tool_env, unix_process_group};
 /// (`Stopped` when cancelled, `Completed` on exit 0, `Failed` otherwise —
 /// always with the `exit code: N` detail). The starter stays quick and
 /// non-blocking: it spawns the process and two reader threads and returns.
-pub(crate) fn spawn_bash_job(
+pub fn spawn_bash_job(
     command: &str,
     cwd: &std::path::Path,
     handle: &JobHandle,

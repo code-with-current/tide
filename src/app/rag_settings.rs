@@ -33,6 +33,15 @@ pub(crate) struct RagSettingsPanel {
     /// The in-flight list mutation ("add" or a source id) — buttons show
     /// their pending state until the Sources reply clears it.
     pub pending_source: Option<String>,
+    /// Which scope the sources card lists and the add dialog targets.
+    pub scope: KnowledgeScope,
+}
+
+/// The Knowledge page's scope: global knowledge, or one project's.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KnowledgeScope {
+    Global,
+    Project(Uuid),
 }
 
 /// The add dialog's editable state. Text entities are created when the
@@ -63,6 +72,23 @@ impl RagSettingsPanel {
             sources_error: None,
             dialog: None,
             pending_source: None,
+            scope: KnowledgeScope::Global,
+        }
+    }
+
+    /// Whether `source` belongs to the current scope. Global sources carry
+    /// the `*` workspace; project sources carry the project's id.
+    pub(crate) fn source_in_scope(
+        &self,
+        source: &client::KnowledgeSourceWire,
+        scope: KnowledgeScope,
+    ) -> bool {
+        match scope {
+            KnowledgeScope::Global => source.enabled_workspace_ids.iter().any(|id| id == "*"),
+            KnowledgeScope::Project(project_id) => source
+                .enabled_workspace_ids
+                .iter()
+                .any(|id| id == &project_id.to_string()),
         }
     }
 
@@ -71,13 +97,10 @@ impl RagSettingsPanel {
         let name = cx.new(|cx| {
             crate::input::TextInput::new(window, cx)
                 .clear_on_escape()
-                .placeholder("settings.rag.dialog_name_placeholder")
+                .placeholder(tr!("settings.rag.dialog_name_placeholder"))
         });
-        let location = cx.new(|cx| {
-            crate::input::TextInput::new(window, cx)
-                .clear_on_escape()
-                .placeholder("settings.rag.add_location_placeholder")
-        });
+        let location =
+            cx.new(|cx| crate::input::TextInput::new(window, cx).placeholder(SOURCE_KINDS[0].2));
         self.dialog = Some(SourceDialogDraft {
             name,
             kind: "url",
@@ -97,6 +120,37 @@ impl RagSettingsPanel {
 // ── dispatch + actions ─────────────────────────────────────────────────────
 
 impl Tide {
+    /// Browse for a local docs file or folder and drop the chosen path into
+    /// the add dialog's location field.
+    pub(super) fn rag_browse_local_source(&mut self, cx: &mut Context<Self>) {
+        if self.daemon.is_remote() {
+            self.show_toast(tr!("errors.remote_project_picker"));
+            return;
+        }
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: true,
+            multiple: false,
+            prompt: Some(tr!("settings.rag.dialog_browse").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(dialog) = this.rag_settings.dialog.as_mut() {
+                        dialog.location.update(cx, |input, cx| {
+                            let len = input.content().len();
+                            input.replace_range(0..len, &path.to_string_lossy(), cx);
+                        });
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Generic RAG command dispatch: request on a thread, reply through the
     /// ops channel, wake the pump.
     pub(super) fn rag_dispatch(
@@ -208,6 +262,10 @@ impl Tide {
         self.rag_settings.dialog.as_mut().expect("checked").busy = true;
         self.rag_settings.pending_source = Some("add".to_owned());
         let kind = kind.to_owned();
+        let project_id = match self.rag_settings.scope {
+            KnowledgeScope::Global => None,
+            KnowledgeScope::Project(id) => Some(id.to_string()),
+        };
         self.rag_dispatch(
             move |payload| match payload {
                 client::ResponsePayload::Sources { sources } => RagOpsEvent::Sources(Ok(sources)),
@@ -217,6 +275,7 @@ impl Tide {
                 name,
                 kind,
                 location,
+                project_id,
             },
         );
         cx.notify();
@@ -608,8 +667,15 @@ impl Tide {
     /// toggle and index status in the body; the model-state pill and the
     /// build action live in the card head. Degrades to a hint without a
     /// selected project.
-    pub(super) fn render_memory_rag_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let Some(project) = self.selected_project() else {
+    /// The Memory & RAG card for an explicit project — the Projects settings
+    /// page renders it for the rail selection.
+    pub(super) fn render_memory_rag_card_for(
+        &self,
+        project: Option<Project>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let Some(project) = project else {
             return div()
                 .child(settings_group_head(
                     theme,
@@ -744,8 +810,88 @@ impl Tide {
             Vec::new(),
         ));
 
-        let mut body = card_body_flush(theme);
-        if self.rag_settings.sources.is_empty() {
+        // Scope chips: global knowledge, or one project's. The list and the
+        // add dialog both target the selected scope.
+        let scope = self.rag_settings.scope;
+        let mut scopes = div().flex().flex_wrap().gap(px(6.0)).child(
+            div()
+                .id("knowledge-scope-global")
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .h(px(26.0))
+                .px(px(8.0))
+                .rounded(px(8.0))
+                .cursor_default()
+                .flex()
+                .items_center()
+                .text_size(sp(12.5))
+                .when(scope == KnowledgeScope::Global, |element| {
+                    element
+                        .bg(theme.sidebar_item_background)
+                        .border_1()
+                        .border_color(theme.accent)
+                })
+                .when(scope != KnowledgeScope::Global, |element| {
+                    element.hover(|element| element.bg(theme.overlay))
+                })
+                .text_color(theme.text_secondary)
+                .child(tr!("settings.rag.scope_global"))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.rag_settings.scope = KnowledgeScope::Global;
+                    cx.notify();
+                })),
+        );
+        for project in self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+        {
+            let project_id = project.id;
+            let selected = scope == KnowledgeScope::Project(project_id);
+            scopes = scopes.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "knowledge-scope-{}",
+                        project_id
+                    )))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .h(px(26.0))
+                    .px(px(8.0))
+                    .rounded(px(8.0))
+                    .cursor_default()
+                    .flex()
+                    .items_center()
+                    .text_size(sp(12.5))
+                    .when(selected, |element| {
+                        element
+                            .bg(theme.sidebar_item_background)
+                            .border_1()
+                            .border_color(theme.accent)
+                    })
+                    .when(!selected, |element| {
+                        element.hover(|element| element.bg(theme.overlay))
+                    })
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(project.name.clone()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.rag_settings.scope = KnowledgeScope::Project(project_id);
+                        cx.notify();
+                    })),
+            );
+        }
+
+        let mut body =
+            card_body_flush(theme).child(div().px(px(20.0)).pt(px(10.0)).pb(px(4.0)).child(scopes));
+        let in_scope: Vec<_> = self
+            .rag_settings
+            .sources
+            .iter()
+            .filter(|source| self.rag_settings.source_in_scope(source, scope))
+            .cloned()
+            .collect();
+        if in_scope.is_empty() {
             body = body.child(
                 div()
                     .px(px(20.0))
@@ -756,7 +902,7 @@ impl Tide {
             );
         }
         let pending = self.rag_settings.pending_source.clone();
-        for (index, source) in self.rag_settings.sources.clone().into_iter().enumerate() {
+        for (index, source) in in_scope.into_iter().enumerate() {
             // The live line under the name: phase detail while indexing
             // (upstream's LIVE_PHASES treatment), settled stats otherwise.
             let live = source.progress.as_ref().filter(|progress| {
@@ -1025,7 +1171,29 @@ impl Tide {
             kinds = kinds.child(row);
         }
         body = body.child(kinds);
-        // Location (per-kind placeholder rides the input; hint below)
+        // Location (per-kind hint below; docs adds a local file browser)
+        let browse = (kind == "docs").then(|| {
+            let weak = cx.entity().downgrade();
+            div()
+                .id("rag-location-browse")
+                .rounded(px(5.0))
+                .border_1()
+                .border_color(theme.border)
+                .px(px(8.0))
+                .py(px(3.0))
+                .text_size(sp(11.0))
+                .cursor_pointer()
+                .hover(|element| element.bg(theme.overlay))
+                .text_color(theme.text_secondary)
+                .child(tr!("settings.rag.dialog_browse"))
+                .on_click({
+                    move |_, _window, cx| {
+                        let _ = weak.update(cx, |tide, cx| {
+                            tide.rag_browse_local_source(cx);
+                        });
+                    }
+                })
+        });
         body = body.child(
             div()
                 .flex()
@@ -1033,10 +1201,17 @@ impl Tide {
                 .gap(px(4.0))
                 .child(
                     div()
-                        .text_size(sp(11.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(tr!("settings.rag.dialog_location")),
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(sp(11.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("settings.rag.dialog_location")),
+                        )
+                        .children(browse),
                 )
                 .child(location.clone())
                 .child(
@@ -1143,7 +1318,25 @@ impl Tide {
                             .text_size(sp(11.0))
                             .text_color(theme.text_tertiary)
                             .child(tr!("settings.rag.dialog_description")),
-                    ),
+                    )
+                    .child({
+                        let target = match self.rag_settings.scope {
+                            KnowledgeScope::Global => {
+                                tr!("settings.rag.scope_global")
+                            }
+                            KnowledgeScope::Project(project_id) => self
+                                .state
+                                .projects
+                                .iter()
+                                .find(|project| project.id == project_id)
+                                .map(|project| project.name.clone())
+                                .unwrap_or_default(),
+                        };
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.rag.scope_target", target = target))
+                    }),
             )
             .child(body)
             .child(footer);

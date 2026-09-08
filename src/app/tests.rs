@@ -9,6 +9,7 @@ use super::navigation_rail::{
     navigation_rail_scale, should_show_navigation_rail,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
+use super::sessions::effective_start_model;
 use super::settings::visible_settings_pages;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
@@ -28,7 +29,7 @@ use super::{
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
-    DriverEvent, Message, MessageRole, ProviderKind, ReasoningBlock, RuntimeEventCursor,
+    DriverEvent, Message, MessageRole, Project, ProviderKind, ReasoningBlock, RuntimeEventCursor,
     SessionStatus, TranscriptBlock, TurnStatus, UserInputOption, UserInputQuestion,
 };
 
@@ -73,6 +74,7 @@ fn structured_user_input_preserves_question_order_and_custom_answer_precedence()
 use gpui::{ListAlignment, ListState, Pixels, px};
 use std::{
     collections::{HashSet, VecDeque},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -1947,6 +1949,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::General,
         SettingsPage::Appearance,
         SettingsPage::Git,
+        SettingsPage::Projects,
         SettingsPage::Tide,
         SettingsPage::Knowledge,
         SettingsPage::Skills,
@@ -2155,4 +2158,38 @@ fn latest_todo_plan_keeps_the_last_known_list_while_a_card_is_in_flight() {
 
     session.transcript_blocks[0].activities.clear();
     assert_eq!(latest_todo_plan(&session), None);
+}
+
+#[test]
+fn project_default_model_overrides_a_new_chats_start() {
+    let project = Project::from_path(PathBuf::from("/tmp/waku"));
+
+    // No project overrides: the remembered pair wins.
+    assert_eq!(
+        effective_start_model(None, ProviderKind::Tide, Some("gpt-5".into())),
+        (ProviderKind::Tide, Some("gpt-5".into()))
+    );
+
+    // A project without overrides defers to the remembered pair too.
+    assert_eq!(
+        effective_start_model(Some(&project), ProviderKind::Tide, Some("gpt-5".into())),
+        (ProviderKind::Tide, Some("gpt-5".into()))
+    );
+
+    // A project model-only override rides the remembered provider.
+    let mut model_only = project.clone();
+    model_only.default_model = Some("claude-opus-4-5".into());
+    assert_eq!(
+        effective_start_model(Some(&model_only), ProviderKind::Tide, Some("gpt-5".into())),
+        (ProviderKind::Tide, Some("claude-opus-4-5".into()))
+    );
+
+    // A full project pair wins outright.
+    let mut full = project;
+    full.default_provider = Some(ProviderKind::Tide);
+    full.default_model = Some("claude-opus-4-5".into());
+    assert_eq!(
+        effective_start_model(Some(&full), ProviderKind::Tide, None),
+        (ProviderKind::Tide, Some("claude-opus-4-5".into()))
+    );
 }

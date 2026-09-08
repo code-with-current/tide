@@ -573,11 +573,13 @@ pub fn list_sources() -> Vec<protocol::KnowledgeSourceWire> {
 }
 
 /// Add a source (validating kind + dedupe by kind+location), enqueue the
-/// first index, and return the wire row.
+/// first index, and return the wire row. `project_id` scopes the source to
+/// one project's memory; `None` keeps it global.
 pub fn add_source(
     name: &str,
     kind: &str,
     location: &str,
+    project_id: Option<&str>,
 ) -> Result<protocol::KnowledgeSourceWire, String> {
     if !matches!(kind, "url" | "docs" | "crawl" | "repo") {
         return Err(format!(
@@ -618,7 +620,14 @@ pub fn add_source(
         name.trim().to_owned()
     };
     let source = ks
-        .add_source(&name, kind, location.trim(), Some(&["*".to_owned()]))
+        .add_source(
+            &name,
+            kind,
+            location.trim(),
+            Some(&[project_id
+                .map(str::to_owned)
+                .unwrap_or_else(|| "*".to_owned())]),
+        )
         .map_err(|e| e.to_string())?;
     enqueue_reindex(&source.id);
     Ok(source_wire(&source))

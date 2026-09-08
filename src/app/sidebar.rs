@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
 use gpui::{KeyBinding, actions, solid_background};
 
+use super::projects_page::project_avatar;
 use super::*;
 
 actions!(tide_sidebar, [CancelSessionRename]);
@@ -1324,6 +1325,17 @@ impl Tide {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("project.no_project_name"),
         };
+        let project_avatar_element = match &group {
+            SidebarGroup::Project(project_id) => {
+                let probe = self.landed_probe(*project_id);
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == *project_id)
+                    .map(|project| project_avatar(project, probe.as_ref(), 16.0))
+            }
+            _ => None,
+        };
         let updated_chevron = matches!(group, SidebarGroup::Updated(_)).then(|| {
             icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
                 .when(collapsed, |icon| {
@@ -1414,7 +1426,9 @@ impl Tide {
                     .items_center()
                     .gap(px(5.0))
                     .when(show_folder_icon, |element| {
-                        element.child(icon(folder_icon, 14.0, theme.text_secondary))
+                        element.child(project_avatar_element.unwrap_or_else(|| {
+                            icon(folder_icon, 14.0, theme.text_secondary).into_any_element()
+                        }))
                     })
                     .child(
                         div()
@@ -1836,8 +1850,18 @@ impl Tide {
                     .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
                     .line_height(sp(15.0))
                     .when_some(detail_label, |element, label| {
+                        let project_avatar_element = if !grouped_by_project {
+                            project.and_then(|project| {
+                                let probe = self.landed_probe(project.id);
+                                Some(project_avatar(project, probe.as_ref(), 12.5))
+                            })
+                        } else {
+                            None
+                        };
                         element
-                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                            .child(project_avatar_element.unwrap_or_else(|| {
+                                icon(detail_icon, 12.5, theme.text_tertiary).into_any_element()
+                            }))
                             .child(
                                 div()
                                     .flex_1()
@@ -2072,99 +2096,99 @@ impl Tide {
     pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .px_8()
-                .pb(px(46.0))
-                .child(icon("icons/sparkle.svg", 24.0, theme.accent))
-                .child(
-                    div()
-                        .mt(px(16.0))
-                        .text_size(sp(20.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(tr_cow!("onboarding.open_project_to_begin")),
-                )
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .max_w(px(380.0))
-                        .text_center()
-                        .text_size(sp(12.5))
-                        .line_height(sp(19.0))
-                        .text_color(theme.text_tertiary)
-                        .child(tr_cow!("onboarding.description")),
-                )
-                .child(
-                    div()
-                        .mt(px(20.0))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(8.0))
-                        .tab_index(0)
-                        .tab_group()
-                        .tab_stop(false)
-                        .child(
-                            div()
-                                .id("onboarding-add-project")
-                                .track_focus(&self.onboarding_add_project_focus)
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                                .h(px(32.0))
-                                .px(px(14.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .cursor_default()
-                                .bg(theme.inverse)
-                                .text_color(theme.on_inverse)
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .hover(|element| element.opacity(0.9))
-                                .active(|element| element.opacity(0.8))
-                                .child(tr_cow!("onboarding.open_project_folder"))
-                                .on_click(cx.listener(|this, _, _, cx| this.add_project(cx)))
-                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.add_project(cx);
-                                        cx.stop_propagation();
-                                    }
-                                })),
-                        )
-                        .child(
-                            div()
-                                .id("onboarding-projectless")
-                                .track_focus(&self.onboarding_projectless_focus)
-                                .tab_index(1)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                                .h(px(30.0))
-                                .px(px(12.0))
-                                .rounded_full()
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .cursor_default()
-                                .text_color(theme.text_secondary)
-                                .text_size(sp(12.5))
-                                .hover(|element| element.bg(theme.overlay))
-                                .active(|element| element.bg(theme.overlay_strong))
-                                .child(icon("icons/x.svg", 11.0, theme.text_tertiary))
-                                .child(tr_cow!("project.no_project"))
-                                .on_click(cx.listener(|this, _, _, cx| {
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .px_8()
+            .pb(px(46.0))
+            .child(icon("icons/sparkle.svg", 24.0, theme.accent))
+            .child(
+                div()
+                    .mt(px(16.0))
+                    .text_size(sp(20.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr_cow!("onboarding.open_project_to_begin")),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .max_w(px(380.0))
+                    .text_center()
+                    .text_size(sp(12.5))
+                    .line_height(sp(19.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr_cow!("onboarding.description")),
+            )
+            .child(
+                div()
+                    .mt(px(20.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.0))
+                    .tab_index(0)
+                    .tab_group()
+                    .tab_stop(false)
+                    .child(
+                        div()
+                            .id("onboarding-add-project")
+                            .track_focus(&self.onboarding_add_project_focus)
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .h(px(32.0))
+                            .px(px(14.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .cursor_default()
+                            .bg(theme.inverse)
+                            .text_color(theme.on_inverse)
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .hover(|element| element.opacity(0.9))
+                            .active(|element| element.opacity(0.8))
+                            .child(tr_cow!("onboarding.open_project_folder"))
+                            .on_click(cx.listener(|this, _, _, cx| this.add_project(cx)))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.add_project(cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("onboarding-projectless")
+                            .track_focus(&self.onboarding_projectless_focus)
+                            .tab_index(1)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .h(px(30.0))
+                            .px(px(12.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .cursor_default()
+                            .text_color(theme.text_secondary)
+                            .text_size(sp(12.5))
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.bg(theme.overlay_strong))
+                            .child(icon("icons/x.svg", 11.0, theme.text_tertiary))
+                            .child(tr_cow!("project.no_project"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.create_projectless_session(cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                                     this.create_projectless_session(cx);
-                                }))
-                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.create_projectless_session(cx);
-                                        cx.stop_propagation();
-                                    }
-                                })),
-                        ),
-                )
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    ),
+            )
     }
 
     /// The new-session screen: the greeting, the composer, and the workspace
@@ -2204,7 +2228,10 @@ impl Tide {
                     .filter(|project| !project.is_projectless())
                     .filter(|project| Some(project.id) != selected_project_id),
             )
-            .map(|project| (project.id, project.display_name()))
+            .map(|project| {
+                let probe = self.landed_probe(project.id);
+                (project.clone(), probe, project.display_name())
+            })
             .collect::<Vec<_>>();
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("empty-state-project", cx);
@@ -2218,15 +2245,45 @@ impl Tide {
                 let mut items = project_options
                     .clone()
                     .into_iter()
-                    .map(|(project_id, project_name)| {
+                    .map(|(project, probe, project_name)| {
                         let weak = weak.clone();
-                        MenuItem::new(project_name, move |_, cx| {
-                            if Some(project_id) == selected_project_id {
-                                return;
-                            }
-                            let _ = weak.update(cx, |this, cx| this.select_project(project_id, cx));
+                        let project_id = project.id;
+                        let is_selected = Some(project_id) == selected_project_id;
+                        MenuItem::custom(move |_, cx| {
+                            let theme = Theme::current(cx);
+                            div()
+                                .w_full()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(project_avatar(&project, probe.as_ref(), 16.0))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(12.5))
+                                        .text_color(if is_selected {
+                                            theme.text
+                                        } else {
+                                            theme.text_secondary
+                                        })
+                                        .child(SharedString::from(project_name.clone())),
+                                )
+                                .when(is_selected, |element| {
+                                    element.child(icon(
+                                        "icons/check.svg",
+                                        12.0,
+                                        theme.text_secondary,
+                                    ))
+                                })
+                                .into_any_element()
                         })
-                        .selected(Some(project_id) == selected_project_id)
+                        .on_click(move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.select_project(project_id, cx);
+                            });
+                        })
                     })
                     .collect::<Vec<_>>();
                 if !items.is_empty() {
@@ -2517,12 +2574,14 @@ mod tests {
             name: "Task".to_owned(),
             path: root.join("2026-08-23/task"),
             created_at: 0,
+            ..Project::from_path(root.join("2026-08-23/task"))
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
             name: "Ordinary".to_owned(),
             path: PathBuf::from("/tmp/dev/ordinary"),
             created_at: 0,
+            ..Project::from_path(PathBuf::from("/tmp/dev/ordinary"))
         };
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));
         assert!(!sidebar_project_is_projectless(&ordinary, Some(root)));

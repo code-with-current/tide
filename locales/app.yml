@@ -419,6 +419,12 @@ settings.rag.add_source:
   en: Add knowledge source
 settings.rag.dialog_description:
   en: Indexed content is searchable by the agent's memory tool.
+settings.rag.scope_global:
+  en: Global
+settings.rag.scope_target:
+  en: "Scope: %{target}"
+settings.rag.dialog_browse:
+  en: Browse…
 settings.rag.dialog_name:
   en: Name
 settings.rag.dialog_name_placeholder:
@@ -1119,6 +1125,90 @@ command_scope.builtin:
 
 skills.search:
   en: Search skills…
+projects.search:
+  en: Search projects…
+projects.empty_title:
+  en: No projects
+projects.empty_description:
+  en: Open a folder to add a project.
+projects.no_match:
+  en: No projects match your search.
+projects.count_one:
+  en: 1 project
+projects.count_many:
+  en: "%{count} projects"
+projects.filter_caption:
+  en: "%{shown} of %{total} projects"
+projects.select_placeholder:
+  en: Select a project to configure it.
+projects.section_general:
+  en: General
+projects.icon:
+  en: Icon
+projects.icon_auto:
+  en: Auto
+projects.icon_upload:
+  en: Upload…
+projects.icon_upload_failed:
+  en: Could not use that image. Pick a PNG, JPG, or WebP under 2 MB.
+projects.icon_color:
+  en: Background
+projects.default_model:
+  en: Default model for new chats
+projects.default_model_global:
+  en: Global default
+projects.default_model_hint:
+  en: New chats in this project start on this model.
+projects.actions:
+  en: Actions
+projects.action_name:
+  en: Action name
+projects.action_command:
+  en: Command
+projects.action_add:
+  en: Add action
+projects.action_needs_command:
+  en: A command is required.
+projects.action_run:
+  en: Run
+projects.action_stop:
+  en: Stop
+projects.action_unavailable:
+  en: No terminal is available for this task.
+projects.action_failed:
+  en: "Could not start the action: %{error}"
+projects.remove_failed:
+  en: "Could not remove the project: %{error}"
+inspector.section_actions:
+  en: Actions
+projects.settings_save_failed:
+  en: "Could not save project settings: %{error}"
+projects.actions_empty:
+  en: Run a command in this project with one click.
+projects.git_identity:
+  en: Git identity
+projects.git_identity_global:
+  en: Global
+projects.memory_rag:
+  en: Memory & RAG
+projects.remove:
+  en: Remove project…
+projects.remove_title:
+  en: Remove project
+projects.remove_body:
+  en: "\"%{name}\" will no longer open in Tide."
+projects.remove_history:
+  en: Also delete its sessions and history
+projects.remove_confirm:
+  en: Remove
+projects.remove_cancel:
+  en: Cancel
+projects.rename_commit_hint:
+  en: Press Enter to rename
+projects.directory_missing:
+  en: This folder is missing on disk. Settings stay editable.
+projects.directory_unavailable:
+  en: Available when the project folder exists.
 skills.count_one:
   en: 1 skill
 skills.count_many:
@@ -2340,6 +2430,10 @@ settings.git:
   en: Git
 settings.git_keywords:
   en: git identity identities github commit attribution co-author signing ssh
+settings.projects:
+  en: Projects
+settings.projects_keywords:
+  en: projects workspace folder identity icon actions model remove
 git.caption:
   en: GitHub accounts and commit identities.
 git.loading:

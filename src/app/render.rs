@@ -252,6 +252,7 @@ impl Render for Tide {
             let git_dialogs = self.render_git_dialogs(window, cx);
             let rag_dialog = self.render_rag_source_dialog(window, cx);
             let tide_wizard = self.render_tide_wizard(window, cx);
+            let projects_remove = self.render_projects_remove_dialog(cx);
             let toast = self.render_active_toast(cx);
             let content = div()
                 .relative()
@@ -271,6 +272,7 @@ impl Render for Tide {
                 .children(goal_dialog)
                 .children(git_dialogs)
                 .children(rag_dialog)
+                .children(projects_remove)
                 .children(tide_wizard)
                 .children(image_preview)
                 .children(task_switcher)
@@ -303,203 +305,203 @@ impl Render for Tide {
         // transcript's content measurement matches its narrowed bounds; the
         // pane's geometry-keyed cache re-renders it when this changes.
         self.inspector_rendered_width = inspector::inspector_consumed_width(inspector_shown);
-        let content =
-            div()
-                .key_context("Tide")
-                .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
-                .on_action(cx.listener(Self::new_session_action))
-                .on_action(cx.listener(Self::new_project_action))
-                .on_action(cx.listener(Self::open_settings_action))
-                .on_action(cx.listener(Self::toggle_remote_control_action))
-                .on_action(cx.listener(Self::toggle_sidebar_action))
-                .on_action(cx.listener(Self::toggle_right_panel_action))
-                .on_action(cx.listener(Self::toggle_command_palette_action))
-                .on_action(cx.listener(Self::toggle_fps_counter_action))
-                .on_action(cx.listener(Self::navigate_back_action))
-                .on_action(cx.listener(Self::navigate_forward_action))
-                .on_action(cx.listener(Self::switch_task_forward_action))
-                .on_action(cx.listener(Self::switch_task_backward_action))
-                .on_action(cx.listener(Self::select_first_task_action))
-                .on_action(cx.listener(Self::select_last_task_action))
-                .on_action(cx.listener(Self::confirm_task_switch_action))
-                .on_action(cx.listener(Self::cancel_task_switch_action))
-                .on_action(cx.listener(Self::focus_composer_action))
-                .on_action(cx.listener(Self::toggle_model_picker_action))
-                .on_action(cx.listener(Self::toggle_usage_panel_action))
-                .on_action(cx.listener(Self::save_right_panel_file_action))
-                .on_action(cx.listener(Self::cancel_turn_action))
-                .on_action(cx.listener(Self::copy_selection_action))
-                .on_action(cx.listener(Self::open_find_action))
-                .on_action(cx.listener(Self::open_find_replace_action))
-                .on_action(cx.listener(Self::close_find_action))
-                .on_action(cx.listener(Self::find_next_action))
-                .on_action(cx.listener(Self::find_previous_action))
-                .on_action(cx.listener(Self::toggle_find_case_action))
-                .on_action(cx.listener(Self::toggle_find_whole_word_action))
-                .on_action(cx.listener(Self::toggle_find_regex_action))
-                .on_action(cx.listener(Self::replace_all_matches_action))
-                .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
-                .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
-                .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
-                .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
-                .size_full()
-                .relative()
-                .flex()
-                .text_color(theme.text)
-                .font_family(".SystemUIFont")
-                // Both panels slide through a container that narrows while their
-                // content keeps its full width and is clipped: the sidebar list
-                // and the right panel's surfaces never reflow on the way in or
-                // out, and their bounds stay put so only the clip moves.
-                .when(panels.sidebar > 0.0, |root| {
-                    root.child(
-                        div()
-                            .h_full()
-                            .flex_none()
-                            .w(px(panels.sidebar))
-                            .when(panels.sidebar_sliding, |element| element.overflow_hidden())
-                            .child(
-                                self.sidebar_pane.clone().cached(
-                                    StyleRefinement::default()
-                                        .w(px(panels.sidebar_content))
-                                        .h_full()
-                                        .flex_none(),
-                                ),
-                            ),
-                    )
-                })
-                .child(
+        let content = div()
+            .key_context("Tide")
+            .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
+            .on_action(cx.listener(Self::new_session_action))
+            .on_action(cx.listener(Self::new_project_action))
+            .on_action(cx.listener(Self::open_settings_action))
+            .on_action(cx.listener(Self::toggle_remote_control_action))
+            .on_action(cx.listener(Self::toggle_sidebar_action))
+            .on_action(cx.listener(Self::toggle_right_panel_action))
+            .on_action(cx.listener(Self::toggle_command_palette_action))
+            .on_action(cx.listener(Self::toggle_fps_counter_action))
+            .on_action(cx.listener(Self::navigate_back_action))
+            .on_action(cx.listener(Self::navigate_forward_action))
+            .on_action(cx.listener(Self::switch_task_forward_action))
+            .on_action(cx.listener(Self::switch_task_backward_action))
+            .on_action(cx.listener(Self::select_first_task_action))
+            .on_action(cx.listener(Self::select_last_task_action))
+            .on_action(cx.listener(Self::confirm_task_switch_action))
+            .on_action(cx.listener(Self::cancel_task_switch_action))
+            .on_action(cx.listener(Self::focus_composer_action))
+            .on_action(cx.listener(Self::toggle_model_picker_action))
+            .on_action(cx.listener(Self::toggle_usage_panel_action))
+            .on_action(cx.listener(Self::save_right_panel_file_action))
+            .on_action(cx.listener(Self::cancel_turn_action))
+            .on_action(cx.listener(Self::copy_selection_action))
+            .on_action(cx.listener(Self::open_find_action))
+            .on_action(cx.listener(Self::open_find_replace_action))
+            .on_action(cx.listener(Self::close_find_action))
+            .on_action(cx.listener(Self::find_next_action))
+            .on_action(cx.listener(Self::find_previous_action))
+            .on_action(cx.listener(Self::toggle_find_case_action))
+            .on_action(cx.listener(Self::toggle_find_whole_word_action))
+            .on_action(cx.listener(Self::toggle_find_regex_action))
+            .on_action(cx.listener(Self::replace_all_matches_action))
+            .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
+            .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
+            .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
+            .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
+            .size_full()
+            .relative()
+            .flex()
+            .text_color(theme.text)
+            .font_family(".SystemUIFont")
+            // Both panels slide through a container that narrows while their
+            // content keeps its full width and is clipped: the sidebar list
+            // and the right panel's surfaces never reflow on the way in or
+            // out, and their bounds stay put so only the clip moves.
+            .when(panels.sidebar > 0.0, |root| {
+                root.child(
                     div()
-                        .flex_1()
                         .h_full()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .bg(theme.surface)
-                        .when(panels.sidebar > 0.0, |element| {
-                            element.border_l_1().border_color(theme.sidebar_border)
-                        })
-                        .child(self.render_header(window, cx))
-                        // The chat's working region — transcript through
-                        // composer and the workspace footer beneath it — laid
-                        // out as a row with the inspector column as an in-flow
-                        // sibling: the card consumes layout width, so the
-                        // transcript and everything that aligns with it
-                        // (permission, queued messages, the composer, the
-                        // footer) genuinely narrow instead of being overlaid.
-                        // Only the header stays full-width chrome.
+                        .flex_none()
+                        .w(px(panels.sidebar))
+                        .when(panels.sidebar_sliding, |element| element.overflow_hidden())
                         .child(
-                            div()
-                                .flex_1()
-                                .min_h(px(0.0))
-                                .w_full()
-                                .flex()
-                                .flex_row()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .flex_col()
-                                        .child(if empty {
-                                            // The new-session screen composes
-                                            // its own centered composer and
-                                            // workspace chips; the bottom
-                                            // chrome below stays empty-state
-                                            // only.
-                                            if self.selected_project().is_some() {
-                                                self.render_new_session_screen(window, cx)
-                                                    .into_any_element()
-                                            } else {
-                                                self.render_empty_state(cx).into_any_element()
-                                            }
-                                        } else {
-                                            self.transcript_pane
-                                                .clone()
-                                                .cached(
-                                                    StyleRefinement::default()
-                                                        .flex_1()
-                                                        .min_h(px(0.0))
-                                                        .w_full(),
-                                                )
+                            self.sidebar_pane.clone().cached(
+                                StyleRefinement::default()
+                                    .w(px(panels.sidebar_content))
+                                    .h_full()
+                                    .flex_none(),
+                            ),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .bg(theme.surface)
+                    .when(panels.sidebar > 0.0, |element| {
+                        element.border_l_1().border_color(theme.sidebar_border)
+                    })
+                    .child(self.render_header(window, cx))
+                    // The chat's working region — transcript through
+                    // composer and the workspace footer beneath it — laid
+                    // out as a row with the inspector column as an in-flow
+                    // sibling: the card consumes layout width, so the
+                    // transcript and everything that aligns with it
+                    // (permission, queued messages, the composer, the
+                    // footer) genuinely narrow instead of being overlaid.
+                    // Only the header stays full-width chrome.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(if empty {
+                                        // The new-session screen composes
+                                        // its own centered composer and
+                                        // workspace chips; the bottom
+                                        // chrome below stays empty-state
+                                        // only.
+                                        if self.selected_project().is_some() {
+                                            self.render_new_session_screen(window, cx)
                                                 .into_any_element()
-                                        })
-                                        .children(permission)
-                                        .when(
-                                            self.selected_project().is_some() && !empty,
-                                            |element| {
-                                                element
-                                                    .children(self.render_composer_todo(cx))
-                                                    .children(self.render_queued_messages(cx))
-                                                    .child(self.render_composer(window, cx))
-                                                    .child(self.render_workspace_footer(
-                                                        cx,
-                                                        MenuAlign::AboveLeft,
-                                                    ))
-                                            },
+                                        } else {
+                                            self.render_empty_state(cx).into_any_element()
+                                        }
+                                    } else {
+                                        self.transcript_pane
+                                            .clone()
+                                            .cached(
+                                                StyleRefinement::default()
+                                                    .flex_1()
+                                                    .min_h(px(0.0))
+                                                    .w_full(),
+                                            )
+                                            .into_any_element()
+                                    })
+                                    .children(permission)
+                                    .when(self.selected_project().is_some() && !empty, |element| {
+                                        element
+                                            .children(self.render_composer_todo(cx))
+                                            .children(self.render_queued_messages(cx))
+                                            .child(self.render_composer(window, cx))
+                                            .child(
+                                                self.render_workspace_footer(
+                                                    cx,
+                                                    MenuAlign::AboveLeft,
+                                                ),
+                                            )
+                                    }),
+                            )
+                            // The inspector island: mounted as a pane so
+                            // targeted notifies (pulse ticks, stream
+                            // commits to the transcript) replay it instead
+                            // of rebuilding its sections per frame.
+                            .when(inspector_shown, |element| {
+                                element.child(
+                                    div()
+                                        .h_full()
+                                        .flex_none()
+                                        .w(px(inspector::INSPECTOR_TOTAL_WIDTH))
+                                        .flex()
+                                        .child(
+                                            self.inspector_pane.clone().cached(
+                                                StyleRefinement::default().w_full().h_full(),
+                                            ),
                                         ),
                                 )
-                                // The inspector island: mounted as a pane so
-                                // targeted notifies (pulse ticks, stream
-                                // commits to the transcript) replay it instead
-                                // of rebuilding its sections per frame.
-                                .when(inspector_shown, |element| {
-                                    element.child(
-                                        div()
-                                            .h_full()
-                                            .flex_none()
-                                            .w(px(inspector::INSPECTOR_TOTAL_WIDTH))
-                                            .flex()
-                                            .child(self.inspector_pane.clone().cached(
-                                                StyleRefinement::default().w_full().h_full(),
-                                            )),
-                                    )
-                                }),
-                        )
-                        .relative()
-                        .children(toast)
-                        .children(computer_use)
-                        .when(self.sidebar_visible, |element| {
-                            element.child(self.render_panel_resize_handle(
-                                "sidebar-resize-handle",
-                                PanelResizeTarget::Sidebar,
-                                cx,
-                            ))
-                        }),
-                )
-                .when(panels.right_panel > 0.0, |root| {
-                    root.child(
-                        div()
-                            .h_full()
-                            .flex_none()
-                            .w(px(panels.right_panel))
-                            .flex()
-                            .relative()
-                            .when(panels.right_panel_sliding, |element| {
-                                element.overflow_hidden()
-                            })
-                            // Pinned to the window's right edge, so the panel is
-                            // uncovered from that edge inward rather than dragged
-                            // across the screen.
-                            .child(
-                                self.right_panel_pane.clone().cached(
-                                    StyleRefinement::default()
-                                        .absolute()
-                                        .top_0()
-                                        .right_0()
-                                        .w(px(panels.right_panel_content))
-                                        .h_full(),
-                                ),
-                            ),
+                            }),
                     )
-                })
-                .children(command_palette)
-                .children(commit_dialog)
-                .children(goal_dialog)
-                .children(tide_wizard)
-                .children(image_preview)
-                .children(task_switcher)
-                .into_any_element();
+                    .relative()
+                    .children(toast)
+                    .children(computer_use)
+                    .when(self.sidebar_visible, |element| {
+                        element.child(self.render_panel_resize_handle(
+                            "sidebar-resize-handle",
+                            PanelResizeTarget::Sidebar,
+                            cx,
+                        ))
+                    }),
+            )
+            .when(panels.right_panel > 0.0, |root| {
+                root.child(
+                    div()
+                        .h_full()
+                        .flex_none()
+                        .w(px(panels.right_panel))
+                        .flex()
+                        .relative()
+                        .when(panels.right_panel_sliding, |element| {
+                            element.overflow_hidden()
+                        })
+                        // Pinned to the window's right edge, so the panel is
+                        // uncovered from that edge inward rather than dragged
+                        // across the screen.
+                        .child(
+                            self.right_panel_pane.clone().cached(
+                                StyleRefinement::default()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .w(px(panels.right_panel_content))
+                                    .h_full(),
+                            ),
+                        ),
+                )
+            })
+            .children(command_palette)
+            .children(commit_dialog)
+            .children(goal_dialog)
+            .children(tide_wizard)
+            .children(image_preview)
+            .children(task_switcher)
+            .into_any_element();
 
         self.render_window_frame(content, window, cx)
     }

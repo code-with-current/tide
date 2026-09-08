@@ -1224,6 +1224,145 @@ impl Tide {
     /// per-project enable toggle, the index stats, and the Re-Index header
     /// action. Hidden without a selected session; rows degrade to dashes
     /// until the project's status has loaded.
+    /// One run button per configured project action. Hidden entirely when
+    /// the session's project has none — the section never shows an empty
+    /// frame.
+    pub(super) fn render_inspector_actions_section(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let theme = Theme::current(cx);
+        let session = self.selected_session()?;
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)?;
+        if project.is_projectless() || project.actions.is_empty() {
+            return None;
+        }
+        let actions = project.actions.clone();
+        let project_id = project.id;
+        // Keep run state fresh while the section is visible: the poll is
+        // what carries runs that started before any runtime attached.
+        self.poll_action_jobs(cx);
+        let mut body = div().flex().flex_col().gap(px(6.0));
+        for (index, action) in actions.iter().enumerate() {
+            let (running, port) = self.action_run_state(project_id, &action.name);
+            let command = action.command.clone();
+            let action_name = action.name.clone();
+            let control = if running {
+                let stop_name = action_name.clone();
+                div()
+                    .id(SharedString::from(format!("inspector-action-stop-{index}")))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(theme.danger.opacity(0.5))
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .text_size(sp(10.0))
+                    .cursor_pointer()
+                    .hover(|element| element.bg(theme.overlay))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_color(theme.danger)
+                    .child(icon("icons/stop.svg", 9.0, theme.danger))
+                    .child(tr!("projects.action_stop"))
+                    .on_click({
+                        let weak = cx.entity().downgrade();
+                        move |_, _window, cx| {
+                            let _ = weak.update(cx, |tide, cx| {
+                                tide.stop_project_action(project_id, &stop_name, cx);
+                            });
+                        }
+                    })
+                    .into_any_element()
+            } else {
+                div()
+                    .id(SharedString::from(format!("inspector-action-play-{index}")))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .text_size(sp(10.0))
+                    .cursor_pointer()
+                    .hover(|element| element.bg(theme.overlay))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_color(theme.text_secondary)
+                    .child(icon("icons/play.svg", 9.0, theme.text_secondary))
+                    .child(tr!("projects.action_run"))
+                    .on_click({
+                        let weak = cx.entity().downgrade();
+                        let command = command.clone();
+                        let action_name = action_name.clone();
+                        move |_, _window, cx| {
+                            let _ = weak.update(cx, |tide, cx| {
+                                tide.run_project_action(
+                                    project_id,
+                                    action_name.clone(),
+                                    command.clone(),
+                                    cx,
+                                );
+                            });
+                        }
+                    })
+                    .into_any_element()
+            };
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(action.name.clone())),
+                    )
+                    .children(port.map(|port| {
+                        div()
+                            .id(SharedString::from(format!("inspector-action-port-{index}")))
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(theme.border)
+                            .px(px(5.0))
+                            .py(px(1.0))
+                            .text_size(sp(10.0))
+                            .cursor_pointer()
+                            .hover(|element| element.bg(theme.overlay))
+                            .text_color(theme.success)
+                            .child(SharedString::from(format!(":{port}")))
+                            .on_click({
+                                let weak = cx.entity().downgrade();
+                                move |_, _window, cx| {
+                                    let _ = weak.update(cx, |tide, cx| {
+                                        tide.open_action_url(port, cx);
+                                    });
+                                }
+                            })
+                    }))
+                    .child(control),
+            );
+        }
+        Some(render_section(
+            SectionId::Actions,
+            &tr!("inspector.section_actions"),
+            None,
+            None,
+            self.inspector.is_collapsed(SectionId::Actions),
+            body,
+            &theme,
+            cx,
+        ))
+    }
+
     pub(super) fn render_inspector_memory_rag_section(
         &mut self,
         cx: &mut Context<Self>,

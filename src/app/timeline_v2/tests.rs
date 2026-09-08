@@ -2135,7 +2135,7 @@ fn render_activity_body_constructs_for_every_family() {
     let mut bash = tool_activity(ActivityKind::Command, "bash", None);
     bash.display_target = Some("cargo test".to_owned());
     bash.output = Some("test result: ok".to_owned());
-    let _ = render_activity_body(&bash, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&bash, test_workspace(), &selection, &theme, None);
 
     // Edit: prepared diff body under the file's relative path.
     let mut edit = tool_activity(ActivityKind::FileChange, "edit_file", None);
@@ -2146,18 +2146,18 @@ fn render_activity_body_constructs_for_every_family() {
         status: None,
         diff: Some("@@\n-old\n+new".to_owned()),
     }];
-    let _ = render_activity_body(&edit, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&edit, test_workspace(), &selection, &theme, None);
 
     // JSON-valued output gets the JSON card instead of the plain viewport.
     let mut json = tool_activity(ActivityKind::Tool, "memory", None);
     json.output = Some(r#"{"saved": ["a"]}"#.to_owned());
-    let _ = render_activity_body(&json, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&json, test_workspace(), &selection, &theme, None);
 
     // Dispatch: badge + plain report.
     let mut dispatch = tool_activity(ActivityKind::Tool, "dispatch_agent", Some("Look into it"));
     dispatch.arguments = Some(r#"{"agent": "Explorer"}"#.to_owned());
     dispatch.output = Some("Found the flake.".to_owned());
-    let _ = render_activity_body(&dispatch, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&dispatch, test_workspace(), &selection, &theme, None);
 
     // Failed: the error-token card replaces the result section.
     let mut failed = tool_activity(ActivityKind::Command, "bash", None);
@@ -2165,53 +2165,53 @@ fn render_activity_body_constructs_for_every_family() {
     failed.complete = true;
     failed.detail = Some("exit 1".to_owned());
     failed.output = Some("error: no such file".to_owned());
-    let _ = render_activity_body(&failed, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&failed, test_workspace(), &selection, &theme, None);
 
     // Directory listing: the tree listing in the scroll viewport under its
     // directory path.
     let mut listing = tool_activity(ActivityKind::Tool, "list_dir", Some("api-doc/\nbdd/"));
     listing.arguments = Some(r#"{"path": "src/"}"#.to_owned());
     listing.output = Some("api-doc/\nbdd/\nclient/\ncmd/".to_owned());
-    let _ = render_activity_body(&listing, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&listing, test_workspace(), &selection, &theme, None);
     // A listing whose output never landed keeps the empty body column.
     let mut bare_listing = tool_activity(ActivityKind::Tool, "directory_tree", None);
     bare_listing.display_target = Some("crates/".to_owned());
-    let _ = render_activity_body(&bare_listing, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&bare_listing, test_workspace(), &selection, &theme, None);
 
     // Read-only tools: the captured output as the content viewport — the
     // five the pane owes (read, media read, fetch, glob, grep) and a
     // display-only read riding the blockquote/input fallback.
     let mut read = tool_activity(ActivityKind::FileRead, "read_file", Some("src/main.rs"));
     read.output = Some("fn main() {\n    println!(\"hi\");\n}".to_owned());
-    let _ = render_activity_body(&read, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&read, test_workspace(), &selection, &theme, None);
 
     let mut media = tool_activity(ActivityKind::FileRead, "read_media_file", None);
     media.output = Some("[image: 640x480 png, 3.2 KB]".to_owned());
-    let _ = render_activity_body(&media, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&media, test_workspace(), &selection, &theme, None);
 
     let mut fetch = tool_activity(ActivityKind::Search, "web_fetch", None);
     fetch.display_target = Some("https://example.com".to_owned());
     fetch.output = Some("<!doctype html>\n<h1>Example</h1>".to_owned());
-    let _ = render_activity_body(&fetch, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&fetch, test_workspace(), &selection, &theme, None);
 
     let mut glob = tool_activity(ActivityKind::FileSearch, "glob", None);
     glob.arguments = Some(r#"{"pattern": "**/*.rs"}"#.to_owned());
     glob.output = Some("src/main.rs\nsrc/lib.rs".to_owned());
-    let _ = render_activity_body(&glob, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&glob, test_workspace(), &selection, &theme, None);
 
     let mut grep = tool_activity(ActivityKind::FileSearch, "grep", None);
     grep.arguments = Some(r#"{"pattern": "TODO"}"#.to_owned());
     grep.output = Some("src/main.rs:42: // TODO ship".to_owned());
-    let _ = render_activity_body(&grep, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&grep, test_workspace(), &selection, &theme, None);
 
     let mut display_only = tool_activity(ActivityKind::FileRead, "read_file", None);
     display_only.display_target = Some("src/main.rs".to_owned());
     display_only.arguments = Some(r#"{"path": "/tmp/ws/src/main.rs"}"#.to_owned());
-    let _ = render_activity_body(&display_only, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&display_only, test_workspace(), &selection, &theme, None);
 
     // The quietest case: no inputs, no output — an empty body column.
     let bare = tool_activity(ActivityKind::FileRead, "read_file", None);
-    let _ = render_activity_body(&bare, test_workspace(), &selection, &theme);
+    let _ = render_activity_body(&bare, test_workspace(), &selection, &theme, None);
 }
 
 // ── Presentation classification ────────────────────────────────────────────

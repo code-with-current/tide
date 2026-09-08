@@ -11,7 +11,10 @@ use crate::git_settings::{
     GitDiscoveredCredentialWire, GitOpResultWire, GitProfileWire, GitSnapshotWire,
     GithubConnectPollWire, GithubDeviceStartWire,
 };
-use crate::model::{AgentSession, GoalOperation, Project, UserInputAnswer};
+use crate::model::{
+    AgentSession, BackgroundWorkItem, GoalOperation, Project, ProjectAction, ProjectIcon,
+    ProviderKind, UserInputAnswer,
+};
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
@@ -233,6 +236,9 @@ pub enum Command {
         /// url | docs | crawl | repo
         kind: String,
         location: String,
+        /// None = global knowledge; Some = scoped to one project id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<String>,
     },
     SourcesRemove {
         source_id: String,
@@ -285,6 +291,44 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Drop a project from the app. With `delete_history`, its sessions and
+    /// their messages/transcripts are removed too.
+    RemoveProject {
+        project_id: Uuid,
+        delete_history: bool,
+    },
+    /// The session's action jobs (registry poll — events need a runtime).
+    ListActionJobs {
+        session_id: String,
+    },
+    /// Run a project action as a background job owned by the session:
+    /// the orchestrator can list/probe it with job_list/job_output. Output
+    /// is file-backed and the run record persists, so a restarted daemon
+    /// re-adopts a still-running process into the same session.
+    RunAction {
+        session_id: String,
+        project_id: String,
+        project_path: String,
+        action_name: String,
+        command: String,
+    },
+    /// Stop a running action job: SIGINT the group, SIGKILL on timeout.
+    StopAction {
+        session_id: String,
+        job_id: String,
+    },
+    /// Persist one project's settings. The daemon replies with a fresh
+    /// task-state snapshot; clients stage edits optimistically and reconcile
+    /// when it lands.
+    UpdateProjectSettings {
+        project_id: Uuid,
+        name: String,
+        icon: ProjectIcon,
+        icon_color: Option<String>,
+        default_provider: Option<ProviderKind>,
+        default_model: Option<String>,
+        actions: Vec<ProjectAction>,
+    },
     HydrateSession {
         session_id: Uuid,
     },
@@ -597,6 +641,13 @@ pub enum ResponsePayload {
     Sources {
         sources: Vec<KnowledgeSourceWire>,
     },
+    /// The session's background action jobs (client polls; registry events
+    /// require an attached runtime). `runs` maps each job back to its
+    /// project + action so a freshly started UI can seed its row state.
+    ActionJobs {
+        jobs: Vec<BackgroundWorkItem>,
+        runs: Vec<crate::model::ActionRunWire>,
+    },
     GitOp {
         result: GitOpResultWire,
     },
@@ -699,6 +750,36 @@ mod base64_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remove_project_round_trips_with_history_flag() {
+        let command = Command::RemoveProject {
+            project_id: "0194883a-0000-7000-8000-000000000001"
+                .parse::<Uuid>()
+                .unwrap(),
+            delete_history: true,
+        };
+        let json = serde_json::to_value(&command).unwrap();
+
+        assert_eq!(json["type"], "removeProject");
+        assert_eq!(json["projectId"], "0194883a-0000-7000-8000-000000000001");
+        assert_eq!(json["deleteHistory"], true);
+
+        let Command::RemoveProject {
+            project_id,
+            delete_history,
+        } = serde_json::from_value(json).unwrap()
+        else {
+            panic!("unexpected command variant");
+        };
+        assert_eq!(
+            project_id,
+            "0194883a-0000-7000-8000-000000000001"
+                .parse::<Uuid>()
+                .unwrap()
+        );
+        assert!(delete_history);
+    }
 
     #[test]
     fn binary_payloads_use_base64_json_strings() {

@@ -1,8 +1,10 @@
 name: Tests
 
 on:
-  push:
   pull_request:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -37,6 +39,7 @@ jobs:
           sudo apt-get install --yes \
             clang \
             cmake \
+            libasound2-dev \
             libfontconfig-dev \
             libvulkan1 \
             libwayland-dev \

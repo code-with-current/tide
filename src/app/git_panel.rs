@@ -23,7 +23,7 @@ use protocol::git_panel::{
 use crate::Tide;
 use crate::input::TextInput;
 use crate::model::{AgentSession, SessionWorkspace};
-use crate::query::Query;
+use crate::query::{FetchToken, Query};
 use crate::review_diff::{self, Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 
 use super::git_history::{self, HistoryGraph};
@@ -547,6 +547,31 @@ impl Tide {
         .detach();
     }
 
+    /// Drop every per-project query for a workspace switch: stale rows from
+    /// the previous project must not render (nor land) while the new
+    /// project's refresh is on its way. Tab and collapse preferences stay.
+    pub(super) fn reset_git_panel_for_workspace(&mut self) {
+        // Invalidate any in-flight pass: its landing guard compares against
+        // the bumped generation, so the old project's data is discarded.
+        self.git_panel.generation = self.git_panel.generation.wrapping_add(1);
+        self.git_panel.refresh_in_flight = false;
+        self.git_panel.error = None;
+        // The query states are enums without Default; Missing is the
+        // "nothing fetched" ground state.
+        self.git_panel.status = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.conflicts = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.branch_info = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.ahead_behind = None;
+        self.git_panel.stashes = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.log = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.log_loaded = false;
+        self.git_panel.worktrees = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.worktrees_loaded = false;
+        self.git_panel.current_identity = GitQuery::Missing(FetchToken::fresh(()));
+        self.git_panel.trailer = None;
+        self.git_panel_changes_rows.borrow_mut().clear();
+    }
+
     /// One background pass over the daemon's git-panel reads: status,
     /// conflicts, branch info, ahead/behind, stashes, and the log when the
     /// History tab (or a previous pass) has asked for it. Requests share a
@@ -1028,7 +1053,8 @@ impl Tide {
     /// Whether the worktree's owning session is mid-turn — removal stays
     /// blocked until it settles.
     pub(super) fn worktree_session_is_busy(&self, path: &Path) -> bool {
-        self.worktree_session(path).is_some_and(|session| session.is_busy())
+        self.worktree_session(path)
+            .is_some_and(|session| session.is_busy())
     }
 
     /// Opens the per-file diff sub-view for a clicked change and requests

@@ -360,6 +360,8 @@ pub fn flatten(
             font: run_font,
             color: if run.style.code {
                 palette.code_text
+            } else if run.style.link.is_some() {
+                palette.accent
             } else {
                 base_color
             },
@@ -367,7 +369,7 @@ pub fn flatten(
             // underlay; a run background could only ever be a square box.
             background_color: None,
             underline: run.style.link.is_some().then_some(UnderlineStyle {
-                color: Some(palette.tertiary),
+                color: Some(palette.accent),
                 thickness: px(1.0),
                 wavy: false,
             }),
@@ -387,6 +389,122 @@ pub fn flatten(
 }
 
 /// A flat string with uniform styling, for non-markdown transcript text.
+/// Bare-link detection for plain (non-markdown) text: `http(s)://` URLs
+/// and absolute path tokens, token-bounded, trailing punctuation trimmed.
+/// Job logs and terminal-style output get clickable links without a
+/// markdown pass.
+pub fn linkify_ranges(text: &str) -> Vec<(Range<usize>, String)> {
+    let mut links = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let window = &text[index..];
+        let url = window
+            .find("http://")
+            .map(|at| at + "http://".len())
+            .or_else(|| {
+                if window.starts_with("https://") {
+                    Some("https://".len())
+                } else {
+                    None
+                }
+            })
+            .map(|scheme_end| scheme_end);
+        if let Some(scheme_end) = url {
+            let start = index
+                + (scheme_end
+                    - if window.starts_with("https://") {
+                        "https://".len()
+                    } else {
+                        "http://".len()
+                    });
+            let rest = &text[start..];
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let token = rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
+            let token_end = start + token.len();
+            if token.len() >= "a.b".len() {
+                links.push((start..token_end, token.to_owned()));
+            }
+            index = token_end.max(index + 1);
+            continue;
+        }
+        // Absolute path tokens: start-of-token `/`, at least one more
+        // separator or dot, no spaces.
+        let boundary = index == 0 || bytes[index - 1].is_ascii_whitespace();
+        if boundary && bytes[index] == b'/' {
+            let rest = &text[index..];
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let token = rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']']);
+            if token.len() >= 3 && token[1..].contains(['/', '.']) {
+                links.push((index..index + token.len(), token.to_owned()));
+            }
+            index += end.max(1);
+            continue;
+        }
+        index += 1;
+    }
+    links
+}
+
+/// [`flatten_plain`] with bare URLs and paths detected as links. Linked
+/// ranges paint in the accent with an underline so they read as
+/// clickable before the cursor proves it.
+pub fn flatten_plain_with_links(
+    text: impl Into<SharedString>,
+    family: &'static str,
+    weight: FontWeight,
+    color: Hsla,
+    accent: Hsla,
+) -> FlatText {
+    let text: SharedString = text.into();
+    let links = linkify_ranges(&text);
+    let mut run_font = font(family);
+    run_font.weight = weight;
+    let mut runs = Vec::new();
+    let mut cursor = 0usize;
+    for (range, _) in &links {
+        if range.start > cursor {
+            runs.push(TextRun {
+                len: range.start - cursor,
+                font: run_font.clone(),
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+        }
+        runs.push(TextRun {
+            len: range.end - range.start,
+            font: run_font.clone(),
+            color: accent,
+            background_color: None,
+            underline: Some(UnderlineStyle {
+                color: Some(accent),
+                thickness: px(1.0),
+                wavy: false,
+            }),
+            strikethrough: None,
+        });
+        cursor = range.end;
+    }
+    if cursor < text.len() {
+        runs.push(TextRun {
+            len: text.len() - cursor,
+            font: run_font,
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        });
+    }
+    FlatText {
+        text,
+        runs,
+        links,
+        code_ranges: Vec::new(),
+    }
+}
+
 pub fn flatten_plain(
     text: impl Into<SharedString>,
     family: &'static str,
@@ -855,6 +973,34 @@ fn text_element(flat: &FlatText, key: TextKey, ctx: &Ctx) -> AnyElement {
 /// cross-element selection behavior without manufacturing a markdown tree.
 /// The caller supplies a stable key in paint order and decides whether copying
 /// across this element should insert a paragraph break or a single newline.
+/// [`selectable_flat_text`] with a link handler: clicked URLs and paths
+/// route to the app (browser / file viewer) instead of the open_url
+/// default.
+pub fn selectable_linked_text(
+    flat: &FlatText,
+    key: TextKey,
+    selection: TranscriptSelection,
+    code_wash: Hsla,
+    selection_wash: Hsla,
+    block_break: bool,
+    link_handler: LinkHandler,
+) -> AnyElement {
+    text_element_with_selection(
+        flat,
+        flat.runs.clone(),
+        key,
+        selection,
+        None,
+        Some(link_handler),
+        code_wash,
+        selection_wash,
+        gpui::transparent_black(),
+        gpui::transparent_black(),
+        block_break,
+        None,
+    )
+}
+
 pub fn selectable_flat_text(
     flat: &FlatText,
     key: TextKey,
@@ -2228,6 +2374,26 @@ fn column_widths(
         }
     }
     widths
+}
+
+#[cfg(test)]
+mod linkify_tests {
+    use super::linkify_ranges;
+
+    #[test]
+    fn linkify_detects_urls_and_paths() {
+        let links = linkify_ranges("ready on http://localhost:3000/ done");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].1, "http://localhost:3000/");
+
+        let links = linkify_ranges("see /Volumes/512gb/TestAi/waku/src/main.rs, thanks");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].1, "/Volumes/512gb/TestAi/waku/src/main.rs");
+
+        // Relative paths and prose slashes stay plain.
+        assert!(linkify_ranges("chat / me later").is_empty());
+        assert!(linkify_ranges("no protocol example.com here").is_empty());
+    }
 }
 
 #[cfg(test)]

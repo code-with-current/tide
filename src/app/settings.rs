@@ -24,7 +24,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -42,6 +42,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
         "settings.git",
         "icons/git-branch.svg",
         "settings.git_keywords",
+    ),
+    (
+        SettingsPage::Projects,
+        "settings.projects",
+        "icons/folder.svg",
+        "settings.projects_keywords",
     ),
     (
         SettingsPage::Tide,
@@ -318,10 +324,10 @@ impl Tide {
             window,
             cx,
         );
-        // The Skills page is a mail-style split that owns the whole content
-        // column — no titlebar strip, no width cap, no card.
+        // The Skills and Projects pages are mail-style splits that own the
+        // whole content column — no titlebar strip, no width cap, no card.
         // Window dragging stays with the sidebar's own titlebar region.
-        if page == SettingsPage::Skills {
+        if page == SettingsPage::Skills || page == SettingsPage::Projects {
             return div()
                 .flex_1()
                 .h_full()
@@ -332,18 +338,21 @@ impl Tide {
                 .border_color(theme.sidebar_border)
                 .bg(theme.surface)
                 .children(right_window_controls.map(|controls| {
-                    self.render_settings_drag_region("settings-skills-titlebar", cx)
+                    let label = if page == SettingsPage::Skills {
+                        "settings-skills-titlebar"
+                    } else {
+                        "settings-projects-titlebar"
+                    };
+                    self.render_settings_drag_region(label, cx)
                         .flex()
                         .items_center()
                         .justify_end()
                         .child(controls)
                 }))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .child(self.render_skills_settings(cx)),
-                );
+                .child(div().flex_1().min_h_0().child(match page {
+                    SettingsPage::Projects => self.render_projects_settings(cx),
+                    _ => self.render_skills_settings(cx),
+                }));
         }
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
@@ -379,6 +388,7 @@ impl Tide {
                     .render_git_settings(Theme::current(cx), cx)
                     .into_any_element(),
                 SettingsPage::Knowledge => self.render_knowledge_settings(cx),
+                SettingsPage::Projects => self.render_projects_settings(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
@@ -532,7 +542,6 @@ impl Tide {
                 Some(SharedString::from(tr!("settings.knowledge_description"))),
                 Some(self.rag_sources_add_button(theme, cx)),
             ))
-            .child(self.render_memory_rag_card(&theme, cx))
             .child(self.render_sources_card(&theme, cx))
             .into_any_element()
     }
@@ -1544,7 +1553,6 @@ impl Tide {
                 .child(self.render_git_github_card(&snapshot, theme, cx))
                 .child(self.render_git_identities_card(&snapshot, theme, cx))
                 .child(self.render_git_attribution_card(&snapshot, theme, cx))
-                .child(self.render_git_projects_card(&snapshot, theme, cx));
         }
         if let Some(error) = self.git_settings.error.clone() {
             body = body.child(
@@ -2295,341 +2303,19 @@ impl Tide {
             .child(head)
             .child(card_body(&theme).child(card_rows(&theme, rows)))
     }
+}
 
-    /// The Workspaces group (git.tsx:948-994): one row per project with its
-    /// resolved identity, plus the per-project apply surface — the picker
-    /// that writes repo-local git config — folded into each row.
-    fn render_git_projects_card(
-        &self,
-        snapshot: &protocol::git_settings::GitSnapshotWire,
-        theme: Theme,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let head = settings_group_head(
-            &theme,
-            tr!("git.projects.title"),
-            vec![
-                div()
-                    .truncate()
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("git.projects.caption"))
-                    .into_any_element(),
-            ],
-        );
-        let mut body = card_body_flush(&theme);
-
-        if snapshot.statuses.is_empty() {
-            body = body.child(
-                div()
-                    .px(px(20.0))
-                    .py(px(13.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("git.projects.empty_title")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(4.0))
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("git.projects.empty_description")),
-                            ),
-                    ),
-            );
-            return div().child(head).child(body);
-        }
-
-        for (index, status) in snapshot.statuses.iter().enumerate() {
-            let Some(handle) = self.git_settings.project_menus.get(index) else {
-                continue;
-            };
-
-            // The matched profile drives the rail color and the picker's
-            // current label; `None` means the global identity applies.
-            let profile = status
-                .profile_id
-                .as_ref()
-                .and_then(|id| snapshot.profiles.iter().find(|profile| &profile.id == id));
-            let rail_color = if status.is_repo {
-                git_dot_color(
-                    profile.map(|p| p.color.as_str()).unwrap_or("keyword"),
-                    &theme,
-                )
-            } else {
-                theme.danger
-            };
-
-            let badge_label = if !status.is_repo {
-                tr!("git.projects.not_repo")
-            } else if status.has_override {
-                "override".to_string()
-            } else {
-                "global".to_string()
-            };
-            let badge = div()
-                .px(px(5.0))
-                .py(px(1.0))
-                .rounded(px(4.0))
-                .border_1()
-                .flex_none()
-                .text_size(sp(9.5))
-                .border_color(if status.is_repo {
-                    theme.border_strong
-                } else {
-                    theme.danger.opacity(0.5)
-                })
-                .text_color(if status.is_repo {
-                    theme.text_tertiary
-                } else {
-                    theme.danger
-                })
-                .child(SharedString::from(badge_label.to_uppercase()));
-
-            let second_line = match (status.identity_name.clone(), status.identity_email.clone()) {
-                (Some(name), Some(email)) => format!("{} · {} <{}>", status.path, name, email),
-                _ => format!("{} · {}", status.path, tr!("git.projects.no_identity")),
-            };
-
-            let mut controls = div().flex().flex_none().items_center().gap(px(6.0));
-
-            if status.is_repo {
-                // The picker trigger: the active identity or Global. The
-                // dropdown primitive owns open state, dismissal, and menu
-                // keyboard navigation (arrows/enter/escape); the trigger
-                // itself is tabbable like every other control here.
-                let current_label = profile
-                    .map(|profile| {
-                        SharedString::from(
-                            profile
-                                .name
-                                .clone()
-                                .unwrap_or_else(|| profile.user_name.clone()),
-                        )
-                    })
-                    .unwrap_or_else(|| SharedString::from(tr!("git.projects.global")));
-                let picker_open = handle.is_open();
-                let trigger = div()
-                    .id(SharedString::from(format!(
-                        "git-project-picker-{}",
-                        status.project_id
-                    )))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .h(px(24.0))
-                    .px(px(9.0))
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(if picker_open {
-                        theme.accent
-                    } else {
-                        theme.border_strong
-                    })
-                    .when(picker_open, |element| element.bg(theme.overlay))
-                    .max_w(px(180.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .cursor_default()
-                    .text_size(sp(11.5))
-                    .text_color(theme.text_secondary)
-                    .hover(|element| element.bg(theme.overlay))
-                    .child(div().truncate().child(current_label))
-                    .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary));
-
-                let weak = cx.entity().downgrade();
-                let project_path = status.path.clone();
-                let active_profile_id = status.profile_id.clone();
-                let menu_profiles =
-                    std::rc::Rc::new(snapshot.profiles.iter().cloned().collect::<Vec<_>>());
-                controls = controls.child(dropdown_menu(
-                    trigger,
-                    SharedString::from(format!("git-project-picker-menu-{}", status.project_id)),
-                    handle,
-                    MenuAlign::BelowRight,
-                    move |_| {
-                        let global_weak = weak.clone();
-                        let global_path = project_path.clone();
-                        let mut items = vec![
-                            MenuItem::new(tr!("git.projects.global"), move |_, cx| {
-                                let _ = global_weak.update(cx, |this, _| {
-                                    this.git_set_project_identity(
-                                        global_path.clone(),
-                                        "global".into(),
-                                    );
-                                });
-                            })
-                            .icon("icons/globe.svg")
-                            .selected(active_profile_id.is_none()),
-                        ];
-                        for menu_profile in menu_profiles.iter() {
-                            let weak = weak.clone();
-                            let project_path = project_path.clone();
-                            let profile_id = menu_profile.id.clone();
-                            let display = menu_profile
-                                .name
-                                .clone()
-                                .unwrap_or_else(|| menu_profile.user_name.clone());
-                            let email = menu_profile.user_email.clone();
-                            let dot = git_dot_color(&menu_profile.color, &theme);
-                            let selected =
-                                active_profile_id.as_deref() == Some(menu_profile.id.as_str());
-                            items.push(
-                                MenuItem::custom(move |_, _| {
-                                    div()
-                                        .w(px(252.0))
-                                        .py(px(4.0))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(9.0))
-                                        .child(
-                                            div().size(px(7.0)).flex_none().rounded_full().bg(dot),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .child(
-                                                    div()
-                                                        .w_full()
-                                                        .truncate()
-                                                        .text_size(sp(12.5))
-                                                        .font_weight(FontWeight::MEDIUM)
-                                                        .text_color(theme.text)
-                                                        .child(display.clone()),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .w_full()
-                                                        .mt(px(1.0))
-                                                        .truncate()
-                                                        .font_family(".SystemUIFontMonospaced")
-                                                        .text_size(sp(10.5))
-                                                        .text_color(theme.text_tertiary)
-                                                        .child(email.clone()),
-                                                ),
-                                        )
-                                        .when(selected, |element| {
-                                            element.child(icon(
-                                                "icons/check.svg",
-                                                11.0,
-                                                theme.text_tertiary,
-                                            ))
-                                        })
-                                        .into_any_element()
-                                })
-                                .on_click(move |_, cx| {
-                                    let _ = weak.update(cx, |this, _| {
-                                        this.git_set_project_identity(
-                                            project_path.clone(),
-                                            profile_id.clone(),
-                                        );
-                                    });
-                                }),
-                            );
-                        }
-                        items
-                    },
-                ));
-            }
-
-            if status.has_override {
-                let project_path = status.path.clone();
-                controls = controls.child(
-                    div()
-                        .id(SharedString::from(format!(
-                            "git-project-clear-{}",
-                            status.project_id
-                        )))
-                        .tab_index(0)
-                        .focus_visible(|style| style.border_color(theme.danger))
-                        .h(px(24.0))
-                        .px(px(8.0))
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(theme.border_strong)
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .cursor_default()
-                        .text_size(sp(11.5))
-                        .text_color(theme.text_secondary)
-                        .hover(|element| element.text_color(theme.danger))
-                        .child(tr!("git.projects.clear_override"))
-                        .on_activation(cx, move |this, _, cx| {
-                            this.git_clear_project_identity(project_path.clone());
-                            cx.notify();
-                        }),
-                );
-            }
-
-            body = body.child(
-                div()
-                    .px(px(20.0))
-                    .py(px(9.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .when(index > 0, |row| row.border_t_1().border_color(theme.border))
-                    .child(
-                        div()
-                            .size(px(28.0))
-                            .flex_none()
-                            .rounded(px(7.0))
-                            .bg(rail_color.opacity(0.14))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(div().size(px(8.0)).rounded_full().bg(rail_color)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .text_size(sp(13.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(status.name.clone()),
-                                    )
-                                    .child(badge),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(2.0))
-                                    .truncate()
-                                    .font_family(".SystemUIFontMonospaced")
-                                    .text_size(sp(10.5))
-                                    .text_color(theme.text_ghost)
-                                    .child(SharedString::from(second_line)),
-                            ),
-                    )
-                    .child(controls),
-            );
-        }
-        div().child(head).child(body)
+/// A profile tile's icon, from tide's `IDENTITY_ICONS` shortlist. Tide has no
+/// user or briefcase mark, so those fall back to the branch glyph.
+pub(super) fn git_identity_icon(name: &str) -> &'static str {
+    match name {
+        "commit" | "code" => "icons/git-commit-horizontal.svg",
+        "server" => "icons/server.svg",
+        // branch, user, briefcase, and anything unrecognized.
+        _ => "icons/git-branch.svg",
     }
 }
 
-/// One chip of the attribution role pair: a focusable pill that reads as
-/// selected through the accent border and tint rather than motion.
 pub(super) fn git_segment_chip(
     id: &'static str,
     label: String,
@@ -2650,17 +2336,6 @@ pub(super) fn git_segment_chip(
         .text_size(12.0)
         .no_hover()
         .flex_none()
-}
-
-/// A profile tile's icon, from tide's `IDENTITY_ICONS` shortlist. Tide has no
-/// user or briefcase mark, so those fall back to the branch glyph.
-pub(super) fn git_identity_icon(name: &str) -> &'static str {
-    match name {
-        "commit" | "code" => "icons/git-commit-horizontal.svg",
-        "server" => "icons/server.svg",
-        // branch, user, briefcase, and anything unrecognized.
-        _ => "icons/git-branch.svg",
-    }
 }
 
 /// Theme-token dot color, port of tide's `identity-style.ts` map. Tide's

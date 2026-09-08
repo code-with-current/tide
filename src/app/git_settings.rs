@@ -116,11 +116,6 @@ pub(crate) struct GitProfileRequest {
 pub(crate) struct GitSettingsPanel {
     pub snapshot: Option<GitSnapshotWire>,
     pub loaded: bool,
-    /// One dropdown handle per Workspaces row (index-aligned with
-    /// `snapshot.statuses`), driving the per-project identity picker. The
-    /// menu primitive owns its open state; the handles are grown in the
-    /// snapshot drain so render stays pure.
-    pub project_menus: Vec<crate::ui::menu::ContextMenuHandle>,
     /// Transient save indicator for the attribution rows, mirroring tide's
     /// `savingKey`.
     pub saving_attribution: bool,
@@ -160,7 +155,6 @@ impl GitSettingsPanel {
             profile_dialog: None,
             import_open: false,
             import_list: None,
-            project_menus: Vec::new(),
             confirm_delete: None,
             confirm_disconnect: None,
             gh_connecting: None,

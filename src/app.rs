@@ -33,11 +33,11 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderModelOption,
-    ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus,
-    SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun, SubagentToolStatus,
-    TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time,
-    unix_time_millis,
+    MessageRole, PendingPermission, Project, ProjectAction, ProjectIcon, ProviderKind,
+    ProviderModel, ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock,
+    RuntimeMode, SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
+    SubagentToolStatus, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
+    compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -212,6 +212,9 @@ enum SettingsPage {
     /// Port of tide's Git settings screen — accounts, identities,
     /// attribution, per-project identity state.
     Git,
+    /// Per-project configuration — identity, icon, default model, actions,
+    /// git identity, memory & RAG, removal.
+    Projects,
     /// Knowledge sources + per-project Memory & RAG (upstream's
     /// Settings → Knowledge screen).
     Knowledge,
@@ -1456,6 +1459,39 @@ pub struct Tide {
     /// scrollbar and land at the top when the selection moves.
     skills_detail_scroll: ScrollHandle,
     skills_detail_scrollbar: Rc<ScrollbarState>,
+    /// Filter query over the Projects settings page's rows.
+    projects_settings_search: Entity<TextInput>,
+    /// Virtualized list over the filtered project rows.
+    projects_settings_list: ListState,
+    projects_settings_scrollbar: Rc<ScrollbarState>,
+    /// The rows the list currently draws, refreshed once per frame rather
+    /// than per row.
+    projects_settings_rows: RefCell<Vec<projects_page::ProjectsRow>>,
+    /// The project the detail panel shows. `None` falls back to the first
+    /// visible row, so the panel never opens empty.
+    projects_settings_selected: Option<Uuid>,
+    projects_detail_scroll: ScrollHandle,
+    /// Landed icon probes, keyed by project id.
+    projects_icon_probes: RefCell<HashMap<Uuid, projects_page::ProjectIconProbe>>,
+    /// Bumped per probe; a result from a superseded probe is discarded.
+    projects_icon_probe_generation: u64,
+    /// The remove-project confirmation, when open.
+    projects_remove_dialog: Option<projects_page::RemoveProjectDialog>,
+    /// Live action runs: (session, project, action name) → daemon job id.
+    action_job_ids: RefCell<HashMap<(Uuid, Uuid, String), String>>,
+    /// OS-probed listening ports by action job id.
+    action_job_ports: RefCell<HashMap<String, u16>>,
+    action_jobs_poll_at: Option<Instant>,
+    /// The project whose last icon upload failed validation; drives the
+    /// detail panel's inline error.
+    projects_icon_error: Option<Uuid>,
+    /// Backing field for the selected project's name edit.
+    projects_name_input: Entity<TextInput>,
+    /// The action editor's add-row fields.
+    projects_action_name: Entity<TextInput>,
+    projects_action_command: Entity<TextInput>,
+    /// The last add attempt lacked a command; drives the inline error.
+    projects_action_error: bool,
     /// Source the list is narrowed to; `None` shows every ecosystem.
     skills_source_filter: Option<crate::skills::SkillSource>,
     /// The skill directory whose delete button is armed for its confirming
@@ -1649,6 +1685,7 @@ mod mermaid_images;
 mod model_picker;
 mod navigation_rail;
 mod permission_flow;
+mod projects_page;
 mod rag_settings;
 mod remote_control;
 mod render;
@@ -1683,6 +1720,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 use inspector::{InspectorState, StreamLogEntry};
 use navigation_rail::{ConversationNavigationRail, TranscriptNavigationTurn};
+pub use projects_page::init as init_projects_keys;
 pub use settings::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
@@ -2042,6 +2080,16 @@ impl Tide {
                 .clear_on_escape()
                 .placeholder(tr!("skills.search"))
         });
+        let projects_settings_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("projects.search"))
+        });
+        let projects_name_input = cx.new(|cx| TextInput::new(window, cx));
+        let projects_action_name =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("projects.action_name")));
+        let projects_action_command =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("projects.action_command")));
         let session_rename_input = cx.new(|cx| TextInput::new(window, cx));
         let usage_project_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
@@ -2573,6 +2621,33 @@ impl Tide {
             })
             .detach();
             cx.subscribe(
+                &projects_settings_search,
+                |_: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &projects_name_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.commit_project_rename(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &projects_action_name,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if let InputEvent::Submit(_) = event {
+                        this.add_project_action_from_selection(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.commit_session_rename(cx),
@@ -2926,6 +3001,23 @@ impl Tide {
                 skills_selection: TranscriptSelection::default(),
                 skills_detail_scroll: ScrollHandle::new(),
                 skills_detail_scrollbar: ScrollbarState::new(),
+                projects_settings_search,
+                projects_settings_list: ListState::new(0, ListAlignment::Top, px(512.0)),
+                projects_settings_scrollbar: ScrollbarState::new(),
+                projects_settings_rows: RefCell::new(Vec::new()),
+                projects_settings_selected: None,
+                projects_detail_scroll: ScrollHandle::new(),
+                projects_icon_probes: RefCell::new(HashMap::new()),
+                projects_icon_probe_generation: 0,
+                projects_remove_dialog: None,
+                action_job_ids: RefCell::new(HashMap::new()),
+                action_job_ports: RefCell::new(HashMap::new()),
+                action_jobs_poll_at: None,
+                projects_icon_error: None,
+                projects_name_input,
+                projects_action_name,
+                projects_action_command,
+                projects_action_error: false,
                 skills_source_filter: None,
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
@@ -3042,6 +3134,10 @@ impl Tide {
             // The skill library too: the Skills settings page must open onto
             // data, not a scan.
             this.ensure_skills_catalog(false, cx);
+            // Project avatars resolve once at startup; every surface (sidebar
+            // headers, pickers, the settings page) reads the landed results
+            // without any frame touching the filesystem.
+            this.ensure_all_project_icon_probes(cx);
             // And the header's "open project in app" targets, so its menu
             // lists installed apps and icons without ever probing on a frame.
             this.detect_open_in_apps(cx);

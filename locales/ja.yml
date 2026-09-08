@@ -71,6 +71,48 @@ settings.remote_keywords: リモート コントロール リンク QR 中継 �
 settings.computer_use: コンピュータ操作
 settings.git: Git
 settings.git_keywords: git アイデンティティ GitHub コミット 属性 共著 署名 ssh
+settings.projects: プロジェクト
+settings.projects_keywords: プロジェクト ワークスペース フォルダ アイデンティティ アイコン アクション モデル 削除
+projects.search: プロジェクトを検索…
+projects.empty_title: プロジェクトがありません
+projects.empty_description: フォルダを開くとプロジェクトが追加されます。
+projects.no_match: 一致するプロジェクトがありません。
+projects.count_one: 1 件のプロジェクト
+projects.count_many: "%{count} 件のプロジェクト"
+projects.filter_caption: "%{total} 件中 %{shown} 件を表示"
+projects.select_placeholder: 設定するプロジェクトを選択してください。
+projects.section_general: 一般
+projects.icon: アイコン
+projects.icon_auto: 自動
+projects.icon_upload: アップロード…
+projects.icon_upload_failed: その画像は使用できません。2 MB 以下の PNG・JPG・WebP を選んでください。
+projects.icon_color: 背景
+projects.default_model: 新しいチャットのデフォルトモデル
+projects.default_model_global: グローバル設定に従う
+projects.default_model_hint: このプロジェクトの新規チャットはこのモデルで開始します。
+projects.git_identity: Git アイデンティティ
+projects.memory_rag: メモリ & RAG
+projects.actions: アクション
+projects.action_name: アクション名
+projects.action_command: コマンド
+projects.action_add: アクションを追加
+projects.action_needs_command: コマンドは必須です。
+projects.action_run: 実行
+projects.action_stop: 停止
+projects.action_unavailable: このターミナルは利用できません。
+projects.action_failed: "アクションを開始できませんでした: %{error}"
+projects.remove_failed: "プロジェクトを削除できませんでした: %{error}"
+inspector.section_actions: アクション
+projects.settings_save_failed: "プロジェクト設定を保存できませんでした: %{error}"
+projects.remove: プロジェクトを削除…
+projects.remove_title: プロジェクトを削除
+projects.remove_body: "「%{name}」は Tide で開けなくなります。"
+projects.remove_history: セッションと履歴も削除する
+projects.remove_confirm: 削除
+projects.remove_cancel: キャンセル
+projects.rename_commit_hint: Enter で名前を変更
+projects.directory_missing: このフォルダはディスク上にありません。設定は編集できます。
+projects.directory_unavailable: プロジェクトフォルダが存在する場合に利用できます。
 git.caption: GitHub アカウントとコミット署名。
 git.loading: 読み込み中…
 git.op_failed: Git 操作に失敗しました
@@ -1389,6 +1431,9 @@ settings.rag.add: 追加
 settings.rag.cancel: キャンセル
 settings.rag.add_source: ナレッジソースを追加
 settings.rag.dialog_description: インデックスされた内容はエージェントのメモリツールで検索できます。
+settings.rag.scope_global: グローバル
+settings.rag.scope_target: "スコープ: %{target}"
+settings.rag.dialog_browse: 参照…
 settings.rag.dialog_name: 名前
 settings.rag.dialog_name_placeholder: React ドキュメント
 settings.rag.dialog_kind: 種類

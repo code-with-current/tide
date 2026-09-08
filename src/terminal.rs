@@ -639,6 +639,9 @@ pub struct TerminalView {
     cursor_blink: gpui::Entity<TerminalCursorBlink>,
     cursor_focus_tracking_started: bool,
     context_menu: ContextMenuHandle,
+    /// Routes clicked file links into the app's file viewer; without one,
+    /// clicks fall back to revealing in the file manager.
+    open_file_handler: Option<std::rc::Rc<dyn Fn(PathBuf, &mut Window, &mut App)>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -701,12 +704,28 @@ impl TerminalView {
             cursor_blink,
             cursor_focus_tracking_started: false,
             context_menu,
+            open_file_handler: None,
             _subscriptions: subscriptions,
         }
     }
 
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
+    }
+
+    /// Whether the PTY's child process has exited. Driven by the terminal
+    /// layer's `Exited` event, drained on the view's own frames.
+    pub fn exited(&self) -> bool {
+        self.exited
+    }
+
+    /// Route clicked file links to the app (its file viewer) instead of
+    /// the file manager.
+    pub fn set_open_file_handler(
+        &mut self,
+        handler: std::rc::Rc<dyn Fn(PathBuf, &mut Window, &mut App)>,
+    ) {
+        self.open_file_handler = Some(handler);
     }
 
     pub fn set_panel_width(&mut self, width: f32) {
@@ -846,7 +865,11 @@ impl TerminalView {
             match target {
                 TerminalLinkTarget::Url(url) => cx.open_url(&url),
                 TerminalLinkTarget::File(path) => {
-                    crate::platform::reveal_in_file_manager(&path, cx)
+                    if let Some(handler) = self.open_file_handler.clone() {
+                        handler(path, window, cx);
+                    } else {
+                        crate::platform::reveal_in_file_manager(&path, cx);
+                    }
                 }
             }
             window.prevent_default();

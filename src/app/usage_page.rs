@@ -52,6 +52,11 @@ impl Tide {
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
         }
+        if page == SettingsPage::Projects {
+            self.sync_project_selection_ui(cx);
+            self.git_load_snapshot();
+            self.poll_action_jobs(cx);
+        }
         if page == SettingsPage::Tide && !self.tide.loaded {
             self.tide_load_providers();
         }

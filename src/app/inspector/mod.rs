@@ -56,6 +56,7 @@ pub(crate) enum SectionId {
     Config,
     Git,
     MemoryRag,
+    Actions,
     StreamLog,
 }
 
@@ -67,6 +68,7 @@ impl SectionId {
             Self::Config => "inspector-config-header",
             Self::Git => "inspector-git-header",
             Self::MemoryRag => "inspector-memory-rag-header",
+            Self::Actions => "inspector-actions-header",
             Self::StreamLog => "inspector-stream-log-header",
         }
     }
@@ -151,6 +153,7 @@ impl Tide {
             .overflow_x_hidden()
             .child(self.render_inspector_session_section(cx))
             .child(self.render_inspector_config_section(cx))
+            .children(self.render_inspector_actions_section(cx))
             .children(self.render_inspector_memory_rag_section(cx))
             // hide for now
             // .children(self.render_inspector_git_section(cx))

@@ -46,6 +46,8 @@ impl TideBackend {
         let mut task_state = task_store
             .load()
             .context("could not load Tide task database")?;
+        // Re-adopt action runs whose processes survived a daemon restart.
+        crate::action_jobs::adopt_orphans();
         migrate_projectless_state(&task_store, &mut task_state)?;
         let composer_drafts = ComposerDraftStore::for_state_path(task_store.path());
         let attachments = AttachmentStore::new(
@@ -365,9 +367,10 @@ impl Backend for TideBackend {
                 name,
                 kind,
                 location,
+                project_id,
             } => {
-                let source =
-                    crate::rag::add_source(&name, &kind, &location).map_err(anyhow::Error::msg)?;
+                let source = crate::rag::add_source(&name, &kind, &location, project_id.as_deref())
+                    .map_err(anyhow::Error::msg)?;
                 let _ = source;
                 Ok(ResponsePayload::Sources {
                     sources: crate::rag::list_sources(),
@@ -545,6 +548,109 @@ impl Backend for TideBackend {
                     })
                     .collect();
                 Ok(ResponsePayload::TaskStateSaved { sessions })
+            }
+            Command::RemoveProject {
+                project_id,
+                delete_history,
+            } => {
+                let mut state = self.task_state.lock();
+                if delete_history {
+                    let deleted: Vec<Uuid> = state
+                        .sessions
+                        .iter()
+                        .filter(|session| session.project_id == project_id)
+                        .map(|session| session.id)
+                        .collect();
+                    {
+                        let mut removed = self.removed_session_ids.lock();
+                        removed.extend(deleted.iter().copied());
+                    }
+                    self.sessions
+                        .lock()
+                        .retain(|session_id, _| !deleted.contains(session_id));
+                    state
+                        .sessions
+                        .retain(|session| session.project_id != project_id);
+                }
+                state.projects.retain(|project| project.id != project_id);
+                self.task_store.save(&mut state)?;
+                Ok(ResponsePayload::TaskState {
+                    projects: state.projects.clone(),
+                    sessions: state
+                        .sessions
+                        .iter()
+                        .map(AgentSession::list_projection)
+                        .collect(),
+                    default_cwd: self.default_cwd.clone(),
+                    projectless_root: crate::projectless::workspace_root(),
+                })
+            }
+            Command::RunAction {
+                session_id,
+                project_id,
+                project_path,
+                action_name,
+                command,
+            } => {
+                // A session-owned background job: the orchestrator's
+                // job_list/job_output reach it; file-backed output and the
+                // run record let a restarted daemon re-adopt it.
+                let job_id = crate::action_jobs::start(
+                    &session_id,
+                    &project_id,
+                    &project_path,
+                    &action_name,
+                    &command,
+                )
+                .map_err(anyhow::Error::msg)?;
+                Ok(ResponsePayload::Cursor {
+                    cursor: Some(json!({ "jobId": job_id })),
+                })
+            }
+            Command::StopAction { session_id, job_id } => {
+                crate::action_jobs::stop(&session_id, &job_id).map_err(anyhow::Error::msg)?;
+                Ok(ResponsePayload::Ack)
+            }
+            // The session's action jobs for the UI poll: registry events
+            // require an attached runtime, so runs that started before any
+            // message are surfaced by polling instead.
+            Command::ListActionJobs { session_id } => {
+                let (jobs, runs) = crate::action_jobs::list(&session_id);
+                Ok(ResponsePayload::ActionJobs { jobs, runs })
+            }
+            Command::UpdateProjectSettings {
+                project_id,
+                name,
+                icon,
+                icon_color,
+                default_provider,
+                default_model,
+                actions,
+            } => {
+                let mut state = self.task_state.lock();
+                if let Some(project) = state
+                    .projects
+                    .iter_mut()
+                    .find(|project| project.id == project_id)
+                {
+                    project.name = name;
+                    project.icon = icon;
+                    project.icon_color = icon_color;
+                    project.default_provider = default_provider;
+                    project.default_model = default_model;
+                    project.actions = actions;
+                }
+                self.task_store.save(&mut state)?;
+                Ok(ResponsePayload::TaskState {
+                    projects: state.projects.clone(),
+                    sessions: state
+                        .sessions
+                        .iter()
+                        .map(AgentSession::list_projection)
+                        .collect(),
+                    default_cwd: self.default_cwd.clone(),
+                    projectless_root: crate::projectless::workspace_root(),
+                })
             }
             Command::RemoveSession => {
                 {
@@ -1365,6 +1471,11 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::RemoveProject { .. }
+        | Command::RunAction { .. }
+        | Command::StopAction { .. }
+        | Command::ListActionJobs { .. }
+        | Command::UpdateProjectSettings { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::LoadComposerDrafts
@@ -1390,6 +1501,18 @@ fn handle_driver_command(
     Ok(ResponsePayload::Ack)
 }
 
+/// Temporary diagnostics for the action-run path (see the UI twin).
+fn action_debug(msg: impl std::fmt::Display) {
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tide-action-debug.log")
+    {
+        let _ = writeln!(file, "{msg}");
+    }
+}
+
 fn ensure_shell_environment() {
     static REFRESHED: OnceLock<()> = OnceLock::new();
     REFRESHED.get_or_init(|| {
@@ -1397,8 +1520,6 @@ fn ensure_shell_environment() {
     });
 }
 
-/// Wire → stored profile conversion, field-for-field; only used by the
-/// daemon's `GitIdentitySave` arm.
 fn stored_profile(
     profile: protocol::git_settings::GitProfileWire,
 ) -> store::git_identities::GitIdentityProfile {

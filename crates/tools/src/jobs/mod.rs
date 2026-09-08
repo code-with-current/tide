@@ -33,8 +33,8 @@ use protocol::model::{
 };
 
 pub use api::{
-    global_job_registry, JobError, JobHandle, JobHooks, JobOutcome, JobOutputSink, JobRead,
-    JobRegistry, JobStart, KillOutcome, Reader, SettledStatus,
+    JobError, JobHandle, JobHooks, JobOutcome, JobOutputSink, JobRead, JobRegistry, JobStart,
+    KillOutcome, Reader, SettledStatus, global_job_registry,
 };
 pub use wake::{JobNotice, JobWake, NoticeSource, WakeListener};
 
@@ -230,6 +230,21 @@ impl JobBuffer {
             text, model_cursor, ..
         } = &mut *self.inner.lock().unwrap();
         read_at(model_cursor, text, output_limit)
+    }
+
+    /// The current buffer tail without advancing either cursor — for
+    /// snapshot-style consumers such as the action-jobs poll.
+    pub(crate) fn snapshot_tail(&self, max_bytes: usize) -> String {
+        let state = self.inner.lock().unwrap();
+        let text = &state.text;
+        if text.len() <= max_bytes {
+            return text.clone();
+        }
+        let mut cut = text.len() - max_bytes;
+        while cut < text.len() && !text.is_char_boundary(cut) {
+            cut += 1;
+        }
+        text[cut..].to_string()
     }
 
     /// Consume the delta since the UI cursor's last read, advancing only
