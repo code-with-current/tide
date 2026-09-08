@@ -48,6 +48,14 @@ pub struct FetchToken<K> {
     generation: u64,
 }
 
+impl<K> FetchToken<K> {
+    /// A token nobody issued: the ground state for a query whose cache was
+    /// dropped (e.g. a workspace switch resetting the git panel).
+    pub fn fresh(key: K) -> Self {
+        Self { key, generation: 0 }
+    }
+}
+
 /// What a read found.
 #[derive(Debug)]
 pub enum Query<K, V> {

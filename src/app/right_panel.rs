@@ -1843,6 +1843,10 @@ impl Tide {
         self.reset_file_search_for_session(cx);
         self.reload_clean_right_panel_file_editors(cx);
         self.state.right_panel_visible = self.right_panel_visible;
+        // The git panel's rows belong to the previous project; drop them
+        // before any render so nothing from the old workspace leaks, then
+        // refresh if the surface is showing.
+        self.reset_git_panel_for_workspace();
         if self.active_right_panel_surface() == Some(&RightPanelSurface::Git) {
             if self.git_settings.snapshot.is_none() {
                 self.git_load_snapshot();
