@@ -1,9 +1,9 @@
 //! The user-message bubble — tide's right-aligned chat anatomy. The bubble
 //! itself is plain text (markdown arrives with the text-part task) on the
-//! raised surface, clamped at ~160px with a bottom mask fade plus a chevron
-//! disclosure underneath; a hover-revealed footer under it carries the clock,
-//! the edit pencil, and Copy. The pencil swaps the bubble for an inline
-//! editor (a `TextInput` entity the pane owns) with Cancel/Send actions; when
+//! raised surface, clamped at ~160px with a bottom mask fade and an ellipsis
+//! pinned to the cut; the clamp chevron shares one row under the bubble with
+//! the hover-revealed footer (the clock, the edit pencil, and Copy). The
+//! pencil swaps the bubble for an inline
 //! the edited message is not the last one, Send first arms an inline
 //! confirmation naming what the resend removes, computed by [`edit_removals`].
 //!
@@ -324,7 +324,8 @@ pub(crate) fn render_user_bubble(
             column = column.child(editor_card(message_id, editing, theme, &actions));
         }
         None => {
-            if !content.trim().is_empty() {
+            let has_content = !content.trim().is_empty();
+            if has_content {
                 column = column.child(user_bubble(
                     message_id,
                     content,
@@ -333,15 +334,12 @@ pub(crate) fn render_user_bubble(
                     selection,
                     mention_resolver,
                 ));
-                if clamp_needed(content) {
-                    column = column.child(clamp_chevron(
-                        message_id,
-                        clamp_expanded,
-                        theme,
-                        toggle_clamp,
-                    ));
-                }
             }
+            // The clamp chevron lives in the footer's one row — visible
+            // without hover whenever the clamp is on, so the disclosure
+            // never depends on pointing at the bubble.
+            let clamp =
+                (has_content && clamp_needed(content)).then(|| (clamp_expanded, toggle_clamp));
             column = column.child(user_hover_footer(
                 message_id,
                 created_at,
@@ -350,6 +348,7 @@ pub(crate) fn render_user_bubble(
                 group,
                 theme,
                 actions.edit,
+                clamp,
             ));
         }
     }
@@ -448,6 +447,24 @@ fn user_bubble(
                             linear_color_stop(surface.opacity(0.0), 0.0),
                             linear_color_stop(surface, 1.0),
                         )),
+                )
+                // The ellipsis: pinned to the cut on the surface-colored
+                // padding slot, so the clamp reads as "there is more" rather
+                // than text merely ending. The wash masks the faded glyphs
+                // behind it.
+                .child(
+                    div()
+                        .absolute()
+                        .right_0()
+                        .bottom_0()
+                        .pb(px(10.0))
+                        .pr(px(14.0))
+                        .pl(px(6.0))
+                        .bg(surface)
+                        .text_size(sp(14.0))
+                        .line_height(sp(20.0))
+                        .text_color(theme.text)
+                        .child("…"),
                 )
         })
         .child(text)
@@ -573,9 +590,9 @@ fn render_bubble_attachments(attachments: &[UserBubbleAttachment], theme: &Theme
     Some(row)
 }
 
-/// The clamp's expand/collapse chevron, under the bubble and right-aligned
-/// with it by the column's `items_end`. The whole row toggles; expanded reads
-/// chevron-up (collapse), collapsed chevron-down (expand).
+/// The clamp's expand/collapse chevron, rightmost in the footer row so it
+/// sits under the bubble's ellipsis corner. The whole button toggles;
+/// expanded reads chevron-up (collapse), collapsed chevron-down (expand).
 fn clamp_chevron(
     message_id: Uuid,
     expanded: bool,
@@ -604,10 +621,10 @@ fn clamp_chevron(
         .on_click(move |event, window, cx| toggle(&id, event, window, cx))
 }
 
-/// The hover footer: clock first, then the pencil (hidden while the session
-/// cannot rewind — the pencil's `editable` flag is the list's gate), then
-/// Copy. Revealed by the column's hover group; the clipboard write lives here
-/// because click handlers receive the app context.
+/// The one row under the bubble: the clamp chevron (always visible when the
+/// clamp is on, rightmost so it sits under the bubble's ellipsis corner)
+/// sharing the line with the hover-revealed clock, pencil, and Copy. The
+/// clipboard write lives here because click handlers receive the app context.
 #[allow(clippy::too_many_arguments)]
 fn user_hover_footer(
     message_id: Uuid,
@@ -617,10 +634,10 @@ fn user_hover_footer(
     group: SharedString,
     theme: &Theme,
     on_edit: UserBubbleAction,
+    clamp: Option<(bool, GroupToggle)>,
 ) -> Div {
     let clock = clock_time(created_at);
-    let mut row = div()
-        .h(px(24.0))
+    let mut items = div()
         .flex()
         .items_center()
         .gap(px(4.0))
@@ -628,7 +645,7 @@ fn user_hover_footer(
         .group_hover(group, |style| style.visible());
 
     if !clock.is_empty() {
-        row = row.child(
+        items = items.child(
             div()
                 .text_size(sp(11.0))
                 .text_color(theme.text_ghost)
@@ -636,7 +653,7 @@ fn user_hover_footer(
         );
     }
     if editable {
-        row = row.child(
+        items = items.child(
             icon_button(
                 SharedString::from(format!("user-edit-{message_id}")),
                 "icons/pencil.svg",
@@ -647,7 +664,7 @@ fn user_hover_footer(
         );
     }
     let copy_text = content.to_owned();
-    row.child(
+    let items = items.child(
         icon_button(
             SharedString::from(format!("user-copy-{message_id}")),
             "icons/copy.svg",
@@ -657,7 +674,17 @@ fn user_hover_footer(
         .on_click(move |_, _, cx| {
             cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy_text.clone()));
         }),
-    )
+    );
+    let mut row = div()
+        .h(px(24.0))
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .child(items);
+    if let Some((expanded, toggle)) = clamp {
+        row = row.child(clamp_chevron(message_id, expanded, theme, toggle));
+    }
+    row
 }
 
 /// The editor card that replaces the bubble: the pane's `TextInput` entity
