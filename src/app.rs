@@ -3126,6 +3126,10 @@ impl Tide {
             // The skill library too: the Skills settings page must open onto
             // data, not a scan.
             this.ensure_skills_catalog(false, cx);
+            // Project avatars resolve once at startup; every surface (sidebar
+            // headers, pickers, the settings page) reads the landed results
+            // without any frame touching the filesystem.
+            this.ensure_all_project_icon_probes(cx);
             // And the header's "open project in app" targets, so its menu
             // lists installed apps and icons without ever probing on a frame.
             this.detect_open_in_apps(cx);

@@ -1558,7 +1558,9 @@ impl Tide {
                     }
                     let project = Project::from_path(path);
                     let project_id = project.id;
+                    let project_path = project.path.clone();
                     this.state.projects.push(project);
+                    this.ensure_project_icon_probe(project_id, project_path, cx);
                     this.analytics.track(crate::analytics::Event::ProjectAdded);
                     this.create_session_for(project_id, this.state.last_provider, cx);
                 });

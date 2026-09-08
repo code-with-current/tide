@@ -53,11 +53,8 @@ impl Tide {
             self.ensure_skills_catalog(false, cx);
         }
         if page == SettingsPage::Projects {
-            self.ensure_selected_project_probe(cx);
+            self.sync_project_selection_ui(cx);
             self.git_load_snapshot();
-            if let Some((id, _)) = self.projects_settings_target() {
-                self.rag_refresh(&id.to_string());
-            }
         }
         if page == SettingsPage::Tide && !self.tide.loaded {
             self.tide_load_providers();

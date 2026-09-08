@@ -56,6 +56,69 @@ fn uploaded_icon_path(name: &str) -> PathBuf {
 
 /// An action is only worth storing when its command is non-empty; a blank
 /// name falls back to the command's first word.
+/// The project avatar in every surface: preset glyph, uploaded image,
+/// well-known repo file, or the initials fallback. `probe` is the landed
+/// background result for this project, when one exists.
+pub(super) fn project_avatar(
+    project: &Project,
+    probe: Option<&ProjectIconProbe>,
+    size: f32,
+) -> AnyElement {
+    let tile = |child: AnyElement| {
+        div()
+            .w(px(size))
+            .h(px(size))
+            .flex_none()
+            .rounded(px(size * 0.24))
+            .bg(icon_tile_background(project))
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(child)
+            .into_any_element()
+    };
+    match &project.icon {
+        ProjectIcon::Preset(path) => tile(
+            PRESET_ICONS
+                .iter()
+                .copied()
+                .find(|candidate| *candidate == path.as_str())
+                .map(|static_path| {
+                    icon(static_path, size * 0.5, rgb(0xFF_FF_FF).into()).into_any_element()
+                })
+                .unwrap_or_else(|| div().into_any_element()),
+        ),
+        ProjectIcon::Uploaded(name) => tile(
+            img(uploaded_icon_path(name))
+                .size_full()
+                .object_fit(gpui::ObjectFit::Cover)
+                .into_any_element(),
+        ),
+        ProjectIcon::Auto => {
+            let well_known = probe
+                .filter(|probe| probe.root == project.path)
+                .and_then(|probe| probe.well_known.clone());
+            match well_known {
+                Some(path) => tile(
+                    img(path)
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .into_any_element(),
+                ),
+                None => tile(
+                    div()
+                        .text_size(sp(size * 0.34))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(0xFF_FF_FF))
+                        .child(SharedString::from(auto_initials(&project.name)))
+                        .into_any_element(),
+                ),
+            }
+        }
+    }
+}
+
 fn normalize_project_action(name: String, command: &str) -> Option<ProjectAction> {
     let command = command.trim();
     if command.is_empty() {
@@ -183,6 +246,10 @@ pub(super) enum ProjectsRow {
 impl Tide {
     // ── Selection ──────────────────────────────────────────────────────────
 
+    pub(super) fn landed_probe(&self, project_id: Uuid) -> Option<ProjectIconProbe> {
+        self.projects_icon_probes.borrow().get(&project_id).cloned()
+    }
+
     fn select_settings_project(&mut self, id: Uuid, cx: &mut Context<Self>) {
         self.projects_settings_selected = Some(id);
         self.projects_icon_error = None;
@@ -190,29 +257,58 @@ impl Tide {
         // carried over would land mid-panel.
         self.projects_detail_scroll
             .set_offset(gpui::Point::default());
-        if let Some(project) = self
+        self.sync_project_selection_ui(cx);
+        cx.notify();
+    }
+
+    /// Everything the detail panel needs for the effective selection: probe
+    /// the directory, load the rename field, warm the RAG status.
+    pub(super) fn sync_project_selection_ui(&mut self, cx: &mut Context<Self>) {
+        let Some((id, path)) = self.projects_settings_target() else {
+            return;
+        };
+        self.ensure_project_icon_probe(id, path, cx);
+        self.load_name_input_for(id, cx);
+        if self
+            .rag_settings
+            .status
+            .as_ref()
+            .is_none_or(|status| status.project_id != id.to_string())
+        {
+            self.rag_refresh(&id.to_string());
+        }
+    }
+
+    /// Mirror `project_id`'s name into the rename field.
+    fn load_name_input_for(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let Some(name) = self
             .state
             .projects
             .iter()
-            .find(|project| project.id == id)
-            .cloned()
-        {
-            let name = project.name.clone();
-            self.projects_name_input.update(cx, |input, cx| {
-                let len = input.content().len();
-                input.replace_range(0..len, &name, cx);
-            });
-            self.ensure_project_icon_probe(project.id, project.path, cx);
-            if self
-                .rag_settings
-                .status
-                .as_ref()
-                .is_none_or(|status| status.project_id != id.to_string())
-            {
-                self.rag_refresh(&id.to_string());
-            }
+            .find(|project| project.id == project_id)
+            .map(|project| project.name.clone())
+        else {
+            return;
+        };
+        self.projects_name_input.update(cx, |input, cx| {
+            let len = input.content().len();
+            input.replace_range(0..len, &name, cx);
+        });
+    }
+
+    /// Probe every ordinary project once, so avatars render with data in all
+    /// surfaces (sidebar, pickers) without any frame touching the filesystem.
+    pub(super) fn ensure_all_project_icon_probes(&mut self, cx: &mut Context<Self>) {
+        let targets: Vec<(Uuid, PathBuf)> = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .map(|project| (project.id, project.path.clone()))
+            .collect();
+        for (id, path) in targets {
+            self.ensure_project_icon_probe(id, path, cx);
         }
-        cx.notify();
     }
 
     /// Start a background probe of the project directory unless a
@@ -268,13 +364,6 @@ impl Tide {
         .detach();
     }
 
-    /// Probe for whichever project the detail panel will show.
-    pub(super) fn ensure_selected_project_probe(&mut self, cx: &mut Context<Self>) {
-        if let Some((id, path)) = self.projects_settings_target() {
-            self.ensure_project_icon_probe(id, path, cx);
-        }
-    }
-
     /// The project the detail panel will show: the rail selection, or the
     /// first ordinary project. `(id, path)` so callers borrow nothing.
     pub(super) fn projects_settings_target(&self) -> Option<(Uuid, PathBuf)> {
@@ -321,6 +410,7 @@ impl Tide {
         self.projects_detail_scroll
             .set_offset(gpui::Point::default());
         self.projects_settings_list.scroll_to_reveal_item(row_index);
+        self.sync_project_selection_ui(cx);
         cx.notify();
     }
 
@@ -586,18 +676,10 @@ impl Tide {
                     .flex()
                     .items_center()
                     .gap(px(9.0))
-                    .child(
-                        div()
-                            .w(px(26.0))
-                            .h(px(26.0))
-                            .flex_none()
-                            .rounded(px(6.0))
-                            .bg(theme.overlay)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(icon("icons/folder.svg", 13.0, theme.text_secondary)),
-                    )
+                    .child({
+                        let probe = self.landed_probe(id);
+                        project_avatar(project, probe.as_ref(), 26.0)
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -854,7 +936,7 @@ impl Tide {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(self.render_project_icon_tile(project, 40.0, 14.0))
+                    .child(self.render_project_icon_tile(project, 40.0))
                     .child(
                         TextField::new("project-name-input", self.projects_name_input.clone())
                             .w_full(),
@@ -882,64 +964,9 @@ impl Tide {
 
     /// The project's icon tile in every mode: preset glyph, uploaded image,
     /// well-known repo file, or the initials fallback.
-    fn render_project_icon_tile(&self, project: &Project, size: f32, font: f32) -> AnyElement {
-        let tile = |child: AnyElement| {
-            div()
-                .w(px(size))
-                .h(px(size))
-                .flex_none()
-                .rounded(px(size * 0.24))
-                .bg(icon_tile_background(project))
-                .overflow_hidden()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(child)
-                .into_any_element()
-        };
-        match &project.icon {
-            ProjectIcon::Preset(path) => tile(
-                PRESET_ICONS
-                    .iter()
-                    .copied()
-                    .find(|candidate| *candidate == path.as_str())
-                    .map(|static_path| {
-                        icon(static_path, size * 0.5, rgb(0xFF_FF_FF).into()).into_any_element()
-                    })
-                    .unwrap_or_else(|| div().into_any_element()),
-            ),
-            ProjectIcon::Uploaded(name) => tile(
-                img(uploaded_icon_path(name))
-                    .size_full()
-                    .object_fit(gpui::ObjectFit::Cover)
-                    .into_any_element(),
-            ),
-            ProjectIcon::Auto => {
-                let well_known = {
-                    let probes = self.projects_icon_probes.borrow();
-                    probes
-                        .get(&project.id)
-                        .filter(|probe| probe.root == project.path)
-                        .and_then(|probe| probe.well_known.clone())
-                };
-                match well_known {
-                    Some(path) => tile(
-                        img(path)
-                            .size_full()
-                            .object_fit(gpui::ObjectFit::Cover)
-                            .into_any_element(),
-                    ),
-                    None => tile(
-                        div()
-                            .text_size(sp(font))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xFF_FF_FF))
-                            .child(SharedString::from(auto_initials(&project.name)))
-                            .into_any_element(),
-                    ),
-                }
-            }
-        }
+    fn render_project_icon_tile(&self, project: &Project, size: f32) -> AnyElement {
+        let probe = self.landed_probe(project.id);
+        project_avatar(project, probe.as_ref(), size)
     }
 
     /// New chats in this project start on the picked model; the composer's
@@ -1385,6 +1412,7 @@ impl Tide {
             .collect();
         self.projects_settings_selected =
             fallback_project_selection(&ids, removed, self.projects_settings_selected);
+        self.sync_project_selection_ui(cx);
         let delete_history = dialog.delete_history;
         let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
