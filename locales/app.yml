@@ -1175,6 +1175,8 @@ projects.action_stop:
   en: Stop
 projects.action_unavailable:
   en: No terminal is available for this task.
+projects.action_failed:
+  en: "Could not start the action: %{error}"
 projects.remove_failed:
   en: "Could not remove the project: %{error}"
 inspector.section_actions:

@@ -96,6 +96,7 @@ projects.action_needs_command: 必须填写命令。
 projects.action_run: 运行
 projects.action_stop: 停止
 projects.action_unavailable: 此任务没有可用的终端。
+projects.action_failed: "无法启动操作：%{error}"
 projects.remove_failed: "无法删除项目：%{error}"
 inspector.section_actions: 操作
 projects.settings_save_failed: "无法保存项目设置：%{error}"

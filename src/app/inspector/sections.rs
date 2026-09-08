@@ -1245,8 +1245,7 @@ impl Tide {
         let project_id = project.id;
         let mut body = div().flex().flex_col().gap(px(6.0));
         for (index, action) in actions.iter().enumerate() {
-            self.refresh_action_run_port(project_id, &action.name, cx);
-            let (running, port) = self.action_run_state(project_id, &action.name, cx);
+            let (running, port) = self.action_run_state(project_id, &action.name);
             let command = action.command.clone();
             let action_name = action.name.clone();
             let control = if running {

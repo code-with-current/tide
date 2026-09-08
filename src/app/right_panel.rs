@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use super::branches::{BranchPickerContext, BranchPickerSurface};
 use super::git_history::{self, GRAPH_WIDTH, HISTORY_ROW_H};
@@ -1661,18 +1662,9 @@ mod tests {
     // and are covered by its own tests; this module only consumes them.
 }
 
-pub(super) struct ActionRun {
-    pub(super) project_id: Uuid,
-    pub(super) action_name: String,
-    pub(super) terminal_id: Uuid,
-    /// The dev-server port the run's output advertised, when scanned.
-    pub(super) exposed_port: Option<u16>,
-    pub(super) last_port_scan: Option<std::time::Instant>,
-}
-
 /// A dev-server port the run's visible output advertised (`localhost:5173`
 /// and friends). Pure so the threshold lives next to its test.
-fn scan_exposed_port(text: &str) -> Option<u16> {
+pub(super) fn scan_exposed_port(text: &str) -> Option<u16> {
     for line in text.lines() {
         for needle in ["localhost:", "127.0.0.1:", "0.0.0.0:"] {
             let Some(index) = line.find(needle) else {
@@ -1690,6 +1682,29 @@ fn scan_exposed_port(text: &str) -> Option<u16> {
         }
     }
     None
+}
+
+const MAX_ACTION_OUTPUT_BYTES: usize = 512 * 1024;
+
+/// Append one read of an action run's output stream to the shared buffer,
+/// keeping only the tail of a huge log.
+fn pump_action_output<R: std::io::Read>(mut stream: R, output: Arc<Mutex<String>>) {
+    let mut buffer = [0u8; 4096];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                let mut out = output
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                out.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                let excess = out.len().saturating_sub(MAX_ACTION_OUTPUT_BYTES / 2);
+                if excess > 0 {
+                    out.drain(..excess);
+                }
+            }
+        }
+    }
 }
 
 impl Tide {
@@ -1986,6 +2001,10 @@ impl Tide {
     /// row can flip Play/Stop and scan for an advertised port; the shared
     /// session terminal is never involved and output never reaches the
     /// transcript.
+    /// Run a project action as a daemon-side background job (kind
+    /// `process`): it shows in the jobs pill, the jobs popup, and the
+    /// background-work surface. No terminal is involved; output streams
+    /// into the background job's log.
     pub(super) fn run_project_action(
         &mut self,
         project_id: Uuid,
@@ -1993,166 +2012,128 @@ impl Tide {
         command: String,
         cx: &mut Context<Self>,
     ) {
-        if self.daemon.is_remote() || self.selected_workspace_path().is_none() {
+        let Some(session_id) = self.state.selected_session else {
             self.show_toast(tr!("projects.action_unavailable"));
             return;
-        }
-        // A still-registered run means it's live: just focus its tab. A run
-        // whose process exited is stale — drop it and start fresh.
-        let stale = {
-            let runs = self.action_runs.borrow();
-            runs.iter()
-                .find(|run| run.project_id == project_id && run.action_name == action_name)
-                .map(|run| {
-                    self.right_panel_terminals
-                        .get(&run.terminal_id)
-                        .is_none_or(|view| view.read(cx).exited())
-                })
-        }; // Option<bool>: Some(false) => live run exists
-        if stale == Some(false) {
-            let terminal_id = self
-                .action_runs
-                .borrow()
-                .iter()
-                .find(|run| run.project_id == project_id && run.action_name == action_name)
-                .map(|run| run.terminal_id)
-                .expect("checked above");
-            self.open_right_panel_surface(RightPanelSurface::Terminal(terminal_id), cx);
+        };
+        let Some(project_path) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.to_string_lossy().into_owned())
+        else {
             return;
-        }
-        self.action_runs
-            .borrow_mut()
-            .retain(|run| !(run.project_id == project_id && run.action_name == action_name));
-
-        let working_directory = self
-            .selected_workspace_path()
-            .map(|path| path.to_path_buf())
-            .expect("checked above");
-        let terminal_id = Uuid::new_v4();
-        self.right_panel_terminals.insert(
-            terminal_id,
-            cx.new(|cx| TerminalView::new(working_directory, cx)),
-        );
-        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
-            let command = command.clone();
-            view.update(cx, |view, cx| view.run_command(command, cx));
-        }
-        self.action_runs.borrow_mut().push(ActionRun {
-            project_id,
-            action_name,
-            terminal_id,
-            exposed_port: None,
-            last_port_scan: None,
-        });
-        self.open_right_panel_surface(RightPanelSurface::Terminal(terminal_id), cx);
+        };
+        let daemon = self.daemon.client();
+        let action_name_for_job = action_name.clone();
+        let action_name_for_key = action_name;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        session_id,
+                        Uuid::nil(),
+                        client::Command::RunAction {
+                            session_id: session_id.to_string(),
+                            project_path,
+                            action_name: action_name_for_job,
+                            command,
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(client::ResponsePayload::Cursor {
+                    cursor: Some(cursor),
+                }) => {
+                    if let Some(job_id) = cursor.get("jobId").and_then(|value| value.as_str()) {
+                        this.action_job_ids
+                            .borrow_mut()
+                            .insert((project_id, action_name_for_key), job_id.to_owned());
+                    }
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.show_toast(tr!("projects.action_failed", error = error));
+                }
+                _ => {}
+            });
+        })
+        .detach();
     }
 
-    /// Stop a running action: Ctrl+C for a clean shutdown, then close the
-    /// run's tab and drop its PTY (SIGHUP ends the process group).
+    /// SIGINT a running action job's process group.
     pub(super) fn stop_project_action(
         &mut self,
         project_id: Uuid,
         action_name: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(terminal_id) = self
-            .action_runs
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(job_id) = self
+            .action_job_ids
             .borrow()
-            .iter()
-            .find(|run| run.project_id == project_id && run.action_name == action_name)
-            .map(|run| run.terminal_id)
+            .get(&(project_id, action_name.to_owned()))
+            .cloned()
         else {
             return;
         };
-        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
-            view.update(cx, |view, cx| view.interrupt(cx));
-        }
-        self.action_runs
+        self.action_job_ids
             .borrow_mut()
-            .retain(|run| !(run.project_id == project_id && run.action_name == action_name));
-        if let Some(index) = self
-            .right_panel_surfaces
-            .iter()
-            .position(|surface| surface.terminal_id() == Some(terminal_id))
-        {
-            self.close_right_panel_surface(index, cx);
-        } else {
-            self.right_panel_terminals.remove(&terminal_id);
-        }
-        cx.notify();
+            .remove(&(project_id, action_name.to_owned()));
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        session_id,
+                        Uuid::nil(),
+                        client::Command::StopAction {
+                            session_id: session_id.to_string(),
+                            job_id,
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.show_toast(tr!("projects.action_failed", error = error));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
-    /// (running, advertised port) for one action row. Runs whose terminal
-    /// vanished (tab closed) count as stopped.
+    /// (running, advertised port) for one action row, read from the
+    /// session's background-work registry.
     pub(super) fn action_run_state(
         &self,
         project_id: Uuid,
         action_name: &str,
-        cx: &App,
     ) -> (bool, Option<u16>) {
-        let runs = self.action_runs.borrow();
-        let Some(run) = runs
-            .iter()
-            .find(|run| run.project_id == project_id && run.action_name == action_name)
+        let Some(session_id) = self.state.selected_session else {
+            return (false, None);
+        };
+        let Some(job_id) = self
+            .action_job_ids
+            .borrow()
+            .get(&(project_id, action_name.to_owned()))
+            .cloned()
         else {
             return (false, None);
         };
-        let running = self
-            .right_panel_terminals
-            .get(&run.terminal_id)
-            .is_some_and(|view| !view.read(cx).exited());
-        (running, running.then(|| run.exposed_port).flatten())
+        self.background_work
+            .get(&session_id)
+            .and_then(|registry| registry.action_job_state(&job_id))
+            .unwrap_or((false, None))
     }
 
-    /// Rescan a run's output for an advertised port at most every couple of
-    /// seconds; the result lands on the run so rows render without I/O.
-    pub(super) fn refresh_action_run_port(
-        &mut self,
-        project_id: Uuid,
-        action_name: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let (due, terminal_id) = {
-            let runs = self.action_runs.borrow();
-            let Some(run) = runs
-                .iter()
-                .find(|run| run.project_id == project_id && run.action_name == action_name)
-            else {
-                return;
-            };
-            let due = run
-                .last_port_scan
-                .is_none_or(|scanned| scanned.elapsed() >= std::time::Duration::from_secs(2));
-            (due, run.terminal_id)
-        };
-        if !due {
-            return;
-        }
-        let Some(view) = self.right_panel_terminals.get(&terminal_id) else {
-            return;
-        };
-        let text = view.read(cx).visible_text();
-        let port = scan_exposed_port(&text);
-        let mut changed = false;
-        {
-            let mut runs = self.action_runs.borrow_mut();
-            if let Some(run) = runs
-                .iter_mut()
-                .find(|run| run.project_id == project_id && run.action_name == action_name)
-            {
-                run.last_port_scan = Some(std::time::Instant::now());
-                if run.exposed_port != port {
-                    run.exposed_port = port;
-                    changed = true;
-                }
-            }
-        }
-        if changed {
-            cx.notify();
-        }
-    }
-
-    /// Open an action's advertised URL in a right-panel browser tab.
     pub(super) fn open_action_url(&mut self, port: u16, cx: &mut Context<Self>) {
         let browser_id = Uuid::new_v4();
         self.right_panel_pending_browser_urls

@@ -327,6 +327,24 @@ impl BackgroundWorkRegistry {
         // per event.
         self.dirty_output.insert(key.clone());
     }
+    /// (running, advertised port) for one daemon action job. The port is
+    /// scanned from the job's captured output — dev servers print their
+    /// URL, so no OS polling is needed.
+    pub(super) fn action_job_state(&self, job_id: &str) -> Option<(bool, Option<u16>)> {
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Process, job_id);
+        let item = self.items.get(&key)?;
+        let running = matches!(
+            item.status,
+            BackgroundWorkStatus::Starting
+                | BackgroundWorkStatus::Running
+                | BackgroundWorkStatus::Stopping
+        );
+        let port = item
+            .output
+            .as_deref()
+            .and_then(super::right_panel::scan_exposed_port);
+        Some((running, running.then_some(port).flatten()))
+    }
 
     fn append_output(&mut self, key: &BackgroundWorkKey, delta: &str) {
         if delta.is_empty() {

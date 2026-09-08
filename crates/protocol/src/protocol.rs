@@ -296,6 +296,20 @@ pub enum Command {
         project_id: Uuid,
         delete_history: bool,
     },
+    /// Run a project action as a session-scoped background job (kind
+    /// `process`). The job streams output through the background-work
+    /// pipeline; stop it with `StopAction`.
+    RunAction {
+        session_id: String,
+        project_path: String,
+        action_name: String,
+        command: String,
+    },
+    /// SIGINT a running action job's process group.
+    StopAction {
+        session_id: String,
+        job_id: String,
+    },
     /// Persist one project's settings. The daemon replies with a fresh
     /// task-state snapshot; clients stage edits optimistically and reconcile
     /// when it lands.

@@ -100,6 +100,7 @@ projects.action_needs_command: コマンドは必須です。
 projects.action_run: 実行
 projects.action_stop: 停止
 projects.action_unavailable: このターミナルは利用できません。
+projects.action_failed: "アクションを開始できませんでした: %{error}"
 projects.remove_failed: "プロジェクトを削除できませんでした: %{error}"
 inspector.section_actions: アクション
 projects.settings_save_failed: "プロジェクト設定を保存できませんでした: %{error}"
