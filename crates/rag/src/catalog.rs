@@ -1,7 +1,8 @@
 //! Curated local embedding models. The ids are the stable keys indexes
 //! record in their embedding plan; `repo` is the original HuggingFace
 //! name and the user-facing display string. File lists and sizes were
-//! HEAD-verified against the repos on 2026-09-08.
+//! HEAD-verified against the repos (2026-09-08; the four 2026-09-09
+//! additions verified via the HF API the same day).
 
 /// One catalog entry. Static data — the whole catalog compiles in.
 pub struct LocalModelEntry {
@@ -93,8 +94,109 @@ pub const BGE_M3_ENTRY: LocalModelEntry = LocalModelEntry {
     passage_prefix: None,
 };
 
+/// The sentence-transformers classic (Xenova's transformers.js export;
+/// smallest download, 256-token effective window).
+pub const MINILM_L6_ENTRY: LocalModelEntry = LocalModelEntry {
+    id: "local-minilm-l6",
+    repo: "Xenova/all-MiniLM-L6-v2",
+    dims: 384,
+    // The position table holds 512, but the model was trained at 256 —
+    // the sentence-transformers window is the honest cap.
+    max_tokens: 256,
+    languages: "en",
+    hf_base: "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main",
+    files: &[
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+    ],
+    // 22,972,370 + 711,661 + 366 + 650
+    download_size: 23_685_047,
+    vendored: false,
+    query_prefix: None,
+    passage_prefix: None,
+};
+
+/// BAAI bge-small-en-v1.5 (MIT). Queries carry bge's retrieval
+/// instruction; documents embed raw.
+pub const BGE_SMALL_ENTRY: LocalModelEntry = LocalModelEntry {
+    id: "local-bge-small",
+    repo: "Xenova/bge-small-en-v1.5",
+    dims: 384,
+    max_tokens: 512,
+    languages: "en",
+    hf_base: "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main",
+    files: &[
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+    ],
+    // 34,014,426 + 711,396 + 366 + 683
+    download_size: 34_726_871,
+    vendored: false,
+    query_prefix: Some("Represent this sentence for searching relevant passages: "),
+    passage_prefix: None,
+};
+
+/// Snowflake arctic-embed-s (Apache-2.0, trained without instruction
+/// prefixes — the Snowflake repo ships the ONNX itself).
+pub const ARCTIC_S_ENTRY: LocalModelEntry = LocalModelEntry {
+    id: "local-arctic-s",
+    repo: "Snowflake/snowflake-arctic-embed-s",
+    dims: 384,
+    max_tokens: 512,
+    languages: "en",
+    hf_base: "https://huggingface.co/Snowflake/snowflake-arctic-embed-s/resolve/main",
+    files: &[
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+    ],
+    // 34,015,111 + 711,649 + 1,433 + 703
+    download_size: 34_728_896,
+    vendored: false,
+    query_prefix: None,
+    passage_prefix: None,
+};
+
+/// nomic-embed-text-v1.5 (768 dims, mandatory task prefixes). The plain
+/// ONNX graph is trained at 2048 positions — the advertised 8192 needs
+/// the YARN sentence-transformers path, which the local runner does not
+/// use, so the catalog caps at the trained window. The official repo is
+/// ungated and ships the ONNX itself (Xenova's mirror is gated).
+pub const NOMIC_V15_ENTRY: LocalModelEntry = LocalModelEntry {
+    id: "local-nomic-v15",
+    repo: "nomic-ai/nomic-embed-text-v1.5",
+    dims: 768,
+    max_tokens: 2048,
+    languages: "en",
+    hf_base: "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main",
+    files: &[
+        "onnx/model_quantized.onnx",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "config.json",
+    ],
+    // 137,296,292 + 711,396 + 1,191 + 2,538
+    download_size: 138_011_417,
+    vendored: false,
+    query_prefix: Some("search_query: "),
+    passage_prefix: Some("search_document: "),
+};
+
 /// The full catalog, display order.
-pub const CATALOG: &[LocalModelEntry] = &[DEFAULT_ENTRY, MLE5_SMALL_ENTRY, BGE_M3_ENTRY];
+pub const CATALOG: &[LocalModelEntry] = &[
+    DEFAULT_ENTRY,
+    MINILM_L6_ENTRY,
+    BGE_SMALL_ENTRY,
+    ARCTIC_S_ENTRY,
+    NOMIC_V15_ENTRY,
+    MLE5_SMALL_ENTRY,
+    BGE_M3_ENTRY,
+];
 
 /// Look up an entry by embedder id.
 pub fn entry(id: &str) -> Option<&'static LocalModelEntry> {
@@ -109,6 +211,35 @@ pub fn default_entry() -> &'static LocalModelEntry {
 /// Is this id a catalog (local) embedder?
 pub fn is_local_id(id: &str) -> bool {
     entry(id).is_some()
+}
+
+// ── reranker ──────────────────────────────────────────────────────────────
+
+/// The optional cross-encoder reranker. Deliberately NOT in `CATALOG` —
+/// it is not an embedder choice, so it must not appear in the embedder
+/// picker — but it reuses the same `LocalModelEntry` shape so the
+/// downloader/exists-check/progress plumbing works unchanged. `dims` is
+/// meaningless for a cross-encoder (it scores pairs, it does not embed);
+/// `max_tokens` is the pair window (query + passage truncate here).
+/// File sizes HEAD-verified against the repo on 2026-09-09.
+pub const RERANKER_ENTRY: LocalModelEntry = LocalModelEntry {
+    id: "rerank-msmarco-miniilm",
+    repo: "Xenova/ms-marco-MiniLM-L-6-v2",
+    dims: 1,
+    max_tokens: 512,
+    languages: "en",
+    hf_base: "https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main",
+    files: &["onnx/model_quantized.onnx", "tokenizer.json"],
+    // 23,143,499 + 711,396
+    download_size: 23_854_895,
+    vendored: false,
+    query_prefix: None,
+    passage_prefix: None,
+};
+
+/// The reranker entry (download/exists checks key on it).
+pub fn reranker_entry() -> &'static LocalModelEntry {
+    &RERANKER_ENTRY
 }
 
 #[cfg(test)]
@@ -166,7 +297,10 @@ mod tests {
         // The e5 entry deliberately shares 384 dims with the default while
         // being a different vector space — the id-based plan lock (not the
         // dims check) is what must catch a switch between them.
-        assert_eq!(default_entry().dims, entry("local-mle5-small").unwrap().dims);
+        assert_eq!(
+            default_entry().dims,
+            entry("local-mle5-small").unwrap().dims
+        );
         assert_ne!(default_entry().id, MLE5_SMALL_ENTRY.id);
     }
 }
