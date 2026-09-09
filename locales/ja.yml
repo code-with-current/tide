@@ -1651,6 +1651,7 @@ settings.rag.close: 閉じる
 settings.rag.rebuild_title: 再構築が必要です
 settings.rag.rebuild_description: 新しく選択したモデルを使用するには、各プロジェクトの再インデックスが必要です。再構築まで既存のインデックスは引き続き検索可能です。
 settings.rag.rebuild_progress: 再構築中… 残り {count}
+settings.rag.rebuild_stalled: 再構築が停止しました — ステップが応答しません。再試行で残りのキューを続行します。
 settings.rag.rebuild_now: 再構築
 settings.rag.dismiss: 閉じる
 

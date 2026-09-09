@@ -3193,6 +3193,8 @@ settings.rag.rebuild_description:
   en: Reindexing is needed for each of your projects to use the newly selected model. Existing indexes stay searchable until rebuilt.
 settings.rag.rebuild_progress:
   en: Rebuilding… {count} remaining
+settings.rag.rebuild_stalled:
+  en: Rebuild stalled — a step stopped responding. Retry continues the remaining queue.
 settings.rag.rebuild_now:
   en: Rebuild
 settings.rag.dismiss:

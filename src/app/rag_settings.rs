@@ -27,6 +27,9 @@ pub(crate) enum RagOpsEvent {
     Endpoint(Result<client::RagEndpointWire, String>),
     /// One serial rebuild step finished — pop the next from the queue.
     RebuildStep,
+    /// The 2 s rebuild heartbeat: stall watchdog plus a status refresh
+    /// for the in-flight step's project (keeps the phase label live).
+    RebuildTick,
 }
 
 /// The RagConfigGet payload.
@@ -96,8 +99,9 @@ pub(crate) struct RagInlineInputs {
 }
 
 /// The rebuild dialog: what a change left behind, and the serial queue
-/// once "Rebuild all now" starts. `project_id == "*"` (the knowledge
-/// index) fans out to a per-source reindex instead of RagInitWorkspace.
+/// once Rebuild starts. Knowledge sources reindex only after the project
+/// queue drains — concurrently they contend for the daemon's serial RAG
+/// machinery and stall both (the "stuck at walking" bug).
 pub(crate) struct RebuildState {
     pub affected: Vec<client::RagAffectedWorkspaceWire>,
     /// Remaining project ids to re-init, front first.
@@ -105,7 +109,20 @@ pub(crate) struct RebuildState {
     /// Queue length at start — the progress bar's denominator.
     pub total: usize,
     pub running: bool,
+    /// The project whose init is in flight — the heartbeat polls it.
+    pub current: Option<String>,
+    /// Knowledge sources still awaiting their reindex (fired at finish).
+    pub knowledge_pending: bool,
+    /// When the in-flight step was dispatched — the stall watchdog.
+    pub step_started: Option<std::time::Instant>,
+    /// A step stopped replying — Retry continues the remaining queue.
+    pub stalled: bool,
 }
+
+/// How long one rebuild step may run without replying before the strip
+/// flags a stall. Generous on purpose: big repos embed for minutes, a
+/// deadlock never replies at all.
+const RAG_REBUILD_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// The add-endpoint dialog's editable state (text entities are created
 /// when the dialog opens — they need a window).
@@ -537,13 +554,14 @@ impl Tide {
         self.rag_config_load();
     }
 
-    /// "Rebuild all now": fan the knowledge index (*) out to per-source
-    /// reindexes, then re-init each affected project serially.
+    /// Rebuild: re-init each affected project serially. Knowledge sources
+    /// reindex at [`Self::rag_rebuild_finish`], not here.
     pub(super) fn rag_rebuild_start(&mut self, cx: &mut Context<Self>) {
         let Some(rebuild) = self.rag_settings.rebuild.as_mut() else {
             return;
         };
         rebuild.running = true;
+        rebuild.stalled = false;
         rebuild.queue = rebuild
             .affected
             .iter()
@@ -551,37 +569,68 @@ impl Tide {
             .map(|a| a.project_id.clone())
             .collect();
         rebuild.total = rebuild.queue.len();
-        // The knowledge index reindexes through its serial manager.
-        for source in self.rag_settings.sources.clone() {
-            self.rag_dispatch(
-                move |payload| match payload {
-                    client::ResponsePayload::Sources { .. } => RagOpsEvent::Noop,
-                    _ => RagOpsEvent::Status(Err("unexpected response".into())),
-                },
-                client::Command::SourcesReindex {
-                    source_id: source.id.clone(),
-                },
-            );
-        }
+        rebuild.knowledge_pending = !self.rag_settings.sources.is_empty();
+        self.rag_poll_rebuild();
         self.rag_rebuild_next(cx);
         cx.notify();
     }
 
-    /// Pop the next serial rebuild step (no-op when the queue empties).
+    /// Continue a stalled rebuild from the front of its remaining queue.
+    pub(super) fn rag_rebuild_retry(&mut self, cx: &mut Context<Self>) {
+        let Some(rebuild) = self.rag_settings.rebuild.as_mut() else {
+            return;
+        };
+        if !rebuild.stalled {
+            return;
+        }
+        rebuild.stalled = false;
+        rebuild.running = true;
+        self.rag_poll_rebuild();
+        self.rag_rebuild_next(cx);
+    }
+
+    /// The queue drained: fire the knowledge reindexes (only now — the
+    /// serial manager would contend with project inits), then clear.
+    fn rag_rebuild_finish(&mut self, cx: &mut Context<Self>) {
+        let knowledge = self
+            .rag_settings
+            .rebuild
+            .as_ref()
+            .is_some_and(|rebuild| rebuild.knowledge_pending);
+        if knowledge {
+            if let Some(rebuild) = self.rag_settings.rebuild.as_mut() {
+                rebuild.knowledge_pending = false;
+            }
+            for source in self.rag_settings.sources.clone() {
+                self.rag_dispatch(
+                    move |payload| match payload {
+                        client::ResponsePayload::Sources { .. } => RagOpsEvent::Noop,
+                        _ => RagOpsEvent::Status(Err("unexpected response".into())),
+                    },
+                    client::Command::SourcesReindex {
+                        source_id: source.id.clone(),
+                    },
+                );
+            }
+            self.rag_poll_sources();
+        }
+        self.rag_settings.rebuild = None;
+        cx.notify();
+    }
+
+    /// Pop the next serial rebuild step (finish when the queue empties).
     fn rag_rebuild_next(&mut self, cx: &mut Context<Self>) {
         let next = self
             .rag_settings
             .rebuild
             .as_mut()
-            .filter(|rebuild| rebuild.running)
+            .filter(|rebuild| rebuild.running && !rebuild.stalled)
             .and_then(|rebuild| rebuild.queue.first().cloned());
         if let Some(project_id) = next {
-            self.rag_settings
-                .rebuild
-                .as_mut()
-                .expect("checked")
-                .queue
-                .remove(0);
+            let rebuild = self.rag_settings.rebuild.as_mut().expect("checked");
+            rebuild.queue.remove(0);
+            rebuild.current = Some(project_id.clone());
+            rebuild.step_started = Some(std::time::Instant::now());
             self.rag_dispatch_result(
                 |result| match result {
                     Ok(client::ResponsePayload::RagInit { .. }) => RagOpsEvent::RebuildStep,
@@ -593,8 +642,13 @@ impl Tide {
                 },
                 client::Command::RagInitWorkspace { project_id },
             );
-        } else if let Some(rebuild) = self.rag_settings.rebuild.as_mut() {
-            rebuild.running = false;
+        } else if self
+            .rag_settings
+            .rebuild
+            .as_ref()
+            .is_some_and(|rebuild| rebuild.running && !rebuild.stalled && rebuild.queue.is_empty())
+        {
+            self.rag_rebuild_finish(cx);
         }
         cx.notify();
     }
@@ -939,6 +993,10 @@ impl Tide {
                             queue: Vec::new(),
                             total: 0,
                             running: false,
+                            current: None,
+                            knowledge_pending: false,
+                            step_started: None,
+                            stalled: false,
                         });
                     }
                 }
@@ -962,9 +1020,32 @@ impl Tide {
                         .as_ref()
                         .is_some_and(|rebuild| rebuild.running && rebuild.queue.is_empty());
                     if done {
-                        self.rag_settings.rebuild = None;
+                        self.rag_rebuild_finish(cx);
                     } else {
                         self.rag_rebuild_next(cx);
+                    }
+                }
+                RagOpsEvent::RebuildTick => {
+                    let Some(rebuild) = self.rag_settings.rebuild.as_ref() else {
+                        continue;
+                    };
+                    if !rebuild.running || rebuild.stalled {
+                        continue;
+                    }
+                    // Watchdog: a step that never replies would stall the
+                    // queue (and the phase label) forever.
+                    let timed_out = rebuild
+                        .step_started
+                        .is_some_and(|started| started.elapsed() > RAG_REBUILD_STEP_TIMEOUT);
+                    if timed_out {
+                        let rebuild = self.rag_settings.rebuild.as_mut().expect("checked");
+                        rebuild.stalled = true;
+                        rebuild.running = false;
+                    } else {
+                        if let Some(project) = rebuild.current.as_deref() {
+                            self.rag_poll_again(project);
+                        }
+                        self.rag_poll_rebuild();
                     }
                 }
             }
@@ -1045,6 +1126,22 @@ impl Tide {
                         Err(error) => RagOpsEvent::Sources(Err(error.to_string())),
                     };
                 if ops_tx.send(outcome).is_ok() {
+                    signal_event_pump(&event_wake);
+                }
+            });
+    }
+
+    /// The rebuild's 2 s heartbeat — re-armed by the drain while a step
+    /// is in flight; it drives the watchdog and the in-flight project's
+    /// status refresh.
+    fn rag_poll_rebuild(&self) {
+        let ops_tx = self.rag_settings.ops_tx.clone();
+        let event_wake = self.event_wake_tx.clone();
+        let _ = std::thread::Builder::new()
+            .name("tide-rag-rebuild-tick".into())
+            .spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                if ops_tx.send(RagOpsEvent::RebuildTick).is_ok() {
                     signal_event_pump(&event_wake);
                 }
             });
@@ -2105,7 +2202,7 @@ impl Tide {
         self.rag_settings
             .rebuild
             .as_ref()
-            .filter(|rebuild| !rebuild.running)?;
+            .filter(|rebuild| !rebuild.running && !rebuild.stalled)?;
 
         let footer = div()
             .flex()
@@ -2184,51 +2281,81 @@ impl Tide {
     }
 
     /// The serial rebuild's live progress, below the Memory cards — the
-    /// offer dialog is gone by now (it never renders while running).
-    pub(super) fn render_rag_rebuild_progress(&self, theme: &Theme) -> Option<Div> {
+    /// offer dialog is gone by now (it never renders while running). A
+    /// step that outlives the watchdog shows a stall error + Retry.
+    pub(super) fn render_rag_rebuild_progress(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let rebuild = self
             .rag_settings
             .rebuild
             .as_ref()
-            .filter(|rebuild| rebuild.running)?;
+            .filter(|rebuild| rebuild.running || rebuild.stalled)?;
+        let stalled = rebuild.stalled;
         let remaining = rebuild.queue.len();
-        let pct = (rebuild.total > 0).then(|| {
+        let pct = (!stalled && rebuild.total > 0).then(|| {
             ((rebuild.total - remaining.min(rebuild.total)) as f64 / rebuild.total as f64 * 100.0)
                 .round() as u32
         });
-        Some(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .rounded(px(13.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.raised)
-                .px(px(14.0))
-                .py(px(12.0))
-                .child(motion::spin(icon(
-                    "icons/loader-circle.svg",
+        let status = if stalled {
+            tr!("settings.rag.rebuild_stalled")
+        } else {
+            tr!("settings.rag.rebuild_progress", count = remaining)
+        };
+        let mut card = div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .rounded(px(13.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.raised)
+            .px(px(14.0))
+            .py(px(12.0))
+            .child(if stalled {
+                icon(
+                    "icons/alert.svg",
                     13.0,
-                    theme.text_tertiary,
-                )))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(7.0))
-                        .child(
-                            div()
-                                .text_size(sp(11.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("settings.rag.rebuild_progress", count = remaining)),
-                        )
-                        .child(rag_progress_bar(theme, pct)),
+                    crate::app::timeline_v2::status_color(
+                        theme,
+                        crate::app::timeline_v2::Status::Error,
+                    ),
+                )
+                .into_any_element()
+            } else {
+                motion::spin(icon("icons/loader-circle.svg", 13.0, theme.text_tertiary))
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(7.0))
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(status),
+                    )
+                    .when(!stalled, |body| {
+                        body.child(rag_progress_bar(theme, pct))
+                    }),
+            );
+        if stalled {
+            card = card.child(
+                CardButton::new("rag-rebuild-retry", tr!("common.retry")).render(
+                    *theme,
+                    cx,
+                    |this: &mut Tide, _window, cx: &mut Context<Tide>| this.rag_rebuild_retry(cx),
                 ),
-        )
+            );
+        }
+        Some(card)
     }
 }
 

@@ -1599,6 +1599,7 @@ settings.rag.close: 关闭
 settings.rag.rebuild_title: 需要重建
 settings.rag.rebuild_description: 需要对每个项目重新索引才能使用新选择的模型。重建之前，现有索引仍可搜索。
 settings.rag.rebuild_progress: 重建中… 剩余 {count}
+settings.rag.rebuild_stalled: 重建已停滞 — 某一步骤停止响应。重试以继续剩余队列。
 settings.rag.rebuild_now: 重建
 settings.rag.dismiss: 关闭
 
