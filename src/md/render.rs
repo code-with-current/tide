@@ -399,6 +399,9 @@ pub fn linkify_ranges(text: &str) -> Vec<(Range<usize>, String)> {
     let mut index = 0usize;
     while index < bytes.len() {
         let window = &text[index..];
+        // Indices must walk char boundaries — a mid-character byte
+        // index panics every slice below on CJK/emoji text.
+        let step = window.chars().next().map_or(1, char::len_utf8);
         let url = window
             .find("http://")
             .map(|at| at + "http://".len())
@@ -425,7 +428,7 @@ pub fn linkify_ranges(text: &str) -> Vec<(Range<usize>, String)> {
             if token.len() >= "a.b".len() {
                 links.push((start..token_end, token.to_owned()));
             }
-            index = token_end.max(index + 1);
+            index = token_end.max(index + step);
             continue;
         }
         // Absolute path tokens: start-of-token `/`, at least one more
@@ -441,7 +444,7 @@ pub fn linkify_ranges(text: &str) -> Vec<(Range<usize>, String)> {
             index += end.max(1);
             continue;
         }
-        index += 1;
+        index += step;
     }
     links
 }
@@ -2393,6 +2396,27 @@ mod linkify_tests {
         // Relative paths and prose slashes stay plain.
         assert!(linkify_ranges("chat / me later").is_empty());
         assert!(linkify_ranges("no protocol example.com here").is_empty());
+    }
+
+    #[test]
+    fn linkify_multibyte_text_does_not_panic() {
+        // Byte-walking past a multi-byte character used to slice
+        // mid-character and abort the app (crash while rendering
+        // localized indexing progress).
+        let text = "再構築中… see https://example.com/idx for details";
+        let links = linkify_ranges(text);
+        assert_eq!(links.len(), 1);
+        let (range, token) = &links[0];
+        assert_eq!(token, "https://example.com/idx");
+        assert_eq!(&text[range.clone()], token.as_str());
+
+        // Pure CJK + emoji, no links: walks clean.
+        assert!(linkify_ranges("準備中… ✅ 完了").is_empty());
+
+        // A URL glued directly to CJK still links from its own boundary.
+        let links = linkify_ranges("参照http://a.b/c");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].1, "http://a.b/c");
     }
 }
 
