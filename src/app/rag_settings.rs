@@ -1775,116 +1775,76 @@ impl Tide {
                 .description(tr!("settings.rag.model_hint"))
                 .control(change_button),
         ];
-        // The selected model's status block — state-driven and compact;
-        // the dialog carries the full model information.
+        // The selected model's status block — only states that need
+        // attention render: live download progress and failures. Quiet
+        // ready states live in the selector dialog.
         let model_pending = self.rag_settings.pending_model.borrow().clone();
         let model_pending = model_pending.as_deref();
         let mut status_area: Option<Div> = None;
         if let Some(model) = selected_model.as_ref() {
             let busy = model_pending == Some(model.id.as_str());
-            let block = match model.download_state.as_str() {
-                "downloading" => div()
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(7.0))
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(sp(11.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(SharedString::from(match model.download_percent {
-                                        Some(pct) => format!(
-                                            "{} · {pct}%",
-                                            tr!("settings.rag.model_downloading")
-                                        ),
-                                        None => tr!("settings.rag.model_downloading").to_string(),
-                                    })),
-                            )
-                            .child(
-                                div()
-                                    .text_size(sp(10.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child(SharedString::from(format!(
-                                        "{:.1} MB",
-                                        model.download_size as f64 / 1_048_576.0
-                                    ))),
-                            ),
-                    )
-                    .child(rag_progress_bar(theme, model.download_percent)),
-                "failed" => div()
-                    .px(px(20.0))
-                    .py(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .child(icon(
-                        "icons/alert.svg",
-                        12.0,
-                        crate::app::timeline_v2::status_color(
-                            theme,
-                            crate::app::timeline_v2::Status::Error,
-                        ),
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(11.0))
-                            .text_color(theme.danger)
-                            .child(SharedString::from(format!(
-                                "{} — {}",
-                                tr!("settings.rag.model_failed"),
-                                model.download_error.as_deref().unwrap_or_default()
-                            ))),
-                    )
-                    .child(
-                        CardButton::new(
-                            SharedString::from(format!("rag-model-retry-{}", model.id)),
-                            tr!("common.retry"),
+            let state = model.download_state.as_str();
+            if state == "downloading" {
+                let label = match model.download_percent {
+                    Some(pct) => {
+                        format!("{} · {pct}%", tr!("settings.rag.model_downloading"))
+                    }
+                    None => tr!("settings.rag.model_downloading").to_string(),
+                };
+                let size = format!("{:.1} MB", model.download_size as f64 / 1_048_576.0);
+                status_area = Some(
+                    div()
+                        .px(px(20.0))
+                        .py(px(12.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(7.0))
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .text_size(sp(11.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(SharedString::from(label)),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(sp(10.5))
+                                        .text_color(theme.text_tertiary)
+                                        .child(SharedString::from(size)),
+                                ),
                         )
-                        .busy(busy)
-                        .ghost()
-                        .render(*theme, cx, {
-                            let id = model.id.clone();
-                            move |this, _window, cx| {
-                                this.rag_model_command(client::Command::RagModelDownload {
-                                    model_id: id.clone(),
-                                });
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .child(
-                        CardButton::new(
-                            SharedString::from(format!("rag-model-delete-{}", model.id)),
-                            tr!("settings.rag.delete_model"),
-                        )
-                        .busy(busy)
-                        .ghost()
-                        .render(*theme, cx, {
-                            let id = model.id.clone();
-                            move |this, _window, cx| {
-                                this.rag_model_command(client::Command::RagModelDelete {
-                                    model_id: id.clone(),
-                                });
-                                cx.notify();
-                            }
-                        }),
-                    ),
-                _ => {
-                    let mut row = div()
+                        .child(rag_progress_bar(theme, model.download_percent)),
+                );
+            } else if state == "failed" {
+                let retry = CardButton::new(
+                    SharedString::from(format!("rag-model-retry-{}", model.id)),
+                    tr!("common.retry"),
+                )
+                .busy(busy)
+                .ghost()
+                .render(*theme, cx, {
+                    let id = model.id.clone();
+                    move |this, _window, cx| {
+                        this.rag_model_command(client::Command::RagModelDownload {
+                            model_id: id.clone(),
+                        });
+                        cx.notify();
+                    }
+                });
+                let error = format!(
+                    "{} — {}",
+                    tr!("settings.rag.model_failed"),
+                    model.download_error.as_deref().unwrap_or_default()
+                );
+                status_area = Some(
+                    div()
                         .px(px(20.0))
                         .py(px(10.0))
                         .flex()
@@ -1892,62 +1852,26 @@ impl Tide {
                         .gap(px(8.0))
                         .border_t_1()
                         .border_color(theme.border)
-                        .child(card_pill(
-                            theme,
-                            if model.vendored {
-                                tr!("settings.rag.state_builtin")
-                            } else if model.downloaded {
-                                tr!("settings.rag.state_downloaded")
-                            } else {
-                                tr!("settings.rag.state_not_downloaded")
-                            },
-                            if model.downloaded || model.vendored {
-                                theme.success
-                            } else {
-                                theme.text_tertiary
-                            },
-                        ));
-                    if model.downloaded && !model.vendored {
-                        row = row.child(
-                            CardButton::new(
-                                SharedString::from(format!("rag-model-delete-{}", model.id)),
-                                tr!("settings.rag.delete_model"),
-                            )
-                            .busy(busy)
-                            .ghost()
-                            .render(*theme, cx, {
-                                let id = model.id.clone();
-                                move |this, _window, cx| {
-                                    this.rag_model_command(client::Command::RagModelDelete {
-                                        model_id: id.clone(),
-                                    });
-                                    cx.notify();
-                                }
-                            }),
-                        );
-                    } else if !model.downloaded && !model.vendored {
-                        row = row.child(
-                            CardButton::new(
-                                SharedString::from(format!("rag-model-download-{}", model.id)),
-                                tr!("settings.rag.download"),
-                            )
-                            .busy(busy)
-                            .ghost()
-                            .render(*theme, cx, {
-                                let id = model.id.clone();
-                                move |this, _window, cx| {
-                                    this.rag_model_command(client::Command::RagModelDownload {
-                                        model_id: id.clone(),
-                                    });
-                                    cx.notify();
-                                }
-                            }),
-                        );
-                    }
-                    row
-                }
-            };
-            status_area = Some(block);
+                        .child(icon(
+                            "icons/alert.svg",
+                            12.0,
+                            crate::app::timeline_v2::status_color(
+                                theme,
+                                crate::app::timeline_v2::Status::Error,
+                            ),
+                        ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(sp(11.0))
+                                .text_color(theme.danger)
+                                .child(SharedString::from(error)),
+                        )
+                        .child(retry),
+                );
+            }
         }
 
         let mut body = card_body(theme).child(card_rows(theme, rows));
