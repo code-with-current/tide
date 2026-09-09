@@ -1016,8 +1016,12 @@ usage.cost_upper: 费用
 usage.tokens_upper: 令牌
 usage.daily_cost: 每日费用
 usage.daily_processed_tokens: 每日已处理令牌
+usage.monthly_cost: 每月费用
+usage.monthly_processed_tokens: 每月已处理令牌
 usage.model_upper: 模型
 usage.day_upper: 日期
+usage.month_upper: 月份
+usage.month: 月份
 usage.breakdown: 明细
 usage.no_projects_match: 没有符合筛选条件的项目
 usage.by_project: 按项目
@@ -1073,6 +1077,17 @@ usage.active_day_one: "%{count} 个活跃日"
 usage.active_day_many: "%{count} 个活跃日"
 usage.filter_projects: 筛选项目…
 usage.chart_description: Claude Code 与 Codex 的每日%{metric}分布。
+usage.refresh: 刷新用量
+usage.refreshing: 刷新中…
+usage.reported_cost_note: "各服务商在%{count}中报告的金额"
+usage.turn_one: "%{count} 轮对话"
+usage.turn_many: "%{count} 轮对话"
+usage.cache_read_share: 缓存读取占比
+usage.cached_of_input: "输入 %{total} 中的 %{count}"
+usage.of_observed_input: 占观测到的输入
+usage.empty_state_title: 尚未记录用量
+usage.empty_state_body: Tide 从 %{version} 版本开始记录用量，统计数据会随着使用逐渐出现
+usage.tracking_since: 自 %{date} 起记录
 usage.refresh_failed: "用量刷新失败：%{error}"
 usage.context_used: 上下文窗口已使用 %{percent}%（%{shortcut}）
 usage.shortcut: 用量（%{shortcut}）
@@ -1555,7 +1570,7 @@ settings.rag.global_title: 记忆与 RAG
 settings.rag.global_knowledge: 全局知识索引
 settings.rag.loading: 加载中…
 settings.rag.saving: 保存中…
-settings.rag.model_hint: 构建新索引使用的嵌入模型。切换后、重建之前，现有索引仍可搜索。
+settings.rag.model_hint: 用于所有新索引。
 settings.rag.group_local: 本地模型
 settings.rag.group_cloud: 云端
 settings.rag.group_endpoints: 自定义端点

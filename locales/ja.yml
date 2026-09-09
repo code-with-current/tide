@@ -1067,8 +1067,12 @@ usage.cost_upper: コスト
 usage.tokens_upper: トークン
 usage.daily_cost: 日別コスト
 usage.daily_processed_tokens: 日別の処理済みトークン
+usage.monthly_cost: 月別コスト
+usage.monthly_processed_tokens: 月別の処理済みトークン
 usage.model_upper: モデル
 usage.day_upper: 日付
+usage.month_upper: 月
+usage.month: 月
 usage.breakdown: 内訳
 usage.no_projects_match: フィルタに一致するプロジェクトはありません
 usage.by_project: プロジェクト別
@@ -1124,6 +1128,17 @@ usage.active_day_one: "アクティブ %{count} 日"
 usage.active_day_many: "アクティブ %{count} 日"
 usage.filter_projects: プロジェクトを絞り込む…
 usage.chart_description: "Claude Code と Codex の日別 %{metric}。"
+usage.refresh: 使用状況を更新
+usage.refreshing: 更新中…
+usage.reported_cost_note: "%{count}にわたりプロバイダーが報告した金額"
+usage.turn_one: "%{count} ターン"
+usage.turn_many: "%{count} ターン"
+usage.cache_read_share: キャッシュ読み取り率
+usage.cached_of_input: "入力 %{total} のうち %{count}"
+usage.of_observed_input: 観測された入力のうち
+usage.empty_state_title: 使用状況はまだ記録されていません
+usage.empty_state_body: "Tide はバージョン %{version} から使用状況を記録します。使い始めると統計が表示されます"
+usage.tracking_since: "%{date} から記録"
 usage.refresh_failed: "使用状況の更新に失敗しました：%{error}"
 usage.context_used: コンテキストウインドウを %{percent}% 使用（%{shortcut}）
 usage.shortcut: 使用状況（%{shortcut}）
@@ -1607,7 +1622,7 @@ settings.rag.global_title: メモリとRAG
 settings.rag.global_knowledge: グローバル知識インデックス
 settings.rag.loading: 読み込み中…
 settings.rag.saving: 保存中…
-settings.rag.model_hint: 新しいインデックスの構築に使う埋め込みモデルです。切り替えても再構築までは既存のインデックスを検索できます。
+settings.rag.model_hint: すべての新規インデックスに使用されます。
 settings.rag.group_local: ローカルモデル
 settings.rag.group_cloud: クラウド
 settings.rag.group_endpoints: カスタムエンドポイント

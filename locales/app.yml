@@ -2214,10 +2214,18 @@ usage.daily_cost:
   en: Daily cost
 usage.daily_processed_tokens:
   en: Daily processed tokens
+usage.monthly_cost:
+  en: Monthly cost
+usage.monthly_processed_tokens:
+  en: Monthly processed tokens
 usage.model_upper:
   en: MODEL
 usage.day_upper:
   en: DAY
+usage.month_upper:
+  en: MONTH
+usage.month:
+  en: Month
 usage.breakdown:
   en: Breakdown
 usage.no_projects_match:
@@ -3128,7 +3136,7 @@ settings.rag.loading:
 settings.rag.saving:
   en: Saving…
 settings.rag.model_hint:
-  en: The embedding model every new index is built with. Switching models leaves existing indexes queryable until rebuilt.
+  en: Used for every new index.
 settings.rag.group_local:
   en: Local models
 settings.rag.group_cloud:

@@ -82,6 +82,9 @@ pub(crate) struct RagSettingsPanel {
     /// The embedding-model dialog's staged selection — the dialog is
     /// open while set.
     pub model_dialog: Option<String>,
+    /// The retrieval card's chunking disclosure (progressive disclosure —
+    /// rarely-touched settings stay collapsed).
+    pub advanced_open: std::cell::Cell<bool>,
     /// The next config update chains straight into a rebuild (Select &
     /// Rebuild) — the offer dialog is gone.
     pub rebuild_after_update: std::cell::Cell<bool>,
@@ -176,6 +179,7 @@ impl RagSettingsPanel {
             config_requested: std::cell::Cell::new(false),
             models: Vec::new(),
             model_dialog: None,
+            advanced_open: std::cell::Cell::new(false),
             rebuild_after_update: std::cell::Cell::new(false),
             endpoint_dialog: None,
             rebuild: None,
@@ -1994,56 +1998,128 @@ impl Tide {
         };
         let min_sim = inline.min_similarity;
 
+        let open = self.rag_settings.advanced_open.get();
+        let chunk_summary = {
+            let config = self.rag_settings.config.as_ref();
+            match (
+                config.and_then(|c| c.chunk_size),
+                config.and_then(|c| c.chunk_overlap),
+            ) {
+                (Some(size), Some(overlap)) => format!("{size} / {overlap}"),
+                _ => tr!("settings.rag.chunk_default").to_string(),
+            }
+        };
+        let disclosure = div()
+            .id("rag-advanced-disclosure")
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(20.0))
+            .py(px(9.0))
+            .border_t_1()
+            .border_color(theme.border)
+            .cursor_pointer()
+            .hover(|el| el.bg(theme.overlay))
+            .on_click(cx.listener(|this: &mut Tide, _event, _window, cx| {
+                this.rag_settings.advanced_open.set(!this.rag_settings.advanced_open.get());
+                cx.notify();
+            }))
+            .child(icon(
+                if open {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                12.0,
+                theme.text_tertiary,
+            ))
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(tr!("settings.rag.advanced_title")),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+            )
+            .child(
+                div()
+                    .text_size(sp(10.5))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(chunk_summary)),
+            );
+
+        let mut chunk_rows = Vec::new();
+        if open {
+            chunk_rows.push(
+                CardRow::new(tr!("settings.rag.chunk_size")).control(
+                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                        "rag-chunksize-input",
+                        inline.chunk_size,
+                    )),
+                ),
+            );
+            chunk_rows.push(
+                CardRow::new(tr!("settings.rag.chunk_overlap")).control(
+                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                        "rag-chunkoverlap-input",
+                        inline.chunk_overlap,
+                    )),
+                ),
+            );
+        }
+
         let card = div().w_full().child(settings_group_head(
             theme,
             tr!("settings.rag.retrieval_title"),
             Vec::new(),
         ));
-        card.child(card_body(theme).child(card_rows(
+        let mut body = card_body(theme).child(card_rows(
             theme,
             vec![
-                CardRow::new(tr!("settings.rag.top_k"))
-                    .description(tr!("settings.rag.top_k_hint"))
-                    .control(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(minus)
-                            .child(
-                                div()
-                                    .min_w(px(24.0))
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .flex()
-                                    .justify_center()
-                                    .child(SharedString::from(top_k.to_string())),
-                            )
-                            .child(plus),
-                    ),
-                CardRow::new(tr!("settings.rag.min_similarity"))
-                    .description(tr!("settings.rag.min_similarity_hint"))
-                    .control(
-                        div().w(px(110.0)).child(
-                            crate::ui::text_field::TextField::new("rag-minsim-input", min_sim),
-                        ),
-                    ),
+                CardRow::new(tr!("settings.rag.top_k")).control(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(minus)
+                        .child(
+                            div()
+                                .min_w(px(24.0))
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .flex()
+                                .justify_center()
+                                .child(SharedString::from(top_k.to_string())),
+                        )
+                        .child(plus),
+                ),
+                CardRow::new(tr!("settings.rag.min_similarity")).control(
+                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                        "rag-minsim-input",
+                        min_sim,
+                    )),
+                ),
                 CardRow::new(tr!("settings.rag.rerank"))
-                    .description(tr!("settings.rag.rerank_hint"))
                     .control(self.render_rerank_control(theme, cx)),
                 CardRow::new(tr!("settings.rag.block_flagged"))
-                    .description(tr!("settings.rag.block_flagged_hint"))
                     .control(self.render_block_flagged_control(theme, cx)),
-                CardRow::new(tr!("settings.rag.inline_knowledge"))
-                    .description(tr!("settings.rag.inline_knowledge_hint"))
-                    .control(
-                        div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
-                            "rag-inlineknowledge-input",
-                            inline.inline_knowledge,
-                        )),
-                    ),
+                CardRow::new(tr!("settings.rag.inline_knowledge")).control(
+                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                        "rag-inlineknowledge-input",
+                        inline.inline_knowledge,
+                    )),
+                ),
             ],
-        )))
+        ));
+        body = body.child(disclosure);
+        if !chunk_rows.is_empty() {
+            body = body.child(card_rows(theme, chunk_rows));
+        }
+        card.child(body)
     }
 
     /// The rerank toggle plus its model-download affordance: toggling on
@@ -2146,52 +2222,6 @@ impl Tide {
 
     /// Advanced: chunking overrides as inline fields (commit on Enter;
     /// empty clears back to the chunker defaults). Changes route through
-    /// the affected dialog like a model switch — they invalidate indexes.
-    pub(super) fn render_rag_advanced_card(
-        &self,
-        window: &mut Window,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let Some(inline) = self.rag_settings.inline_inputs(window, cx) else {
-            return div()
-                .w_full()
-                .child(settings_group_head(
-                    theme,
-                    tr!("settings.rag.advanced_title"),
-                    Vec::new(),
-                ))
-                .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
-        };
-        let (chunk_size_edit, chunk_overlap_edit) = (inline.chunk_size, inline.chunk_overlap);
-
-        let card = div().w_full().child(settings_group_head(
-            theme,
-            tr!("settings.rag.advanced_title"),
-            Vec::new(),
-        ));
-        card.child(card_body(theme).child(card_rows(
-            theme,
-            vec![
-                CardRow::new(tr!("settings.rag.chunk_size"))
-                    .description(tr!("settings.rag.chunk_hint"))
-                    .control(
-                        div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
-                            "rag-chunksize-input",
-                            chunk_size_edit,
-                        )),
-                    ),
-                CardRow::new(tr!("settings.rag.chunk_overlap"))
-                    .description(tr!("settings.rag.chunk_hint"))
-                    .control(
-                        div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
-                            "rag-chunkoverlap-input",
-                            chunk_overlap_edit,
-                        )),
-                    ),
-            ],
-        )))
-    }
 
     /// Custom endpoints: BYOK rows with remove; add opens the sheet.
     pub(super) fn render_rag_endpoints_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {

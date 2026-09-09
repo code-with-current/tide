@@ -357,14 +357,11 @@ impl Tide {
                     _ => self.render_skills_settings(cx),
                 }));
         }
-        // The Monthly and Projects list views own their own scrolling, so
-        // their pages fill the viewport instead of riding the shared scroll
-        // container.
-        let fills_viewport = page == SettingsPage::Usage
-            && matches!(
-                self.usage_view,
-                UsageViewMode::Monthly | UsageViewMode::Projects
-            );
+        // Only the Projects ranking owns its own scrolling now; the Monthly
+        // dashboard scrolls with the page like Daily, its statement card
+        // capped internally.
+        let fills_viewport =
+            page == SettingsPage::Usage && self.usage_view == UsageViewMode::Projects;
         // The titlebar strip is transparent; once content slides under it, a
         // hairline marks the boundary so the clip edge reads as a header
         // rather than a glitch.
@@ -561,8 +558,7 @@ impl Tide {
                             .gap(px(26.0))
                             .child(self.render_rag_model_card(&theme, cx))
                             .child(self.render_rag_endpoints_card(&theme, cx))
-                            .child(self.render_rag_retrieval_card(window, &theme, cx))
-                            .child(self.render_rag_advanced_card(window, &theme, cx)),
+                            .child(self.render_rag_retrieval_card(window, &theme, cx)),
                     )
                     .child(
                         div()
