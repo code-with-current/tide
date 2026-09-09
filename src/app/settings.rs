@@ -7,6 +7,9 @@ use crate::ui::card::{
 };
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
+/// The Memory page lays its cards out in two side-by-side sections — it
+/// gets roughly double the single-column measure so neither column cramps.
+const SETTINGS_MEMORY_MAX_WIDTH: f32 = 1160.0;
 
 /// The Usage page is a dashboard, not a form; it mirrors T3 Code's wide
 /// two-column layout and needs the extra room for the chart.
@@ -56,10 +59,10 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
         "settings.tide_keywords",
     ),
     (
-        SettingsPage::Knowledge,
-        "settings.knowledge",
+        SettingsPage::Memory,
+        "settings.memory",
         "icons/library-big.svg",
-        "settings.knowledge_keywords",
+        "settings.memory_keywords",
     ),
     (
         SettingsPage::Skills,
@@ -371,6 +374,7 @@ impl Tide {
             .w_full()
             .max_w(px(match page {
                 SettingsPage::Usage => SETTINGS_USAGE_MAX_WIDTH,
+                SettingsPage::Memory => SETTINGS_MEMORY_MAX_WIDTH,
                 _ => SETTINGS_CONTENT_MAX_WIDTH,
             }))
             .mx_auto()
@@ -387,7 +391,7 @@ impl Tide {
                 SettingsPage::Git => self
                     .render_git_settings(Theme::current(cx), cx)
                     .into_any_element(),
-                SettingsPage::Knowledge => self.render_knowledge_settings(cx),
+                SettingsPage::Memory => self.render_memory_settings(cx),
                 SettingsPage::Projects => self.render_projects_settings(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
@@ -528,9 +532,10 @@ impl Tide {
             .into_any_element()
     }
 
-    /// The Knowledge page: per-project Memory & RAG plus the knowledge
-    /// sources registry (upstream's Settings → Knowledge).
-    fn render_knowledge_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The Memory page: two columns — memory & RAG configuration on the
+    /// left (embedding model, custom endpoints, retrieval, advanced), the
+    /// knowledge sources registry on the right.
+    fn render_memory_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         div()
             .flex()
@@ -538,12 +543,37 @@ impl Tide {
             .gap(px(26.0))
             .child(settings_page_header(
                 &theme,
-                tr!("settings.knowledge"),
-                Some(SharedString::from(tr!("settings.knowledge_description"))),
+                tr!("settings.memory"),
+                Some(SharedString::from(tr!("settings.memory_description"))),
                 Some(self.rag_sources_add_button(theme, cx)),
             ))
-            .child(self.render_global_rag_cards(&theme, cx))
-            .child(self.render_sources_card(&theme, cx))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(26.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(26.0))
+                            .child(self.render_rag_model_card(&theme, cx))
+                            .child(self.render_rag_endpoints_card(&theme, cx))
+                            .child(self.render_rag_retrieval_card(&theme, cx))
+                            .child(self.render_rag_advanced_card(&theme, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(26.0))
+                            .child(self.render_sources_card(&theme, cx)),
+                    ),
+            )
             .into_any_element()
     }
 

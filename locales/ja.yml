@@ -1650,3 +1650,7 @@ settings.rag.chunk_size: チャンクサイズ
 settings.rag.chunk_overlap: チャンクオーバーラップ
 settings.rag.chunk_hint: ASTチャンカーの既定値を上書きします。変更には再構築が必要です。再構築まで既存のインデックスはそのまま動作します。
 settings.rag.chunk_default: （既定）
+settings.memory: メモリ
+settings.memory_description: メモリとRAGの設定、および知識ソース — 埋め込みモデル、検索調整、検索可能なナレッジベース。
+settings.memory_keywords: メモリ,rag,埋め込み,知識,インデックス
+settings.rag.model_status: モデルの状態

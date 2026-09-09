@@ -1598,3 +1598,7 @@ settings.rag.chunk_size: 分块大小
 settings.rag.chunk_overlap: 分块重叠
 settings.rag.chunk_hint: 覆盖 AST 分块器的默认值。更改后需要重建——在此之前现有索引继续工作。
 settings.rag.chunk_default: （默认）
+settings.memory: 记忆
+settings.memory_description: 记忆与 RAG 配置及知识源 — 嵌入模型、检索调优和可搜索的知识库。
+settings.memory_keywords: 记忆,rag,嵌入,知识,索引
+settings.rag.model_status: 模型状态

@@ -3190,3 +3190,11 @@ settings.rag.chunk_hint:
   en: Overrides the AST chunker defaults. Changing these requires a rebuild — existing indexes keep working until then.
 settings.rag.chunk_default:
   en: (default)
+settings.memory:
+  en: Memory
+settings.memory_description:
+  en: Memory & RAG configuration and knowledge sources — the embedding model, retrieval tuning, and the searchable knowledge base.
+settings.memory_keywords:
+  en: memory, rag, embeddings, knowledge, index
+settings.rag.model_status:
+  en: Model status

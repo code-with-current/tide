@@ -215,9 +215,9 @@ enum SettingsPage {
     /// Per-project configuration — identity, icon, default model, actions,
     /// git identity, memory & RAG, removal.
     Projects,
-    /// Knowledge sources + per-project Memory & RAG (upstream's
-    /// Settings → Knowledge screen).
-    Knowledge,
+    /// Global memory & RAG configuration + knowledge sources (upstream's
+    /// Settings → Knowledge screen, restructured into two columns).
+    Memory,
     Skills,
     Usage,
     Daemon,
