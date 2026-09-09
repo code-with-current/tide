@@ -51,8 +51,6 @@ pub(crate) struct RagSettingsPanel {
     /// The in-flight list mutation ("add" or a source id) — buttons show
     /// their pending state until the Sources reply clears it.
     pub pending_source: Option<String>,
-    /// Which scope the sources card lists and the add dialog targets.
-    pub scope: KnowledgeScope,
     /// The global Memory & RAG settings (model picker / retrieval /
     /// advanced cards). `None` until first load.
     pub config: Option<client::RagConfigWire>,
@@ -103,13 +101,6 @@ pub(crate) struct EndpointDialogDraft {
     pub busy: bool,
 }
 
-/// The Knowledge page's scope: global knowledge, or one project's.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum KnowledgeScope {
-    Global,
-    Project(Uuid),
-}
-
 /// The add dialog's editable state. Text entities are created when the
 /// dialog opens (they need a window, only click handlers have one).
 pub(crate) struct SourceDialogDraft {
@@ -135,7 +126,6 @@ impl RagSettingsPanel {
             sources_error: None,
             dialog: None,
             pending_source: None,
-            scope: KnowledgeScope::Global,
             config: None,
             endpoints: Vec::new(),
             cloud_configured: false,
@@ -149,22 +139,6 @@ impl RagSettingsPanel {
         }
     }
 
-    /// Whether `source` belongs to the current scope. Global sources carry
-    /// the `*` workspace; project sources carry the project's id.
-    pub(crate) fn source_in_scope(
-        &self,
-        source: &client::KnowledgeSourceWire,
-        scope: KnowledgeScope,
-    ) -> bool {
-        match scope {
-            KnowledgeScope::Global => source.enabled_workspace_ids.iter().any(|id| id == "*"),
-            KnowledgeScope::Project(project_id) => source
-                .enabled_workspace_ids
-                .iter()
-                .any(|id| id == &project_id.to_string()),
-        }
-    }
-
     /// Open the add dialog (upstream's SourceDialog, fresh every time).
     fn open_source_dialog(&mut self, window: &mut Window, cx: &mut Context<Tide>) {
         let name = cx.new(|cx| {
@@ -174,10 +148,7 @@ impl RagSettingsPanel {
         });
         let location =
             cx.new(|cx| crate::input::TextInput::new(window, cx).placeholder(SOURCE_KINDS[0].2));
-        let project = match self.scope {
-            KnowledgeScope::Global => None,
-            KnowledgeScope::Project(id) => Some(id.to_string()),
-        };
+        let project = None; // the dialog's own selector decides the target
         self.dialog = Some(SourceDialogDraft {
             name,
             kind: "url",
@@ -1133,6 +1104,171 @@ fn rag_build_label(status: Option<&client::RagStatusWire>, project_id: &str) -> 
 }
 
 
+
+// ── the add-provider wizard's dialog vocabulary, shared by the Memory
+// screen's dialogs ─────────────────────────────────────────────────────────
+
+/// The wizard's labeled-field pattern: a MEDIUM secondary label over a
+/// bordered TextField shell (focus accent, inset background).
+fn rag_field(
+    theme: &Theme,
+    id: &'static str,
+    label: SharedString,
+    input: Entity<crate::input::TextInput>,
+) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_size(sp(11.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .child(crate::ui::text_field::TextField::new(id, input).w_full())
+}
+
+/// The wizard's footer action pill (26px, bordered, hover overlay).
+fn rag_dialog_pill(
+    theme: &Theme,
+    id: &'static str,
+    label: SharedString,
+    busy: bool,
+    dim: bool,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .tab_index(0)
+        .focus_visible(|style| style.border_color(theme.accent))
+        .h(px(26.0))
+        .px(px(10.0))
+        .min_w(px(96.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border_strong)
+        .when(dim || busy, |element| element.opacity(0.45))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .gap(px(5.0))
+        .cursor_default()
+        .text_size(sp(12.5))
+        .text_color(theme.text_secondary)
+        .hover(|element| element.bg(theme.overlay))
+        .child(label)
+        .on_click(move |_this, window, cx| on_click(window, cx))
+}
+
+/// The wizard's modal shell: composer card, 18px radius, xl shadow, a
+/// click-stopped scrollable body between header and footer strips, over a
+/// scrim — deferred at priority 0 so anchored menus float above it.
+fn rag_dialog_layer(
+    id: &'static str,
+    theme: &Theme,
+    width: f32,
+    header: Div,
+    body: Div,
+    footer: Div,
+) -> AnyElement {
+    let card = div()
+        .id(SharedString::from(format!("{id}-card")))
+        .key_context(id)
+        .w(px(width))
+        .max_h(px(640.0))
+        .overflow_hidden()
+        .rounded(px(18.0))
+        .bg(theme.composer)
+        .shadow_xl()
+        .flex()
+        .flex_col()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(header)
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-body")))
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(body),
+        )
+        .child(footer);
+    let scrim = if theme.is_dark {
+        gpui::hsla(0.0, 0.0, 0.0, 0.34)
+    } else {
+        gpui::hsla(0.0, 0.0, 0.0, 0.16)
+    };
+    let layer = div()
+        .id(id)
+        .absolute()
+        .inset_0()
+        .occlude()
+        .bg(scrim)
+        .p(px(24.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(card);
+    gpui::deferred(layer).with_priority(0).into_any_element()
+}
+
+/// The wizard's header strip: title + description over a hairline.
+fn rag_dialog_header(theme: &Theme, title: SharedString, description: SharedString) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .px(px(20.0))
+        .py(px(14.0))
+        .border_b_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(sp(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.text)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(description),
+                ),
+        )
+}
+
+/// The wizard's footer strip: inline error left, action pills right.
+fn rag_dialog_footer(theme: &Theme, error: Option<&str>, pills: Vec<Stateful<Div>>) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(8.0))
+        .px(px(20.0))
+        .py(px(12.0))
+        .border_t_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(11.5))
+                .text_color(theme.danger)
+                .children(error.map(SharedString::from)),
+        )
+        .child(div().flex().items_center().gap(px(8.0)).children(pills))
+}
+
 // ── global settings cards (model picker / models / retrieval / endpoints) ──
 
 impl Tide {
@@ -1445,7 +1581,11 @@ impl Tide {
                     ),
                 CardRow::new(tr!("settings.rag.min_similarity"))
                     .description(tr!("settings.rag.min_similarity_hint"))
-                    .control(div().w(px(110.0)).child(min_sim)),
+                    .control(
+                        div().w(px(110.0)).child(
+                            crate::ui::text_field::TextField::new("rag-minsim-input", min_sim),
+                        ),
+                    ),
             ],
         )))
     }
@@ -1472,10 +1612,20 @@ impl Tide {
             vec![
                 CardRow::new(tr!("settings.rag.chunk_size"))
                     .description(tr!("settings.rag.chunk_hint"))
-                    .control(div().w(px(110.0)).child(chunk_size_edit)),
+                    .control(
+                        div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                            "rag-chunksize-input",
+                            chunk_size_edit,
+                        )),
+                    ),
                 CardRow::new(tr!("settings.rag.chunk_overlap"))
                     .description(tr!("settings.rag.chunk_hint"))
-                    .control(div().w(px(110.0)).child(chunk_overlap_edit)),
+                    .control(
+                        div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                            "rag-chunkoverlap-input",
+                            chunk_overlap_edit,
+                        )),
+                    ),
             ],
         )))
     }
@@ -1532,8 +1682,9 @@ impl Tide {
         card.child(card_body(theme).child(card_rows(theme, rows)))
     }
 
-    /// The add-endpoint sheet (probe errors stay inline; nothing persists
-    /// until the daemon's probe passes).
+    /// The add-endpoint dialog — the wizard vocabulary: labeled
+    /// TextField rows, probe hint, footer pills (the daemon verifies with
+    /// one test embedding before anything persists; failures stay inline).
     pub(super) fn render_rag_endpoint_dialog(
         &mut self,
         _window: &mut Window,
@@ -1550,114 +1701,98 @@ impl Tide {
             draft.busy,
         );
 
-        let field = |label: SharedString, input: Entity<crate::input::TextInput>| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(sp(11.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(label),
-                )
-                .child(input)
-        };
         let body = div()
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .child(field(
-                tr!("settings.rag.dialog_name").to_string().into(),
-                name,
-            ))
-            .child(field(
-                tr!("settings.rag.endpoint_base_url").to_string().into(),
-                base_url,
-            ))
-            .child(field(
-                tr!("settings.rag.endpoint_model_id").to_string().into(),
-                model_id,
-            ))
-            .child(field(
-                tr!("settings.rag.endpoint_api_key").to_string().into(),
-                api_key,
-            ))
-            .when(!busy && error.is_some(), |el| {
-                el.child(
-                    div()
-                        .text_size(sp(11.0))
-                        .text_color(theme.danger)
-                        .child(SharedString::from(error.clone().unwrap_or_default())),
-                )
-            });
-
-        let mut footer = div().flex().justify_end().gap(px(8.0));
-        footer = footer.child(
-            CardButton::new("rag-endpoint-cancel", tr!("settings.rag.cancel")).render(
-                theme,
-                cx,
-                |this: &mut Tide, _window, cx: &mut Context<Tide>| {
-                    this.rag_settings.endpoint_dialog = None;
-                    cx.notify();
-                },
-            ),
-        );
-        let submit_label = if busy {
-            tr!("settings.rag.endpoint_probing").to_string()
-        } else {
-            tr!("settings.rag.add").to_string()
-        };
-        footer = footer.child(
-            CardButton::new("rag-endpoint-submit", submit_label)
-                .busy(busy)
-                .render(theme, cx, |this: &mut Tide, _window, cx: &mut Context<Tide>| this.rag_endpoint_add(cx)),
-        );
-
-        let card = div()
-            .id("rag-endpoint-dialog")
-            .occlude()
-            .w(px(460.0))
-            .rounded(px(13.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .bg(theme.raised)
-            .shadow_lg()
+            .p(px(20.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .p(px(18.0))
+            .child(rag_field(
+                &theme,
+                "rag-endpoint-name",
+                tr!("settings.rag.dialog_name").to_string().into(),
+                name,
+            ))
+            .child(rag_field(
+                &theme,
+                "rag-endpoint-base-url",
+                tr!("settings.rag.endpoint_base_url").to_string().into(),
+                base_url,
+            ))
+            .child(rag_field(
+                &theme,
+                "rag-endpoint-model",
+                tr!("settings.rag.endpoint_model_id").to_string().into(),
+                model_id,
+            ))
+            .child(rag_field(
+                &theme,
+                "rag-endpoint-key",
+                tr!("settings.rag.endpoint_api_key").to_string().into(),
+                api_key,
+            ))
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_size(sp(14.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("settings.rag.add_endpoint")),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("settings.rag.endpoint_dialog_hint")),
-                    ),
-            )
-            .child(body)
-            .child(footer);
-        Some(crate::ui::modal::deferred_scrim(
-            "rag-endpoint-layer",
-            card,
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_ghost)
+                    .child(tr!("settings.rag.endpoint_dialog_hint")),
+            );
+
+        let submit_label = if busy {
+            tr!("settings.rag.endpoint_probing")
+        } else {
+            tr!("settings.rag.add")
+        };
+        let footer = rag_dialog_footer(
             &theme,
+            (!busy).then(|| error.as_deref()).flatten(),
+            vec![
+                rag_dialog_pill(
+                    &theme,
+                    "rag-endpoint-cancel",
+                    tr!("settings.rag.cancel").to_string().into(),
+                    false,
+                    false,
+                    {
+                        let weak = cx.entity().downgrade();
+                        move |_window, cx| {
+                            let _ = weak.update(cx, |this: &mut Tide, cx| {
+                                this.rag_settings.endpoint_dialog = None;
+                                cx.notify();
+                            });
+                        }
+                    },
+                ),
+                rag_dialog_pill(
+                    &theme,
+                    "rag-endpoint-submit",
+                    submit_label.to_string().into(),
+                    busy,
+                    false,
+                    {
+                        let weak = cx.entity().downgrade();
+                        move |_window, cx| {
+                            let _ = weak.update(cx, |this: &mut Tide, cx| {
+                                this.rag_endpoint_add(cx);
+                            });
+                        }
+                    },
+                ),
+            ],
+        );
+        Some(rag_dialog_layer(
+            "RagEndpointDialog",
+            &theme,
+            480.0,
+            rag_dialog_header(
+                &theme,
+                tr!("settings.rag.add_endpoint").to_string().into(),
+                tr!("settings.rag.endpoint_dialog_hint").to_string().into(),
+            ),
+            body,
+            footer,
         ))
     }
 
-    /// The rebuild offer after a settings change or delete: affected
-    /// indexes listed, "Rebuild all now" (serial) or "Later".
     pub(super) fn render_rag_rebuild_dialog(
         &mut self,
         _window: &mut Window,
@@ -2116,87 +2251,8 @@ impl Tide {
             vec![add.into_any_element()],
         ));
 
-        // Scope chips: global knowledge, or one project's. The list and the
-        // add dialog both target the selected scope.
-        let scope = self.rag_settings.scope;
-        let mut scopes = div().flex().flex_wrap().gap(px(6.0)).child(
-            div()
-                .id("knowledge-scope-global")
-                .tab_index(0)
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .h(px(26.0))
-                .px(px(8.0))
-                .rounded(px(8.0))
-                .cursor_default()
-                .flex()
-                .items_center()
-                .text_size(sp(12.5))
-                .when(scope == KnowledgeScope::Global, |element| {
-                    element
-                        .bg(theme.sidebar_item_background)
-                        .border_1()
-                        .border_color(theme.accent)
-                })
-                .when(scope != KnowledgeScope::Global, |element| {
-                    element.hover(|element| element.bg(theme.overlay))
-                })
-                .text_color(theme.text_secondary)
-                .child(tr!("settings.rag.scope_global"))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.rag_settings.scope = KnowledgeScope::Global;
-                    cx.notify();
-                })),
-        );
-        for project in self
-            .state
-            .projects
-            .iter()
-            .filter(|project| !project.is_projectless())
-        {
-            let project_id = project.id;
-            let selected = scope == KnowledgeScope::Project(project_id);
-            scopes = scopes.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "knowledge-scope-{}",
-                        project_id
-                    )))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .h(px(26.0))
-                    .px(px(8.0))
-                    .rounded(px(8.0))
-                    .cursor_default()
-                    .flex()
-                    .items_center()
-                    .text_size(sp(12.5))
-                    .when(selected, |element| {
-                        element
-                            .bg(theme.sidebar_item_background)
-                            .border_1()
-                            .border_color(theme.accent)
-                    })
-                    .when(!selected, |element| {
-                        element.hover(|element| element.bg(theme.overlay))
-                    })
-                    .text_color(theme.text_secondary)
-                    .child(SharedString::from(project.name.clone()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.rag_settings.scope = KnowledgeScope::Project(project_id);
-                        cx.notify();
-                    })),
-            );
-        }
-
-        let mut body =
-            card_body_flush(theme).child(div().px(px(20.0)).pt(px(10.0)).pb(px(4.0)).child(scopes));
-        let in_scope: Vec<_> = self
-            .rag_settings
-            .sources
-            .iter()
-            .filter(|source| self.rag_settings.source_in_scope(source, scope))
-            .cloned()
-            .collect();
+        let mut body = card_body_flush(theme);
+        let in_scope: Vec<_> = self.rag_settings.sources.clone();
         if in_scope.is_empty() {
             body = body.child(
                 div()
@@ -2375,9 +2431,10 @@ const SOURCE_KINDS: [(&str, &str, &str, &str, &str); 4] = [
 ];
 
 impl Tide {
-    /// The add-source dialog: Name + Kind (radio rows with hints) +
-    /// Location with per-kind placeholder, inline validation, busy submit.
-    /// Mounted from the settings overlay stack.
+    /// The add-knowledge dialog — the add-provider wizard's component
+    /// vocabulary (composer card, TextField fields, tile grid, footer
+    /// pills): target project selector, name, a 2×2 kind tile grid, and
+    /// the location field with the docs browser.
     pub(super) fn render_rag_source_dialog(
         &mut self,
         _window: &mut Window,
@@ -2397,10 +2454,9 @@ impl Tide {
             .find(|(value, ..)| *value == kind)
             .unwrap_or(&SOURCE_KINDS[0]);
 
-        let mut body = div().flex().flex_col().gap(px(10.0));
+        let mut body = div().p(px(20.0)).flex().flex_col().gap(px(12.0));
 
-        // Target scope — its own selector, independent of the card's
-        // scope chips (global knowledge or any project).
+        // Target scope — chosen here, not on the card.
         let selected_project = draft.project.clone();
         let weak = cx.entity().downgrade();
         let scope_handle = self.menu_handle("rag-dialog-scope", cx);
@@ -2415,7 +2471,7 @@ impl Tide {
                 .unwrap_or_else(|| tr!("settings.rag.scope_global").to_string()),
         };
         let projects = self.state.projects.clone();
-        let scope_selector = crate::ui::menu::dropdown_menu(
+        let scope_selector = dropdown_menu(
             MenuChip::new("rag-dialog-scope-chip")
                 .label(scope_label)
                 .outlined()
@@ -2423,22 +2479,19 @@ impl Tide {
                 .justify_between(),
             "rag-dialog-scope-menu",
             &scope_handle,
-            crate::ui::menu::MenuAlign::BelowLeft,
+            MenuAlign::BelowLeft,
             move |_| {
-                let mut items = vec![crate::ui::menu::MenuItem::new(
-                    tr!("settings.rag.scope_global"),
-                    {
-                        let weak = weak.clone();
-                        move |_window, cx| {
-                            let _ = weak.update(cx, |tide: &mut Tide, cx| {
-                                if let Some(draft) = tide.rag_settings.dialog.as_mut() {
-                                    draft.project = None;
-                                }
-                                cx.notify();
-                            });
-                        }
-                    },
-                )
+                let mut items = vec![MenuItem::new(tr!("settings.rag.scope_global"), {
+                    let weak = weak.clone();
+                    move |_window, cx| {
+                        let _ = weak.update(cx, |tide: &mut Tide, cx| {
+                            if let Some(draft) = tide.rag_settings.dialog.as_mut() {
+                                draft.project = None;
+                            }
+                            cx.notify();
+                        });
+                    }
+                })
                 .selected(selected_project.is_none())];
                 for project in projects.iter().filter(|p| !p.is_projectless()) {
                     let weak = weak.clone();
@@ -2446,7 +2499,7 @@ impl Tide {
                     let is_selected = selected_project.as_deref() == Some(id.as_str());
                     let label = project.name.clone();
                     items.push(
-                        crate::ui::menu::MenuItem::new(label, move |_window, cx| {
+                        MenuItem::new(label, move |_window, cx| {
                             let _ = weak.update(cx, |tide: &mut Tide, cx| {
                                 if let Some(draft) = tide.rag_settings.dialog.as_mut() {
                                     draft.project = Some(id.clone());
@@ -2469,40 +2522,33 @@ impl Tide {
                     div()
                         .text_size(sp(11.5))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
+                        .text_color(theme.text_secondary)
                         .child(tr!("settings.rag.dialog_project")),
                 )
                 .child(scope_selector),
         );
 
         // Name
-        body = body.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(sp(11.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(tr!("settings.rag.dialog_name")),
-                )
-                .child(name),
-        );
+        body = body.child(rag_field(
+            &theme,
+            "rag-source-name",
+            tr!("settings.rag.dialog_name").to_string().into(),
+            name,
+        ));
 
-        // Kind — a 2×2 thumbnail grid (icon over label over hint; kind is
-        // fixed upstream after creation, so this dialog is add-only).
-        let mut kinds = div().flex().flex_col().gap(px(4.0)).child(
+        // Kind — the wizard's tile grid: icon over label over hint, two
+        // equal columns, selected = accent border (kind is fixed after
+        // creation; this dialog is add-only).
+        let mut kinds = div().flex().flex_col().gap(px(6.0)).child(
             div()
                 .text_size(sp(11.5))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text)
+                .text_color(theme.text_secondary)
                 .child(tr!("settings.rag.dialog_kind")),
         );
-        let grid = div().flex().flex_wrap().gap(px(6.0));
+        let grid = div().flex().flex_col().gap(px(8.0));
         let grid = SOURCE_KINDS.chunks(2).fold(grid, |grid, row_kinds| {
-            let mut row = div().flex().gap(px(6.0)).w_full();
+            let mut row = div().flex().gap(px(8.0));
             for (value, label_key, _placeholder, hint_key, icon_path) in row_kinds {
                 let selected = *value == kind;
                 let weak = cx.entity().downgrade();
@@ -2513,19 +2559,20 @@ impl Tide {
                     .focus_visible(|style| style.border_color(theme.accent))
                     .flex_1()
                     .min_w_0()
-                    .px(px(10.0))
-                    .py(px(9.0))
-                    .rounded(px(9.0))
+                    .p(px(10.0))
+                    .rounded(px(12.0))
                     .border_1()
+                    .border_color(if selected {
+                        theme.accent.opacity(0.5)
+                    } else {
+                        theme.border
+                    })
+                    .when(selected, |el| el.bg(theme.inset))
                     .cursor_pointer()
                     .flex()
                     .flex_col()
                     .items_start()
                     .gap(px(4.0))
-                    .when(selected, |el| {
-                        el.border_color(theme.accent).bg(theme.inset)
-                    })
-                    .when(!selected, |el| el.border_color(theme.border))
                     .child(icon(
                         icon_path,
                         16.0,
@@ -2561,6 +2608,7 @@ impl Tide {
         });
         kinds = kinds.child(grid);
         body = body.child(kinds);
+
         // Location (per-kind hint below; docs adds a local file browser)
         let browse = (kind == "docs").then(|| {
             let weak = cx.entity().downgrade();
@@ -2598,12 +2646,15 @@ impl Tide {
                             div()
                                 .text_size(sp(11.5))
                                 .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
+                                .text_color(theme.text_secondary)
                                 .child(tr!("settings.rag.dialog_location")),
                         )
                         .children(browse),
                 )
-                .child(location.clone())
+                .child(crate::ui::text_field::TextField::new(
+                    "rag-source-location",
+                    location,
+                ))
                 .child(
                     div()
                         .text_size(sp(10.5))
@@ -2611,111 +2662,56 @@ impl Tide {
                         .child(tr!(kind_meta.3)),
                 ),
         );
-        if let Some(error) = error {
-            body = body.child(
-                div()
-                    .text_size(sp(11.0))
-                    .text_color(crate::app::timeline_v2::status_color(
-                        &theme,
-                        crate::app::timeline_v2::Status::Error,
-                    ))
-                    .child(SharedString::from(error)),
-            );
-        }
-        // Footer: Cancel + Add (busy spinner while the first index runs —
-        // upstream disables submit for exactly this window).
-        let footer = div()
-            .flex()
-            .justify_end()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .id("rag-dialog-cancel")
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .px(px(12.0))
-                    .py(px(5.0))
-                    .rounded(px(7.0))
-                    .border_1()
-                    .border_color(theme.border)
-                    .text_size(sp(11.5))
-                    .cursor_pointer()
-                    .child(tr!("settings.rag.cancel"))
-                    .on_click({
-                        let weak = cx.entity().downgrade();
-                        move |_, _window, cx| {
-                            let _ = weak.update(cx, |tide, cx| {
-                                tide.rag_settings.close_source_dialog(cx);
-                            });
-                        }
-                    }),
-            )
-            .child(
-                div()
-                    .id("rag-dialog-submit")
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .px(px(12.0))
-                    .py(px(5.0))
-                    .rounded(px(7.0))
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .text_size(sp(11.5))
-                    .cursor_pointer()
-                    .when(busy, |el| el.opacity(0.6))
-                    .child(if busy {
-                        motion::spin(icon("icons/loader-circle.svg", 11.0, theme.text_tertiary))
-                            .into_any_element()
-                    } else {
-                        SharedString::from(tr!("settings.rag.add")).into_any_element()
-                    })
-                    .on_click({
-                        let weak = cx.entity().downgrade();
-                        move |_, _window, cx| {
-                            let _ = weak.update(cx, |tide, cx| {
-                                tide.rag_source_add(cx);
-                            });
-                        }
-                    }),
-            );
-        let card = div()
-            .id("rag-source-dialog")
-            .occlude()
-            .w(px(420.0))
-            .rounded(px(13.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .bg(theme.raised)
-            .shadow_lg()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .p(px(18.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_size(sp(14.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("settings.rag.add_source")),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("settings.rag.dialog_description")),
-                    )
-            )
-            .child(body)
-            .child(footer);
-        Some(crate::ui::modal::deferred_scrim(
-            "rag-source-layer",
-            card,
+
+        let footer = rag_dialog_footer(
             &theme,
+            (!busy).then(|| error.as_deref()).flatten(),
+            vec![
+                rag_dialog_pill(
+                    &theme,
+                    "rag-source-cancel",
+                    tr!("settings.rag.cancel").to_string().into(),
+                    false,
+                    false,
+                    {
+                        let weak = cx.entity().downgrade();
+                        move |window, cx| {
+                            let _ = weak.update(cx, |this: &mut Tide, cx| {
+                                this.rag_settings.dialog = None;
+                                window.refresh();
+                                cx.notify();
+                            });
+                        }
+                    },
+                ),
+                rag_dialog_pill(
+                    &theme,
+                    "rag-source-submit",
+                    tr!("settings.rag.add").to_string().into(),
+                    busy,
+                    false,
+                    {
+                        let weak = cx.entity().downgrade();
+                        move |_window, cx| {
+                            let _ = weak.update(cx, |this: &mut Tide, cx| {
+                                this.rag_source_add(cx);
+                            });
+                        }
+                    },
+                ),
+            ],
+        );
+        Some(rag_dialog_layer(
+            "RagSourceDialog",
+            &theme,
+            520.0,
+            rag_dialog_header(
+                &theme,
+                tr!("settings.rag.add_source").to_string().into(),
+                tr!("settings.rag.dialog_description").to_string().into(),
+            ),
+            body,
+            footer,
         ))
     }
 }
