@@ -166,19 +166,20 @@ pub fn ingest_workspace(
 
     let db_path = crate::store::rag_db_path(inputs.data_dir, inputs.workspace_id);
     let rag_store = if db_path.is_file() {
-        let store =
+        let mut store =
             RagStore::open_at(&db_path).map_err(|e| format!("Failed to open RAG index: {e}"))?;
-        let recorded = store.plan();
+        let recorded = store.plan().clone();
         if recorded.embedder_id != plan.embedder_id
             || recorded.dims != plan.dims
             || recorded.chunk_size != plan.chunk_size
             || recorded.chunk_overlap != plan.chunk_overlap
         {
-            return Err(format!(
-                "Index was built with {} ({} dims); the configured model/chunking \
-                 differs — rebuild required (clear the index to switch).",
-                recorded.embedder_id, recorded.dims
-            ));
+            // A full ingest IS the rebuild: reset under the new plan
+            // rather than refuse — the old vectors are another space and
+            // the walk re-embeds everything anyway.
+            store
+                .rebuild_with_plan(plan)
+                .map_err(|e| format!("Failed to reset RAG index for rebuild: {e}"))?;
         }
         store
     } else {
@@ -669,7 +670,7 @@ mod tests {
     }
 
     #[test]
-    fn ingest_blocks_on_plan_mismatch() {
+    fn ingest_resets_index_on_plan_change() {
         use crate::store::EmbeddingPlan;
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path().join("ws");
@@ -705,33 +706,36 @@ mod tests {
         )
         .unwrap();
 
-        // Same dims, different model: the id lock blocks the mix.
-        let err = ingest_workspace(
+        // Different model, same dims: a full ingest IS the rebuild — it
+        // resets the index under the new plan instead of refusing.
+        ingest_workspace(
             inputs(&data, &ws),
             &embedder,
             &plan("local-mle5-small", None),
             |_| {},
         )
-        .err()
         .unwrap();
-        assert!(err.contains("rebuild required"), "was {err}");
+        let db = crate::store::rag_db_path(&data, "w1");
+        let store = crate::store::RagStore::open_at(&db).unwrap();
+        assert_eq!(store.plan().embedder_id, "local-mle5-small");
+        assert_eq!(store.plan().dims, 384);
 
-        // A chunking change is a mismatch too.
-        let err = ingest_workspace(
+        // A chunking change resets too.
+        ingest_workspace(
             inputs(&data, &ws),
             &embedder,
-            &plan("local-code-512", Some(800)),
+            &plan("local-mle5-small", Some(800)),
             |_| {},
         )
-        .err()
         .unwrap();
-        assert!(err.contains("rebuild required"), "was {err}");
+        let store = crate::store::RagStore::open_at(&db).unwrap();
+        assert_eq!(store.plan().chunk_size, Some(800));
 
         // The matching plan re-ingests (idempotent).
         ingest_workspace(
             inputs(&data, &ws),
             &embedder,
-            &plan("local-code-512", None),
+            &plan("local-mle5-small", Some(800)),
             |_| {},
         )
         .unwrap();

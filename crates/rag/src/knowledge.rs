@@ -39,6 +39,13 @@ pub struct KnowledgeSource {
     pub embedder_id: Option<String>,
     /// ['*'] = all workspaces
     pub enabled_workspace_ids: Vec<String>,
+    /// Injection screen verdict for the fetched content — true means the
+    /// source is withheld from recall (visible in settings regardless).
+    #[serde(default)]
+    pub injection_flag: bool,
+    /// First screen findings ("rule: snippet" lines) when flagged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub injection_detail: Option<String>,
 }
 
 /// Ingestion progress event (TS SourceProgressEvent) — wire shape verbatim.
@@ -103,6 +110,23 @@ impl KnowledgeStore {
               enabledWorkspaceIds TEXT NOT NULL DEFAULT '[\"*\"]'
             )",
         )?;
+        // Guarded column additions — a registry db created before the
+        // injection screen simply gains the columns (same pattern as the
+        // store's v2 sourceId ALTER).
+        let has_flag: bool = rag.with_connection(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM pragma_table_info('sources') WHERE name = 'injectionFlag'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok()
+        });
+        if !has_flag {
+            rag.run_raw(
+                "ALTER TABLE sources ADD COLUMN injectionFlag INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sources ADD COLUMN injectionDetail TEXT;",
+            )?;
+        }
         Ok(Self { rag })
     }
 
@@ -121,11 +145,29 @@ impl KnowledgeStore {
             embedder_id: row.get("embedderId")?,
             enabled_workspace_ids: serde_json::from_str(&enabled_raw)
                 .unwrap_or_else(|_| vec!["*".to_owned()]),
+            injection_flag: row.get::<_, Option<i64>>("injectionFlag")?.unwrap_or(0) != 0,
+            injection_detail: row.get("injectionDetail")?,
         })
     }
 
-    const SOURCE_COLUMNS: &'static str =
-        "id, name, kind, location, createdAt, lastIndexedAt, status, error, chunkCount, embedderId, enabledWorkspaceIds";
+    const SOURCE_COLUMNS: &'static str = "id, name, kind, location, createdAt, lastIndexedAt, status, error, chunkCount, embedderId, enabledWorkspaceIds, injectionFlag, injectionDetail";
+
+    /// Persist the injection screen verdict for a source (re-indexing
+    /// overwrites it; `detail` carries the first finding lines).
+    pub fn mark_injection(
+        &self,
+        id: &str,
+        flagged: bool,
+        detail: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE sources SET injectionFlag = ?2, injectionDetail = ?3 WHERE id = ?1",
+                params![id, flagged as i64, detail],
+            )
+        })?;
+        Ok(())
+    }
 
     pub fn add_source(
         &self,
@@ -382,10 +424,13 @@ pub fn ingest_documents(
     // Plan lock: the store's recorded embedding plan must name this
     // embedder — never mix vector spaces (pre-v3 dbs backfilled their plan
     // from the legacy embedderId meta, so this covers old indexes too).
+    // Reindexes reset the index BEFORE calling here (the daemon's
+    // reindex path owns rebuild semantics); pure appends like
+    // remember_fact fail until the rebuild runs.
     let recorded = store.rag.plan();
     if recorded.embedder_id != embedder.id() || recorded.dims != embedder.dim() {
         return Err(format!(
-            "knowledge index built with different embedder {} ({} dims); remove sources or switch back (requested {}, {} dims)",
+            "knowledge index built with {} ({} dims); rebuild required to switch (requested {}, {} dims)",
             recorded.embedder_id,
             recorded.dims,
             embedder.id(),

@@ -1507,7 +1507,7 @@ pub fn enqueue_reindex(source_id: &str) {
 /// The synchronous job body: mark indexing → fetch by kind → screen →
 /// embed+store → settle status and chunk count.
 fn reindex_source_sync(source_id: &str) {
-    let Ok(ks) = open_knowledge() else {
+    let Ok(mut ks) = open_knowledge() else {
         return;
     };
     let Some(source) = ks.get_source(source_id) else {
@@ -1546,6 +1546,29 @@ fn reindex_source_sync(source_id: &str) {
         // Measure remote dims up front so the plan check in
         // ingest_documents compares reality, not the pre-probe default.
         embedder.ensure_dims()?;
+        // Model switch: the shared knowledge index is one vector space —
+        // reset it under the new plan and requeue every other source
+        // (in the rebuild flow they're already queued; duplicates
+        // collapse). Appends (remember_fact) never take this path.
+        {
+            let recorded = ks.rag.plan().clone();
+            if recorded.embedder_id != embedder.id() || recorded.dims != embedder.dim() {
+                let mut next = recorded;
+                next.embedder_id = embedder.id().to_owned();
+                next.dims = embedder.dim();
+                next.created_at = rag::unix_ms_now();
+                ks.rag
+                    .rebuild_with_plan(&next)
+                    .map_err(|e| format!("knowledge index reset failed: {e}"))?;
+                for source in ks.list_sources().map_err(|e| e.to_string())? {
+                    if source.id != source_id {
+                        ks.set_chunk_count(&source.id, 0);
+                        ks.mark_status(&source.id, "queued", None);
+                        enqueue_reindex(&source.id);
+                    }
+                }
+            }
+        }
         let count = ingest_documents(&ks, embedder.as_ref(), source_id, &docs, |progress| {
             source_progress_map()
                 .lock()

@@ -192,12 +192,42 @@ impl RagStore {
         &self.plan
     }
 
+    /// Reset for a rebuild under a different plan: chunks, FTS rows and
+    /// the vec0 table go (dimensions are fixed at CREATE, so the virtual
+    /// table is dropped and recreated), then the new plan is locked.
+    /// Meta survives. This is what a model switch's rebuild runs — the
+    /// mismatch gates in ingest/knowledge never append across spaces,
+    /// they hand the store here.
+    pub fn rebuild_with_plan(&mut self, intended: &EmbeddingPlan) -> rusqlite::Result<()> {
+        let plan_json = serde_json::to_string(intended)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute_batch("DELETE FROM chunks; DELETE FROM chunks_fts;")?;
+        tx.execute_batch("DROP TABLE chunks_vec;")?;
+        tx.execute_batch(&format!(
+            "CREATE VIRTUAL TABLE chunks_vec USING vec0(
+               embedding float[{}],
+               +chunkId  TEXT
+             );",
+            intended.dims
+        ))?;
+        tx.prepare(
+            "INSERT INTO meta(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )?
+        .execute([PLAN_META_KEY, plan_json.as_str()])?;
+        tx.commit()?;
+        self.plan = intended.clone();
+        Ok(())
+    }
+
     fn read_plan(&self) -> rusqlite::Result<EmbeddingPlan> {
-        let raw = self
-            .get_meta(PLAN_META_KEY)?
-            .ok_or_else(|| rusqlite::Error::InvalidParameterName("embeddingPlan meta missing".into()))?;
-        serde_json::from_str(&raw)
-            .map_err(|e| rusqlite::Error::InvalidParameterName(format!("corrupt embeddingPlan meta: {e}")))
+        let raw = self.get_meta(PLAN_META_KEY)?.ok_or_else(|| {
+            rusqlite::Error::InvalidParameterName("embeddingPlan meta missing".into())
+        })?;
+        serde_json::from_str(&raw).map_err(|e| {
+            rusqlite::Error::InvalidParameterName(format!("corrupt embeddingPlan meta: {e}"))
+        })
     }
 
     /// Idempotent schema migration — same steps/versions as the TS
@@ -474,6 +504,32 @@ impl RagStore {
             .query_map([source_id], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         Ok(rows)
+    }
+
+    /// Full chunk rows for one knowledge source — the inline path renders
+    /// source content from these.
+    pub fn rows_by_source(&self, source_id: &str) -> rusqlite::Result<Vec<ChunkRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {CHUNK_COLUMNS} FROM chunks WHERE sourceId = ?1 ORDER BY path, startLine"
+        ))?;
+        let rows = stmt
+            .query_map([source_id], row_from_db)?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Total content bytes across the given sources (the inline budget
+    /// check — SQL-side so oversized sets cost a scan, not a load).
+    pub fn content_chars_for_sources(&self, source_ids: &[String]) -> rusqlite::Result<i64> {
+        if source_ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders = source_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM chunks WHERE sourceId IN ({placeholders})"
+        );
+        self.conn
+            .query_row(&sql, rusqlite::params_from_iter(source_ids), |r| r.get(0))
     }
 
     /// Delete chunk + FTS + vector rows by chunk id (all three explicit —
@@ -770,6 +826,38 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_with_plan_wipes_and_rewrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        let plan = |dims: usize, id: &str| EmbeddingPlan {
+            embedder_id: id.into(),
+            dims,
+            chunk_size: None,
+            chunk_overlap: None,
+            created_at: 1,
+        };
+        let mut store = RagStore::open_at_with_plan(&db, &plan(384, "a")).unwrap();
+        let written = store.upsert_chunks(&[row("c1", "fn alpha() {}")]).unwrap();
+        store
+            .upsert_vectors(&[(written[0].1, written[0].0.clone(), vec![0.0; 384])])
+            .unwrap();
+        assert_eq!(store.chunk_count().unwrap(), 1);
+
+        store.rebuild_with_plan(&plan(768, "b")).unwrap();
+        assert_eq!(store.plan().embedder_id, "b");
+        assert_eq!(store.plan().dims, 768);
+        assert_eq!(store.chunk_count().unwrap(), 0);
+        // The recreated vec0 only takes the new space.
+        assert!(store.upsert_vectors(&[(1, "x".into(), vec![0.0; 384])]).is_err());
+        assert!(store.upsert_vectors(&[(1, "x".into(), vec![0.0; 768])]).is_ok());
+
+        // The rewrite persists — a fresh open reads the new plan.
+        let reopened = RagStore::open_at(&db).unwrap();
+        assert_eq!(reopened.plan().embedder_id, "b");
+        assert_eq!(reopened.plan().dims, 768);
+    }
+
+    #[test]
     fn upsert_replaces_on_conflict() {
         let (_dir, s) = store();
         s.upsert_chunks(&[row("c1", "first body")]).unwrap();
@@ -916,7 +1004,10 @@ mod tests {
                 .unwrap();
         }
         let reopened = RagStore::open_at(&path).unwrap();
-        assert_eq!(reopened.get_meta("schemaVersion").unwrap().as_deref(), Some("3"));
+        assert_eq!(
+            reopened.get_meta("schemaVersion").unwrap().as_deref(),
+            Some("3")
+        );
         assert_eq!(reopened.plan().embedder_id, "cloud-base");
         assert_eq!(reopened.plan().dims, 384);
         // Its 384-dim vectors stay queryable through the migration.
@@ -946,6 +1037,9 @@ mod tests {
 
         let q = embedder.embed(&["query".to_owned()]).unwrap();
         let err = s.query_by_vector(&q[0], 1).unwrap_err();
-        assert!(err.to_string().contains("does not match the index plan"), "was {err}");
+        assert!(
+            err.to_string().contains("does not match the index plan"),
+            "was {err}"
+        );
     }
 }
