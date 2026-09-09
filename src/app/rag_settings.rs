@@ -92,6 +92,7 @@ pub(crate) struct RagInlineInputs {
     pub min_similarity: Entity<crate::input::TextInput>,
     pub chunk_size: Entity<crate::input::TextInput>,
     pub chunk_overlap: Entity<crate::input::TextInput>,
+    pub inline_knowledge: Entity<crate::input::TextInput>,
 }
 
 /// The rebuild dialog: what a change left behind, and the serial queue
@@ -218,7 +219,6 @@ impl RagSettingsPanel {
         });
         cx.notify();
     }
-
 }
 
 impl RagSettingsPanel {
@@ -236,6 +236,7 @@ impl RagSettingsPanel {
                 min_similarity: inline.min_similarity.clone(),
                 chunk_size: inline.chunk_size.clone(),
                 chunk_overlap: inline.chunk_overlap.clone(),
+                inline_knowledge: inline.inline_knowledge.clone(),
             });
         }
         let config = self.config.as_ref()?;
@@ -257,20 +258,22 @@ impl RagSettingsPanel {
             seed(config.min_similarity.map(|v| format!("{v}"))),
             cx,
         );
-        let chunk_size = make(
-            "1024",
-            seed(config.chunk_size.map(|v| format!("{v}"))),
-            cx,
-        );
+        let chunk_size = make("1024", seed(config.chunk_size.map(|v| format!("{v}"))), cx);
         let chunk_overlap = make(
             "128",
             seed(config.chunk_overlap.map(|v| format!("{v}"))),
+            cx,
+        );
+        let inline_knowledge = make(
+            "12000",
+            seed(Some(config.inline_knowledge_chars.to_string())),
             cx,
         );
         let inline = RagInlineInputs {
             min_similarity,
             chunk_size,
             chunk_overlap,
+            inline_knowledge,
         };
         // Commit on Enter/submit: parse, patch, and reseed on failure.
         {
@@ -300,10 +303,20 @@ impl RagSettingsPanel {
             })
             .detach();
         }
+        {
+            let field = inline.inline_knowledge.clone();
+            cx.subscribe(&field, |this, _entity, event, cx| {
+                if let crate::input::InputEvent::Submit(content) = event {
+                    this.rag_inline_submit(InlineField::InlineKnowledge, content.clone(), cx);
+                }
+            })
+            .detach();
+        }
         *self.inline.borrow_mut() = Some(RagInlineInputs {
             min_similarity: inline.min_similarity.clone(),
             chunk_size: inline.chunk_size.clone(),
             chunk_overlap: inline.chunk_overlap.clone(),
+            inline_knowledge: inline.inline_knowledge.clone(),
         });
         Some(inline)
     }
@@ -312,12 +325,13 @@ impl RagSettingsPanel {
 /// The one-row placeholder while the config bundle is still loading —
 /// shared by the retrieval and advanced cards.
 fn rag_loading_row(theme: &Theme) -> Vec<CardRow> {
-    vec![CardRow::new(tr!("settings.rag.loading"))
-        .control(motion::spin(icon(
+    vec![
+        CardRow::new(tr!("settings.rag.loading")).control(motion::spin(icon(
             "icons/loader-circle.svg",
             11.0,
             theme.text_tertiary,
-        )))]
+        ))),
+    ]
 }
 
 /// Which inline settings field submitted.
@@ -326,6 +340,7 @@ pub(crate) enum InlineField {
     MinSimilarity,
     ChunkSize,
     ChunkOverlap,
+    InlineKnowledge,
 }
 
 // ── dispatch + actions ─────────────────────────────────────────────────────
@@ -431,7 +446,9 @@ impl Tide {
         );
         self.rag_dispatch_result(
             |result| match result {
-                Ok(client::ResponsePayload::RagModels { models }) => RagOpsEvent::Models(Ok(models)),
+                Ok(client::ResponsePayload::RagModels { models }) => {
+                    RagOpsEvent::Models(Ok(models))
+                }
                 Err(error) => RagOpsEvent::Models(Err(error)),
                 Ok(_) => RagOpsEvent::Models(Err("unexpected response".into())),
             },
@@ -457,9 +474,7 @@ impl Tide {
                 Ok(client::ResponsePayload::RagAffected { workspaces }) => {
                     RagOpsEvent::Affected(workspaces)
                 }
-                Ok(client::ResponsePayload::Ack) => {
-                    RagOpsEvent::Affected(Vec::new())
-                }
+                Ok(client::ResponsePayload::Ack) => RagOpsEvent::Affected(Vec::new()),
                 Err(error) => RagOpsEvent::Config(Err(error)),
                 Ok(_) => RagOpsEvent::Config(Err("unexpected response".into())),
             },
@@ -489,7 +504,9 @@ impl Tide {
         );
         self.rag_dispatch_result(
             |result| match result {
-                Ok(client::ResponsePayload::RagModels { models }) => RagOpsEvent::Models(Ok(models)),
+                Ok(client::ResponsePayload::RagModels { models }) => {
+                    RagOpsEvent::Models(Ok(models))
+                }
                 Err(error) => RagOpsEvent::Models(Err(error)),
                 Ok(_) => RagOpsEvent::Models(Err("unexpected response".into())),
             },
@@ -559,7 +576,12 @@ impl Tide {
             .filter(|rebuild| rebuild.running)
             .and_then(|rebuild| rebuild.queue.first().cloned());
         if let Some(project_id) = next {
-            self.rag_settings.rebuild.as_mut().expect("checked").queue.remove(0);
+            self.rag_settings
+                .rebuild
+                .as_mut()
+                .expect("checked")
+                .queue
+                .remove(0);
             self.rag_dispatch_result(
                 |result| match result {
                     Ok(client::ResponsePayload::RagInit { .. }) => RagOpsEvent::RebuildStep,
@@ -599,7 +621,12 @@ impl Tide {
     }
 
     /// Enable/disable RAG for a project, then refresh.
-    pub(super) fn rag_set_enabled(&mut self, project_id: &str, enabled: bool, cx: &mut Context<Self>) {
+    pub(super) fn rag_set_enabled(
+        &mut self,
+        project_id: &str,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.rag_settings.pending_toggle = Some((project_id.to_owned(), enabled));
         let command = if enabled {
             client::Command::RagEnableWorkspace {
@@ -692,11 +719,19 @@ impl Tide {
         let api_key = dialog.api_key.read(cx).content().trim().to_owned();
         let error = rag_endpoint_validate(&name, &base_url, &model_id, &api_key);
         if let Some(error) = error {
-            self.rag_settings.endpoint_dialog.as_mut().expect("checked").error = Some(error);
+            self.rag_settings
+                .endpoint_dialog
+                .as_mut()
+                .expect("checked")
+                .error = Some(error);
             cx.notify();
             return;
         }
-        self.rag_settings.endpoint_dialog.as_mut().expect("checked").busy = true;
+        self.rag_settings
+            .endpoint_dialog
+            .as_mut()
+            .expect("checked")
+            .busy = true;
         self.rag_endpoint_command(client::Command::RagEndpointAdd {
             name,
             base_url,
@@ -725,6 +760,19 @@ impl Tide {
                 match raw.parse::<f64>() {
                     Ok(value) if (-1.0..=1.0).contains(&value) => client::RagConfigPatchWire {
                         min_similarity: Some(value),
+                        ..Default::default()
+                    },
+                    _ => {
+                        self.show_toast(tr!("settings.rag.error_number_required"));
+                        return;
+                    }
+                }
+            }
+            InlineField::InlineKnowledge => {
+                let raw = if raw.is_empty() { "0".to_owned() } else { raw };
+                match raw.parse::<u64>() {
+                    Ok(value) if value <= 65_536 => client::RagConfigPatchWire {
+                        inline_knowledge_chars: Some(value),
                         ..Default::default()
                     },
                     _ => {
@@ -963,14 +1011,17 @@ impl Tide {
             .name("tide-rag-poll".into())
             .spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(2000));
-                let outcome =
-                    match daemon.request(Uuid::nil(), Uuid::nil(), client::Command::RagModelsList) {
-                        Ok(client::ResponsePayload::RagModels { models }) => {
-                            RagOpsEvent::Models(Ok(models))
-                        }
-                        Ok(_) => RagOpsEvent::Models(Err("unexpected response".into())),
-                        Err(error) => RagOpsEvent::Models(Err(error.to_string())),
-                    };
+                let outcome = match daemon.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    client::Command::RagModelsList,
+                ) {
+                    Ok(client::ResponsePayload::RagModels { models }) => {
+                        RagOpsEvent::Models(Ok(models))
+                    }
+                    Ok(_) => RagOpsEvent::Models(Err("unexpected response".into())),
+                    Err(error) => RagOpsEvent::Models(Err(error.to_string())),
+                };
                 if ops_tx.send(outcome).is_ok() {
                     signal_event_pump(&event_wake);
                 }
@@ -1078,19 +1129,6 @@ fn rag_selection_label(
     config.embedder_id.clone()
 }
 
-/// The affected-workspace display name: the project's name, or the global
-/// knowledge label for `"*"`.
-fn rag_affected_label(project_id: &str, projects: &[Project]) -> String {
-    if project_id == "*" {
-        return tr!("settings.rag.global_knowledge").to_string();
-    }
-    projects
-        .iter()
-        .find(|project| project.id.to_string() == project_id)
-        .map(|project| project.name.clone())
-        .unwrap_or_else(|| project_id.to_owned())
-}
-
 /// The embedding-model state, as the head pill renders it: ready /
 /// downloading / failed (with the error) / not downloaded. A status for
 /// another project reads as not downloaded.
@@ -1165,8 +1203,6 @@ fn rag_build_label(status: Option<&client::RagStatusWire>, project_id: &str) -> 
         tr!("settings.rag.build").to_string()
     }
 }
-
-
 
 // ── the add-provider wizard's dialog vocabulary, shared by the Memory
 // screen's dialogs ─────────────────────────────────────────────────────────
@@ -1374,9 +1410,7 @@ impl Tide {
             MenuAlign::BelowRight,
             move |_| {
                 let mut items: Vec<MenuItem> =
-                    vec![MenuItem::Header(
-                        tr!("settings.rag.group_local").into(),
-                    )];
+                    vec![MenuItem::Header(tr!("settings.rag.group_local").into())];
                 for model in models.iter() {
                     let weak = weak.clone();
                     let id = model.id.clone();
@@ -1418,9 +1452,7 @@ impl Tide {
                         .selected(selected),
                     );
                 }
-                items.push(MenuItem::Header(
-                    tr!("settings.rag.group_cloud").into(),
-                ));
+                items.push(MenuItem::Header(tr!("settings.rag.group_cloud").into()));
                 {
                     let weak = weak.clone();
                     let selected = selected_id.as_deref() == Some("cloud-base");
@@ -1444,9 +1476,7 @@ impl Tide {
                     );
                 }
                 if !endpoints.is_empty() {
-                    items.push(MenuItem::Header(
-                        tr!("settings.rag.group_endpoints").into(),
-                    ));
+                    items.push(MenuItem::Header(tr!("settings.rag.group_endpoints").into()));
                     for endpoint in endpoints.iter() {
                         let weak = weak.clone();
                         let id = endpoint.id.clone();
@@ -1483,7 +1513,12 @@ impl Tide {
                         10.0,
                         theme.text_tertiary,
                     )))
-                    .child(div().text_size(sp(10.5)).text_color(theme.text_tertiary).child(tr!("settings.rag.saving")))
+                    .child(
+                        div()
+                            .text_size(sp(10.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("settings.rag.saving")),
+                    )
                     .into_any_element(),
             );
         }
@@ -1493,9 +1528,11 @@ impl Tide {
             head,
         ));
 
-        let mut rows = vec![CardRow::new(tr!("settings.rag.model"))
-            .description(tr!("settings.rag.model_hint"))
-            .control(picker_menu)];
+        let mut rows = vec![
+            CardRow::new(tr!("settings.rag.model"))
+                .description(tr!("settings.rag.model_hint"))
+                .control(picker_menu),
+        ];
         // The selected catalog model's status + management row — the local
         // models manager lives here now, scoped to the active selection.
         let model_pending = self.rag_settings.pending_model.borrow().clone();
@@ -1514,10 +1551,9 @@ impl Tide {
                     .child(card_pill(
                         theme,
                         match model.download_percent {
-                            Some(pct) => format!(
-                                "{} · {pct}%",
-                                tr!("settings.rag.model_downloading")
-                            ),
+                            Some(pct) => {
+                                format!("{} · {pct}%", tr!("settings.rag.model_downloading"))
+                            }
                             None => tr!("settings.rag.model_downloading").to_string(),
                         },
                         theme.warning,
@@ -1670,23 +1706,24 @@ impl Tide {
             .as_ref()
             .map(|config| config.top_k)
             .unwrap_or(5);
-        let minus = CardButton::new("rag-topk-minus", "−")
-            .render(*theme, cx, |this, _window, cx| {
+        let minus =
+            CardButton::new("rag-topk-minus", "−").render(*theme, cx, |this, _window, cx| {
                 this.rag_topk_bump(-1);
                 cx.notify();
             });
-        let plus = CardButton::new("rag-topk-plus", "+")
-            .render(*theme, cx, |this, _window, cx| {
-                this.rag_topk_bump(1);
-                cx.notify();
-            });
+        let plus = CardButton::new("rag-topk-plus", "+").render(*theme, cx, |this, _window, cx| {
+            this.rag_topk_bump(1);
+            cx.notify();
+        });
         let Some(inline) = self.rag_settings.inline_inputs(window, cx) else {
-            return div().w_full().child(settings_group_head(
-                theme,
-                tr!("settings.rag.retrieval_title"),
-                Vec::new(),
-            ))
-            .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
+            return div()
+                .w_full()
+                .child(settings_group_head(
+                    theme,
+                    tr!("settings.rag.retrieval_title"),
+                    Vec::new(),
+                ))
+                .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
         };
         let min_sim = inline.min_similarity;
 
@@ -1724,8 +1761,120 @@ impl Tide {
                             crate::ui::text_field::TextField::new("rag-minsim-input", min_sim),
                         ),
                     ),
+                CardRow::new(tr!("settings.rag.rerank"))
+                    .description(tr!("settings.rag.rerank_hint"))
+                    .control(self.render_rerank_control(theme, cx)),
+                CardRow::new(tr!("settings.rag.block_flagged"))
+                    .description(tr!("settings.rag.block_flagged_hint"))
+                    .control(self.render_block_flagged_control(theme, cx)),
+                CardRow::new(tr!("settings.rag.inline_knowledge"))
+                    .description(tr!("settings.rag.inline_knowledge_hint"))
+                    .control(
+                        div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                            "rag-inlineknowledge-input",
+                            inline.inline_knowledge,
+                        )),
+                    ),
             ],
         )))
+    }
+
+    /// The rerank toggle plus its model-download affordance: toggling on
+    /// with the model missing offers the download inline (23 MB); a
+    /// failed download shows its error text.
+    fn render_rerank_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let config = self.rag_settings.config.as_ref();
+        let enabled = config.is_some_and(|c| c.rerank_enabled);
+        let state = config
+            .and_then(|c| c.reranker_download.clone())
+            .unwrap_or_else(|| "not-downloaded".to_owned());
+        let downloaded = state == "ready";
+        let downloading = state == "downloading";
+        let mut control = div().flex().items_center().gap(px(8.0));
+        let toggle = toggle_switch(
+            "rag-rerank-toggle",
+            enabled,
+            false,
+            *theme,
+            cx,
+            |this, _window, cx| {
+                let next = !this
+                    .rag_settings
+                    .config
+                    .as_ref()
+                    .is_some_and(|c| c.rerank_enabled);
+                this.rag_config_update(client::RagConfigPatchWire {
+                    rerank_enabled: Some(next),
+                    ..Default::default()
+                });
+                cx.notify();
+            },
+        );
+        control = control.child(toggle);
+        if !downloaded {
+            let error = config
+                .and_then(|c| c.reranker_download_error.clone())
+                .filter(|_| state == "failed");
+            if let Some(error) = error {
+                control = control.child(
+                    div()
+                        .max_w(px(220.0))
+                        .text_size(sp(10.5))
+                        .text_color(crate::app::timeline_v2::status_color(
+                            theme,
+                            crate::app::timeline_v2::Status::Error,
+                        ))
+                        .truncate()
+                        .child(SharedString::from(error)),
+                );
+            } else if downloading {
+                control = control.child(
+                    div()
+                        .text_size(sp(10.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("settings.rag.rerank_downloading")),
+                );
+            } else {
+                let download =
+                    CardButton::new("rag-reranker-download", tr!("settings.rag.rerank_download"))
+                        .ghost()
+                        .render(*theme, cx, |this, _window, _cx| {
+                            this.rag_model_command(client::Command::RagModelDownload {
+                                model_id: "rerank-msmarco-miniilm".to_owned(),
+                            });
+                        });
+                control = control.child(download.into_any_element());
+            }
+        }
+        control
+    }
+
+    fn render_block_flagged_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let blocked = self
+            .rag_settings
+            .config
+            .as_ref()
+            .is_some_and(|c| c.knowledge_block_flagged);
+        let toggle = toggle_switch(
+            "rag-blockflagged-toggle",
+            blocked,
+            false,
+            *theme,
+            cx,
+            |this, _window, cx| {
+                let next = !this
+                    .rag_settings
+                    .config
+                    .as_ref()
+                    .is_some_and(|c| c.knowledge_block_flagged);
+                this.rag_config_update(client::RagConfigPatchWire {
+                    knowledge_block_flagged: Some(next),
+                    ..Default::default()
+                });
+                cx.notify();
+            },
+        );
+        div().child(toggle)
     }
 
     /// Advanced: chunking overrides as inline fields (commit on Enter;
@@ -1738,12 +1887,14 @@ impl Tide {
         cx: &mut Context<Self>,
     ) -> Div {
         let Some(inline) = self.rag_settings.inline_inputs(window, cx) else {
-            return div().w_full().child(settings_group_head(
-                theme,
-                tr!("settings.rag.advanced_title"),
-                Vec::new(),
-            ))
-            .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
+            return div()
+                .w_full()
+                .child(settings_group_head(
+                    theme,
+                    tr!("settings.rag.advanced_title"),
+                    Vec::new(),
+                ))
+                .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
         };
         let (chunk_size_edit, chunk_overlap_edit) = (inline.chunk_size, inline.chunk_overlap);
 
@@ -1941,87 +2092,27 @@ impl Tide {
         ))
     }
 
+    /// The rebuild offer: a plain warning that the embedding model
+    /// changed and each project needs reindexing. Dismiss keeps the
+    /// change — indexes go stale until rebuilt. Rebuild starts the serial
+    /// queue; its progress then lives below the cards, not here.
     pub(super) fn render_rag_rebuild_dialog(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
-        let rebuild = self.rag_settings.rebuild.as_ref()?;
-        let running = rebuild.running;
-        let remaining = rebuild.queue.len();
-        let affected: Vec<(String, String)> = rebuild
-            .affected
-            .iter()
-            .map(|a| {
-                (
-                    rag_affected_label(&a.project_id, &self.state.projects),
-                    a.built_with.clone(),
-                )
-            })
-            .collect();
+        self.rag_settings
+            .rebuild
+            .as_ref()
+            .filter(|rebuild| !rebuild.running)?;
 
-        let rows = div().flex().flex_col().gap(px(6.0));
-        let rows = affected.iter().fold(rows, |rows, (name, built_with)| {
-            rows.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text)
-                            .child(SharedString::from(name.clone())),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(10.5))
-                            .text_color(theme.text_tertiary)
-                            .child(SharedString::from(format!(
-                                "· {}",
-                                built_with
-                            ))),
-                    ),
-            )
-        });
-
-        let status_line = if running {
-            tr!("settings.rag.rebuild_progress", count = remaining)
-        } else {
-            tr!("settings.rag.rebuild_description")
-        };
-        // Determinate bar while the serial queue drains: done over the
-        // queue's original length.
-        let rebuild_pct = (running && rebuild.total > 0).then(|| {
-            ((rebuild.total - remaining.min(rebuild.total)) as f64 / rebuild.total as f64 * 100.0)
-                .round() as u32
-        });
-
-        let mut footer = div().flex().justify_end().gap(px(8.0));
-        if !running {
-            footer = footer.child(
-                CardButton::new("rag-rebuild-later", tr!("settings.rag.later")).render(
-                    theme,
-                    cx,
-                    |this: &mut Tide, _window, cx: &mut Context<Tide>| {
-                        this.rag_settings.rebuild = None;
-                        cx.notify();
-                    },
-                ),
-            );
-            footer = footer.child(
-                CardButton::new("rag-rebuild-now", tr!("settings.rag.rebuild_now"))
-                    .render(theme, cx, |this: &mut Tide, _window, cx: &mut Context<Tide>| this.rag_rebuild_start(cx)),
-            );
-        }
-        let footer = if running {
-            footer.child(
-                CardButton::new("rag-rebuild-close", tr!("settings.rag.close"))
-                    .render(
+        let footer = div()
+            .flex()
+            .justify_end()
+            .gap(px(8.0))
+            .child(
+                CardButton::new("rag-rebuild-dismiss", tr!("settings.rag.dismiss")).render(
                     theme,
                     cx,
                     |this: &mut Tide, _window, cx: &mut Context<Tide>| {
@@ -2030,9 +2121,13 @@ impl Tide {
                     },
                 ),
             )
-        } else {
-            footer
-        };
+            .child(
+                CardButton::new("rag-rebuild-now", tr!("settings.rag.rebuild_now")).render(
+                    theme,
+                    cx,
+                    |this: &mut Tide, _window, cx: &mut Context<Tide>| this.rag_rebuild_start(cx),
+                ),
+            );
 
         let card = div()
             .id("rag-rebuild-dialog")
@@ -2050,32 +2145,90 @@ impl Tide {
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(2.0))
+                    .items_start()
+                    .gap(px(10.0))
+                    .child(icon(
+                        "icons/alert.svg",
+                        15.0,
+                        crate::app::timeline_v2::status_color(
+                            &theme,
+                            crate::app::timeline_v2::Status::Error,
+                        ),
+                    ))
                     .child(
                         div()
-                            .text_size(sp(14.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("settings.rag.rebuild_title")),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(status_line),
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(sp(14.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.rag.rebuild_title")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("settings.rag.rebuild_description")),
+                            ),
                     ),
             )
-            .when(running, |card| {
-                card.child(div().px(px(2.0)).child(rag_progress_bar(&theme, rebuild_pct)))
-            })
-            .child(rows)
             .child(footer);
         Some(crate::ui::modal::deferred_scrim(
             "rag-rebuild-layer",
             card,
             &theme,
         ))
+    }
+
+    /// The serial rebuild's live progress, below the Memory cards — the
+    /// offer dialog is gone by now (it never renders while running).
+    pub(super) fn render_rag_rebuild_progress(&self, theme: &Theme) -> Option<Div> {
+        let rebuild = self
+            .rag_settings
+            .rebuild
+            .as_ref()
+            .filter(|rebuild| rebuild.running)?;
+        let remaining = rebuild.queue.len();
+        let pct = (rebuild.total > 0).then(|| {
+            ((rebuild.total - remaining.min(rebuild.total)) as f64 / rebuild.total as f64 * 100.0)
+                .round() as u32
+        });
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .rounded(px(13.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .bg(theme.raised)
+                .px(px(14.0))
+                .py(px(12.0))
+                .child(motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    13.0,
+                    theme.text_tertiary,
+                )))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(7.0))
+                        .child(
+                            div()
+                                .text_size(sp(11.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("settings.rag.rebuild_progress", count = remaining)),
+                        )
+                        .child(rag_progress_bar(theme, pct)),
+                ),
+        )
     }
 }
 
@@ -2302,9 +2455,7 @@ impl Tide {
             .filter(|(pending, _)| pending == &project_id);
         // Optimistic flip: while the enable command is in flight the
         // toggle paints the target state, inert until Status replies.
-        let shown_enabled = pending_toggle
-            .map(|(_, next)| *next)
-            .unwrap_or(enabled);
+        let shown_enabled = pending_toggle.map(|(_, next)| *next).unwrap_or(enabled);
         let toggle_disabled = pending_toggle.is_some();
         let busy = rag_is_busy(relevant);
         let progress = relevant
@@ -2375,16 +2526,13 @@ impl Tide {
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .when(
-                            relevant.is_some_and(|status| status.plan_stale),
-                            |row| {
-                                row.child(card_pill(
-                                    theme,
-                                    tr!("settings.rag.stale_badge"),
-                                    theme.warning,
-                                ))
-                            },
-                        )
+                        .when(relevant.is_some_and(|status| status.plan_stale), |row| {
+                            row.child(card_pill(
+                                theme,
+                                tr!("settings.rag.stale_badge"),
+                                theme.warning,
+                            ))
+                        })
                         .child(
                             div()
                                 .text_size(sp(12.5))
@@ -2441,7 +2589,12 @@ impl Tide {
                         11.0,
                         theme.text_tertiary,
                     )))
-                    .child(div().text_size(sp(11.0)).text_color(theme.text_tertiary).child(tr!("settings.rag.loading"))),
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("settings.rag.loading")),
+                    ),
             );
         } else if in_scope.is_empty() {
             body = body.child(
@@ -2483,13 +2636,31 @@ impl Tide {
                             .unwrap_or_else(|| phase.to_string()),
                     }
                 }
-                None => format!(
-                    "{} · {} · {} {}",
-                    source.kind,
-                    source.status,
-                    source.chunk_count,
-                    tr!("settings.rag.chunks_suffix")
-                ),
+                None => {
+                    let base = format!(
+                        "{} · {} · {} {}",
+                        source.kind,
+                        source.status,
+                        source.chunk_count,
+                        tr!("settings.rag.chunks_suffix")
+                    );
+                    // The injection screen verdict rides the settled line:
+                    // flagged sources show why, so the badge is actionable.
+                    match source
+                        .injection
+                        .as_deref()
+                        .filter(|verdict| *verdict == "flagged")
+                    {
+                        Some(_) => {
+                            let note = source
+                                .injection_detail
+                                .clone()
+                                .unwrap_or_else(|| tr!("settings.rag.flagged").to_string());
+                            format!("{base} · ⚠ {note}")
+                        }
+                        None => base,
+                    }
+                }
             };
             let row_pending = pending.as_deref() == Some(source.id.as_str());
             let indexing = source.status == "queued" || source.status == "indexing";
@@ -2556,14 +2727,18 @@ impl Tide {
                         .child(
                             div()
                                 .text_size(sp(10.5))
-                                .text_color(if source.status == "error" {
-                                    crate::app::timeline_v2::status_color(
-                                        theme,
-                                        crate::app::timeline_v2::Status::Error,
-                                    )
-                                } else {
-                                    theme.text_tertiary
-                                })
+                                .text_color(
+                                    if source.status == "error"
+                                        || source.injection.as_deref() == Some("flagged")
+                                    {
+                                        crate::app::timeline_v2::status_color(
+                                            theme,
+                                            crate::app::timeline_v2::Status::Error,
+                                        )
+                                    } else {
+                                        theme.text_tertiary
+                                    },
+                                )
                                 .truncate()
                                 .child(SharedString::from(detail)),
                         ),
@@ -2671,18 +2846,20 @@ impl Tide {
             &scope_handle,
             MenuAlign::BelowLeft,
             move |_| {
-                let mut items = vec![MenuItem::new(tr!("settings.rag.scope_global"), {
-                    let weak = weak.clone();
-                    move |_window, cx| {
-                        let _ = weak.update(cx, |tide: &mut Tide, cx| {
-                            if let Some(draft) = tide.rag_settings.dialog.as_mut() {
-                                draft.project = None;
-                            }
-                            cx.notify();
-                        });
-                    }
-                })
-                .selected(selected_project.is_none())];
+                let mut items = vec![
+                    MenuItem::new(tr!("settings.rag.scope_global"), {
+                        let weak = weak.clone();
+                        move |_window, cx| {
+                            let _ = weak.update(cx, |tide: &mut Tide, cx| {
+                                if let Some(draft) = tide.rag_settings.dialog.as_mut() {
+                                    draft.project = None;
+                                }
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .selected(selected_project.is_none()),
+                ];
                 for project in projects.iter().filter(|p| !p.is_projectless()) {
                     let weak = weak.clone();
                     let id = project.id.to_string();
@@ -2766,7 +2943,11 @@ impl Tide {
                     .child(icon(
                         icon_path,
                         16.0,
-                        if selected { theme.accent } else { theme.text_tertiary },
+                        if selected {
+                            theme.accent
+                        } else {
+                            theme.text_tertiary
+                        },
                     ))
                     .child(
                         div()
@@ -3016,7 +3197,14 @@ mod tests {
         );
     }
 
-    fn model(id: &str, name: &str, dims: usize, langs: &str, state: &str, vendored: bool) -> client::RagModelWire {
+    fn model(
+        id: &str,
+        name: &str,
+        dims: usize,
+        langs: &str,
+        state: &str,
+        vendored: bool,
+    ) -> client::RagModelWire {
         client::RagModelWire {
             id: id.into(),
             name: name.into(),
@@ -3045,20 +3233,53 @@ mod tests {
         let label = rag_model_sub_label(&m);
         assert!(label.contains("384 dim"), "was {label}");
         assert!(label.contains("512"), "was {label}");
-        assert!(label.contains(&tr!("settings.rag.lang_english")), "was {label}");
-        assert!(label.contains(&tr!("settings.rag.state_downloaded")), "was {label}");
+        assert!(
+            label.contains(&tr!("settings.rag.lang_english")),
+            "was {label}"
+        );
+        assert!(
+            label.contains(&tr!("settings.rag.state_downloaded")),
+            "was {label}"
+        );
 
-        let m = model("local-mle5-small", "Xenova/multilingual-e5-small", 384, "multilingual", "not-downloaded", false);
+        let m = model(
+            "local-mle5-small",
+            "Xenova/multilingual-e5-small",
+            384,
+            "multilingual",
+            "not-downloaded",
+            false,
+        );
         let label = rag_model_sub_label(&m);
-        assert!(label.contains(&tr!("settings.rag.lang_multilingual")), "was {label}");
-        assert!(label.contains(&tr!("settings.rag.state_not_downloaded")), "was {label}");
+        assert!(
+            label.contains(&tr!("settings.rag.lang_multilingual")),
+            "was {label}"
+        );
+        assert!(
+            label.contains(&tr!("settings.rag.state_not_downloaded")),
+            "was {label}"
+        );
     }
 
     #[test]
     fn selection_label_prefers_original_repo_names() {
         let models = vec![
-            model("local-code-512", "isuruwijesiri/all-MiniLM-L6-v2-code-search-512", 384, "en", "ready", true),
-            model("local-bge-m3", "Xenova/bge-m3", 1024, "multilingual", "ready", false),
+            model(
+                "local-code-512",
+                "isuruwijesiri/all-MiniLM-L6-v2-code-search-512",
+                384,
+                "en",
+                "ready",
+                true,
+            ),
+            model(
+                "local-bge-m3",
+                "Xenova/bge-m3",
+                1024,
+                "multilingual",
+                "ready",
+                false,
+            ),
         ];
         let config = client::RagConfigWire {
             embedder_id: "local-bge-m3".into(),
@@ -3076,7 +3297,10 @@ mod tests {
             rag_selection_label(Some(&config), &models, &[]),
             tr!("settings.rag.cloud_embedder")
         );
-        assert_eq!(rag_selection_label(None, &models, &[]), tr!("settings.rag.loading"));
+        assert_eq!(
+            rag_selection_label(None, &models, &[]),
+            tr!("settings.rag.loading")
+        );
     }
 
     #[test]
@@ -3087,12 +3311,5 @@ mod tests {
         assert!(rag_endpoint_validate("n", "https://x", "", "k").is_some());
         assert!(rag_endpoint_validate("n", "https://x", "m", "").is_some());
         assert!(rag_endpoint_validate("n", "http://localhost:11434/v1", "m", "ollama").is_none());
-    }
-
-    #[test]
-    fn affected_label_marks_the_knowledge_index() {
-        let label = rag_affected_label("*", &[]);
-        assert_eq!(label, tr!("settings.rag.global_knowledge"));
-        assert_eq!(rag_affected_label("raw-id", &[]), "raw-id");
     }
 }

@@ -1568,6 +1568,15 @@ settings.rag.tokens_suffix: tokens
 settings.rag.retrieval_title: 检索
 settings.rag.top_k: 每次查询结果数
 settings.rag.top_k_hint: 向量与关键词结果融合后返回的块数量。
+settings.rag.rerank: 重排结果
+settings.rag.rerank_hint: 使用本地交叉编码器对融合结果重新评分以提升精度。需下载 23 MB 模型。
+settings.rag.rerank_download: 下载模型
+settings.rag.rerank_downloading: 下载中…
+settings.rag.block_flagged: 屏蔽被标记的来源
+settings.rag.block_flagged_hint: 被注入检测标记的知识来源将从召回结果中排除。
+settings.rag.flagged: 被注入检测标记
+settings.rag.inline_knowledge: 内联小型来源
+settings.rag.inline_knowledge_hint: 启用的知识来源总字符数低于此值时固定进系统提示词而非检索。0 为禁用。按 Enter 提交。
 settings.rag.min_similarity: 最小相似度
 settings.rag.min_similarity_hint: 丢弃低于该余弦相似度的结果。留空表示不设下限。取值 -1 到 1。
 settings.rag.min_sim_off: （关闭）
@@ -1588,10 +1597,10 @@ settings.rag.edit: 编辑
 settings.rag.save: 保存
 settings.rag.close: 关闭
 settings.rag.rebuild_title: 需要重建
-settings.rag.rebuild_description: 这些索引使用其他嵌入模型或分块参数构建。重建前仍可搜索。
+settings.rag.rebuild_description: 需要对每个项目重新索引才能使用新选择的模型。重建之前，现有索引仍可搜索。
 settings.rag.rebuild_progress: 重建中… 剩余 {count}
-settings.rag.rebuild_now: 立即全部重建
-settings.rag.later: 稍后
+settings.rag.rebuild_now: 重建
+settings.rag.dismiss: 关闭
 
 settings.rag.stale_badge: 需要重建
 settings.rag.advanced_title: 高级

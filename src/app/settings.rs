@@ -574,6 +574,7 @@ impl Tide {
                             .child(self.render_sources_card(&theme, cx)),
                     ),
             )
+            .children(self.render_rag_rebuild_progress(&theme))
             .into_any_element()
     }
 

@@ -3133,6 +3133,24 @@ settings.rag.top_k_hint:
   en: How many chunks the memory tool returns after fusing vector and keyword matches.
 settings.rag.min_similarity:
   en: Minimum similarity
+settings.rag.rerank:
+  en: Rerank results
+settings.rag.rerank_hint:
+  en: Rescore the fused matches with a local cross-encoder for better precision. Downloads a 23 MB model.
+settings.rag.rerank_download:
+  en: Download model
+settings.rag.rerank_downloading:
+  en: downloading…
+settings.rag.block_flagged:
+  en: Block flagged sources
+settings.rag.block_flagged_hint:
+  en: Knowledge sources the injection screen flagged are withheld from recall results.
+settings.rag.flagged:
+  en: flagged by the injection screen
+settings.rag.inline_knowledge:
+  en: Inline small sources
+settings.rag.inline_knowledge_hint:
+  en: Enabled knowledge sources totalling under this many characters are pinned into the system prompt instead of retrieved. 0 disables. Commits on Enter.
 settings.rag.min_similarity_hint:
   en: Discard hits below this cosine similarity. Leave empty for no floor. A number between -1 and 1.
 settings.rag.min_sim_off:
@@ -3172,13 +3190,13 @@ settings.rag.close:
 settings.rag.rebuild_title:
   en: Rebuild required
 settings.rag.rebuild_description:
-  en: These indexes were built with a different embedding model or chunking. They stay searchable until rebuilt.
+  en: Reindexing is needed for each of your projects to use the newly selected model. Existing indexes stay searchable until rebuilt.
 settings.rag.rebuild_progress:
   en: Rebuilding… {count} remaining
 settings.rag.rebuild_now:
-  en: Rebuild all now
-settings.rag.later:
-  en: Later
+  en: Rebuild
+settings.rag.dismiss:
+  en: Dismiss
 
 settings.rag.stale_badge:
   en: Rebuild required
