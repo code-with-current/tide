@@ -45,6 +45,20 @@ impl IngestProgressEvent {
             error: None,
         }
     }
+
+    /// The terminal failure event — callers without a `Result` return
+    /// path (the daemon's spawned ingest thread) report the error through
+    /// the progress map instead of stderr alone.
+    pub fn failed(error: String) -> Self {
+        Self {
+            phase: "failed".to_string(),
+            files_seen: 0,
+            chunks_total: 0,
+            chunks_embedded: 0,
+            current_file: None,
+            error: Some(error),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -152,8 +166,8 @@ pub fn ingest_workspace(
 
     let db_path = crate::store::rag_db_path(inputs.data_dir, inputs.workspace_id);
     let rag_store = if db_path.is_file() {
-        let store = RagStore::open_at(&db_path)
-            .map_err(|e| format!("Failed to open RAG index: {e}"))?;
+        let store =
+            RagStore::open_at(&db_path).map_err(|e| format!("Failed to open RAG index: {e}"))?;
         let recorded = store.plan();
         if recorded.embedder_id != plan.embedder_id
             || recorded.dims != plan.dims
