@@ -1654,3 +1654,5 @@ settings.memory: メモリ
 settings.memory_description: メモリとRAGの設定、および知識ソース — 埋め込みモデル、検索調整、検索可能なナレッジベース。
 settings.memory_keywords: メモリ,rag,埋め込み,知識,インデックス
 settings.rag.model_status: モデルの状態
+settings.rag.endpoints_empty_title: カスタムエンドポイントはありません
+settings.rag.dialog_project: 追加先

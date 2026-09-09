@@ -117,7 +117,7 @@ pub(super) fn visible_settings_pages(
 impl Tide {
     pub(super) fn render_settings(
         &mut self,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -319,7 +319,7 @@ impl Tide {
             )
     }
 
-    fn render_settings_content(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let page = self.settings_page.unwrap_or(SettingsPage::General);
         let right_window_controls = self.render_client_window_controls(
@@ -391,7 +391,7 @@ impl Tide {
                 SettingsPage::Git => self
                     .render_git_settings(Theme::current(cx), cx)
                     .into_any_element(),
-                SettingsPage::Memory => self.render_memory_settings(cx),
+                SettingsPage::Memory => self.render_memory_settings(window, cx),
                 SettingsPage::Projects => self.render_projects_settings(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
@@ -535,7 +535,7 @@ impl Tide {
     /// The Memory page: two columns — memory & RAG configuration on the
     /// left (embedding model, custom endpoints, retrieval, advanced), the
     /// knowledge sources registry on the right.
-    fn render_memory_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_memory_settings(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         div()
             .flex()
@@ -545,7 +545,7 @@ impl Tide {
                 &theme,
                 tr!("settings.memory"),
                 Some(SharedString::from(tr!("settings.memory_description"))),
-                Some(self.rag_sources_add_button(theme, cx)),
+                None,
             ))
             .child(
                 div()
@@ -561,8 +561,8 @@ impl Tide {
                             .gap(px(26.0))
                             .child(self.render_rag_model_card(&theme, cx))
                             .child(self.render_rag_endpoints_card(&theme, cx))
-                            .child(self.render_rag_retrieval_card(&theme, cx))
-                            .child(self.render_rag_advanced_card(&theme, cx)),
+                            .child(self.render_rag_retrieval_card(window, &theme, cx))
+                            .child(self.render_rag_advanced_card(window, &theme, cx)),
                     )
                     .child(
                         div()

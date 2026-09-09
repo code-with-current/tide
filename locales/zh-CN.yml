@@ -1602,3 +1602,5 @@ settings.memory: 记忆
 settings.memory_description: 记忆与 RAG 配置及知识源 — 嵌入模型、检索调优和可搜索的知识库。
 settings.memory_keywords: 记忆,rag,嵌入,知识,索引
 settings.rag.model_status: 模型状态
+settings.rag.endpoints_empty_title: 暂无自定义端点
+settings.rag.dialog_project: 添加到

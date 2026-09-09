@@ -3198,3 +3198,7 @@ settings.memory_keywords:
   en: memory, rag, embeddings, knowledge, index
 settings.rag.model_status:
   en: Model status
+settings.rag.endpoints_empty_title:
+  en: No custom endpoints
+settings.rag.dialog_project:
+  en: Add to

@@ -68,10 +68,18 @@ pub(crate) struct RagSettingsPanel {
     pub picker: ContextMenuHandle,
     /// The add-endpoint dialog, when open.
     pub endpoint_dialog: Option<EndpointDialogDraft>,
-    /// The single-field edit dialog (cloud model id / min similarity).
-    pub value_dialog: Option<ValueDialogDraft>,
     /// The rebuild-offer dialog after a settings change or delete.
     pub rebuild: Option<RebuildState>,
+    /// Inline numeric/text fields for the retrieval + advanced cards,
+    /// created on first render (they need a window) once config loads.
+    pub inline: std::cell::RefCell<Option<RagInlineInputs>>,
+}
+
+/// The three inline-edited settings fields, as TextInput entities.
+pub(crate) struct RagInlineInputs {
+    pub min_similarity: Entity<crate::input::TextInput>,
+    pub chunk_size: Entity<crate::input::TextInput>,
+    pub chunk_overlap: Entity<crate::input::TextInput>,
 }
 
 /// The rebuild dialog: what a change left behind, and the serial queue
@@ -95,21 +103,6 @@ pub(crate) struct EndpointDialogDraft {
     pub busy: bool,
 }
 
-/// What the single-field edit dialog is editing.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ValueDialogKind {
-    CloudModelId,
-    MinSimilarity,
-    ChunkSize,
-    ChunkOverlap,
-}
-
-pub(crate) struct ValueDialogDraft {
-    pub kind: ValueDialogKind,
-    pub value: Entity<crate::input::TextInput>,
-    pub error: Option<String>,
-}
-
 /// The Knowledge page's scope: global knowledge, or one project's.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KnowledgeScope {
@@ -123,6 +116,9 @@ pub(crate) struct SourceDialogDraft {
     pub name: Entity<crate::input::TextInput>,
     pub kind: &'static str,
     pub location: Entity<crate::input::TextInput>,
+    /// Where the source lands: `None` = global knowledge, else a project
+    /// id — chosen in the dialog, independent of the card's scope chips.
+    pub project: Option<String>,
     pub error: Option<String>,
     pub busy: bool,
 }
@@ -148,8 +144,8 @@ impl RagSettingsPanel {
             models: Vec::new(),
             picker: ContextMenuHandle::new(cx),
             endpoint_dialog: None,
-            value_dialog: None,
             rebuild: None,
+            inline: std::cell::RefCell::new(None),
         }
     }
 
@@ -178,10 +174,15 @@ impl RagSettingsPanel {
         });
         let location =
             cx.new(|cx| crate::input::TextInput::new(window, cx).placeholder(SOURCE_KINDS[0].2));
+        let project = match self.scope {
+            KnowledgeScope::Global => None,
+            KnowledgeScope::Project(id) => Some(id.to_string()),
+        };
         self.dialog = Some(SourceDialogDraft {
             name,
             kind: "url",
             location,
+            project,
             error: None,
             busy: false,
         });
@@ -226,48 +227,100 @@ impl RagSettingsPanel {
         cx.notify();
     }
 
-    /// Open the single-field edit dialog (cloud model id / min similarity)
-    /// seeded with the current value.
-    fn open_value_dialog(&mut self, kind: ValueDialogKind, window: &mut Window, cx: &mut Context<Tide>) {
-        let current = match (kind, self.config.as_ref()) {
-            (ValueDialogKind::CloudModelId, Some(config)) => {
-                config.cloud_model_id.clone().unwrap_or_default()
-            }
-            (ValueDialogKind::MinSimilarity, Some(config)) => config
-                .min_similarity
-                .map(|v| format!("{v}"))
-                .unwrap_or_default(),
-            (ValueDialogKind::ChunkSize, Some(config)) => config
-                .chunk_size
-                .map(|v| format!("{v}"))
-                .unwrap_or_default(),
-            (ValueDialogKind::ChunkOverlap, Some(config)) => config
-                .chunk_overlap
-                .map(|v| format!("{v}"))
-                .unwrap_or_default(),
-            _ => String::new(),
-        };
-        let placeholder = match kind {
-            ValueDialogKind::CloudModelId => "text-embedding-3-small".to_string(),
-            ValueDialogKind::MinSimilarity => "0.2".to_string(),
-            ValueDialogKind::ChunkSize => "1024".to_string(),
-            ValueDialogKind::ChunkOverlap => "128".to_string(),
-        };
-        let value = cx.new(|cx| {
-            let mut input = crate::input::TextInput::new(window, cx)
-                .clear_on_escape()
-                .placeholder(placeholder);
-            let len = input.content().len();
-            input.replace_range(0..len, &current, cx);
+}
+
+impl RagSettingsPanel {
+    /// The inline settings fields, creating + subscribing them on first
+    /// use (render has a window; the drain does not).
+    fn inline_inputs(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Tide>,
+    ) -> RagInlineInputs {
+        if let Some(inline) = self.inline.borrow().as_ref() {
+            return RagInlineInputs {
+                min_similarity: inline.min_similarity.clone(),
+                chunk_size: inline.chunk_size.clone(),
+                chunk_overlap: inline.chunk_overlap.clone(),
+            };
+        }
+        let config = self.config.as_ref();
+        let seed = |v: Option<String>| v.unwrap_or_default();
+        let mut make = |placeholder: &str, value: String, cx: &mut Context<Tide>| {
+            let input = cx.new(|cx| {
+                let mut input = crate::input::TextInput::new(window, cx)
+                    .clear_on_escape()
+                    .submit_on_enter()
+                    .placeholder(placeholder);
+                let len = input.content().len();
+                input.replace_range(0..len, &value, cx);
+                input
+            });
             input
+        };
+        let min_similarity = make(
+            "0.2",
+            seed(config.and_then(|c| c.min_similarity).map(|v| format!("{v}"))),
+            cx,
+        );
+        let chunk_size = make(
+            "1024",
+            seed(config.and_then(|c| c.chunk_size).map(|v| format!("{v}"))),
+            cx,
+        );
+        let chunk_overlap = make(
+            "128",
+            seed(config.and_then(|c| c.chunk_overlap).map(|v| format!("{v}"))),
+            cx,
+        );
+        let inline = RagInlineInputs {
+            min_similarity,
+            chunk_size,
+            chunk_overlap,
+        };
+        // Commit on Enter/submit: parse, patch, and reseed on failure.
+        {
+            let field = inline.min_similarity.clone();
+            cx.subscribe(&field, |this, _entity, event, cx| {
+                if let crate::input::InputEvent::Submit(content) = event {
+                    this.rag_inline_submit(InlineField::MinSimilarity, content.clone(), cx);
+                }
+            })
+            .detach();
+        }
+        {
+            let field = inline.chunk_size.clone();
+            cx.subscribe(&field, |this, _entity, event, cx| {
+                if let crate::input::InputEvent::Submit(content) = event {
+                    this.rag_inline_submit(InlineField::ChunkSize, content.clone(), cx);
+                }
+            })
+            .detach();
+        }
+        {
+            let field = inline.chunk_overlap.clone();
+            cx.subscribe(&field, |this, _entity, event, cx| {
+                if let crate::input::InputEvent::Submit(content) = event {
+                    this.rag_inline_submit(InlineField::ChunkOverlap, content.clone(), cx);
+                }
+            })
+            .detach();
+        }
+        *self.inline.borrow_mut() = Some(RagInlineInputs {
+            min_similarity: inline.min_similarity.clone(),
+            chunk_size: inline.chunk_size.clone(),
+            chunk_overlap: inline.chunk_overlap.clone(),
         });
-        self.value_dialog = Some(ValueDialogDraft {
-            kind,
-            value,
-            error: None,
-        });
-        cx.notify();
+        inline
     }
+}
+
+/// Which inline settings field submitted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InlineField {
+    MinSimilarity,
+    ChunkSize,
+    ChunkOverlap,
 }
 
 // ── dispatch + actions ─────────────────────────────────────────────────────
@@ -576,6 +629,7 @@ impl Tide {
         let name = dialog.name.read(cx).content().trim().to_owned();
         let location = dialog.location.read(cx).content().trim().to_owned();
         let kind = dialog.kind;
+        let project_id = dialog.project.clone();
         let mut error = None;
         if name.is_empty() {
             error = Some(tr!("settings.rag.error_name_required").to_string());
@@ -595,10 +649,6 @@ impl Tide {
         self.rag_settings.dialog.as_mut().expect("checked").busy = true;
         self.rag_settings.pending_source = Some("add".to_owned());
         let kind = kind.to_owned();
-        let project_id = match self.rag_settings.scope {
-            KnowledgeScope::Global => None,
-            KnowledgeScope::Project(id) => Some(id.to_string()),
-        };
         self.rag_dispatch(
             move |payload| match payload {
                 client::ResponsePayload::Sources { sources } => RagOpsEvent::Sources(Ok(sources)),
@@ -641,59 +691,50 @@ impl Tide {
         cx.notify();
     }
 
-    /// Submit the single-field edit dialog (empty clears cloud model id).
-    pub(super) fn rag_value_submit(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.rag_settings.value_dialog.as_ref() else {
-            return;
-        };
-        let raw = dialog.value.read(cx).content().trim().to_owned();
-        let patch = match dialog.kind {
-            ValueDialogKind::CloudModelId => client::RagConfigPatchWire {
-                cloud_model_id: Some(raw),
-                ..Default::default()
-            },
-            ValueDialogKind::MinSimilarity => {
-                let parsed = raw.parse::<f64>().ok().filter(|v| v.is_finite());
-                match parsed {
-                    Some(value) => client::RagConfigPatchWire {
+    /// One inline field submitted (Enter): parse, patch, and surface a
+    /// toast on a bad value. Empty chunk fields clear the override.
+    pub(super) fn rag_inline_submit(
+        &mut self,
+        field: InlineField,
+        raw: String,
+        cx: &mut Context<Self>,
+    ) {
+        let raw = raw.trim().to_owned();
+        let patch = match field {
+            InlineField::MinSimilarity => {
+                if raw.is_empty() {
+                    // No clear semantics for the floor yet — ignore.
+                    return;
+                }
+                match raw.parse::<f64>() {
+                    Ok(value) if (-1.0..=1.0).contains(&value) => client::RagConfigPatchWire {
                         min_similarity: Some(value),
                         ..Default::default()
                     },
-                    None => {
-                        let error = tr!("settings.rag.error_number_required").to_string();
-                        self.rag_settings.value_dialog.as_mut().expect("checked").error = Some(error);
-                        cx.notify();
+                    _ => {
+                        self.show_toast(tr!("settings.rag.error_number_required"));
                         return;
                     }
                 }
             }
-            ValueDialogKind::ChunkSize | ValueDialogKind::ChunkOverlap => {
-                // Empty clears the override (back to chunker defaults) —
-                // expressed as 0, which the daemon maps to "unset".
+            InlineField::ChunkSize | InlineField::ChunkOverlap => {
                 let raw = if raw.is_empty() { "0".to_owned() } else { raw };
-                {
-                    match raw.parse::<u64>() {
-                        Ok(value) => match dialog.kind {
-                            ValueDialogKind::ChunkSize => client::RagConfigPatchWire {
-                                chunk_size: Some(value),
-                                ..Default::default()
-                            },
-                            _ => client::RagConfigPatchWire {
-                                chunk_overlap: Some(value),
-                                ..Default::default()
-                            },
-                        },
-                        Err(_) => {
-                            let error = tr!("settings.rag.error_number_required").to_string();
-                            self.rag_settings.value_dialog.as_mut().expect("checked").error = Some(error);
-                            cx.notify();
-                            return;
-                        }
+                match raw.parse::<u64>() {
+                    Ok(value) if field == InlineField::ChunkSize => client::RagConfigPatchWire {
+                        chunk_size: Some(value),
+                        ..Default::default()
+                    },
+                    Ok(value) => client::RagConfigPatchWire {
+                        chunk_overlap: Some(value),
+                        ..Default::default()
+                    },
+                    Err(_) => {
+                        self.show_toast(tr!("settings.rag.error_number_required"));
+                        return;
                     }
                 }
             }
         };
-        self.rag_settings.value_dialog = None;
         self.rag_config_update(patch);
         cx.notify();
     }
@@ -1230,40 +1271,6 @@ impl Tide {
             },
         );
 
-        let cloud_allowed = config
-            .as_ref()
-            .is_some_and(|config| config.cloud_allowed);
-        let cloud_toggle = toggle_switch(
-            SharedString::from("rag-cloud-allowed"),
-            cloud_allowed,
-            false,
-            *theme,
-            cx,
-            move |this, _window, cx| {
-                let next = !this
-                    .rag_settings
-                    .config
-                    .as_ref()
-                    .is_some_and(|config| config.cloud_allowed);
-                this.rag_config_update(client::RagConfigPatchWire {
-                    cloud_allowed: Some(next),
-                    ..Default::default()
-                });
-                cx.notify();
-            },
-        );
-
-        let cloud_model_value = config
-            .as_ref()
-            .and_then(|config| config.cloud_model_id.clone())
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| tr!("settings.rag.cloud_model_default").to_string());
-        let edit = CardButton::new("rag-cloud-model-edit", tr!("settings.rag.edit"))
-            .render(*theme, cx, |this, window, cx| {
-                this.rag_settings
-                    .open_value_dialog(ValueDialogKind::CloudModelId, window, cx);
-            });
-
         let card = div().w_full().child(settings_group_head(
             theme,
             tr!("settings.rag.global_title"),
@@ -1377,33 +1384,17 @@ impl Tide {
             );
         }
 
-        rows.extend(vec![
-                CardRow::new(tr!("settings.rag.cloud_fallback"))
-                    .description(tr!("settings.rag.cloud_fallback_hint"))
-                    .control(cloud_toggle),
-                CardRow::new(tr!("settings.rag.cloud_model"))
-                    .description(tr!("settings.rag.cloud_model_hint"))
-                    .control(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .truncate()
-                                    .max_w(px(220.0))
-                                    .child(SharedString::from(cloud_model_value)),
-                            )
-                            .child(edit),
-                    ),
-        ]);
         card.child(card_body(theme).child(card_rows(theme, rows)))
     }
 
-    /// Retrieval tuning: top-K stepper and minimum similarity.
-    pub(super) fn render_rag_retrieval_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    /// Retrieval tuning: top-K stepper and minimum similarity (inline
+    /// field — commits on Enter).
+    pub(super) fn render_rag_retrieval_card(
+        &self,
+        window: &mut Window,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let top_k = self
             .rag_settings
             .config
@@ -1422,16 +1413,8 @@ impl Tide {
             });
         let min_sim = self
             .rag_settings
-            .config
-            .as_ref()
-            .and_then(|config| config.min_similarity)
-            .map(|v| format!("{v}"))
-            .unwrap_or_else(|| tr!("settings.rag.min_sim_off").to_string());
-        let edit = CardButton::new("rag-minsim-edit", tr!("settings.rag.edit"))
-            .render(*theme, cx, |this, window, cx| {
-                this.rag_settings
-                    .open_value_dialog(ValueDialogKind::MinSimilarity, window, cx);
-            });
+            .inline_inputs(window, cx)
+            .min_similarity;
 
         let card = div().w_full().child(settings_group_head(
             theme,
@@ -1462,41 +1445,22 @@ impl Tide {
                     ),
                 CardRow::new(tr!("settings.rag.min_similarity"))
                     .description(tr!("settings.rag.min_similarity_hint"))
-                    .control(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(SharedString::from(min_sim)),
-                            )
-                            .child(edit),
-                    ),
+                    .control(div().w(px(110.0)).child(min_sim)),
             ],
         )))
     }
 
-    /// Advanced: chunking overrides (changes route through the affected
-    /// dialog like a model switch — they invalidate existing indexes).
-    pub(super) fn render_rag_advanced_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let config = self.rag_settings.config.as_ref();
-        let value_of = |v: Option<u64>| {
-            v.map(|n| n.to_string())
-                .unwrap_or_else(|| tr!("settings.rag.chunk_default").to_string())
-        };
-        let chunk_size_edit = CardButton::new("rag-chunksize-edit", tr!("settings.rag.edit"))
-            .render(*theme, cx, |this, window, cx| {
-                this.rag_settings
-                    .open_value_dialog(ValueDialogKind::ChunkSize, window, cx);
-            });
-        let chunk_overlap_edit = CardButton::new("rag-chunkoverlap-edit", tr!("settings.rag.edit"))
-            .render(*theme, cx, |this, window, cx| {
-                this.rag_settings
-                    .open_value_dialog(ValueDialogKind::ChunkOverlap, window, cx);
-            });
+    /// Advanced: chunking overrides as inline fields (commit on Enter;
+    /// empty clears back to the chunker defaults). Changes route through
+    /// the affected dialog like a model switch — they invalidate indexes.
+    pub(super) fn render_rag_advanced_card(
+        &self,
+        window: &mut Window,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let inline = self.rag_settings.inline_inputs(window, cx);
+        let (chunk_size_edit, chunk_overlap_edit) = (inline.chunk_size, inline.chunk_overlap);
 
         let card = div().w_full().child(settings_group_head(
             theme,
@@ -1508,38 +1472,10 @@ impl Tide {
             vec![
                 CardRow::new(tr!("settings.rag.chunk_size"))
                     .description(tr!("settings.rag.chunk_hint"))
-                    .control(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(SharedString::from(value_of(
-                                        config.and_then(|c| c.chunk_size),
-                                    ))),
-                            )
-                            .child(chunk_size_edit),
-                    ),
+                    .control(div().w(px(110.0)).child(chunk_size_edit)),
                 CardRow::new(tr!("settings.rag.chunk_overlap"))
                     .description(tr!("settings.rag.chunk_hint"))
-                    .control(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(SharedString::from(value_of(
-                                        config.and_then(|c| c.chunk_overlap),
-                                    ))),
-                            )
-                            .child(chunk_overlap_edit),
-                    ),
+                    .control(div().w(px(110.0)).child(chunk_overlap_edit)),
             ],
         )))
     }
@@ -1559,10 +1495,13 @@ impl Tide {
         if self.rag_settings.endpoints.is_empty() {
             return card.child(
                 card_body(theme).child(
-                    div()
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("settings.rag.endpoints_empty")),
+                    crate::ui::empty_state::EmptyState::new(
+                        "icons/plug.svg",
+                        tr!("settings.rag.endpoints_empty_title"),
+                    )
+                    .caption(tr!("settings.rag.endpoints_empty"))
+                    .w_full()
+                    .py(px(22.0)),
                 ),
             );
         }
@@ -1712,106 +1651,6 @@ impl Tide {
             .child(footer);
         Some(crate::ui::modal::deferred_scrim(
             "rag-endpoint-layer",
-            card,
-            &theme,
-        ))
-    }
-
-    /// The single-field edit dialog (cloud model id / min similarity).
-    pub(super) fn render_rag_value_dialog(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let theme = Theme::current(cx);
-        let draft = self.rag_settings.value_dialog.as_ref()?;
-        let (label, hint) = match draft.kind {
-            ValueDialogKind::CloudModelId => (
-                tr!("settings.rag.cloud_model"),
-                tr!("settings.rag.cloud_model_hint"),
-            ),
-            ValueDialogKind::MinSimilarity => (
-                tr!("settings.rag.min_similarity"),
-                tr!("settings.rag.min_similarity_hint"),
-            ),
-            ValueDialogKind::ChunkSize => (
-                tr!("settings.rag.chunk_size"),
-                tr!("settings.rag.chunk_hint"),
-            ),
-            ValueDialogKind::ChunkOverlap => (
-                tr!("settings.rag.chunk_overlap"),
-                tr!("settings.rag.chunk_hint"),
-            ),
-        };
-        let value = draft.value.clone();
-        let error = draft.error.clone();
-
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(sp(11.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(label),
-                    )
-                    .child(value),
-            )
-            .when(error.is_some(), |el| {
-                el.child(
-                    div()
-                        .text_size(sp(11.0))
-                        .text_color(theme.danger)
-                        .child(SharedString::from(error.clone().unwrap_or_default())),
-                )
-            });
-
-        let mut footer = div().flex().justify_end().gap(px(8.0));
-        footer = footer.child(
-            CardButton::new("rag-value-cancel", tr!("settings.rag.cancel")).render(
-                theme,
-                cx,
-                |this: &mut Tide, _window, cx: &mut Context<Tide>| {
-                    this.rag_settings.value_dialog = None;
-                    cx.notify();
-                },
-            ),
-        );
-        footer = footer.child(
-            CardButton::new("rag-value-submit", tr!("settings.rag.save"))
-                .render(theme, cx, |this: &mut Tide, _window, cx: &mut Context<Tide>| this.rag_value_submit(cx)),
-        );
-
-        let card = div()
-            .id("rag-value-dialog")
-            .occlude()
-            .w(px(380.0))
-            .rounded(px(13.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .bg(theme.raised)
-            .shadow_lg()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .p(px(18.0))
-            .child(
-                div()
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_tertiary)
-                    .child(hint),
-            )
-            .child(body)
-            .child(footer);
-        Some(crate::ui::modal::deferred_scrim(
-            "rag-value-layer",
             card,
             &theme,
         ))
@@ -2263,28 +2102,18 @@ impl Tide {
         card.child(body)
     }
 
-    /// The page-level "Add Source" action (old Tide keeps it in the
-    /// Knowledge page header).
-    pub(super) fn rag_sources_add_button(
-        &self,
-        theme: Theme,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        CardButton::new("rag-source-new", tr!("settings.rag.add_source"))
-            .icon("icons/plus.svg")
-            .render(theme, cx, |this, window, cx| {
-                this.rag_settings.open_source_dialog(window, cx);
-            })
-            .into_any_element()
-    }
-
     /// The knowledge-sources card: the list in a full-bleed body; the
     /// add action lives in the page header.
     pub(super) fn render_sources_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let add = CardButton::new("rag-source-new", tr!("settings.rag.add_source"))
+            .icon("icons/plus.svg")
+            .render(*theme, cx, |this, window, cx| {
+                this.rag_settings.open_source_dialog(window, cx);
+            });
         let card = div().w_full().child(settings_group_head(
             theme,
             tr!("settings.rag.sources_title"),
-            Vec::new(),
+            vec![add.into_any_element()],
         ));
 
         // Scope chips: global knowledge, or one project's. The list and the
@@ -2514,30 +2343,34 @@ impl Tide {
 // ── the add-source dialog (upstream's SourceDialog) ────────────────────────
 
 /// Per-kind metadata (upstream's KINDS): label, placeholder, hint.
-const SOURCE_KINDS: [(&str, &str, &str, &str); 4] = [
+const SOURCE_KINDS: [(&str, &str, &str, &str, &str); 4] = [
     (
         "url",
         "settings.rag.kind_url",
         "https://example.com/page",
         "settings.rag.kind_url_hint",
+        "icons/globe.svg",
     ),
     (
         "docs",
         "settings.rag.kind_docs",
         "/path/to/docs",
         "settings.rag.kind_docs_hint",
+        "icons/folder.svg",
     ),
     (
         "crawl",
         "settings.rag.kind_crawl",
         "https://docs.example.com/",
         "settings.rag.kind_crawl_hint",
+        "icons/cloud-upload.svg",
     ),
     (
         "repo",
         "settings.rag.kind_repo",
         "https://github.com/owner/repo",
         "settings.rag.kind_repo_hint",
+        "icons/git-branch.svg",
     ),
 ];
 
@@ -2561,10 +2394,87 @@ impl Tide {
         );
         let kind_meta = SOURCE_KINDS
             .iter()
-            .find(|(value, _, _, _)| *value == kind)
+            .find(|(value, ..)| *value == kind)
             .unwrap_or(&SOURCE_KINDS[0]);
 
         let mut body = div().flex().flex_col().gap(px(10.0));
+
+        // Target scope — its own selector, independent of the card's
+        // scope chips (global knowledge or any project).
+        let selected_project = draft.project.clone();
+        let weak = cx.entity().downgrade();
+        let scope_handle = self.menu_handle("rag-dialog-scope", cx);
+        let scope_label = match &selected_project {
+            None => tr!("settings.rag.scope_global"),
+            Some(project_id) => self
+                .state
+                .projects
+                .iter()
+                .find(|project| project.id.to_string() == *project_id)
+                .map(|project| project.name.clone())
+                .unwrap_or_else(|| tr!("settings.rag.scope_global").to_string()),
+        };
+        let projects = self.state.projects.clone();
+        let scope_selector = crate::ui::menu::dropdown_menu(
+            MenuChip::new("rag-dialog-scope-chip")
+                .label(scope_label)
+                .outlined()
+                .max_w(px(220.0))
+                .justify_between(),
+            "rag-dialog-scope-menu",
+            &scope_handle,
+            crate::ui::menu::MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = vec![crate::ui::menu::MenuItem::new(
+                    tr!("settings.rag.scope_global"),
+                    {
+                        let weak = weak.clone();
+                        move |_window, cx| {
+                            let _ = weak.update(cx, |tide: &mut Tide, cx| {
+                                if let Some(draft) = tide.rag_settings.dialog.as_mut() {
+                                    draft.project = None;
+                                }
+                                cx.notify();
+                            });
+                        }
+                    },
+                )
+                .selected(selected_project.is_none())];
+                for project in projects.iter().filter(|p| !p.is_projectless()) {
+                    let weak = weak.clone();
+                    let id = project.id.to_string();
+                    let is_selected = selected_project.as_deref() == Some(id.as_str());
+                    let label = project.name.clone();
+                    items.push(
+                        crate::ui::menu::MenuItem::new(label, move |_window, cx| {
+                            let _ = weak.update(cx, |tide: &mut Tide, cx| {
+                                if let Some(draft) = tide.rag_settings.dialog.as_mut() {
+                                    draft.project = Some(id.clone());
+                                }
+                                cx.notify();
+                            });
+                        })
+                        .selected(is_selected),
+                    );
+                }
+                items
+            },
+        );
+        body = body.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.rag.dialog_project")),
+                )
+                .child(scope_selector),
+        );
+
         // Name
         body = body.child(
             div()
@@ -2580,8 +2490,9 @@ impl Tide {
                 )
                 .child(name),
         );
-        // Kind — radio rows with per-kind hints (kind is fixed upstream
-        // after creation; this dialog is add-only).
+
+        // Kind — a 2×2 thumbnail grid (icon over label over hint; kind is
+        // fixed upstream after creation, so this dialog is add-only).
         let mut kinds = div().flex().flex_col().gap(px(4.0)).child(
             div()
                 .text_size(sp(11.5))
@@ -2589,28 +2500,37 @@ impl Tide {
                 .text_color(theme.text)
                 .child(tr!("settings.rag.dialog_kind")),
         );
-        for (value, label_key, _placeholder, hint_key) in SOURCE_KINDS {
-            let selected = value == kind;
-            let mut row = div()
-                .id(SharedString::from(format!("rag-kind-{value}")))
-                .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
-                .px(px(10.0))
-                .py(px(6.0))
-                .rounded(px(7.0))
-                .border_1()
-                .cursor_pointer()
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .when(selected, |el| el.border_color(theme.accent).bg(theme.inset))
-                .when(!selected, |el| el.border_color(theme.border));
-            row = row.child(
-                div()
+        let grid = div().flex().flex_wrap().gap(px(6.0));
+        let grid = SOURCE_KINDS.chunks(2).fold(grid, |grid, row_kinds| {
+            let mut row = div().flex().gap(px(6.0)).w_full();
+            for (value, label_key, _placeholder, hint_key, icon_path) in row_kinds {
+                let selected = *value == kind;
+                let weak = cx.entity().downgrade();
+                let value = *value;
+                let tile = div()
+                    .id(SharedString::from(format!("rag-kind-{value}")))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_color(theme.accent))
                     .flex_1()
                     .min_w_0()
+                    .px(px(10.0))
+                    .py(px(9.0))
+                    .rounded(px(9.0))
+                    .border_1()
+                    .cursor_pointer()
                     .flex()
                     .flex_col()
+                    .items_start()
+                    .gap(px(4.0))
+                    .when(selected, |el| {
+                        el.border_color(theme.accent).bg(theme.inset)
+                    })
+                    .when(!selected, |el| el.border_color(theme.border))
+                    .child(icon(
+                        icon_path,
+                        16.0,
+                        if selected { theme.accent } else { theme.text_tertiary },
+                    ))
                     .child(
                         div()
                             .text_size(sp(12.0))
@@ -2623,30 +2543,23 @@ impl Tide {
                     )
                     .child(
                         div()
-                            .text_size(sp(10.5))
+                            .text_size(sp(10.0))
                             .text_color(theme.text_tertiary)
                             .child(tr!(hint_key)),
-                    ),
-            );
-            row = row.child(if selected {
-                icon("icons/check.svg", 12.0, theme.accent).into_any_element()
-            } else {
-                div().into_any_element()
-            });
-            row = row.on_click({
-                let weak = cx.entity().downgrade();
-                let value = value;
-                move |_, _window, cx| {
-                    let _ = weak.update(cx, |tide: &mut Tide, cx| {
-                        if let Some(draft) = tide.rag_settings.dialog.as_mut() {
-                            draft.kind = value;
-                        }
-                        cx.notify();
+                    )
+                    .on_click(move |_, _window, cx| {
+                        let _ = weak.update(cx, |tide: &mut Tide, cx| {
+                            if let Some(draft) = tide.rag_settings.dialog.as_mut() {
+                                draft.kind = value;
+                            }
+                            cx.notify();
+                        });
                     });
-                }
-            });
-            kinds = kinds.child(row);
-        }
+                row = row.child(tile);
+            }
+            grid.child(row)
+        });
+        kinds = kinds.child(grid);
         body = body.child(kinds);
         // Location (per-kind hint below; docs adds a local file browser)
         let browse = (kind == "docs").then(|| {
@@ -2796,24 +2709,6 @@ impl Tide {
                             .text_color(theme.text_tertiary)
                             .child(tr!("settings.rag.dialog_description")),
                     )
-                    .child({
-                        let target = match self.rag_settings.scope {
-                            KnowledgeScope::Global => {
-                                tr!("settings.rag.scope_global")
-                            }
-                            KnowledgeScope::Project(project_id) => self
-                                .state
-                                .projects
-                                .iter()
-                                .find(|project| project.id == project_id)
-                                .map(|project| project.name.clone())
-                                .unwrap_or_default(),
-                        };
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("settings.rag.scope_target", target = target))
-                    }),
             )
             .child(body)
             .child(footer);
