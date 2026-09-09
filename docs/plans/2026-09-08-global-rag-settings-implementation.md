@@ -2,6 +2,10 @@
 
 Design: [2026-09-08-global-rag-settings-design.md](2026-09-08-global-rag-settings-design.md)
 
+Status: implemented on `feature/global-rag-settings` (commits dc33207 →
+9c67bf2, phases 1–6). One deviation: provider-key reuse in the BYOK sheet
+was deferred — endpoints are paste-a-key only (documented in §6.2).
+
 Phases land independently buildable. Gate each phase with `cargo test --locked
 -p rag -p store -p protocol -p backend` (add `-p tide` once UI lands) plus a
 debug build of the app. The dev watcher builds `target/debug/Tide Debug.app`.
