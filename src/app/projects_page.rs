@@ -110,7 +110,14 @@ pub(super) fn project_avatar(
         ),
         ProjectIcon::Uploaded(name) => tile(
             img(uploaded_icon_path(name))
-                .size_full()
+                // Pixel sizes (not size_full) keep the intrinsic
+                // aspect-ratio Img injects from winning over flex
+                // measurement; the img's own rounding lets the Cover
+                // sprite clip itself to the tile's corners.
+                .w(px(size))
+                .h(px(size))
+                .flex_none()
+                .rounded(px(size * 0.24))
                 .object_fit(gpui::ObjectFit::Cover)
                 .into_any_element(),
         ),
@@ -842,6 +849,9 @@ impl Tide {
                             project.icon = ProjectIcon::Uploaded(file_name);
                         }
                         this.projects_icon_error = None;
+                        // Persist like the preset/auto path — otherwise the
+                        // next projects refresh reverts to the old icon.
+                        this.dispatch_update_project_settings(project_id, cx);
                     }
                     Err(_) => {
                         this.projects_icon_error = Some(project_id);
@@ -1880,12 +1890,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let id = Uuid::new_v4();
         let keep = format!("{id}-99.png");
+        let other_project = format!("{}-1.png", Uuid::new_v4());
         for name in [
             format!("{id}.png"),          // pre-fix layout
             format!("{id}-42.png"),       // prior upload
             format!("{id}-7.jpg"),        // prior upload, other ext
-            "unrelated.png".to_owned(),   // other projects / stray files
-            format!("{}-1.png", Uuid::new_v4()),
+            "unrelated.png".to_owned(),   // stray files
+            other_project.clone(),        // another project's icon
         ] {
             std::fs::write(dir.join(&name), b"x").unwrap();
         }
@@ -1896,8 +1907,53 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         left.sort();
-        assert_eq!(left, vec!["unrelated.png".to_owned(), keep]);
+        let mut expected = vec!["unrelated.png".to_owned(), other_project, keep];
+        expected.sort();
+        assert_eq!(left, expected);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[gpui::test]
+    fn uploaded_avatar_covers_the_rounded_tile(cx: &mut gpui::TestAppContext) {
+        use gpui::{ImageSource, ObjectFit, RenderImage};
+
+        let window = cx.add_empty_window();
+        let wide = std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(
+            image::RgbaImage::from_pixel(200, 100, image::Rgba([255, 0, 0, 255])),
+        )]));
+        window.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(100.), px(100.)),
+            |_, _| {
+                div()
+                    .w(px(40.))
+                    .h(px(40.))
+                    .flex_none()
+                    .rounded(px(9.6))
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .debug_selector(|| "avatar-tile".to_string())
+                    .child(
+                        img(ImageSource::Render(wide))
+                            .w(px(40.))
+                            .h(px(40.))
+                            .flex_none()
+                            .rounded(px(9.6))
+                            .object_fit(ObjectFit::Cover)
+                            .debug_selector(|| "avatar-img".to_string()),
+                    )
+                    .into_any_element()
+            },
+        );
+        let tile_bounds = window.debug_bounds("avatar-tile").expect("tile bounds");
+        let img_bounds = window.debug_bounds("avatar-img").expect("img bounds");
+        assert_eq!(tile_bounds.size, gpui::size(px(40.), px(40.)));
+        // The image must lay out to exactly the tile — `ObjectFit::Cover` then
+        // crops the wide source to it, so a non-square upload fills the
+        // rounded container instead of letterboxing or overflowing.
+        assert_eq!(img_bounds, tile_bounds);
     }
 
     #[test]
