@@ -2328,6 +2328,28 @@ usage.filter_projects:
   en: Filter projects…
 usage.chart_description:
   en: Daily %{metric} split between Claude Code and Codex.
+usage.refresh:
+  en: Refresh usage
+usage.refreshing:
+  en: Refreshing…
+usage.reported_cost_note:
+  en: As reported by your providers across %{count}
+usage.turn_one:
+  en: "%{count} turn"
+usage.turn_many:
+  en: "%{count} turns"
+usage.cache_read_share:
+  en: Cache-read share
+usage.cached_of_input:
+  en: "%{count} of %{total} input"
+usage.of_observed_input:
+  en: of observed input
+usage.empty_state_title:
+  en: No usage recorded yet
+usage.empty_state_body:
+  en: Tide tracks usage from version %{version}; stats appear as you use it
+usage.tracking_since:
+  en: Tracking since %{date}
 
 usage.refresh_failed:
   en: "Usage refresh failed: %{error}"
@@ -3134,11 +3156,11 @@ settings.rag.download:
 settings.rag.delete_model:
   en: Delete
 settings.rag.state_downloaded:
-  en: downloaded
+  en: Downloaded
 settings.rag.state_not_downloaded:
-  en: not downloaded
+  en: Not downloaded
 settings.rag.state_builtin:
-  en: built in
+  en: Built in
 settings.rag.lang_english:
   en: English
 settings.rag.lang_multilingual:

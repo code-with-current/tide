@@ -153,7 +153,7 @@ pub(crate) struct SourceDialogDraft {
 }
 
 impl RagSettingsPanel {
-    pub(crate) fn new(cx: &mut App) -> Self {
+    pub(crate) fn new(_cx: &mut App) -> Self {
         let (ops_tx, ops_rx) = unbounded();
         Self {
             ops_tx,
@@ -1544,18 +1544,12 @@ fn rag_model_dialog_row(
             },
         )
         .into_any_element(),
-        _ if model.downloaded => card_pill(
-            theme,
-            tr!("settings.rag.state_downloaded"),
-            theme.success,
-        )
-        .into_any_element(),
-        _ if model.vendored => card_pill(
-            theme,
-            tr!("settings.rag.state_builtin"),
-            theme.success,
-        )
-        .into_any_element(),
+        _ if model.downloaded => {
+            card_pill(theme, tr!("settings.rag.state_downloaded"), theme.success).into_any_element()
+        }
+        _ if model.vendored => {
+            card_pill(theme, tr!("settings.rag.state_builtin"), theme.success).into_any_element()
+        }
         _ => rag_model_row_button(
             theme,
             SharedString::from(format!("rag-mdl-dl-{}", model.id)),
@@ -1674,12 +1668,14 @@ fn rag_dialog_header(theme: &Theme, title: SharedString, description: SharedStri
                         .text_color(theme.text)
                         .child(title),
                 )
-                .child(
-                    div()
-                        .text_size(sp(11.5))
-                        .text_color(theme.text_tertiary)
-                        .child(description),
-                ),
+                .when(!description.is_empty(), |col| {
+                    col.child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(description),
+                    )
+                }),
         )
 }
 
@@ -1730,7 +1726,6 @@ impl Tide {
             &self.rag_settings.endpoints,
         );
 
-        let selected_id = config.as_ref().map(|c| c.embedder_id.clone());
         // The model picker is a dialog now — the chip opens it staged on
         // the current selection.
         let change_button = CardButton::new(
@@ -1770,62 +1765,93 @@ impl Tide {
                     .into_any_element(),
             );
         }
-        let card = div().w_full().child(settings_group_head(
-            theme,
-            tr!("settings.rag.global_title"),
-            head,
-        ));
 
         let mut rows = vec![
             CardRow::new(tr!("settings.rag.model"))
                 .description(tr!("settings.rag.model_hint"))
                 .control(change_button),
         ];
-        // The selected catalog model's status + management row — the local
-        // models manager lives here now, scoped to the active selection.
+        // The selected model's status block — state-driven and compact;
+        // the dialog carries the full model information.
         let model_pending = self.rag_settings.pending_model.borrow().clone();
         let model_pending = model_pending.as_deref();
+        let mut status_area: Option<Div> = None;
         if let Some(model) = selected_model.as_ref() {
-            let control: gpui::AnyElement = match model.download_state.as_str() {
+            let busy = model_pending == Some(model.id.as_str());
+            let block = match model.download_state.as_str() {
                 "downloading" => div()
+                    .px(px(20.0))
+                    .py(px(12.0))
                     .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(motion::spin(icon(
-                        "icons/loader-circle.svg",
-                        11.0,
-                        theme.warning,
-                    )))
-                    .child(card_pill(
-                        theme,
-                        match model.download_percent {
-                            Some(pct) => {
-                                format!("{} · {pct}%", tr!("settings.rag.model_downloading"))
-                            }
-                            None => tr!("settings.rag.model_downloading").to_string(),
-                        },
-                        theme.warning,
-                    ))
-                    .into_any_element(),
+                    .flex_col()
+                    .gap(px(7.0))
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(SharedString::from(match model.download_percent {
+                                        Some(pct) => format!(
+                                            "{} · {pct}%",
+                                            tr!("settings.rag.model_downloading")
+                                        ),
+                                        None => tr!("settings.rag.model_downloading").to_string(),
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(10.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from(format!(
+                                        "{:.1} MB",
+                                        model.download_size as f64 / 1_048_576.0
+                                    ))),
+                            ),
+                    )
+                    .child(rag_progress_bar(theme, model.download_percent)),
                 "failed" => div()
+                    .px(px(20.0))
+                    .py(px(10.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(card_pill(
-                        theme,
-                        format!(
-                            "{} — {}",
-                            tr!("settings.rag.model_failed"),
-                            model.download_error.as_deref().unwrap_or_default()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(icon(
+                        "icons/alert.svg",
+                        12.0,
+                        crate::app::timeline_v2::status_color(
+                            theme,
+                            crate::app::timeline_v2::Status::Error,
                         ),
-                        theme.danger,
                     ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.0))
+                            .text_color(theme.danger)
+                            .child(SharedString::from(format!(
+                                "{} — {}",
+                                tr!("settings.rag.model_failed"),
+                                model.download_error.as_deref().unwrap_or_default()
+                            ))),
+                    )
                     .child(
                         CardButton::new(
                             SharedString::from(format!("rag-model-retry-{}", model.id)),
-                            tr!("settings.rag.download"),
+                            tr!("common.retry"),
                         )
-                        .busy(model_pending == Some(model.id.as_str()))
+                        .busy(busy)
+                        .ghost()
                         .render(*theme, cx, {
                             let id = model.id.clone();
                             move |this, _window, cx| {
@@ -1836,21 +1862,55 @@ impl Tide {
                             }
                         }),
                     )
-                    .into_any_element(),
-                _ if model.downloaded => {
-                    let mut row = div().flex().items_center().gap(px(8.0));
-                    row = row.child(card_pill(
-                        theme,
-                        tr!("settings.rag.state_downloaded"),
-                        theme.success,
-                    ));
-                    if !model.vendored {
+                    .child(
+                        CardButton::new(
+                            SharedString::from(format!("rag-model-delete-{}", model.id)),
+                            tr!("settings.rag.delete_model"),
+                        )
+                        .busy(busy)
+                        .ghost()
+                        .render(*theme, cx, {
+                            let id = model.id.clone();
+                            move |this, _window, cx| {
+                                this.rag_model_command(client::Command::RagModelDelete {
+                                    model_id: id.clone(),
+                                });
+                                cx.notify();
+                            }
+                        }),
+                    ),
+                _ => {
+                    let mut row = div()
+                        .px(px(20.0))
+                        .py(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .child(card_pill(
+                            theme,
+                            if model.vendored {
+                                tr!("settings.rag.state_builtin")
+                            } else if model.downloaded {
+                                tr!("settings.rag.state_downloaded")
+                            } else {
+                                tr!("settings.rag.state_not_downloaded")
+                            },
+                            if model.downloaded || model.vendored {
+                                theme.success
+                            } else {
+                                theme.text_tertiary
+                            },
+                        ));
+                    if model.downloaded && !model.vendored {
                         row = row.child(
                             CardButton::new(
                                 SharedString::from(format!("rag-model-delete-{}", model.id)),
                                 tr!("settings.rag.delete_model"),
                             )
-                            .busy(model_pending == Some(model.id.as_str()))
+                            .busy(busy)
+                            .ghost()
                             .render(*theme, cx, {
                                 let id = model.id.clone();
                                 move |this, _window, cx| {
@@ -1861,82 +1921,41 @@ impl Tide {
                                 }
                             }),
                         );
+                    } else if !model.downloaded && !model.vendored {
+                        row = row.child(
+                            CardButton::new(
+                                SharedString::from(format!("rag-model-download-{}", model.id)),
+                                tr!("settings.rag.download"),
+                            )
+                            .busy(busy)
+                            .ghost()
+                            .render(*theme, cx, {
+                                let id = model.id.clone();
+                                move |this, _window, cx| {
+                                    this.rag_model_command(client::Command::RagModelDownload {
+                                        model_id: id.clone(),
+                                    });
+                                    cx.notify();
+                                }
+                            }),
+                        );
                     }
-                    row.into_any_element()
+                    row
                 }
-                _ => div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(card_pill(
-                        theme,
-                        tr!("settings.rag.state_not_downloaded"),
-                        theme.text_tertiary,
-                    ))
-                    .child(
-                        CardButton::new(
-                            SharedString::from(format!("rag-model-download-{}", model.id)),
-                            tr!("settings.rag.download"),
-                        )
-                        .busy(model_pending == Some(model.id.as_str()))
-                        .render(*theme, cx, {
-                            let id = model.id.clone();
-                            move |this, _window, cx| {
-                                this.rag_model_command(client::Command::RagModelDownload {
-                                    model_id: id.clone(),
-                                });
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .into_any_element(),
             };
-            rows.push(
-                CardRow::new(tr!("settings.rag.model_status"))
-                    .description(SharedString::from(format!(
-                        "{} · {} dims · {} {}",
-                        model.name,
-                        model.dims,
-                        model.max_tokens,
-                        tr!("settings.rag.tokens_suffix")
-                    )))
-                    .control(control),
-            );
+            status_area = Some(block);
         }
 
         let mut body = card_body(theme).child(card_rows(theme, rows));
-        // A live download strip under the rows while the selected model
-        // is coming down — the same bar vocabulary as the indexing card.
-        if let Some(model) = selected_model
-            && model.download_state == "downloading"
-        {
-            body = body.child(
-                div()
-                    .px(px(20.0))
-                    .pb(px(12.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.0))
-                    .child(rag_progress_bar(theme, model.download_percent))
-                    .child(
-                        div()
-                            .text_size(sp(10.5))
-                            .text_color(theme.text_tertiary)
-                            .child(SharedString::from(match model.download_percent {
-                                Some(pct) => format!(
-                                    "{pct}% · {} · {} MB",
-                                    tr!("settings.rag.model_downloading"),
-                                    model.download_size / 1_048_576,
-                                ),
-                                None => format!(
-                                    "{} · {} MB",
-                                    tr!("settings.rag.model_downloading"),
-                                    model.download_size / 1_048_576,
-                                ),
-                            })),
-                    ),
-            );
+        if let Some(area) = status_area {
+            body = body.child(area);
         }
+
+        let card = div().w_full().child(settings_group_head(
+            theme,
+            tr!("settings.rag.global_title"),
+            head,
+        ));
         card.child(body)
     }
 
@@ -2360,7 +2379,6 @@ impl Tide {
             .map(|c| c.embedder_id.clone());
         let models = self.rag_settings.models.clone();
         let endpoints = self.rag_settings.endpoints.clone();
-        let cloud_available = self.rag_settings.cloud_configured;
         let pending_model = self.rag_settings.pending_model.borrow().clone();
 
         // Confirm needs a changed selection that is ready on disk —
@@ -2387,46 +2405,6 @@ impl Tide {
                 cx.entity().downgrade(),
             ));
         }
-        body = body.child(rag_dialog_section(
-            &theme,
-            tr!("settings.rag.group_cloud").to_string().into(),
-        ));
-        body = body.child(rag_model_row_shell(
-            &theme,
-            "rag-model-row-cloud",
-            staged == "cloud-base",
-            if cloud_available {
-                tr!("settings.rag.cloud_embedder").to_string().into()
-            } else {
-                tr!("settings.rag.cloud_embedder_unconfigured").to_string().into()
-            },
-            tr!("settings.rag.cloud_sub").to_string().into(),
-            card_pill(
-                &theme,
-                if cloud_available {
-                    tr!("settings.rag.state_ready")
-                } else {
-                    tr!("settings.rag.state_not_configured")
-                },
-                if cloud_available {
-                    theme.success
-                } else {
-                    theme.text_tertiary
-                },
-            )
-            .into_any_element(),
-            cloud_available,
-            {
-                let weak = cx.entity().downgrade();
-                move |window, cx| {
-                    let _ = weak.update(cx, |this: &mut Tide, cx| {
-                        this.rag_settings.model_dialog = Some("cloud-base".to_owned());
-                        cx.notify();
-                    });
-                    let _ = window;
-                }
-            },
-        ));
         if !endpoints.is_empty() {
             body = body.child(rag_dialog_section(
                 &theme,
@@ -2506,9 +2484,7 @@ impl Tide {
                                 .map(|c| c.embedder_id.clone())
                                 != Some(staged.clone());
                             if changed {
-                                this.rag_settings
-                                    .rebuild_after_update
-                                    .set(rebuild);
+                                this.rag_settings.rebuild_after_update.set(rebuild);
                                 this.rag_config_update(client::RagConfigPatchWire {
                                     embedder_id: Some(staged.clone()),
                                     ..Default::default()
@@ -2521,8 +2497,8 @@ impl Tide {
                 },
             ));
         }
-        let needs_download = (!staged_ready && !unchanged)
-            .then(|| tr!("settings.rag.needs_download").to_string());
+        let needs_download =
+            (!staged_ready && !unchanged).then(|| tr!("settings.rag.needs_download").to_string());
         let footer = rag_dialog_footer(&theme, needs_download.as_deref(), pills);
 
         Some(rag_dialog_layer(
@@ -2532,7 +2508,7 @@ impl Tide {
             rag_dialog_header(
                 &theme,
                 tr!("settings.rag.model_dialog_title").to_string().into(),
-                tr!("settings.rag.model_dialog_hint").to_string().into(),
+                SharedString::from(""),
             ),
             body,
             footer,
@@ -2601,9 +2577,7 @@ impl Tide {
                             .text_color(theme.text)
                             .child(status),
                     )
-                    .when(!stalled, |body| {
-                        body.child(rag_progress_bar(theme, pct))
-                    }),
+                    .when(!stalled, |body| body.child(rag_progress_bar(theme, pct))),
             );
         if stalled {
             card = card.child(
