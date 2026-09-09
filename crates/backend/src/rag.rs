@@ -772,16 +772,18 @@ fn merge_rag_patch(
         rag.min_similarity = Some(min);
     }
     if let Some(size) = patch.chunk_size {
-        if !(64..=8192).contains(&size) {
-            return Err("chunkSize must be between 64 and 8192".into());
+        // 0 clears the override (back to chunker defaults).
+        if size != 0 && !(64..=8192).contains(&size) {
+            return Err("chunkSize must be between 64 and 8192 (or 0 to clear)".into());
         }
-        rag.chunk_size = Some(size);
+        rag.chunk_size = (size > 0).then_some(size);
     }
     if let Some(overlap) = patch.chunk_overlap {
-        if overlap >= 8192 {
-            return Err("chunkOverlap must be smaller than the chunk size range".into());
+        // 0 clears the override.
+        if overlap != 0 && overlap >= 8192 {
+            return Err("chunkOverlap must be below 8192 (or 0 to clear)".into());
         }
-        rag.chunk_overlap = Some(overlap);
+        rag.chunk_overlap = (overlap > 0).then_some(overlap);
     }
     Ok(())
 }
