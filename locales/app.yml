@@ -379,6 +379,26 @@ settings.rag.enable:
   en: Enable memory
 settings.rag.enable_hint:
   en: The memory tool searches this project's index; enabling downloads the embedding model on first use.
+settings.rag.change:
+  en: Change…
+settings.rag.model_dialog_title:
+  en: Embedding Model
+settings.rag.model_dialog_hint:
+  en: Choose the model used to index your projects and knowledge sources.
+settings.rag.select:
+  en: Select
+settings.rag.select_rebuild:
+  en: Select & Rebuild
+settings.rag.needs_download:
+  en: Download the model before selecting it.
+settings.rag.cloud_sub:
+  en: Cloud · System API key
+settings.rag.endpoint_sub:
+  en: Custom endpoint
+settings.rag.state_ready:
+  en: Ready
+settings.rag.state_not_configured:
+  en: Not configured
 settings.rag.model:
   en: Embedding model
 settings.rag.model_ready:

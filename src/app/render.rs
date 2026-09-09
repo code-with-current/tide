@@ -252,7 +252,7 @@ impl Render for Tide {
             let git_dialogs = self.render_git_dialogs(window, cx);
             let rag_dialog = self.render_rag_source_dialog(window, cx);
             let rag_endpoint_dialog = self.render_rag_endpoint_dialog(window, cx);
-            let rag_rebuild_dialog = self.render_rag_rebuild_dialog(window, cx);
+            let rag_model_dialog = self.render_rag_model_dialog(window, cx);
             let tide_wizard = self.render_tide_wizard(window, cx);
             let projects_remove = self.render_projects_remove_dialog(cx);
             let toast = self.render_active_toast(cx);
@@ -275,7 +275,7 @@ impl Render for Tide {
                 .children(git_dialogs)
                 .children(rag_dialog)
                 .children(rag_endpoint_dialog)
-                .children(rag_rebuild_dialog)
+                .children(rag_model_dialog)
                 .children(projects_remove)
                 .children(tide_wizard)
                 .children(image_preview)

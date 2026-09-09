@@ -1366,6 +1366,16 @@ settings.rag.title: 记忆与 RAG
 settings.rag.no_project: 请先选择一个项目 — 记忆索引按项目存储。
 settings.rag.enable: 启用记忆
 settings.rag.enable_hint: 记忆工具会搜索此项目的索引；首次启用时会下载嵌入模型。
+settings.rag.change: 更改…
+settings.rag.model_dialog_title: 嵌入模型
+settings.rag.model_dialog_hint: 选择用于索引项目和知识源的模型。
+settings.rag.select: 选择
+settings.rag.select_rebuild: 选择并重建
+settings.rag.needs_download: 选择前请先下载模型。
+settings.rag.cloud_sub: 云端 · 系统 API 密钥
+settings.rag.endpoint_sub: 自定义端点
+settings.rag.state_ready: 就绪
+settings.rag.state_not_configured: 未配置
 settings.rag.model: 嵌入模型
 settings.rag.model_ready: 本地模型就绪
 settings.rag.model_downloading: 正在下载嵌入模型…

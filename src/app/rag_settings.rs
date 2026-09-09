@@ -79,8 +79,12 @@ pub(crate) struct RagSettingsPanel {
     pub config_requested: std::cell::Cell<bool>,
     /// The local model catalog + on-disk state.
     pub models: Vec<client::RagModelWire>,
-    /// The embedding-model picker's dropdown.
-    pub picker: ContextMenuHandle,
+    /// The embedding-model dialog's staged selection — the dialog is
+    /// open while set.
+    pub model_dialog: Option<String>,
+    /// The next config update chains straight into a rebuild (Select &
+    /// Rebuild) — the offer dialog is gone.
+    pub rebuild_after_update: std::cell::Cell<bool>,
     /// The add-endpoint dialog, when open.
     pub endpoint_dialog: Option<EndpointDialogDraft>,
     /// The rebuild-offer dialog after a settings change or delete.
@@ -171,7 +175,8 @@ impl RagSettingsPanel {
             config_error: None,
             config_requested: std::cell::Cell::new(false),
             models: Vec::new(),
-            picker: ContextMenuHandle::new(cx),
+            model_dialog: None,
+            rebuild_after_update: std::cell::Cell::new(false),
             endpoint_dialog: None,
             rebuild: None,
             inline: std::cell::RefCell::new(None),
@@ -987,7 +992,13 @@ impl Tide {
                     }
                 },
                 RagOpsEvent::Affected(workspaces) => {
-                    if !workspaces.is_empty() {
+                    // No offer dialog anymore: Select & Rebuild chains the
+                    // update straight into the serial rebuild (progress
+                    // below the cards); a plain Select just leaves the
+                    // stale badges on the project cards.
+                    if self.rag_settings.rebuild_after_update.replace(false)
+                        && !workspaces.is_empty()
+                    {
                         self.rag_settings.rebuild = Some(RebuildState {
                             affected: workspaces,
                             queue: Vec::new(),
@@ -998,6 +1009,7 @@ impl Tide {
                             step_started: None,
                             stalled: false,
                         });
+                        self.rag_rebuild_start(cx);
                     }
                 }
                 RagOpsEvent::Endpoint(result) => match result {
@@ -1194,14 +1206,21 @@ fn rag_model_sub_label(model: &client::RagModelWire) -> String {
         _ if model.vendored => tr!("settings.rag.state_builtin"),
         _ => tr!("settings.rag.state_not_downloaded"),
     };
-    format!(
-        "{} · {} dim · {} {} · {}",
+    let mut line = format!(
+        "{} · {} dims · {} {}",
         rag_language_label(&model.languages),
         model.dims,
         model.max_tokens,
         tr!("settings.rag.tokens_suffix"),
-        state
-    )
+    );
+    if !model.vendored && model.download_size > 0 {
+        line.push_str(&format!(
+            " · {:.1} MB",
+            model.download_size as f64 / 1_048_576.0
+        ));
+    }
+    line.push_str(&format!(" · {}", state));
+    line
 }
 
 /// The selected embedder's display line for the card head: the original
@@ -1359,6 +1378,228 @@ fn rag_dialog_pill(
         .on_click(move |_this, window, cx| on_click(window, cx))
 }
 
+/// A dialog list's section header ("Local models", "Cloud", …).
+fn rag_dialog_section(theme: &Theme, label: SharedString) -> Div {
+    div()
+        .px(px(14.0))
+        .pt(px(10.0))
+        .pb(px(3.0))
+        .text_size(sp(10.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme.text_tertiary)
+        .child(label)
+}
+
+/// A compact inline button for dialog rows (Download / Retry) — stops
+/// propagation so clicking it never stages the row it sits in.
+fn rag_model_row_button(
+    theme: &Theme,
+    id: SharedString,
+    label: SharedString,
+    busy: bool,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(22.0))
+        .px(px(9.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border_strong)
+        .when(busy, |el| el.opacity(0.45))
+        .flex()
+        .flex_none()
+        .items_center()
+        .cursor_pointer()
+        .text_size(sp(11.0))
+        .text_color(theme.text_secondary)
+        .hover(|el| el.bg(theme.overlay))
+        .child(label)
+        .on_click(move |_event, window, cx| {
+            cx.stop_propagation();
+            on_click(window, cx);
+        })
+}
+
+/// One selectable row shell: check bubble, title + info line, a right
+/// control, click-to-stage. `enabled` false dims and deactivates.
+fn rag_model_row_shell(
+    theme: &Theme,
+    id: impl Into<gpui::ElementId>,
+    selected: bool,
+    title: SharedString,
+    sub: SharedString,
+    control: AnyElement,
+    enabled: bool,
+    on_stage: impl Fn(&mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .mx(px(8.0))
+        .my(px(2.0))
+        .rounded(px(8.0))
+        .px(px(10.0))
+        .py(px(8.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .when(selected, |el| el.bg(theme.overlay))
+        .when(!enabled, |el| el.opacity(0.5))
+        .when(enabled, |el| {
+            el.hover(|el| el.bg(theme.overlay))
+                .cursor_pointer()
+                .on_click(move |_event, window, cx| on_stage(window, cx))
+        })
+        .child(
+            div()
+                .size(px(16.0))
+                .flex_none()
+                .rounded_full()
+                .border_1()
+                .border_color(if selected {
+                    theme.accent
+                } else {
+                    theme.border_strong
+                })
+                .when(selected, |el| el.bg(theme.accent))
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(selected, |el| {
+                    el.child(icon("icons/check.svg", 10.0, theme.text))
+                }),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .truncate()
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(sp(10.5))
+                        .text_color(theme.text_tertiary)
+                        .truncate()
+                        .child(sub),
+                ),
+        )
+        .child(control)
+}
+
+/// One catalog-model row: the shell plus the state control — Download
+/// when missing, spinner + live percent while downloading, Retry on
+/// failure, a Downloaded/Built-in pill when ready.
+fn rag_model_dialog_row(
+    theme: &Theme,
+    staged: &str,
+    model: &client::RagModelWire,
+    busy: bool,
+    weak: gpui::WeakEntity<Tide>,
+) -> Stateful<Div> {
+    let control: AnyElement = match model.download_state.as_str() {
+        "downloading" => div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(motion::spin(icon(
+                "icons/loader-circle.svg",
+                11.0,
+                theme.warning,
+            )))
+            .child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(match model.download_percent {
+                        Some(pct) => format!("{pct}%"),
+                        None => tr!("settings.rag.model_downloading").to_string(),
+                    })),
+            )
+            .into_any_element(),
+        "failed" => rag_model_row_button(
+            theme,
+            SharedString::from(format!("rag-mdl-retry-{}", model.id)),
+            tr!("common.retry").to_string().into(),
+            busy,
+            {
+                let weak = weak.clone();
+                let id = model.id.clone();
+                move |_window, cx| {
+                    let _ = weak.update(cx, |this: &mut Tide, cx| {
+                        this.rag_model_command(client::Command::RagModelDownload {
+                            model_id: id.clone(),
+                        });
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .into_any_element(),
+        _ if model.downloaded => card_pill(
+            theme,
+            tr!("settings.rag.state_downloaded"),
+            theme.success,
+        )
+        .into_any_element(),
+        _ if model.vendored => card_pill(
+            theme,
+            tr!("settings.rag.state_builtin"),
+            theme.success,
+        )
+        .into_any_element(),
+        _ => rag_model_row_button(
+            theme,
+            SharedString::from(format!("rag-mdl-dl-{}", model.id)),
+            tr!("settings.rag.download").to_string().into(),
+            busy,
+            {
+                let weak = weak.clone();
+                let id = model.id.clone();
+                move |_window, cx| {
+                    let _ = weak.update(cx, |this: &mut Tide, cx| {
+                        this.rag_model_command(client::Command::RagModelDownload {
+                            model_id: id.clone(),
+                        });
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .into_any_element(),
+    };
+
+    let title: SharedString = model.name.clone().into();
+    let sub: SharedString = rag_model_sub_label(model).into();
+    let id_for_stage = model.id.clone();
+    rag_model_row_shell(
+        theme,
+        SharedString::from(format!("rag-model-row-{}", model.id)),
+        staged == model.id,
+        title,
+        sub,
+        control,
+        true,
+        {
+            let weak = weak.clone();
+            move |_window, cx| {
+                let _ = weak.update(cx, |this: &mut Tide, cx| {
+                    this.rag_settings.model_dialog = Some(id_for_stage.clone());
+                    cx.notify();
+                });
+            }
+        },
+    )
+}
+
 /// The wizard's modal shell: composer card, 18px radius, xl shadow, a
 /// click-stopped scrollable body between header and footer strips, over a
 /// scrim — deferred at priority 0 so anchored menus float above it.
@@ -1489,113 +1730,23 @@ impl Tide {
             &self.rag_settings.endpoints,
         );
 
-        let weak = cx.entity().downgrade();
         let selected_id = config.as_ref().map(|c| c.embedder_id.clone());
-        let cloud_available = self.rag_settings.cloud_configured;
-        let models = self.rag_settings.models.clone();
-        let endpoints = self.rag_settings.endpoints.clone();
-        let picker = self.rag_settings.picker.clone();
-        let picker_menu = dropdown_menu(
-            MenuChip::new("rag-model-picker")
-                .label(selection.clone())
-                .outlined()
-                .selected(picker.is_open())
-                .max_w(px(280.0))
-                .justify_between(),
-            "rag-model-picker-menu",
-            &picker,
-            MenuAlign::BelowRight,
-            move |_| {
-                let mut items: Vec<MenuItem> =
-                    vec![MenuItem::Header(tr!("settings.rag.group_local").into())];
-                for model in models.iter() {
-                    let weak = weak.clone();
-                    let id = model.id.clone();
-                    let label = model.name.clone();
-                    let sub = rag_model_sub_label(model);
-                    let selected = selected_id.as_deref() == Some(id.as_str());
-                    items.push(
-                        MenuItem::custom(move |_, cx| {
-                            let theme = Theme::current(cx);
-                            div()
-                                .flex()
-                                .flex_col()
-                                .py(px(3.0))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.0))
-                                        .text_color(theme.text)
-                                        .truncate()
-                                        .child(SharedString::from(label.clone())),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(sp(10.0))
-                                        .text_color(theme.text_tertiary)
-                                        .truncate()
-                                        .child(SharedString::from(sub.clone())),
-                                )
-                                .into_any_element()
-                        })
-                        .on_click(move |_window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.rag_config_update(client::RagConfigPatchWire {
-                                    embedder_id: Some(id.clone()),
-                                    ..Default::default()
-                                });
-                                cx.notify();
-                            });
-                        })
-                        .selected(selected),
-                    );
-                }
-                items.push(MenuItem::Header(tr!("settings.rag.group_cloud").into()));
-                {
-                    let weak = weak.clone();
-                    let selected = selected_id.as_deref() == Some("cloud-base");
-                    let label = if cloud_available {
-                        tr!("settings.rag.cloud_embedder").to_string()
-                    } else {
-                        tr!("settings.rag.cloud_embedder_unconfigured").to_string()
-                    };
-                    items.push(
-                        MenuItem::new(label, move |_window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.rag_config_update(client::RagConfigPatchWire {
-                                    embedder_id: Some("cloud-base".into()),
-                                    ..Default::default()
-                                });
-                                cx.notify();
-                            });
-                        })
-                        .selected(selected)
-                        .disabled(!cloud_available),
-                    );
-                }
-                if !endpoints.is_empty() {
-                    items.push(MenuItem::Header(tr!("settings.rag.group_endpoints").into()));
-                    for endpoint in endpoints.iter() {
-                        let weak = weak.clone();
-                        let id = endpoint.id.clone();
-                        let label = format!("{} · {}", endpoint.name, endpoint.model_id);
-                        let selected = selected_id.as_deref() == Some(id.as_str());
-                        items.push(
-                            MenuItem::new(label, move |_window, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.rag_config_update(client::RagConfigPatchWire {
-                                        embedder_id: Some(id.clone()),
-                                        ..Default::default()
-                                    });
-                                    cx.notify();
-                                });
-                            })
-                            .selected(selected),
-                        );
-                    }
-                }
-                items
-            },
-        );
+        // The model picker is a dialog now — the chip opens it staged on
+        // the current selection.
+        let change_button = CardButton::new(
+            "rag-model-change",
+            SharedString::from(format!("{} — {}", tr!("settings.rag.change"), selection)),
+        )
+        .render(*theme, cx, |this: &mut Tide, _window, cx| {
+            let staged = this
+                .rag_settings
+                .config
+                .as_ref()
+                .map(|c| c.embedder_id.clone())
+                .unwrap_or_else(|| "local-code-512".to_owned());
+            this.rag_settings.model_dialog = Some(staged);
+            cx.notify();
+        });
 
         let mut head = vec![card_pill(theme, selection, theme.accent).into_any_element()];
         if self.rag_settings.config_pending.get() {
@@ -1628,7 +1779,7 @@ impl Tide {
         let mut rows = vec![
             CardRow::new(tr!("settings.rag.model"))
                 .description(tr!("settings.rag.model_hint"))
-                .control(picker_menu),
+                .control(change_button),
         ];
         // The selected catalog model's status + management row — the local
         // models manager lives here now, scoped to the active selection.
@@ -1743,7 +1894,7 @@ impl Tide {
             rows.push(
                 CardRow::new(tr!("settings.rag.model_status"))
                     .description(SharedString::from(format!(
-                        "{} · {} dim · {} {}",
+                        "{} · {} dims · {} {}",
                         model.name,
                         model.dims,
                         model.max_tokens,
@@ -2189,94 +2340,202 @@ impl Tide {
         ))
     }
 
-    /// The rebuild offer: a plain warning that the embedding model
-    /// changed and each project needs reindexing. Dismiss keeps the
-    /// change — indexes go stale until rebuilt. Rebuild starts the serial
-    /// queue; its progress then lives below the cards, not here.
-    pub(super) fn render_rag_rebuild_dialog(
+    /// The embedding-model selector dialog: staged selection with a
+    /// check bubble, full per-model info, in-row download with live
+    /// progress, and Cancel / Select / Select & Rebuild at the bottom.
+    /// Select applies the model and leaves stale indexes flagged on
+    /// their cards; Select & Rebuild chains the update straight into the
+    /// serial rebuild, whose progress strip renders below the cards.
+    pub(super) fn render_rag_model_dialog(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
-        self.rag_settings
-            .rebuild
+        let staged = self.rag_settings.model_dialog.clone()?;
+        let current = self
+            .rag_settings
+            .config
             .as_ref()
-            .filter(|rebuild| !rebuild.running && !rebuild.stalled)?;
+            .map(|c| c.embedder_id.clone());
+        let models = self.rag_settings.models.clone();
+        let endpoints = self.rag_settings.endpoints.clone();
+        let cloud_available = self.rag_settings.cloud_configured;
+        let pending_model = self.rag_settings.pending_model.borrow().clone();
 
-        let footer = div()
-            .flex()
-            .justify_end()
-            .gap(px(8.0))
-            .child(
-                CardButton::new("rag-rebuild-dismiss", tr!("settings.rag.dismiss")).render(
-                    theme,
-                    cx,
-                    |this: &mut Tide, _window, cx: &mut Context<Tide>| {
-                        this.rag_settings.rebuild = None;
-                        cx.notify();
-                    },
-                ),
-            )
-            .child(
-                CardButton::new("rag-rebuild-now", tr!("settings.rag.rebuild_now")).render(
-                    theme,
-                    cx,
-                    |this: &mut Tide, _window, cx: &mut Context<Tide>| this.rag_rebuild_start(cx),
-                ),
-            );
+        // Confirm needs a changed selection that is ready on disk —
+        // cloud and custom endpoints are always ready.
+        let staged_ready = models
+            .iter()
+            .find(|m| m.id == staged)
+            .map(|m| m.downloaded || m.vendored)
+            .unwrap_or(true);
+        let unchanged = current.as_deref() == Some(staged.as_str());
+        let confirm_dim = unchanged || !staged_ready;
 
-        let card = div()
-            .id("rag-rebuild-dialog")
-            .occlude()
-            .w(px(420.0))
-            .rounded(px(13.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .bg(theme.raised)
-            .shadow_lg()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .p(px(18.0))
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(10.0))
-                    .child(icon(
-                        "icons/alert.svg",
-                        15.0,
-                        crate::app::timeline_v2::status_color(
-                            &theme,
-                            crate::app::timeline_v2::Status::Error,
-                        ),
-                    ))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_size(sp(14.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.rag.rebuild_title")),
-                            )
-                            .child(
-                                div()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(tr!("settings.rag.rebuild_description")),
-                            ),
-                    ),
-            )
-            .child(footer);
-        Some(crate::ui::modal::deferred_scrim(
-            "rag-rebuild-layer",
-            card,
+        let mut body = div().flex().flex_col().pb(px(6.0));
+        body = body.child(rag_dialog_section(
             &theme,
+            tr!("settings.rag.group_local").to_string().into(),
+        ));
+        for model in models.iter() {
+            body = body.child(rag_model_dialog_row(
+                &theme,
+                &staged,
+                model,
+                pending_model.as_deref() == Some(model.id.as_str()),
+                cx.entity().downgrade(),
+            ));
+        }
+        body = body.child(rag_dialog_section(
+            &theme,
+            tr!("settings.rag.group_cloud").to_string().into(),
+        ));
+        body = body.child(rag_model_row_shell(
+            &theme,
+            "rag-model-row-cloud",
+            staged == "cloud-base",
+            if cloud_available {
+                tr!("settings.rag.cloud_embedder").to_string().into()
+            } else {
+                tr!("settings.rag.cloud_embedder_unconfigured").to_string().into()
+            },
+            tr!("settings.rag.cloud_sub").to_string().into(),
+            card_pill(
+                &theme,
+                if cloud_available {
+                    tr!("settings.rag.state_ready")
+                } else {
+                    tr!("settings.rag.state_not_configured")
+                },
+                if cloud_available {
+                    theme.success
+                } else {
+                    theme.text_tertiary
+                },
+            )
+            .into_any_element(),
+            cloud_available,
+            {
+                let weak = cx.entity().downgrade();
+                move |window, cx| {
+                    let _ = weak.update(cx, |this: &mut Tide, cx| {
+                        this.rag_settings.model_dialog = Some("cloud-base".to_owned());
+                        cx.notify();
+                    });
+                    let _ = window;
+                }
+            },
+        ));
+        if !endpoints.is_empty() {
+            body = body.child(rag_dialog_section(
+                &theme,
+                tr!("settings.rag.group_endpoints").to_string().into(),
+            ));
+            for endpoint in endpoints.iter() {
+                body = body.child(rag_model_row_shell(
+                    &theme,
+                    SharedString::from(format!("rag-model-row-{}", endpoint.id)),
+                    staged == endpoint.id,
+                    format!("{} \u{00b7} {}", endpoint.name, endpoint.model_id).into(),
+                    format!(
+                        "{} \u{00b7} {} dims",
+                        tr!("settings.rag.endpoint_sub"),
+                        endpoint.dims
+                    )
+                    .into(),
+                    card_pill(&theme, tr!("settings.rag.state_ready"), theme.success)
+                        .into_any_element(),
+                    true,
+                    {
+                        let weak = cx.entity().downgrade();
+                        let id = endpoint.id.clone();
+                        move |window, cx| {
+                            let _ = weak.update(cx, |this: &mut Tide, cx| {
+                                this.rag_settings.model_dialog = Some(id.clone());
+                                cx.notify();
+                            });
+                            let _ = window;
+                        }
+                    },
+                ));
+            }
+        }
+
+        let mut pills = vec![rag_dialog_pill(
+            &theme,
+            "rag-model-cancel",
+            tr!("settings.rag.cancel").to_string().into(),
+            false,
+            false,
+            {
+                let weak = cx.entity().downgrade();
+                move |_window, cx| {
+                    let _ = weak.update(cx, |this: &mut Tide, cx| {
+                        this.rag_settings.model_dialog = None;
+                        cx.notify();
+                    });
+                }
+            },
+        )];
+        for (pill_id, label, rebuild) in [
+            ("rag-model-select", tr!("settings.rag.select"), false),
+            (
+                "rag-model-select-rebuild",
+                tr!("settings.rag.select_rebuild"),
+                true,
+            ),
+        ] {
+            let weak = cx.entity().downgrade();
+            let staged = staged.clone();
+            pills.push(rag_dialog_pill(
+                &theme,
+                pill_id,
+                label.to_string().into(),
+                false,
+                confirm_dim,
+                {
+                    let weak = weak.clone();
+                    let staged = staged.clone();
+                    move |_window, cx| {
+                        let _ = weak.update(cx, |this: &mut Tide, cx| {
+                            let changed = this
+                                .rag_settings
+                                .config
+                                .as_ref()
+                                .map(|c| c.embedder_id.clone())
+                                != Some(staged.clone());
+                            if changed {
+                                this.rag_settings
+                                    .rebuild_after_update
+                                    .set(rebuild);
+                                this.rag_config_update(client::RagConfigPatchWire {
+                                    embedder_id: Some(staged.clone()),
+                                    ..Default::default()
+                                });
+                            }
+                            this.rag_settings.model_dialog = None;
+                            cx.notify();
+                        });
+                    }
+                },
+            ));
+        }
+        let needs_download = (!staged_ready && !unchanged)
+            .then(|| tr!("settings.rag.needs_download").to_string());
+        let footer = rag_dialog_footer(&theme, needs_download.as_deref(), pills);
+
+        Some(rag_dialog_layer(
+            "RagModelDialog",
+            &theme,
+            560.0,
+            rag_dialog_header(
+                &theme,
+                tr!("settings.rag.model_dialog_title").to_string().into(),
+                tr!("settings.rag.model_dialog_hint").to_string().into(),
+            ),
+            body,
+            footer,
         ))
     }
 
