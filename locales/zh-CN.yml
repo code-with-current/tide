@@ -1404,7 +1404,8 @@ settings.rag.not_indexed: 未索引
 settings.rag.build: 构建索引
 settings.rag.rebuild: 重建索引
 settings.rag.sources_title: 知识来源
-settings.rag.sources_empty: 还没有来源。添加网址、文档路径、站点抓取或代码仓库，让它们的内容可被搜索。
+settings.rag.sources_empty_title: 还没有知识来源
+settings.rag.sources_empty: 添加网址、文档路径、站点抓取或代码仓库，让它们的内容可被搜索。
 settings.rag.reindex: 重新索引
 settings.rag.remove: 移除
 settings.rag.add: 添加
@@ -1595,7 +1596,6 @@ settings.rag.top_k: 每次查询结果数
 settings.rag.top_k_hint: 向量与关键词结果融合后返回的块数量。
 settings.rag.rerank: 重排结果
 settings.rag.rerank_hint: 使用本地交叉编码器对融合结果重新评分以提升精度。需下载 23 MB 模型。
-settings.rag.rerank_download: 下载模型
 settings.rag.rerank_downloading: 下载中…
 settings.rag.block_flagged: 屏蔽被标记的来源
 settings.rag.block_flagged_hint: 被注入检测标记的知识来源将从召回结果中排除。

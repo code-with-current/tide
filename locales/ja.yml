@@ -1456,7 +1456,8 @@ settings.rag.not_indexed: 未インデックス
 settings.rag.build: インデックスを構築
 settings.rag.rebuild: インデックスを再構築
 settings.rag.sources_title: ナレッジソース
-settings.rag.sources_empty: ソースはまだありません。URL、ドキュメントパス、サイトクロール、リポジトリを追加すると、その内容が検索可能になります。
+settings.rag.sources_empty_title: ナレッジソースはまだありません
+settings.rag.sources_empty: URL、ドキュメントパス、サイトクロール、リポジトリを追加すると、その内容が検索可能になります。
 settings.rag.reindex: 再インデックス
 settings.rag.remove: 削除
 settings.rag.add: 追加
@@ -1647,7 +1648,6 @@ settings.rag.top_k: 1回の検索結果数
 settings.rag.top_k_hint: ベクトル検索とキーワード検索を融合した後に返すチャンク数です。
 settings.rag.rerank: 結果をリランク
 settings.rag.rerank_hint: ローカルのクロスエンコーダーで統合結果を再スコアリングし、精度を高めます。23 MB のモデルをダウンロードします。
-settings.rag.rerank_download: モデルをダウンロード
 settings.rag.rerank_downloading: ダウンロード中…
 settings.rag.block_flagged: フラグ付きソースをブロック
 settings.rag.block_flagged_hint: インジェクション検査でフラグが付いたナレッジソースは検索結果から除外されます。

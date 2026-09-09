@@ -1794,7 +1794,6 @@ impl Tide {
                 let size = format!("{:.1} MB", model.download_size as f64 / 1_048_576.0);
                 status_area = Some(
                     div()
-                        .px(px(20.0))
                         .py(px(12.0))
                         .flex()
                         .flex_col()
@@ -1845,7 +1844,6 @@ impl Tide {
                 );
                 status_area = Some(
                     div()
-                        .px(px(20.0))
                         .py(px(10.0))
                         .flex()
                         .items_center()
@@ -1937,9 +1935,8 @@ impl Tide {
             .id("rag-advanced-disclosure")
             .flex()
             .items_center()
-            .gap(px(8.0))
-            .px(px(20.0))
-            .py(px(9.0))
+            .gap(px(10.0))
+            .py(px(12.0))
             .border_t_1()
             .border_color(theme.border)
             .cursor_pointer()
@@ -1959,9 +1956,9 @@ impl Tide {
             ))
             .child(
                 div()
-                    .text_size(sp(12.0))
+                    .text_size(sp(13.5))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
+                    .text_color(theme.text)
                     .child(tr!("settings.rag.advanced_title")),
             )
             .child(
@@ -2046,9 +2043,9 @@ impl Tide {
         card.child(body)
     }
 
-    /// The rerank toggle plus its model-download affordance: toggling on
-    /// with the model missing offers the download inline (23 MB); a
-    /// failed download shows its error text.
+    /// The rerank toggle: switching on auto-downloads the cross-encoder
+    /// (23 MB) so the feature never silently no-ops; the row shows live
+    /// download progress and a Retry when the fetch failed.
     fn render_rerank_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let config = self.rag_settings.config.as_ref();
         let enabled = config.is_some_and(|c| c.rerank_enabled);
@@ -2074,6 +2071,19 @@ impl Tide {
                     rerank_enabled: Some(next),
                     ..Default::default()
                 });
+                if next {
+                    let ready = this
+                        .rag_settings
+                        .config
+                        .as_ref()
+                        .and_then(|c| c.reranker_download.clone())
+                        .is_some_and(|s| s == "ready");
+                    if !ready {
+                        this.rag_model_command(client::Command::RagModelDownload {
+                            model_id: "rerank-msmarco-miniilm".to_owned(),
+                        });
+                    }
+                }
                 cx.notify();
             },
         );
@@ -2083,34 +2093,56 @@ impl Tide {
                 .and_then(|c| c.reranker_download_error.clone())
                 .filter(|_| state == "failed");
             if let Some(error) = error {
-                control = control.child(
-                    div()
-                        .max_w(px(220.0))
-                        .text_size(sp(10.5))
-                        .text_color(crate::app::timeline_v2::status_color(
-                            theme,
-                            crate::app::timeline_v2::Status::Error,
-                        ))
-                        .truncate()
-                        .child(SharedString::from(error)),
-                );
-            } else if downloading {
-                control = control.child(
-                    div()
-                        .text_size(sp(10.5))
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("settings.rag.rerank_downloading")),
-                );
-            } else {
-                let download =
-                    CardButton::new("rag-reranker-download", tr!("settings.rag.rerank_download"))
-                        .ghost()
-                        .render(*theme, cx, |this, _window, _cx| {
-                            this.rag_model_command(client::Command::RagModelDownload {
-                                model_id: "rerank-msmarco-miniilm".to_owned(),
-                            });
+                let busy = self
+                    .rag_settings
+                    .pending_model
+                    .borrow()
+                    .as_deref()
+                    .is_some_and(|id| id == "rerank-msmarco-miniilm");
+                let retry = CardButton::new("rag-reranker-retry", tr!("common.retry"))
+                    .busy(busy)
+                    .ghost()
+                    .render(*theme, cx, |this, _window, _cx| {
+                        this.rag_model_command(client::Command::RagModelDownload {
+                            model_id: "rerank-msmarco-miniilm".to_owned(),
                         });
-                control = control.child(download.into_any_element());
+                    });
+                control = control
+                    .child(
+                        div()
+                            .max_w(px(180.0))
+                            .text_size(sp(10.5))
+                            .text_color(crate::app::timeline_v2::status_color(
+                                theme,
+                                crate::app::timeline_v2::Status::Error,
+                            ))
+                            .truncate()
+                            .child(SharedString::from(error)),
+                    )
+                    .child(retry.into_any_element());
+            } else if downloading {
+                let percent = config.and_then(|c| c.reranker_download_percent);
+                let label: SharedString = match percent {
+                    Some(percent) => format!("{percent}%").into(),
+                    None => tr!("settings.rag.rerank_downloading").to_owned().into(),
+                };
+                control = control.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(motion::spin(icon(
+                            "icons/loader-circle.svg",
+                            11.0,
+                            theme.text_tertiary,
+                        )))
+                        .child(
+                            div()
+                                .text_size(sp(10.5))
+                                .text_color(theme.text_tertiary)
+                                .child(label),
+                        ),
+                );
             }
         }
         control
@@ -2874,7 +2906,7 @@ impl Tide {
     /// The knowledge-sources card: the list in a full-bleed body; the
     /// add action lives in the page header.
     pub(super) fn render_sources_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let add = CardButton::new("rag-source-new", tr!("settings.rag.add_source"))
+        let add = CardButton::new("rag-source-new", tr!("settings.rag.add"))
             .icon("icons/plus.svg")
             .render(*theme, cx, |this, window, cx| {
                 this.rag_settings.open_source_dialog(window, cx);
@@ -2912,12 +2944,13 @@ impl Tide {
             );
         } else if in_scope.is_empty() {
             body = body.child(
-                div()
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("settings.rag.sources_empty")),
+                crate::ui::empty_state::EmptyState::new(
+                    "icons/database.svg",
+                    tr!("settings.rag.sources_empty_title"),
+                )
+                .caption(tr!("settings.rag.sources_empty"))
+                .w_full()
+                .py(px(22.0)),
             );
         }
         let pending = self.rag_settings.pending_source.clone();

@@ -425,8 +425,10 @@ settings.rag.rebuild:
   en: Rebuild index
 settings.rag.sources_title:
   en: Knowledge sources
+settings.rag.sources_empty_title:
+  en: No knowledge sources
 settings.rag.sources_empty:
-  en: No sources yet. Add a URL, docs path, site crawl, or repo to make its content searchable.
+  en: Add a URL, docs path, site crawl, or repo to make its content searchable.
 settings.rag.reindex:
   en: Reindex
 settings.rag.remove:
@@ -3187,8 +3189,6 @@ settings.rag.rerank:
   en: Rerank results
 settings.rag.rerank_hint:
   en: Rescore the fused matches with a local cross-encoder for better precision. Downloads a 23 MB model.
-settings.rag.rerank_download:
-  en: Download model
 settings.rag.rerank_downloading:
   en: downloading…
 settings.rag.block_flagged:
