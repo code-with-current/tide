@@ -1596,6 +1596,7 @@ web.security_short: エンドツーエンド暗号化 · リンクはセッシ�
 settings.rag.global_title: メモリとRAG
 settings.rag.global_knowledge: グローバル知識インデックス
 settings.rag.loading: 読み込み中…
+settings.rag.saving: 保存中…
 settings.rag.model_hint: 新しいインデックスの構築に使う埋め込みモデルです。切り替えても再構築までは既存のインデックスを検索できます。
 settings.rag.group_local: ローカルモデル
 settings.rag.group_cloud: クラウド

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Tide</string>
+    <key>CFBundleExecutable</key>
+    <string>Tide</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>codes.tide</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Tide</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <!-- Sparkle auto-update configuration. The appcast feed lives in the
+         appcast asset of the latest published GitHub release, and the
+         private half of SUPublicEDKey signs each archive during the release
+         build (see RELEASING.md). -->
+    <key>SUFeedURL</key>
+    <string>https://github.com/code-with-current/tide/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>2BpZErSo1c6UVgpQqJuAj5SdYFf14ykuVdvTXTV/JVE=</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

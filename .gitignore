@@ -1,0 +1,15 @@
+.claude
+.agents
+target
+.tide-cache
+.DS_Store
+*.log
+.env
+
+dist
+node_modules
+temp
+
+.docs
+.zcode
+.worktrees

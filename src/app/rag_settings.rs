@@ -51,6 +51,20 @@ pub(crate) struct RagSettingsPanel {
     /// The in-flight list mutation ("add" or a source id) — buttons show
     /// their pending state until the Sources reply clears it.
     pub pending_source: Option<String>,
+    /// The model a Download/Delete/Retry command is flying for — its
+    /// buttons spin until the Models reply lands.
+    pub pending_model: std::cell::RefCell<Option<String>>,
+    /// The endpoint a Remove command is flying for.
+    pub pending_endpoint: std::cell::RefCell<Option<String>>,
+    /// A settings patch is in flight (picker choice, stepper, inline
+    /// commit) — the global card head shows a saving pill.
+    pub config_pending: std::cell::Cell<bool>,
+    /// True once the first Sources reply lands — separates "loading"
+    /// from a genuinely empty registry.
+    pub sources_loaded: std::cell::Cell<bool>,
+    /// The enable-toggle flip in flight: (project id, target state) —
+    /// the toggle paints the target optimistically until Status replies.
+    pub pending_toggle: Option<(String, bool)>,
     /// The global Memory & RAG settings (model picker / retrieval /
     /// advanced cards). `None` until first load.
     pub config: Option<client::RagConfigWire>,
@@ -87,6 +101,8 @@ pub(crate) struct RebuildState {
     pub affected: Vec<client::RagAffectedWorkspaceWire>,
     /// Remaining project ids to re-init, front first.
     pub queue: Vec<String>,
+    /// Queue length at start — the progress bar's denominator.
+    pub total: usize,
     pub running: bool,
 }
 
@@ -126,6 +142,11 @@ impl RagSettingsPanel {
             sources_error: None,
             dialog: None,
             pending_source: None,
+            pending_model: std::cell::RefCell::new(None),
+            pending_endpoint: std::cell::RefCell::new(None),
+            config_pending: std::cell::Cell::new(false),
+            sources_loaded: std::cell::Cell::new(false),
+            pending_toggle: None,
             config: None,
             endpoints: Vec::new(),
             cloud_configured: false,
@@ -202,20 +223,22 @@ impl RagSettingsPanel {
 
 impl RagSettingsPanel {
     /// The inline settings fields, creating + subscribing them on first
-    /// use (render has a window; the drain does not).
+    /// use (render has a window; the drain does not). `None` while the
+    /// config bundle hasn't landed — the fields seed from it, so creating
+    /// them earlier would cache empty seeds.
     fn inline_inputs(
         &self,
         window: &mut Window,
         cx: &mut Context<Tide>,
-    ) -> RagInlineInputs {
+    ) -> Option<RagInlineInputs> {
         if let Some(inline) = self.inline.borrow().as_ref() {
-            return RagInlineInputs {
+            return Some(RagInlineInputs {
                 min_similarity: inline.min_similarity.clone(),
                 chunk_size: inline.chunk_size.clone(),
                 chunk_overlap: inline.chunk_overlap.clone(),
-            };
+            });
         }
-        let config = self.config.as_ref();
+        let config = self.config.as_ref()?;
         let seed = |v: Option<String>| v.unwrap_or_default();
         let mut make = |placeholder: &str, value: String, cx: &mut Context<Tide>| {
             let input = cx.new(|cx| {
@@ -231,17 +254,17 @@ impl RagSettingsPanel {
         };
         let min_similarity = make(
             "0.2",
-            seed(config.and_then(|c| c.min_similarity).map(|v| format!("{v}"))),
+            seed(config.min_similarity.map(|v| format!("{v}"))),
             cx,
         );
         let chunk_size = make(
             "1024",
-            seed(config.and_then(|c| c.chunk_size).map(|v| format!("{v}"))),
+            seed(config.chunk_size.map(|v| format!("{v}"))),
             cx,
         );
         let chunk_overlap = make(
             "128",
-            seed(config.and_then(|c| c.chunk_overlap).map(|v| format!("{v}"))),
+            seed(config.chunk_overlap.map(|v| format!("{v}"))),
             cx,
         );
         let inline = RagInlineInputs {
@@ -282,8 +305,19 @@ impl RagSettingsPanel {
             chunk_size: inline.chunk_size.clone(),
             chunk_overlap: inline.chunk_overlap.clone(),
         });
-        inline
+        Some(inline)
     }
+}
+
+/// The one-row placeholder while the config bundle is still loading —
+/// shared by the retrieval and advanced cards.
+fn rag_loading_row(theme: &Theme) -> Vec<CardRow> {
+    vec![CardRow::new(tr!("settings.rag.loading"))
+        .control(motion::spin(icon(
+            "icons/loader-circle.svg",
+            11.0,
+            theme.text_tertiary,
+        )))]
 }
 
 /// Which inline settings field submitted.
@@ -417,6 +451,7 @@ impl Tide {
     /// Merge a partial settings update; a non-empty affected reply opens
     /// the rebuild dialog.
     pub(super) fn rag_config_update(&self, patch: client::RagConfigPatchWire) {
+        self.rag_settings.config_pending.set(true);
         self.rag_dispatch_result(
             |result| match result {
                 Ok(client::ResponsePayload::RagAffected { workspaces }) => {
@@ -436,6 +471,11 @@ impl Tide {
     /// Download / delete a catalog model (delete reports affected indexes
     /// through the rebuild dialog).
     pub(super) fn rag_model_command(&self, command: client::Command) {
+        if let client::Command::RagModelDownload { model_id }
+        | client::Command::RagModelDelete { model_id } = &command
+        {
+            *self.rag_settings.pending_model.borrow_mut() = Some(model_id.clone());
+        }
         self.rag_dispatch_result(
             |result| match result {
                 Ok(client::ResponsePayload::Ack) => RagOpsEvent::Affected(Vec::new()),
@@ -460,6 +500,9 @@ impl Tide {
     /// Custom-endpoint commands. Add keeps the dialog open with the error
     /// inline when the probe fails.
     pub(super) fn rag_endpoint_command(&self, command: client::Command) {
+        if let client::Command::RagEndpointRemove { endpoint_id } = &command {
+            *self.rag_settings.pending_endpoint.borrow_mut() = Some(endpoint_id.clone());
+        }
         self.rag_dispatch_result(
             |result| match result {
                 Ok(client::ResponsePayload::RagEndpoint { endpoint }) => {
@@ -490,6 +533,7 @@ impl Tide {
             .filter(|a| a.project_id != "*")
             .map(|a| a.project_id.clone())
             .collect();
+        rebuild.total = rebuild.queue.len();
         // The knowledge index reindexes through its serial manager.
         for source in self.rag_settings.sources.clone() {
             self.rag_dispatch(
@@ -555,7 +599,8 @@ impl Tide {
     }
 
     /// Enable/disable RAG for a project, then refresh.
-    pub(super) fn rag_set_enabled(&self, project_id: &str, enabled: bool, cx: &mut Context<Self>) {
+    pub(super) fn rag_set_enabled(&mut self, project_id: &str, enabled: bool, cx: &mut Context<Self>) {
+        self.rag_settings.pending_toggle = Some((project_id.to_owned(), enabled));
         let command = if enabled {
             client::Command::RagEnableWorkspace {
                 project_id: project_id.to_owned(),
@@ -763,6 +808,14 @@ impl Tide {
                             || status.init_state == "running"
                             || live_phase;
                         let id = status.project_id.clone();
+                        if self
+                            .rag_settings
+                            .pending_toggle
+                            .as_ref()
+                            .is_some_and(|(pending, _)| pending == &id)
+                        {
+                            self.rag_settings.pending_toggle = None;
+                        }
                         self.rag_settings.status = Some(status);
                         self.rag_settings.status_error = None;
                         if transient && self.state.selected_project.is_some() {
@@ -779,6 +832,7 @@ impl Tide {
                         self.rag_settings.sources = sources;
                         self.rag_settings.sources_error = None;
                         self.rag_settings.pending_source = None;
+                        self.rag_settings.sources_loaded.set(true);
                         if let Some(dialog) = self.rag_settings.dialog.as_mut()
                             && dialog.busy
                         {
@@ -803,11 +857,15 @@ impl Tide {
                         self.rag_settings.endpoints = bundle.endpoints;
                         self.rag_settings.cloud_configured = bundle.cloud_configured;
                         self.rag_settings.config_error = None;
+                        self.rag_settings.config_pending.set(false);
                         self.rag_settings.config_requested.set(false);
+                        *self.rag_settings.pending_endpoint.borrow_mut() = None;
                     }
                     Err(error) => {
                         self.rag_settings.config_error = Some(error);
                         self.rag_settings.config_requested.set(false);
+                        self.rag_settings.config_pending.set(false);
+                        *self.rag_settings.pending_endpoint.borrow_mut() = None;
                     }
                 },
                 RagOpsEvent::Models(result) => match result {
@@ -816,17 +874,22 @@ impl Tide {
                             .iter()
                             .any(|model| model.download_state == "downloading");
                         self.rag_settings.models = models;
+                        *self.rag_settings.pending_model.borrow_mut() = None;
                         if transient {
                             self.rag_poll_models();
                         }
                     }
-                    Err(error) => self.rag_settings.config_error = Some(error),
+                    Err(error) => {
+                        self.rag_settings.config_error = Some(error);
+                        *self.rag_settings.pending_model.borrow_mut() = None;
+                    }
                 },
                 RagOpsEvent::Affected(workspaces) => {
                     if !workspaces.is_empty() {
                         self.rag_settings.rebuild = Some(RebuildState {
                             affected: workspaces,
                             queue: Vec::new(),
+                            total: 0,
                             running: false,
                         });
                     }
@@ -1407,10 +1470,27 @@ impl Tide {
             },
         );
 
+        let mut head = vec![card_pill(theme, selection, theme.accent).into_any_element()];
+        if self.rag_settings.config_pending.get() {
+            head.insert(
+                0,
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(motion::spin(icon(
+                        "icons/loader-circle.svg",
+                        10.0,
+                        theme.text_tertiary,
+                    )))
+                    .child(div().text_size(sp(10.5)).text_color(theme.text_tertiary).child(tr!("settings.rag.saving")))
+                    .into_any_element(),
+            );
+        }
         let card = div().w_full().child(settings_group_head(
             theme,
             tr!("settings.rag.global_title"),
-            vec![card_pill(theme, selection, theme.accent).into_any_element()],
+            head,
         ));
 
         let mut rows = vec![CardRow::new(tr!("settings.rag.model"))
@@ -1418,14 +1498,31 @@ impl Tide {
             .control(picker_menu)];
         // The selected catalog model's status + management row — the local
         // models manager lives here now, scoped to the active selection.
-        if let Some(model) = selected_model {
+        let model_pending = self.rag_settings.pending_model.borrow().clone();
+        let model_pending = model_pending.as_deref();
+        if let Some(model) = selected_model.as_ref() {
             let control: gpui::AnyElement = match model.download_state.as_str() {
-                "downloading" => card_pill(
-                    theme,
-                    tr!("settings.rag.model_downloading"),
-                    theme.warning,
-                )
-                .into_any_element(),
+                "downloading" => div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(motion::spin(icon(
+                        "icons/loader-circle.svg",
+                        11.0,
+                        theme.warning,
+                    )))
+                    .child(card_pill(
+                        theme,
+                        match model.download_percent {
+                            Some(pct) => format!(
+                                "{} · {pct}%",
+                                tr!("settings.rag.model_downloading")
+                            ),
+                            None => tr!("settings.rag.model_downloading").to_string(),
+                        },
+                        theme.warning,
+                    ))
+                    .into_any_element(),
                 "failed" => div()
                     .flex()
                     .items_center()
@@ -1444,6 +1541,7 @@ impl Tide {
                             SharedString::from(format!("rag-model-retry-{}", model.id)),
                             tr!("settings.rag.download"),
                         )
+                        .busy(model_pending == Some(model.id.as_str()))
                         .render(*theme, cx, {
                             let id = model.id.clone();
                             move |this, _window, cx| {
@@ -1468,6 +1566,7 @@ impl Tide {
                                 SharedString::from(format!("rag-model-delete-{}", model.id)),
                                 tr!("settings.rag.delete_model"),
                             )
+                            .busy(model_pending == Some(model.id.as_str()))
                             .render(*theme, cx, {
                                 let id = model.id.clone();
                                 move |this, _window, cx| {
@@ -1495,6 +1594,7 @@ impl Tide {
                             SharedString::from(format!("rag-model-download-{}", model.id)),
                             tr!("settings.rag.download"),
                         )
+                        .busy(model_pending == Some(model.id.as_str()))
                         .render(*theme, cx, {
                             let id = model.id.clone();
                             move |this, _window, cx| {
@@ -1520,7 +1620,40 @@ impl Tide {
             );
         }
 
-        card.child(card_body(theme).child(card_rows(theme, rows)))
+        let mut body = card_body(theme).child(card_rows(theme, rows));
+        // A live download strip under the rows while the selected model
+        // is coming down — the same bar vocabulary as the indexing card.
+        if let Some(model) = selected_model
+            && model.download_state == "downloading"
+        {
+            body = body.child(
+                div()
+                    .px(px(20.0))
+                    .pb(px(12.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .child(rag_progress_bar(theme, model.download_percent))
+                    .child(
+                        div()
+                            .text_size(sp(10.5))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(match model.download_percent {
+                                Some(pct) => format!(
+                                    "{pct}% · {} · {} MB",
+                                    tr!("settings.rag.model_downloading"),
+                                    model.download_size / 1_048_576,
+                                ),
+                                None => format!(
+                                    "{} · {} MB",
+                                    tr!("settings.rag.model_downloading"),
+                                    model.download_size / 1_048_576,
+                                ),
+                            })),
+                    ),
+            );
+        }
+        card.child(body)
     }
 
     /// Retrieval tuning: top-K stepper and minimum similarity (inline
@@ -1547,10 +1680,15 @@ impl Tide {
                 this.rag_topk_bump(1);
                 cx.notify();
             });
-        let min_sim = self
-            .rag_settings
-            .inline_inputs(window, cx)
-            .min_similarity;
+        let Some(inline) = self.rag_settings.inline_inputs(window, cx) else {
+            return div().w_full().child(settings_group_head(
+                theme,
+                tr!("settings.rag.retrieval_title"),
+                Vec::new(),
+            ))
+            .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
+        };
+        let min_sim = inline.min_similarity;
 
         let card = div().w_full().child(settings_group_head(
             theme,
@@ -1599,7 +1737,14 @@ impl Tide {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let inline = self.rag_settings.inline_inputs(window, cx);
+        let Some(inline) = self.rag_settings.inline_inputs(window, cx) else {
+            return div().w_full().child(settings_group_head(
+                theme,
+                tr!("settings.rag.advanced_title"),
+                Vec::new(),
+            ))
+            .child(card_body(theme).child(card_rows(theme, rag_loading_row(theme))));
+        };
         let (chunk_size_edit, chunk_overlap_edit) = (inline.chunk_size, inline.chunk_overlap);
 
         let card = div().w_full().child(settings_group_head(
@@ -1656,11 +1801,14 @@ impl Tide {
             );
         }
         let mut rows = Vec::new();
+        let endpoint_pending = self.rag_settings.pending_endpoint.borrow().clone();
+        let endpoint_pending = endpoint_pending.as_deref();
         for endpoint in self.rag_settings.endpoints.iter() {
             let remove = CardButton::new(
                 SharedString::from(format!("rag-endpoint-remove-{}", endpoint.id)),
                 tr!("settings.rag.remove"),
             )
+            .busy(endpoint_pending == Some(endpoint.id.as_str()))
             .render(*theme, cx, {
                 let id = endpoint.id.clone();
                 move |this, _window, cx| {
@@ -1846,6 +1994,12 @@ impl Tide {
         } else {
             tr!("settings.rag.rebuild_description")
         };
+        // Determinate bar while the serial queue drains: done over the
+        // queue's original length.
+        let rebuild_pct = (running && rebuild.total > 0).then(|| {
+            ((rebuild.total - remaining.min(rebuild.total)) as f64 / rebuild.total as f64 * 100.0)
+                .round() as u32
+        });
 
         let mut footer = div().flex().justify_end().gap(px(8.0));
         if !running {
@@ -1912,6 +2066,9 @@ impl Tide {
                             .child(status_line),
                     ),
             )
+            .when(running, |card| {
+                card.child(div().px(px(2.0)).child(rag_progress_bar(&theme, rebuild_pct)))
+            })
             .child(rows)
             .child(footer);
         Some(crate::ui::modal::deferred_scrim(
@@ -1936,6 +2093,38 @@ pub(crate) fn init_phase_label(phase: &str) -> String {
         _ => tr!("settings.rag.indexing"),
     }
     .to_string()
+}
+
+/// The 4px track + accent fill shared by every determinate progress
+/// surface (indexing card, model download, rebuild dialog). `None` is
+/// the indeterminate half-fill (denominator still unknown).
+fn rag_progress_bar(theme: &Theme, percent: Option<u32>) -> Div {
+    match percent {
+        Some(pct) => div()
+            .h(px(4.0))
+            .w_full()
+            .rounded_full()
+            .bg(theme.inset)
+            .child(
+                div()
+                    .h_full()
+                    .rounded_full()
+                    .bg(theme.accent)
+                    .w(fract(pct.min(100) as f64 / 100.0)),
+            ),
+        None => div()
+            .h(px(4.0))
+            .w_full()
+            .rounded_full()
+            .bg(theme.inset)
+            .child(
+                div()
+                    .h_full()
+                    .rounded_full()
+                    .bg(theme.accent.opacity(0.6))
+                    .w(gpui::relative(0.5)),
+            ),
+    }
 }
 
 /// The live indexing-progress card (upstream's RagIndexProgress): spinner +
@@ -2025,41 +2214,7 @@ fn render_init_progress(progress: &client::InitProgressWire, theme: &Theme) -> D
                 }),
         );
     if !failed {
-        // Bar: determinate fill vs indeterminate shimmer (a slow pulse —
-        // reduce-motion is honored by motion::spin itself).
-        if determinate {
-            card = card.child(
-                div()
-                    .h(px(4.0))
-                    .w_full()
-                    .rounded_full()
-                    .bg(theme.inset)
-                    .child(
-                        div()
-                            .h_full()
-                            .rounded_full()
-                            .bg(theme.accent)
-                            .w(fract(pct.min(100) as f64 / 100.0)),
-                    ),
-            );
-        } else {
-            // Indeterminate: a half-fill accent bar (the walking/chunking
-            // phases have no denominator worth a percentage).
-            card = card.child(
-                div()
-                    .h(px(4.0))
-                    .w_full()
-                    .rounded_full()
-                    .bg(theme.inset)
-                    .child(
-                        div()
-                            .h_full()
-                            .rounded_full()
-                            .bg(theme.accent.opacity(0.6))
-                            .w(gpui::relative(0.5)),
-                    ),
-            );
-        }
+        card = card.child(rag_progress_bar(theme, determinate.then_some(pct)));
     }
     if failed && let Some(error) = progress.error.as_deref() {
         card = card.child(
@@ -2140,6 +2295,17 @@ impl Tide {
             .as_ref()
             .filter(|status| status.project_id == project_id);
         let enabled = relevant.is_some_and(|status| status.enabled);
+        let pending_toggle = self
+            .rag_settings
+            .pending_toggle
+            .as_ref()
+            .filter(|(pending, _)| pending == &project_id);
+        // Optimistic flip: while the enable command is in flight the
+        // toggle paints the target state, inert until Status replies.
+        let shown_enabled = pending_toggle
+            .map(|(_, next)| *next)
+            .unwrap_or(enabled);
+        let toggle_disabled = pending_toggle.is_some();
         let busy = rag_is_busy(relevant);
         let progress = relevant
             .and_then(|status| status.init_progress.clone())
@@ -2158,16 +2324,22 @@ impl Tide {
         let toggle_id = project_id.clone();
         let toggle = toggle_switch(
             SharedString::from(format!("rag-enable-{project_id}")),
-            enabled,
-            false,
+            shown_enabled,
+            toggle_disabled,
             *theme,
             cx,
             move |this, _window, cx| {
                 let next = !this
                     .rag_settings
-                    .status
+                    .pending_toggle
                     .as_ref()
-                    .is_some_and(|status| status.enabled);
+                    .map(|(_, next)| *next)
+                    .unwrap_or(
+                        this.rag_settings
+                            .status
+                            .as_ref()
+                            .is_some_and(|status| status.enabled),
+                    );
                 this.rag_set_enabled(&toggle_id, next, cx);
             },
         );
@@ -2253,7 +2425,25 @@ impl Tide {
 
         let mut body = card_body_flush(theme);
         let in_scope: Vec<_> = self.rag_settings.sources.clone();
-        if in_scope.is_empty() {
+        let loading = !self.rag_settings.sources_loaded.get()
+            && in_scope.is_empty()
+            && self.rag_settings.sources_error.is_none();
+        if loading {
+            body = body.child(
+                div()
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(motion::spin(icon(
+                        "icons/loader-circle.svg",
+                        11.0,
+                        theme.text_tertiary,
+                    )))
+                    .child(div().text_size(sp(11.0)).text_color(theme.text_tertiary).child(tr!("settings.rag.loading"))),
+            );
+        } else if in_scope.is_empty() {
             body = body.child(
                 div()
                     .px(px(20.0))
@@ -2728,6 +2918,7 @@ mod tests {
             cloud_configured: false,
             model_download: model_download.into(),
             model_download_error: None,
+            model_download_percent: None,
             chunk_count: 12,
             last_ingested_at: None,
             init_state: init_state.into(),
@@ -2837,6 +3028,7 @@ mod tests {
             download_size: 1000,
             download_state: state.into(),
             download_error: None,
+            download_percent: None,
         }
     }
 

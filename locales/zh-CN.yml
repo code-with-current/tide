@@ -1544,6 +1544,7 @@ web.security_short: 端到端加密 · 链接每次会话唯一
 settings.rag.global_title: 记忆与 RAG
 settings.rag.global_knowledge: 全局知识索引
 settings.rag.loading: 加载中…
+settings.rag.saving: 保存中…
 settings.rag.model_hint: 构建新索引使用的嵌入模型。切换后、重建之前，现有索引仍可搜索。
 settings.rag.group_local: 本地模型
 settings.rag.group_cloud: 云端

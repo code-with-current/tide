@@ -3083,6 +3083,8 @@ settings.rag.global_knowledge:
   en: Global knowledge index
 settings.rag.loading:
   en: Loading…
+settings.rag.saving:
+  en: Saving…
 settings.rag.model_hint:
   en: The embedding model every new index is built with. Switching models leaves existing indexes queryable until rebuilt.
 settings.rag.group_local:

@@ -432,7 +432,10 @@ fn running_inits() -> &'static Mutex<HashSet<String>> {
 pub enum ModelDownloadState {
     NotStarted,
     Ready,
-    Downloading,
+    Downloading {
+        received: u64,
+        total: u64,
+    },
     Failed(String),
 }
 
@@ -446,30 +449,39 @@ fn model_downloads_running() -> &'static Mutex<HashSet<String>> {
     RUNNING.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// (state, error) for one model, in the wire shape; vendored models are
-/// always "ready".
-fn model_download_wire(model_id: &str) -> (String, Option<String>) {
+/// (state, error, percent) for one model, in the wire shape; vendored
+/// models are always "ready". The percent rides only Downloading.
+fn model_download_wire(model_id: &str) -> (String, Option<String>, Option<u32>) {
     let Some(entry) = catalog_entry(model_id) else {
-        return ("not-downloaded".to_owned(), None);
+        return ("not-downloaded".to_owned(), None, None);
     };
     if entry.vendored {
-        return ("ready".to_owned(), None);
+        return ("ready".to_owned(), None, None);
     }
     let states = model_download_states().lock().unwrap();
     match states.get(model_id) {
-        Some(ModelDownloadState::Ready) => ("ready".to_owned(), None),
-        Some(ModelDownloadState::Downloading) => ("downloading".to_owned(), None),
-        Some(ModelDownloadState::Failed(error)) => ("failed".to_owned(), Some(error.clone())),
+        Some(ModelDownloadState::Ready) => ("ready".to_owned(), None, None),
+        Some(ModelDownloadState::Downloading { received, total }) => {
+            let percent = download_percent(*received, *total);
+            ("downloading".to_owned(), None, percent)
+        }
+        Some(ModelDownloadState::Failed(error)) => ("failed".to_owned(), Some(error.clone()), None),
         Some(ModelDownloadState::NotStarted) | None => {
             // Never-started reads as ready when the files are already on
             // disk (e.g. a restored data dir).
             if rag::local_model_exists_for(entry, &data_dir()) {
-                ("ready".to_owned(), None)
+                ("ready".to_owned(), None, None)
             } else {
-                ("not-downloaded".to_owned(), None)
+                ("not-downloaded".to_owned(), None, None)
             }
         }
     }
+}
+
+/// Aggregate-byte percent for the downloading state (0 when the total is
+/// still unknown — the HEAD pass hasn't finished yet).
+fn download_percent(received: u64, total: u64) -> Option<u32> {
+    (total > 0).then(|| ((received.min(total) as f64 / total as f64) * 100.0).round() as u32)
 }
 
 /// Read one project's status (config + index + download state) straight
@@ -484,7 +496,7 @@ pub fn status(project_id: &str) -> protocol::RagStatusWire {
     let local_available = local_model_exists(&dir);
     let cloud = cloud_configured();
     let (chunks, last_ingested, plan_id) = read_ingest_state(&dir, project_id);
-    let (download_state, download_error) = model_download_wire(default_entry().id);
+    let (download_state, download_error, download_percent) = model_download_wire(default_entry().id);
     protocol::RagStatusWire {
         project_id: project_id.to_owned(),
         enabled,
@@ -492,6 +504,7 @@ pub fn status(project_id: &str) -> protocol::RagStatusWire {
         cloud_configured: cloud,
         model_download: download_state,
         model_download_error: download_error,
+        model_download_percent: download_percent,
         chunk_count: chunks.unwrap_or(0),
         last_ingested_at: last_ingested,
         init_state: init_state_of(project_id, last_ingested),
@@ -546,13 +559,26 @@ pub fn ensure_model_downloaded(model_id: &str) {
     model_download_states()
         .lock()
         .unwrap()
-        .insert(model_id.to_owned(), ModelDownloadState::Downloading);
+        .insert(model_id.to_owned(), ModelDownloadState::Downloading { received: 0, total: 0 });
     let dir = data_dir();
     let id = model_id.to_owned();
     let spawned = std::thread::Builder::new()
         .name(format!("tide-rag-model-{id}"))
         .spawn(move || {
-            let result = download_model(&dir, entry, |_progress| {});
+            // Byte progress lands in the shared state map — the settings
+            // poll reads it as a percent.
+            let result = download_model(&dir, entry, |progress| {
+                model_download_states()
+                    .lock()
+                    .unwrap()
+                    .insert(
+                        id.clone(),
+                        ModelDownloadState::Downloading {
+                            received: progress.received,
+                            total: progress.total,
+                        },
+                    );
+            });
             let mut states = model_download_states().lock().unwrap();
             match result {
                 Ok(_) => {
@@ -794,7 +820,7 @@ pub fn models_list() -> Vec<protocol::RagModelWire> {
     rag::CATALOG
         .iter()
         .map(|entry| {
-            let (state, error) = model_download_wire(entry.id);
+            let (state, error, percent) = model_download_wire(entry.id);
             protocol::RagModelWire {
                 id: entry.id.to_owned(),
                 name: entry.repo.to_owned(),
@@ -806,6 +832,7 @@ pub fn models_list() -> Vec<protocol::RagModelWire> {
                 download_size: entry.download_size,
                 download_state: state,
                 download_error: error,
+                download_percent: percent,
             }
         })
         .collect()
@@ -1387,6 +1414,32 @@ pub fn remember_fact(project_id: &str, fact: &str) -> Result<(), String> {
 mod tests {
     // The seam wiring is exercised through the vendored crate's own tests;
     // here we pin the config enable/disable cycle against a temp data dir.
+
+    #[test]
+    fn download_percent_clamps_and_handles_unknown_total() {
+        use super::download_percent;
+        assert_eq!(download_percent(0, 0), None);
+        assert_eq!(download_percent(50, 200), Some(25));
+        assert_eq!(download_percent(300, 200), Some(100)); // clamped over-run
+        assert_eq!(download_percent(200, 200), Some(100));
+    }
+
+    #[test]
+    fn model_download_wire_reports_percent_while_downloading() {
+        use super::{ModelDownloadState, model_download_states, model_download_wire};
+        model_download_states().lock().unwrap().insert(
+            "local-bge-m3".to_owned(),
+            ModelDownloadState::Downloading {
+                received: 70,
+                total: 140,
+            },
+        );
+        let (state, error, percent) = model_download_wire("local-bge-m3");
+        assert_eq!(state, "downloading");
+        assert_eq!(error, None);
+        assert_eq!(percent, Some(50));
+        model_download_states().lock().unwrap().remove("local-bge-m3");
+    }
 
     #[test]
     fn enable_disable_cycle_round_trips_the_config() {

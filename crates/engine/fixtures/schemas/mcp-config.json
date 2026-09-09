@@ -1,0 +1,437 @@
+{
+  "providers": [
+    {
+      "id": "p_xng73a1s",
+      "name": "zai",
+      "apiStyle": "anthropic",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "encryptedKey": "***",
+      "enabled": true,
+      "models": [
+        {
+          "id": "m_g0cguj",
+          "alias": "glm-4.5",
+          "modelId": "glm-4.5",
+          "contextWindow": 131072,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-4.5",
+          "reasoning": false,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$0.60 / $2.20 per Mtok",
+          "inputCostPerToken": 6e-7,
+          "outputCostPerToken": 0.0000022,
+          "cacheReadCostPerToken": 1.1e-7
+        },
+        {
+          "id": "m_ba91kf",
+          "alias": "glm-4.5-air",
+          "modelId": "glm-4.5-air",
+          "contextWindow": 131072,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-4.5-air",
+          "reasoning": false,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$0.13 / $0.85 per Mtok",
+          "inputCostPerToken": 1.3e-7,
+          "outputCostPerToken": 8.5e-7,
+          "cacheReadCostPerToken": 2.5e-8
+        },
+        {
+          "id": "m_tbvmr7",
+          "alias": "glm-4.6",
+          "modelId": "glm-4.6",
+          "contextWindow": 204800,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-4.6",
+          "reasoning": false,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$0.50 / $2 per Mtok",
+          "inputCostPerToken": 5e-7,
+          "outputCostPerToken": 0.000002,
+          "cacheReadCostPerToken": 1e-7
+        },
+        {
+          "id": "m_ox8zyu",
+          "alias": "glm-4.7",
+          "modelId": "glm-4.7",
+          "contextWindow": 204800,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-4.7",
+          "reasoning": true,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$0.40 / $1.75 per Mtok",
+          "inputCostPerToken": 4e-7,
+          "outputCostPerToken": 0.00000175,
+          "cacheReadCostPerToken": 8e-8
+        },
+        {
+          "id": "m_navegz",
+          "alias": "glm-5",
+          "modelId": "glm-5",
+          "contextWindow": 204800,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-5",
+          "reasoning": true,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$0.60 / $1.92 per Mtok",
+          "inputCostPerToken": 6e-7,
+          "outputCostPerToken": 0.00000192,
+          "cacheReadCostPerToken": 1.2e-7
+        },
+        {
+          "id": "m_hmuctd",
+          "alias": "glm-5-turbo",
+          "modelId": "glm-5-turbo",
+          "contextWindow": 202752,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-5-turbo",
+          "reasoning": true,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$1.20 / $4 per Mtok",
+          "inputCostPerToken": 0.0000012,
+          "outputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 2.4e-7
+        },
+        {
+          "id": "m_hyeha7",
+          "alias": "glm-5.1",
+          "modelId": "glm-5.1",
+          "contextWindow": 204800,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-5.1",
+          "reasoning": true,
+          "reasoningMandatory": false,
+          "vision": false,
+          "priceLabel": "$0.97 / $3.04 per Mtok",
+          "inputCostPerToken": 9.66e-7,
+          "outputCostPerToken": 0.000003036,
+          "cacheReadCostPerToken": 1.794e-7
+        },
+        {
+          "id": "m_rzfwuh",
+          "alias": "glm-5.2",
+          "modelId": "glm-5.2",
+          "contextWindow": 1048576,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-5.2",
+          "reasoning": true,
+          "reasoningMandatory": false,
+          "supportedEfforts": [
+            "xhigh",
+            "high"
+          ],
+          "vision": false,
+          "priceLabel": "$0.97 / $3.04 per Mtok",
+          "inputCostPerToken": 9.66e-7,
+          "outputCostPerToken": 0.000003036,
+          "cacheReadCostPerToken": 1.932e-7
+        },
+        {
+          "id": "m_4lhzyu",
+          "alias": "glm-5.3",
+          "modelId": "glm-5.3",
+          "contextWindow": 1048576,
+          "providerId": "p_xng73a1s",
+          "catalogId": "glm-5.3",
+          "reasoning": true,
+          "reasoningMandatory": true,
+          "supportedEfforts": [
+            "max",
+            "high",
+            "low"
+          ],
+          "vision": false,
+          "priceLabel": "$1.40 / $4.40 per Mtok",
+          "inputCostPerToken": 0.0000014,
+          "outputCostPerToken": 0.0000044,
+          "cacheReadCostPerToken": 2.6e-7
+        }
+      ]
+    },
+    {
+      "id": "p_as0wa9fu",
+      "name": "OpenCode Zen",
+      "apiStyle": "openai",
+      "baseUrl": "https://opencode.ai/zen/v1",
+      "encryptedKey": "***",
+      "enabled": true,
+      "models": [
+        {
+          "id": "m_8pcg5z",
+          "alias": "mimo-v2.5-free",
+          "modelId": "mimo-v2.5-free",
+          "contextWindow": 200000,
+          "providerId": "p_as0wa9fu",
+          "catalogId": "mimo-v2.5-free",
+          "reasoning": true
+        },
+        {
+          "id": "m_g9vab5",
+          "alias": "muse-spark-1.2-contributor-free",
+          "modelId": "muse-spark-1.2-contributor-free",
+          "contextWindow": 1048576,
+          "providerId": "p_as0wa9fu",
+          "catalogId": "muse-spark-1.2-contributor-free",
+          "reasoning": true
+        },
+        {
+          "id": "m_mvh57q",
+          "alias": "nemotron-3-ultra-free",
+          "modelId": "nemotron-3-ultra-free",
+          "contextWindow": 1000000,
+          "providerId": "p_as0wa9fu",
+          "catalogId": "nemotron-3-ultra-free",
+          "reasoning": true
+        },
+        {
+          "id": "m_treacz",
+          "alias": "nemotron-3.5-lightning-free",
+          "modelId": "nemotron-3.5-lightning-free",
+          "contextWindow": 262144,
+          "providerId": "p_as0wa9fu",
+          "catalogId": "nemotron-3.5-lightning-free",
+          "reasoning": true
+        },
+        {
+          "id": "m_ijlvfi",
+          "alias": "x-preview-f-free",
+          "modelId": "x-preview-f-free",
+          "contextWindow": 1000000,
+          "providerId": "p_as0wa9fu",
+          "catalogId": "x-preview-f-free",
+          "reasoning": true
+        }
+      ]
+    }
+  ],
+  "workspaces": [
+    {
+      "id": "ws_e4cwtusw",
+      "name": "tide",
+      "path": "/Volumes/Data/Project/Project/tide",
+      "branch": "feat/orchestrator-rewrite-subagent-ui-scroll-fixes",
+      "headCommit": "1cd734e",
+      "isDefault": false,
+      "fileCount": 448,
+      "worktreeLocation": ".agent/worktrees/",
+      "scripts": [
+        {
+          "kind": "setup",
+          "command": "pnpm i"
+        },
+        {
+          "kind": "run",
+          "command": "pnpm electron:dev"
+        }
+      ],
+      "ragConfig": {
+        "embedderId": "local-code-512",
+        "dim": 384,
+        "cloudAllowed": false,
+        "chunkTokens": 512
+      }
+    },
+    {
+      "id": "ws_w05k982a",
+      "name": "tide-landing-page",
+      "path": "/Volumes/512gb/TestAi/sumoCODE/landing-page",
+      "branch": "feat/ui-refresh",
+      "headCommit": "9dcdc0b",
+      "isDefault": false,
+      "fileCount": 39,
+      "worktreeLocation": ".agent/worktrees/",
+      "scripts": [
+        {
+          "kind": "setup",
+          "command": "pnpm i"
+        },
+        {
+          "kind": "run",
+          "command": "pnpm dev"
+        }
+      ]
+    },
+    {
+      "id": "ws_b8um41qf",
+      "name": "car-system",
+      "path": "/Volumes/512gb/TestAi/car-system",
+      "branch": "main",
+      "headCommit": "unknown",
+      "isDefault": false,
+      "fileCount": 0,
+      "worktreeLocation": ".agent/worktrees/",
+      "scripts": [],
+      "mcpOAuth": {
+        "clients": {
+          "supabase": "***"
+        },
+        "verifiers": {
+          "supabase": "***"
+        },
+        "tokens": {
+          "supabase": "***"
+        }
+      }
+    },
+    {
+      "id": "ws_rtuoaiis",
+      "name": "yolo-project",
+      "path": "/Volumes/512gb/TestAi/yolo-project",
+      "branch": "main",
+      "headCommit": "unknown",
+      "isDefault": false,
+      "fileCount": 0,
+      "worktreeLocation": ".agent/worktrees/",
+      "scripts": [
+        {
+          "kind": "setup",
+          "command": "pnpm i"
+        },
+        {
+          "kind": "run",
+          "command": "pnpm dev"
+        }
+      ]
+    },
+    {
+      "id": "ws_bh4ki3k0",
+      "name": "atm-gold",
+      "path": "/Volumes/512gb/TestAi/atm-gold",
+      "branch": "main",
+      "headCommit": "unknown",
+      "isDefault": false,
+      "fileCount": 0,
+      "worktreeLocation": ".agent/worktrees/",
+      "scripts": []
+    },
+    {
+      "id": "ws_k9y3i1nn",
+      "name": "tide-rs",
+      "path": "/Volumes/512gb/TestAi/tide-rs",
+      "branch": "main",
+      "headCommit": "unknown",
+      "isDefault": false,
+      "fileCount": 0,
+      "worktreeLocation": ".agent/worktrees/",
+      "scripts": [
+        {
+          "kind": "setup",
+          "command": "bun install"
+        },
+        {
+          "kind": "run",
+          "command": "bun run dev"
+        }
+      ],
+      "archivedAt": "2026-08-25T12:30:13.436Z"
+    }
+  ],
+  "lastSessionId": "s_ttnhg03m",
+  "lastWorkspaceId": "ws_e4cwtusw",
+  "secrets": {},
+  "generalSettings": {
+    "startAtLogin": true,
+    "notifications": true,
+    "notificationSound": true,
+    "gitCoAuthored": true,
+    "gitCoAuthorName": "***",
+    "gitCoAuthorEmail": "***",
+    "autoUpdateCheck": true,
+    "titleModel": {
+      "providerId": "p_xng73a1s",
+      "modelId": "glm-4.5-air"
+    },
+    "commitMessageModel": {
+      "providerId": "p_xng73a1s",
+      "modelId": "glm-4.5-air"
+    }
+  },
+  "ragEnabledWorkspaces": [
+    "ws_xvs7raf8",
+    "ws_uf921rbl",
+    "ws_e4cwtusw",
+    "ws_w05k982a",
+    "ws_zg9ncfx6",
+    "ws_ew9sfdgr",
+    "ws_b8um41qf",
+    "ws_rtuoaiis",
+    "ws_bh4ki3k0",
+    "ws_plh42xqb",
+    "ws_k9y3i1nn"
+  ],
+  "mcpServers": {
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "Authorization": "***"
+      }
+    },
+    "zread": {
+      "type": "http",
+      "url": "https://api.z.ai/api/mcp/zread/mcp",
+      "headers": {
+        "Authorization": "***"
+      }
+    },
+    "web-search-prime": {
+      "type": "http",
+      "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
+      "headers": {
+        "Authorization": "***"
+      }
+    },
+    "web-reader": {
+      "type": "http",
+      "url": "https://api.z.ai/api/mcp/web_reader/mcp",
+      "headers": {
+        "Authorization": "***"
+      }
+    },
+    "zai-mcp-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@z_ai/mcp-server"
+      ],
+      "env": {
+        "Z_AI_API_KEY": "***",
+        "Z_AI_MODE": "ZAI"
+      }
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    }
+  },
+  "extensions": {
+    "disabled": {
+      "agents": [],
+      "skills": [],
+      "mcp": [
+        "tide-filesystem"
+      ]
+    }
+  },
+  "agentSettings": {
+    "defaultAutonomy": "ask",
+    "maxSteps": 1500,
+    "permissionTimeoutMin": 10,
+    "planModeDryRun": true,
+    "auditShellCommands": true,
+    "compactionEnabled": true,
+    "compactionThreshold": 0.75,
+    "compactionKeepTurns": 3,
+    "experimentalBackgroundDispatch": false
+  }
+}

@@ -1,0 +1,25 @@
+name: tide-codes
+base: core24
+# Overwritten by the publish workflow with the release's version.
+version: "0.0.0"
+summary: A fast, native control plane for local coding agents
+description: |
+  Tide is a fast, native desktop app for working with local coding agents.
+license: GPL-3.0-only
+grade: stable
+# Classic, like the deb: the binary links the host's fontconfig/xkbcommon/
+# Vulkan stack, which strict confinement would wall off. The part below
+# unpacks the release deb built by scripts/bundle-linux.sh.
+confinement: classic
+icon: app-icon.png
+
+parts:
+  tide:
+    plugin: nil
+    override-build: |
+      dpkg -x "$SNAPCRAFT_PART_SRC"/tide-v*-linux-*.deb "$SNAPCRAFT_PART_INSTALL"
+
+apps:
+  tide:
+    command: usr/bin/tide
+    desktop: usr/share/applications/codes.tide.desktop

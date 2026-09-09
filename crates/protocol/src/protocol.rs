@@ -555,6 +555,10 @@ pub struct RagStatusWire {
     pub model_download: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_download_error: Option<String>,
+    /// Aggregate-byte percent while downloading (absent until the size
+    /// HEAD pass finishes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_download_percent: Option<u32>,
     pub chunk_count: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ingested_at: Option<i64>,
@@ -644,6 +648,9 @@ pub struct RagModelWire {
     pub download_state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub download_error: Option<String>,
+    /// Aggregate-byte percent while downloading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_percent: Option<u32>,
 }
 
 /// An index left behind by a settings change (or a delete) — the rebuild

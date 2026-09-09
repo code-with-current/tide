@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Composer — Background Jobs Indicator (mockup)</title>
+<style>
+  :root {
+    --canvas: #1b1d21;
+    --panel: #22252a;
+    --composer: #26292f;
+    --border: #34383f;
+    --text: #e7e8eb;
+    --text-2: #a2a6ae;
+    --text-3: #6f747d;
+    --ghost: #4b505a;
+    --accent: #5a8ee0;
+    --success: #4cba6a;
+    --warn: #d8a03e;
+    --danger: #e5534b;
+    --overlay: rgba(255,255,255,0.055);
+    --overlay-strong: rgba(255,255,255,0.09);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--text);
+    font: 13px/1.45 -apple-system, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
+    padding: 40px 24px 80px;
+    display: flex; flex-direction: column; align-items: center; gap: 56px;
+  }
+  .stage { width: 680px; display: flex; flex-direction: column; gap: 10px; }
+  .stage-label {
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--text-3); margin-bottom: 2px;
+  }
+  .note { color: var(--text-3); font-size: 12px; }
+
+  /* ---------- transcript backdrop ---------- */
+  .bubble {
+    align-self: flex-start; max-width: 78%;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 11px; padding: 9px 13px; color: var(--text-2);
+  }
+  .bubble.user { align-self: flex-end; background: #2b3038; color: var(--text); }
+
+  /* ---------- composer card ---------- */
+  .composer {
+    position: relative;
+    width: 100%; background: var(--composer);
+    border: 1px solid var(--border); border-radius: 13px;
+    padding: 10px;
+  }
+  .field {
+    margin: 2px 8px 8px; min-height: 22px; color: var(--text-3);
+    font-size: 13.5px;
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 2px; font-size: 12.5px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 8px; border-radius: 7px;
+    color: var(--text-2); background: transparent;
+  }
+  .chip .dot-icon { width: 13px; height: 13px; border-radius: 4px; background: var(--ghost); opacity: .8; }
+  .spacer { flex: 1; }
+
+  .rbtn {
+    position: relative;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--overlay-strong); color: var(--text);
+    cursor: default; flex: none;
+  }
+  .rbtn svg { width: 14px; height: 14px; }
+  .rbtn.send { background: var(--text); color: #1b1d21; }
+  .right { display: flex; align-items: center; gap: 6px; }
+
+  /* ---------- the jobs indicator ---------- */
+  .jobs-indicator {
+    position: relative;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: default; flex: none;
+    transition: background .12s ease;
+  }
+  .jobs-indicator:hover { background: var(--overlay); }
+  .jobs-indicator .badge {
+    min-width: 17px; height: 17px; padding: 0 5px;
+    border-radius: 9px; background: var(--accent); color: #fff;
+    font-size: 10.5px; font-weight: 650; line-height: 17px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .dotrun {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(90,142,224,.18);
+  }
+
+  /* ---------- the popup ---------- */
+  .jobs-pop {
+    position: absolute; bottom: calc(100% + 8px); right: 0;
+    width: 344px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 10px 32px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+    padding: 5px; display: none; z-index: 10;
+  }
+  .jobs-indicator:hover .jobs-pop { display: block; }
+  .demo-open .jobs-pop { display: block; }
+  .jobs-pop .head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 9px 7px; font-size: 11px; color: var(--text-3);
+    letter-spacing: .05em; text-transform: uppercase;
+  }
+  .jobs-pop .head a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; font-size: 11.5px; }
+  .job-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 9px; border-radius: 7px;
+  }
+  .job-row:hover { background: var(--overlay); }
+  .job-row .st { width: 14px; height: 14px; flex: none; display: flex; align-items: center; justify-content: center; }
+  .job-row .st svg { width: 12px; height: 12px; }
+  .job-row .mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .job-row .t1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .job-row .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-2); flex: none; }
+  .job-row .lbl { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-row .t2 { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-row .time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
+  .job-row .stop {
+    width: 22px; height: 22px; border-radius: 6px; flex: none;
+    display: none; align-items: center; justify-content: center;
+    color: var(--text-2); background: var(--overlay-strong);
+  }
+  .job-row .stop svg { width: 10px; height: 10px; }
+  .job-row:hover .stop { display: inline-flex; }
+  .job-row .stop:hover { background: rgba(229,83,75,.2); color: var(--danger); }
+  .job-row.done { opacity: .55; }
+  .sep { height: 1px; background: var(--border); margin: 4px 7px; }
+  .c-blue { color: var(--accent); } .c-green { color: var(--success); }
+  .c-dim { color: var(--text-3); } .c-red { color: var(--danger); }
+</style>
+</head>
+<body>
+
+<!-- ====== svg defs ====== -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <g id="i-agent"><circle cx="8" cy="5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.5 13.5c.6-2.6 2.4-4 4.5-4s3.9 1.4 4.5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></g>
+    <g id="i-check"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g id="i-stop"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></g>
+    <g id="i-up"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></g>
+  </defs>
+</svg>
+
+<!-- ============================= A ============================= -->
+<div class="stage">
+  <div class="stage-label">A · idle turn, live jobs — hover the indicator</div>
+  <div class="bubble user">run the test suite in the background and keep going</div>
+  <div class="bubble">Started <b>bash-1</b> in the background — continuing with the refactor.</div>
+  <div class="composer">
+    <div class="field">Ask, plan, build… (draft text or empty)</div>
+    <div class="toolbar">
+      <span class="chip"><span class="dot-icon"></span>tide · glm-4.7</span>
+      <span class="chip"><span class="dot-icon"></span>tide-main</span>
+      <span class="chip"><span class="dot-icon"></span>feature/jobs</span>
+      <span class="spacer"></span>
+      <div class="right">
+        <!-- ★ the indicator -->
+        <div class="jobs-indicator" title="2 background jobs running — hover to list">
+          <span class="badge">2</span>
+          <!-- ★ the popup -->
+          <div class="jobs-pop">
+            <div class="head"><span>Background jobs</span><a href="#">Agents panel →</a></div>
+            <div class="job-row">
+              <span class="st"><span class="dotrun"></span></span>
+              <span class="mid">
+                <span class="t1"><span class="id">bash-1</span><span class="lbl">cargo test</span></span>
+                <span class="t2">process · running</span>
+              </span>
+              <span class="time">1:03</span>
+              <span class="stop" title="Stop bash-1"><svg viewBox="0 0 16 16"><use href="#i-stop"/></svg></span>
+            </div>
+            <div class="job-row">
+              <span class="st c-blue"><svg viewBox="0 0 16 16"><use href="#i-agent"/></svg></span>
+              <span class="mid">
+                <span class="t1"><span class="id">agt_7f3k2</span><span class="lbl">code-reviewer · review diff</span></span>
+                <span class="t2">subagent · running</span>
+              </span>
+              <span class="time">0:41</span>
+              <span class="stop" title="Stop agt_7f3k2"><svg viewBox="0 0 16 16"><use href="#i-stop"/></svg></span>
+            </div>
+            <div class="sep"></div>
+            <div class="job-row done">
+              <span class="st c-green"><svg viewBox="0 0 16 16"><use href="#i-check"/></svg></span>
+              <span class="mid">
+                <span class="t1"><span class="id">bash-2</span><span class="lbl">cargo build</span></span>
+                <span class="t2">process · completed</span>
+              </span>
+              <span class="time">4:12</span>
+            </div>
+          </div>
+        </div>
+        <!-- send button (26×26, same as today) -->
+        <span class="rbtn"><svg viewBox="0 0 16 16" style="opacity:.35"><use href="#i-up"/></svg></span>
+      </div>
+    </div>
+  </div>
+  <div class="note">Badge shows the running count only — no spinner, the number is the state. It disappears when the last job settles; settled rows stay dimmed below the separator while anything still runs.</div>
+</div>
+
+<!-- ============================= B ============================= -->
+<div class="stage demo-open">
+  <div class="stage-label">B · turn running — popup pinned open</div>
+  <div class="composer">
+    <div class="field">Continuing the refactor while the suite runs…</div>
+    <div class="toolbar">
+      <span class="chip"><span class="dot-icon"></span>tide · glm-4.7</span>
+      <span class="spacer"></span>
+      <div class="right">
+        <div class="jobs-indicator" title="1 background job running — hover to list">
+          <span class="badge">1</span>
+          <div class="jobs-pop">
+            <div class="head"><span>Background jobs</span><a href="#">Agents panel →</a></div>
+            <div class="job-row">
+              <span class="st"><span class="dotrun"></span></span>
+              <span class="mid">
+                <span class="t1"><span class="id">bash-1</span><span class="lbl">cargo test</span></span>
+                <span class="t2">process · running</span>
+              </span>
+              <span class="time">2:18</span>
+              <span class="stop"><svg viewBox="0 0 16 16"><use href="#i-stop"/></svg></span>
+            </div>
+          </div>
+        </div>
+        <span class="rbtn send" title="Queue follow-up"><svg viewBox="0 0 16 16"><use href="#i-up"/></svg></span>
+      </div>
+    </div>
+  </div>
+  <div class="note">The feature adds no control of its own beside the badge. In the real composer the existing turn-Stop (shown while a turn runs) simply composes next to it, unchanged; job stops live on the popover rows.</div>
+</div>
+
+</body>
+</html>
