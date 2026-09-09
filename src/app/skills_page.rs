@@ -862,40 +862,19 @@ impl Tide {
         };
         let caption = format!("{} · {}", skill.sources_label(), scope_caption);
 
-        let toggle = div()
-            .id(SharedString::from(format!(
-                "skill-enabled-{}",
-                skill.row_key
-            )))
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .w(px(36.0))
-            .h(px(20.0))
-            .p(px(2.0))
-            .flex_none()
-            .rounded_full()
-            .cursor_default()
-            .bg(if enabled { theme.inverse } else { theme.inset })
-            .border_1()
-            .border_color(if enabled {
-                theme.inverse
-            } else {
-                theme.border_strong
-            })
-            .flex()
-            .items_center()
-            .when(enabled, |element| element.justify_end())
-            .child(div().w(px(14.0)).h(px(14.0)).rounded_full().bg(if enabled {
-                theme.on_inverse
-            } else {
-                theme.text_tertiary
-            }))
-            .on_click(cx.listener({
+        let toggle = crate::ui::toggle_switch(
+            SharedString::from(format!("skill-enabled-{}", skill.row_key)),
+            enabled,
+            false,
+            *theme,
+            cx,
+            {
                 let dir = dir.clone();
-                move |this, _, _, cx| {
+                move |this, _window, cx| {
                     this.toggle_skill_enabled(dir.clone(), !enabled, cx);
                 }
-            }));
+            },
+        );
 
         let mut contents = Vec::new();
         if skill.supporting_files == 1 {
