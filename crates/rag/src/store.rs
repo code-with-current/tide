@@ -1,7 +1,8 @@
 //! Per-workspace RAG storage — port of `app/core/rag/store.ts`.
 //! SQLite + FTS5 + sqlite-vec at `<data>/rag/<workspaceId>/index.db`
-//! (schema v3). Table/DDL shapes are byte-compatible with the TS store so
-//! existing indexes stay valid: `chunks` (+ `sourceId`), `chunks_fts`
+//! (schema v3). DDL shapes descend from a TS-era store (no longer
+//! in-tree) and stay frozen so its pre-port indexes keep opening:
+//! `chunks` (+ `sourceId`, `heading`), `chunks_fts`
 //! (porter unicode61), `chunks_vec` (`vec0`, rowid = chunks.rowid,
 //! `+chunkId` aux), `meta`. Since v3 every index carries an
 //! `embeddingPlan` meta record — {embedderId, dims, chunking} — written
@@ -263,7 +264,9 @@ impl RagStore {
         // see them again — every open runs this guarded no-op ALTER
         // instead (same guard idiom as the sourceId block). Fresh dbs
         // skip it (no chunks table yet) and get the column from the v1
-        // DDL below.
+        // DDL below. Single-writer-per-index by design, the same accepted
+        // shape as the v2 sourceId guard — concurrent openers could race
+        // the check into a "duplicate column name" error.
         let chunks_exists: bool = self
             .conn
             .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chunks'")?
@@ -662,20 +665,8 @@ impl RagStore {
         let rows = stmt
             .query_map(params![safe, k as i64], |row| {
                 Ok(FtsHit {
-                    row: ChunkRow {
-                        id: row.get(0)?,
-                        path: row.get(1)?,
-                        symbol: row.get(2)?,
-                        content: row.get(3)?,
-                        content_hash: row.get(4)?,
-                        start_line: row.get(5)?,
-                        end_line: row.get(6)?,
-                        embedder_id: row.get(7)?,
-                        created_at: row.get(8)?,
-                        source_id: row.get(9)?,
-                        heading: row.get(10)?,
-                    },
-                    rank: row.get(11)?,
+                    row: row_from_db(row)?,
+                    rank: row.get("rank")?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -931,8 +922,12 @@ mod tests {
         assert_eq!(store.plan().dims, 768);
         assert_eq!(store.chunk_count().unwrap(), 0);
         // The recreated vec0 only takes the new space.
-        assert!(store.upsert_vectors(&[(1, "x".into(), vec![0.0; 384])]).is_err());
-        assert!(store.upsert_vectors(&[(1, "x".into(), vec![0.0; 768])]).is_ok());
+        assert!(store
+            .upsert_vectors(&[(1, "x".into(), vec![0.0; 384])])
+            .is_err());
+        assert!(store
+            .upsert_vectors(&[(1, "x".into(), vec![0.0; 768])])
+            .is_ok());
 
         // The rewrite persists — a fresh open reads the new plan.
         let reopened = RagStore::open_at(&db).unwrap();
