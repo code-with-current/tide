@@ -6,6 +6,7 @@ pub mod agent_message;
 pub mod ask_followup;
 pub mod background_shell;
 pub mod bash;
+pub mod browser;
 pub mod compact;
 pub mod computer;
 pub mod computer_tools;
@@ -44,6 +45,7 @@ pub use ask_followup::{
 };
 pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
+pub use browser::BrowserBackend;
 pub use compact::{CompactTool, DEFAULT_KEEP_LAST};
 pub use computer::ComputerBackend;
 pub use computer_tools::{

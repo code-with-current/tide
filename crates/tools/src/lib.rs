@@ -39,6 +39,7 @@ pub use tools::ask_followup::{
     followup_pick_outcome, normalize_followup_args, render_followup_text, FollowupAsk,
     FollowupOption,
 };
+pub use tools::browser::{set_shared_browser_backend, shared_browser_backend, BrowserBackend};
 pub use tools::compact::{run_compact, DEFAULT_KEEP_LAST};
 pub use tools::computer::{set_shared_computer_backend, shared_computer_backend, ComputerBackend};
 pub use tools::exit_plan_mode::run_exit_plan_mode;
