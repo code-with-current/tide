@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::embedder::Embedder;
@@ -66,6 +66,21 @@ pub struct SourceProgressEvent {
     pub current: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// Library-doc registry row — the stable-ID heart of the Knowledge
+/// Library: the id is minted once on first sight of a rel_path and
+/// survives every later upsert (v1 rename handling: tombstone, no hash
+/// carry).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryDoc {
+    pub stable_id: String,
+    pub rel_path: String,
+    pub title: String,
+    pub description: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 /// A normalized document produced by fetchers.
@@ -128,6 +143,16 @@ impl KnowledgeStore {
                  ALTER TABLE sources ADD COLUMN injectionDetail TEXT;",
             )?;
         }
+        rag.run_raw(
+            "CREATE TABLE IF NOT EXISTS library_docs (
+              stable_id TEXT PRIMARY KEY,
+              rel_path TEXT NOT NULL UNIQUE,
+              title TEXT NOT NULL DEFAULT '',
+              description TEXT NOT NULL DEFAULT '',
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            )",
+        )?;
         Ok(Self { rag })
     }
 
@@ -344,6 +369,90 @@ impl KnowledgeStore {
             })
             .map(|s| s.id)
             .collect()
+    }
+
+    /// Mint-or-update. The stable_id is minted on first sight of a
+    /// rel_path and never changes; `description: None` preserves the
+    /// stored one (agent re-captures must not wipe triage text).
+    pub fn library_upsert(
+        &self,
+        rel_path: &str,
+        title: &str,
+        description: Option<&str>,
+    ) -> rusqlite::Result<String> {
+        let now = unix_ms_now();
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO library_docs(stable_id, rel_path, title, description, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, COALESCE(?4, ''), ?5, ?5)
+                 ON CONFLICT(rel_path) DO UPDATE SET
+                   title = excluded.title,
+                   description = COALESCE(?4, library_docs.description),
+                   updated_at = excluded.updated_at",
+                params![new_uuid(), rel_path, title, description, now],
+            )?;
+            conn.query_row(
+                "SELECT stable_id FROM library_docs WHERE rel_path = ?1",
+                [rel_path],
+                |r| r.get(0),
+            )
+        })
+    }
+
+    pub fn library_doc_by_path(&self, rel_path: &str) -> rusqlite::Result<Option<LibraryDoc>> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT stable_id, rel_path, title, description, created_at, updated_at
+                 FROM library_docs WHERE rel_path = ?1",
+                [rel_path],
+                Self::library_doc_from_row,
+            )
+            .optional()
+        })
+    }
+
+    /// Delete rows whose rel_path is no longer on disk; returns the
+    /// removed stable_ids (v1 rename handling: tombstone, no hash carry).
+    pub fn library_tombstone_missing(&self, keep: &[String]) -> rusqlite::Result<Vec<String>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT stable_id, rel_path FROM library_docs")?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            let mut gone = Vec::new();
+            for (id, rel) in rows {
+                if !keep.contains(&rel) {
+                    conn.execute("DELETE FROM library_docs WHERE stable_id = ?1", [&id])?;
+                    gone.push(id);
+                }
+            }
+            Ok(gone)
+        })
+    }
+
+    /// Manifest ordering: triage list, most recently updated first.
+    pub fn library_manifest(&self) -> rusqlite::Result<Vec<LibraryDoc>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT stable_id, rel_path, title, description, created_at, updated_at
+                 FROM library_docs ORDER BY updated_at DESC",
+            )?;
+            let rows = stmt
+                .query_map([], Self::library_doc_from_row)?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    fn library_doc_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryDoc> {
+        Ok(LibraryDoc {
+            stable_id: row.get(0)?,
+            rel_path: row.get(1)?,
+            title: row.get(2)?,
+            description: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
     }
 
     /// The sources registry lives on the RagStore's connection — a tiny
@@ -1289,6 +1398,41 @@ mod tests {
 
         ks.delete_source(&src.id);
         assert!(ks.list_sources().unwrap().is_empty());
+    }
+
+    #[test]
+    fn library_registry_mints_stable_ids_once_and_tombstones() {
+        let (_dir, ks) = store();
+        let a1 = ks
+            .library_upsert("proj/decisions.md", "Decisions", None)
+            .unwrap();
+        let a2 = ks
+            .library_upsert("proj/decisions.md", "Decisions", Some("ADR log"))
+            .unwrap();
+        assert_eq!(a1, a2, "upsert must preserve the minted stable_id");
+        let doc = ks
+            .library_doc_by_path("proj/decisions.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(doc.description, "ADR log");
+
+        // Agent re-capture with no description must NOT wipe triage text.
+        ks.library_upsert("proj/decisions.md", "Decisions retitled", None)
+            .unwrap();
+        let doc = ks
+            .library_doc_by_path("proj/decisions.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(doc.description, "ADR log");
+        assert_eq!(doc.title, "Decisions retitled");
+
+        let b = ks.library_upsert("notes.md", "Notes", None).unwrap();
+        let gone = ks
+            .library_tombstone_missing(&["proj/decisions.md".to_string()])
+            .unwrap();
+        assert_eq!(gone, vec![b]);
+        assert!(ks.library_doc_by_path("notes.md").unwrap().is_none());
+        assert!(ks.library_manifest().unwrap().len() == 1);
     }
 
     #[test]
