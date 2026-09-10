@@ -405,8 +405,16 @@ struct Inner {
     /// Daemon-owned store directories (attachments, blobs) that read tools
     /// may resolve into on top of the workspace — the composer hands these
     /// paths to the provider as attachments, and path safety would
-    /// otherwise refuse them as workspace escapes.
+    /// otherwise refuse them as workspace escapes. The knowledge library
+    /// rides along so read_file/glob/grep can read library docs.
     read_annex_roots: Vec<PathBuf>,
+    /// The daemon's write annexes (the knowledge library): write_file and
+    /// edit_file may resolve ABSOLUTE targets into them on top of the
+    /// workspace — the /kb workflow's agent writes. Relative targets stay
+    /// workspace-scoped, and an annex write rides the SAME Plan/Build gate
+    /// as every other write (plan mode blocks it; there is no softer
+    /// auto-allow than the one workspace writes already get).
+    write_annex_roots: Vec<PathBuf>,
     session_id: String,
     context_window: Mutex<Option<u64>>,
     provider_cursor: Mutex<Option<ProviderResumeCursor>>,
@@ -484,6 +492,7 @@ impl TideDriver {
             project_id,
             cwd: options.cwd,
             read_annex_roots: daemon_read_annex_roots(),
+            write_annex_roots: daemon_write_annex_roots(),
             session_id,
             context_window: Mutex::new(None),
             provider_cursor: Mutex::new(options.provider_cursor.clone()),
@@ -1028,13 +1037,29 @@ fn ensure_assistant_tail(history: &mut Vec<HistoryMessage>) -> bool {
 }
 
 /// Store directories the daemon anchors beside `app.db` — the same parent
-/// the backend uses for its attachment and blob stores. Read tools accept
-/// absolute paths inside these in addition to the workspace.
+/// the backend uses for its attachment and blob stores — plus the knowledge
+/// library under the RAG data dir (`rag::library_root(data_dir())`, i.e.
+/// `$TIDE_DATA_DIR/library` or `~/.tide/library`). Read tools accept
+/// absolute paths inside these in addition to the workspace. The library
+/// is derived from the SAME root the RAG indexer reads (`data_dir()`, not
+/// the app.db parent — a different directory) so the two can never drift.
+/// A missing directory is harmless: resolution against a not-yet-created
+/// store simply never matches.
 fn daemon_read_annex_roots() -> Vec<PathBuf> {
-    match crate::persistence::StateStore::default_path().parent() {
+    let mut roots = match crate::persistence::StateStore::default_path().parent() {
         Some(parent) => vec![parent.join("attachments"), parent.join("blobs")],
         None => Vec::new(),
-    }
+    };
+    roots.push(rag::library_root(&store::paths::data_dir()));
+    roots
+}
+
+/// The daemon's write annexes: just the knowledge library, at the exact
+/// root the RAG indexer reads. write_file and edit_file resolve ABSOLUTE
+/// targets under it (the /kb workflow); every other tool stays
+/// workspace-only.
+fn daemon_write_annex_roots() -> Vec<PathBuf> {
+    vec![rag::library_root(&store::paths::data_dir())]
 }
 
 /// Push a user message — the only door user-role messages use — keeping
@@ -3875,6 +3900,7 @@ fn run_gated_call(
         session_id: session_id.clone(),
         workspace_root: inner.cwd.clone(),
         extra_read_roots: inner.read_annex_roots.clone(),
+        write_annex_roots: inner.write_annex_roots.clone(),
         workspace_id: inner
             .project_id
             .clone()
@@ -4009,6 +4035,40 @@ fn spawn_turn(inner: &Arc<Inner>, message: StepMessage) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn annex_roots_carry_the_knowledge_library() {
+        // The library rides the READ annexes (agent read tools reach
+        // library docs) and is the daemon's one WRITE annex (write_file
+        // and edit_file reach it) — both derived from the exact root the
+        // RAG indexer reads, `data_dir()`, never a second location.
+        let library = rag::library_root(&store::paths::data_dir());
+        assert!(daemon_read_annex_roots().contains(&library));
+        assert_eq!(daemon_write_annex_roots(), vec![library]);
+    }
+
+    #[test]
+    fn annex_writes_ride_the_plan_build_gate_unchanged() {
+        // An annex (library) write is still a write: plan mode blocks it
+        // with the same rejection as a workspace write — the annex grant
+        // is resolution-only and cannot soften the permission layer.
+        // (Build mode allows it like every other write; there is no
+        // softer tier for it to slip into — the chip is the whole gate.)
+        let annex_args = json!({
+            "path": rag::library_root(&store::paths::data_dir()).join("docs/kb.md"),
+            "content": "x"
+        });
+        let err = plan_allows(InteractionMode::Plan, "write_file", &annex_args).unwrap_err();
+        assert!(err.contains("Plan mode is read-only"), "{err}");
+        assert!(plan_allows(InteractionMode::Build, "write_file", &annex_args).is_ok());
+        let annex_edit = json!({
+            "path": rag::library_root(&store::paths::data_dir()).join("docs/kb.md"),
+            "old_string": "a",
+            "new_string": "b"
+        });
+        assert!(plan_allows(InteractionMode::Plan, "edit_file", &annex_edit).is_err());
+        assert!(plan_allows(InteractionMode::Build, "edit_file", &annex_edit).is_ok());
+    }
 
     #[test]
     fn prompt_image_mentions_scans_bare_and_quoted_tokens() {

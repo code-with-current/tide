@@ -111,8 +111,17 @@ pub struct ToolContext {
     /// Daemon-owned read annexes (attachment and blob stores) that read
     /// tools may resolve absolute paths into, on top of the workspace — the
     /// composer hands these store paths to the provider as attachments.
-    /// Write tools ignore them and stay workspace-only.
+    /// Write tools ignore them and stay workspace-scoped; write_file and
+    /// edit_file get their own [`Self::write_annex_roots`] grant instead.
     pub extra_read_roots: Vec<PathBuf>,
+    /// Daemon-owned write annexes (the knowledge library) that write_file
+    /// and edit_file may resolve ABSOLUTE targets into, on top of the
+    /// workspace. Relative targets stay workspace-scoped. Empty in tests
+    /// and tool-only binaries — writes are workspace-only there. Writes
+    /// into an annex are outside the workspace and never silently
+    /// privileged: they ride the same permission gate as every other
+    /// write (plan mode blocks them like any mutation).
+    pub write_annex_roots: Vec<PathBuf>,
     /// The memory tool's workspace store key; empty until the orchestrator
     /// wires the active workspace id (memory then reports "no active
     /// workspace", matching the TS behavior for a missing id).
@@ -136,6 +145,7 @@ impl ToolContext {
             session_id: String::new(),
             workspace_root: workspace_root.into(),
             extra_read_roots: Vec::new(),
+            write_annex_roots: Vec::new(),
             workspace_id: String::new(),
             todo_state: TodoState::shared(),
             abort: AbortFlag::new(),

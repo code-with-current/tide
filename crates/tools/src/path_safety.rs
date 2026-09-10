@@ -105,8 +105,97 @@ pub fn resolve_inside_roots(
     resolve_inside_workspace(workspace_root, target)
 }
 
+/// Daemon-owned write annexes (the knowledge library): write_file may
+/// resolve an ABSOLUTE target into them in addition to the workspace —
+/// the write-side counterpart of [`resolve_inside_roots`], following the
+/// same vocabulary rule: relative targets stay workspace-scoped (a
+/// relative path is workspace vocabulary and must never silently reach
+/// into a store). The workspace branch is byte-identical to
+/// [`resolve_inside_workspace`] — still lexical, still no symlink
+/// following, so a brand-new file never trips canonicalize ENOENT.
+///
+/// An annex-resolved target IS symlink-verified: the canonical path of
+/// the target — or, for a file that doesn't exist yet, of its deepest
+/// existing ancestor — must land back inside the workspace or the
+/// matched annex, so a symlink planted inside the annex cannot redirect
+/// the write outside (the write-side mirror of
+/// [`resolve_and_follow_symlinks_roots`]' re-verification; edit_file,
+/// whose targets must already exist, uses that fn directly).
+pub fn resolve_inside_workspace_or_write_annexes(
+    workspace_root: &Path,
+    write_annex_roots: &[PathBuf],
+    target: &str,
+) -> Result<PathBuf, PathEscapeError> {
+    if let Ok(abs) = resolve_inside_workspace(workspace_root, target) {
+        return Ok(abs);
+    }
+    if Path::new(target).is_absolute() {
+        for annex in write_annex_roots {
+            if let Ok(abs) = resolve_inside_workspace(annex, target) {
+                return verify_write_annex_target(workspace_root, annex, target, abs);
+            }
+        }
+    }
+    resolve_inside_workspace(workspace_root, target)
+}
+
+/// Symlink defense for one annex-resolved write target. Two cases:
+/// - something already exists AT the target: canonicalize it and
+///   re-verify against the annex (and workspace). A dangling symlink
+///   fails canonicalize and is REFUSED — `fs::write` would otherwise
+///   materialize the escaped target;
+/// - the target is new: the tail beyond its deepest existing ancestor
+///   cannot contain symlinks (nothing exists there), so the ANCESTOR is
+///   canonicalized and re-verified instead — closing the
+///   new-file-through-parent-symlink hole. Reaching the annex root
+///   without an existing node (a not-yet-created library, say) is safe:
+///   the caller's `create_dir_all` builds the whole subtree fresh.
+fn verify_write_annex_target(
+    workspace_root: &Path,
+    annex: &Path,
+    target: &str,
+    abs: PathBuf,
+) -> Result<PathBuf, PathEscapeError> {
+    let io_error = |e: std::io::Error| PathEscapeError {
+        message: format!("Path error: {e}"),
+        requested_path: Some(target.to_string()),
+        workspace_root: Some(workspace_root.display().to_string()),
+    };
+    let inside = |real: &Path| {
+        assert_resolved_inside(annex, real).is_ok()
+            || assert_resolved_inside(workspace_root, real).is_ok()
+    };
+    if std::fs::symlink_metadata(&abs).is_ok() {
+        return match std::fs::canonicalize(&abs) {
+            Ok(real) if inside(&real) => Ok(real),
+            Ok(real) => Err(PathEscapeError::resolved_escape(&real, annex)),
+            Err(e) => Err(io_error(e)),
+        };
+    }
+    // `abs` is lexically normalized; compare the walk against the
+    // normalized annex so a non-canonical root spelling still terminates.
+    let annex = &lexical_normalize(annex);
+    let mut probe = abs.as_path();
+    while probe != annex && !probe.exists() {
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => break,
+        }
+    }
+    match std::fs::canonicalize(probe) {
+        Ok(real) if inside(&real) => Ok(abs),
+        Ok(real) => Err(PathEscapeError::resolved_escape(&real, annex)),
+        // Vanished mid-call — keep the lexical form, like the read side.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(abs),
+        Err(e) => Err(io_error(e)),
+    }
+}
+
 /// Symlink-following variant of [`resolve_inside_roots`]: resolve, then
 /// re-verify the canonical target against the workspace and every annex.
+/// Also serves edit_file with the write-annex grant: its targets must
+/// already exist, so the read-side re-verification is exactly the write
+/// defense needed there.
 pub fn resolve_and_follow_symlinks_roots(
     workspace_root: &Path,
     annex_roots: &[PathBuf],
@@ -377,5 +466,128 @@ mod tests {
         assert!(resolve_inside_roots(&ws, &[annex.clone()], &escape).is_err());
         // A path outside every root keeps the workspace error.
         assert!(resolve_inside_roots(&ws, &[annex], "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn write_annex_accepts_absolute_library_paths_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(library.join("docs")).unwrap();
+
+        // An absolute target inside the annex resolves.
+        let doc = library.join("docs/kb.md").display().to_string();
+        let resolved =
+            resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &doc).unwrap();
+        assert_eq!(resolved, library.join("docs/kb.md"));
+
+        // Workspace targets are untouched by the annex grant: the same
+        // absolute workspace path resolves identically with and without
+        // the annex list (byte-identical inside-workspace behavior).
+        let inside = ws.join("src/a.rs");
+        std::fs::create_dir_all(ws.join("src")).unwrap();
+        let inside = inside.display().to_string();
+        assert_eq!(
+            resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &inside).unwrap(),
+            resolve_inside_workspace(&ws, &inside).unwrap()
+        );
+
+        // Relative targets NEVER reach the annex — even one spelling a
+        // `../..` walk that would land beside it stays workspace-scoped
+        // and is rejected as a workspace escape.
+        let rel_walk = format!(
+            "../../{}",
+            library
+                .join("docs/kb.md")
+                .display()
+                .to_string()
+                .trim_start_matches('/')
+        );
+        let err = resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &rel_walk)
+            .unwrap_err();
+        assert!(err.message.contains("outside the workspace root"));
+    }
+
+    #[test]
+    fn write_annex_rejects_sibling_and_outside_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+
+        // A sibling of the annex (same parent dir) is not the annex.
+        let sibling = tmp.path().join("libraryx/secret.txt").display().to_string();
+        assert!(
+            resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &sibling).is_err()
+        );
+        // Escaping the annex itself stays rejected.
+        let escape = library.join("../secret.txt").display().to_string();
+        assert!(
+            resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &escape).is_err()
+        );
+        // Far-outside targets keep the workspace error.
+        assert!(resolve_inside_workspace_or_write_annexes(&ws, &[library], "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn write_annex_rejects_symlink_escapes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "x").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, library.join("evil")).unwrap();
+
+        #[cfg(unix)]
+        {
+            // Existing target through the link → canonical target escapes.
+            let existing = library.join("evil/secret.txt").display().to_string();
+            let err = resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &existing)
+                .unwrap_err();
+            assert!(err.message.contains("symlink"), "{err:?}");
+            // Brand-new file through the same link → the deepest existing
+            // ancestor (the link itself) canonicalizes outside → rejected.
+            let new_file = library.join("evil/pwned.md").display().to_string();
+            assert!(
+                resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &new_file)
+                    .is_err()
+            );
+            // A dangling symlink at the target is refused outright —
+            // fs::write would otherwise CREATE the escaped target.
+            std::os::unix::fs::symlink(tmp.path().join("nowhere"), library.join("dangling.md"))
+                .unwrap();
+            let dangling = library.join("dangling.md").display().to_string();
+            assert!(
+                resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &dangling)
+                    .is_err()
+            );
+            // A symlink INSIDE the annex pointing to another spot inside
+            // the annex stays allowed (re-verification passes).
+            std::fs::write(library.join("real.md"), "y").unwrap();
+            std::os::unix::fs::symlink("real.md", library.join("alias.md")).unwrap();
+            let alias = library.join("alias.md").display().to_string();
+            let resolved =
+                resolve_inside_workspace_or_write_annexes(&ws, &[library.clone()], &alias).unwrap();
+            assert!(resolved.ends_with("real.md"));
+        }
+    }
+
+    #[test]
+    fn write_annex_allows_first_write_into_missing_annex() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+        // The library root itself doesn't exist yet — nothing in the
+        // subtree can be a symlink, so the lexical resolution wins and
+        // the caller's create_dir_all builds it.
+        let doc = library.join("docs/first.md").display().to_string();
+        let resolved = resolve_inside_workspace_or_write_annexes(&ws, &[library], &doc).unwrap();
+        assert_eq!(resolved, tmp.path().join("library/docs/first.md"));
     }
 }

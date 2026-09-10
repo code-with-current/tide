@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use crate::path_safety::resolve_inside_workspace;
+use crate::path_safety::resolve_inside_workspace_or_write_annexes;
 use crate::permission::RiskTier;
 use crate::{DiffLine, Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
@@ -18,7 +18,12 @@ const DESCRIPTION: &str = "Create a new file or fully replace an existing file's
 
 pub struct WriteFileTool;
 
-pub(crate) fn run_write_file(rel_path: &str, content: &str, workspace_root: &Path) -> ToolOutcome {
+pub(crate) fn run_write_file(
+    rel_path: &str,
+    content: &str,
+    workspace_root: &Path,
+    write_annex_roots: &[std::path::PathBuf],
+) -> ToolOutcome {
     if rel_path.is_empty() {
         return ToolOutcome::failed("Missing required arg: path");
     }
@@ -34,8 +39,18 @@ pub(crate) fn run_write_file(rel_path: &str, content: &str, workspace_root: &Pat
     }
 
     // resolve_inside (not follow_symlinks) so creating a file where nothing
-    // exists yet doesn't trip canonicalize ENOENT.
-    let abs = match resolve_inside_workspace(workspace_root, rel_path) {
+    // exists yet doesn't trip canonicalize ENOENT. Write annexes (the
+    // knowledge library) extend this for ABSOLUTE targets only — the annex
+    // branch re-verifies symlinks itself (see path_safety); relative
+    // targets stay workspace-scoped either way. An annex write is a write
+    // OUTSIDE the workspace: it keeps RiskTier::Write, so the permission
+    // gate treats it exactly like any other write (plan mode blocks it,
+    // build mode allows it) — never silently privileged.
+    let abs = match resolve_inside_workspace_or_write_annexes(
+        workspace_root,
+        write_annex_roots,
+        rel_path,
+    ) {
         Ok(abs) => abs,
         Err(e) => return ToolOutcome::failed(format!("Path error: {e}")),
     };
@@ -119,7 +134,12 @@ impl Tool for WriteFileTool {
     ) -> Result<ToolOutcome, ToolError> {
         let path = arg_str(&args, "path");
         let content = arg_str(&args, "content");
-        Ok(run_write_file(&path, &content, &ctx.workspace_root))
+        Ok(run_write_file(
+            &path,
+            &content,
+            &ctx.workspace_root,
+            &ctx.write_annex_roots,
+        ))
     }
 }
 
@@ -130,7 +150,7 @@ mod tests {
     #[test]
     fn creates_and_overwrites() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_write_file("src/new.ts", "a\nb", tmp.path());
+        let out = run_write_file("src/new.ts", "a\nb", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
         assert!(out
             .output
@@ -141,7 +161,7 @@ mod tests {
             "a\nb"
         );
 
-        let out = run_write_file("src/new.ts", "z", tmp.path());
+        let out = run_write_file("src/new.ts", "z", tmp.path(), &[]);
         assert!(out
             .output
             .starts_with("Overwrote src/new.ts (1 lines, 1 bytes)."));
@@ -150,7 +170,7 @@ mod tests {
     #[test]
     fn missing_path_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_write_file("", "x", tmp.path());
+        let out = run_write_file("", "x", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("Missing required arg"));
     }
@@ -159,7 +179,7 @@ mod tests {
     fn missing_workspace_root_fails_loudly() {
         let tmp = tempfile::tempdir().unwrap();
         let ghost = tmp.path().join("ghost");
-        let out = run_write_file("a.txt", "x", &ghost);
+        let out = run_write_file("a.txt", "x", &ghost, &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("Workspace root does not exist"));
         assert!(!ghost.exists(), "must not resurrect the deleted root");
@@ -168,7 +188,7 @@ mod tests {
     #[test]
     fn traversal_rejected() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_write_file("../outside.txt", "x", tmp.path());
+        let out = run_write_file("../outside.txt", "x", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("Path error"));
         assert!(!tmp.path().parent().unwrap().join("outside.txt").exists());
@@ -177,7 +197,7 @@ mod tests {
     #[test]
     fn empty_content_is_valid() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_write_file("empty.txt", "", tmp.path());
+        let out = run_write_file("empty.txt", "", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("empty.txt")).unwrap(),
@@ -204,7 +224,7 @@ mod tests {
     #[test]
     fn new_file_diff_is_all_adds() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_write_file("new.txt", "a\nb\n", tmp.path());
+        let out = run_write_file("new.txt", "a\nb\n", tmp.path(), &[]);
         let Some(crate::ToolDisplay::Diff {
             path,
             hunks,
@@ -227,8 +247,8 @@ mod tests {
     #[test]
     fn overwrite_diff_shows_before_and_after() {
         let tmp = tempfile::tempdir().unwrap();
-        run_write_file("f.txt", "one\ntwo\nthree", tmp.path());
-        let out = run_write_file("f.txt", "one\nTWO\nthree", tmp.path());
+        run_write_file("f.txt", "one\ntwo\nthree", tmp.path(), &[]);
+        let out = run_write_file("f.txt", "one\nTWO\nthree", tmp.path(), &[]);
         let Some(crate::ToolDisplay::Diff {
             hunks,
             additions,
@@ -251,5 +271,67 @@ mod tests {
             .collect();
         assert!(texts.contains(&"two"), "old line rides as del: {texts:?}");
         assert!(texts.contains(&"TWO"), "new line rides as add: {texts:?}");
+    }
+
+    #[test]
+    fn annex_write_creates_library_doc() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+
+        // An ABSOLUTE library target resolves through the write annex —
+        // parent dirs are created, exactly like a workspace write.
+        let doc = library.join("docs/kb.md").display().to_string();
+        let out = run_write_file(&doc, "# Note\nbody", &ws, &[library.clone()]);
+        assert_eq!(out.status, crate::OutcomeStatus::Executed);
+        assert_eq!(
+            std::fs::read_to_string(library.join("docs/kb.md")).unwrap(),
+            "# Note\nbody"
+        );
+
+        // Overwrite through the annex works too.
+        let out = run_write_file(&doc, "# Note\nv2", &ws, &[library]);
+        assert_eq!(out.status, crate::OutcomeStatus::Executed);
+        assert!(out.output.starts_with("Overwrote"));
+    }
+
+    #[test]
+    fn annex_write_never_reached_by_relative_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+
+        // A relative walk toward the library stays workspace-scoped and is
+        // rejected as a workspace escape — the annex is absolute-only.
+        let out = run_write_file("../library/escape.md", "x", &ws, &[library.clone()]);
+        assert_eq!(out.status, crate::OutcomeStatus::Failed);
+        assert!(out.output.contains("Path error"));
+        assert!(!library.join("escape.md").exists());
+
+        // Absolute escapes OUT of the annex stay rejected as well.
+        let escape = library.join("../out.md").display().to_string();
+        let out = run_write_file(&escape, "x", &ws, &[library]);
+        assert_eq!(out.status, crate::OutcomeStatus::Failed);
+        assert!(out.output.contains("Path error"));
+        assert!(!tmp.path().join("out.md").exists());
+    }
+
+    #[test]
+    fn annex_write_permission_semantics_stay_write_tiered() {
+        // The annex grant is resolution-only: it must NOT soften the
+        // permission gate. write_file stays RiskTier::Write, so plan mode
+        // blocks an annex write exactly like a workspace write (the gate
+        // is name-keyed and never sees the roots), and build mode allows
+        // it like any other write. Structurally guaranteed by
+        // `WriteFileTool::risk_tier`; asserted here so a future per-path
+        // tier cannot drift in unnoticed.
+        assert_eq!(WriteFileTool.risk_tier(), RiskTier::Write);
+        assert_eq!(
+            crate::permission::risk_tier_for_call("write_file", &serde_json::json!({})),
+            RiskTier::Write
+        );
     }
 }

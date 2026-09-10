@@ -30,6 +30,7 @@ fn ctx_for(session_id: &str) -> ToolContext {
         session_id: session_id.to_string(),
         workspace_root: std::env::temp_dir(),
         extra_read_roots: Vec::new(),
+        write_annex_roots: Vec::new(),
         workspace_id: String::new(),
         todo_state: TodoState::shared(),
         abort: AbortFlag::new(),

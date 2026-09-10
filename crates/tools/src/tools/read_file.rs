@@ -167,6 +167,29 @@ mod tests {
     }
 
     #[test]
+    fn reads_library_doc_through_read_annex() {
+        // The knowledge library rides the read annexes the driver wires
+        // (daemon_read_annex_roots): an ABSOLUTE library path is readable
+        // even though it lives outside every workspace, while relative
+        // targets stay workspace-scoped.
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(library.join("docs")).unwrap();
+        std::fs::write(library.join("docs/kb.md"), "knowledge\n").unwrap();
+
+        let doc = library.join("docs/kb.md").display().to_string();
+        let out = run_read_file(&doc, DEFAULT_MAX_LINES, &ws, &[library.clone()]);
+        assert_eq!(out.status, crate::OutcomeStatus::Executed);
+        assert_eq!(out.output, "knowledge\n");
+
+        let out = run_read_file("docs/kb.md", DEFAULT_MAX_LINES, &ws, &[library]);
+        assert_eq!(out.status, crate::OutcomeStatus::Failed);
+        assert!(out.output.contains("File not found"));
+    }
+
+    #[test]
     fn strips_bom() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("bom.txt"), "\u{feff}hello").unwrap();

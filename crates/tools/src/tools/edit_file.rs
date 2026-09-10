@@ -7,7 +7,7 @@
 
 use serde_json::json;
 
-use crate::path_safety::resolve_and_follow_symlinks;
+use crate::path_safety::resolve_and_follow_symlinks_roots;
 use crate::permission::RiskTier;
 use crate::{DiffHunk, DiffLine, Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
@@ -22,6 +22,7 @@ pub(crate) fn run_edit_file(
     old_str: &str,
     new_str: &str,
     workspace_root: &std::path::Path,
+    write_annex_roots: &[std::path::PathBuf],
 ) -> ToolOutcome {
     if rel_path.is_empty() {
         return ToolOutcome::failed("Missing required arg: path");
@@ -30,7 +31,15 @@ pub(crate) fn run_edit_file(
         return ToolOutcome::failed("Missing required arg: old_string");
     }
 
-    let abs = match resolve_and_follow_symlinks(workspace_root, rel_path) {
+    // Follow + re-verify, extended to the write annexes (the knowledge
+    // library) for ABSOLUTE targets — an existing library doc is editable
+    // while a symlink inside the annex still cannot escape. Relative
+    // targets stay workspace-scoped; with an empty annex list this is
+    // byte-identical to the workspace-only resolution. An annex edit is a
+    // write OUTSIDE the workspace: RiskTier::Write keeps it under the
+    // same permission gate as every other write (plan blocks, build
+    // allows) — never silently privileged.
+    let abs = match resolve_and_follow_symlinks_roots(workspace_root, write_annex_roots, rel_path) {
         Ok(abs) => abs,
         Err(e) => return ToolOutcome::failed(format!("Path error: {e}")),
     };
@@ -277,6 +286,7 @@ impl Tool for EditFileTool {
             &old_string,
             &new_string,
             &ctx.workspace_root,
+            &ctx.write_annex_roots,
         ))
     }
 }
@@ -289,7 +299,7 @@ mod tests {
     fn edits_unique_match() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a.ts"), "const a = 1;\nconst b = 2;\n").unwrap();
-        let out = run_edit_file("a.ts", "const a = 1;", "const a = 2;", tmp.path());
+        let out = run_edit_file("a.ts", "const a = 1;", "const a = 2;", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
         assert!(out
             .output
@@ -317,11 +327,11 @@ mod tests {
     #[test]
     fn missing_args_fail() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(run_edit_file("", "a", "b", tmp.path())
+        assert!(run_edit_file("", "a", "b", tmp.path(), &[])
             .output
             .contains("Missing required arg: path"));
         std::fs::write(tmp.path().join("x"), "y").unwrap();
-        assert!(run_edit_file("x", "", "b", tmp.path())
+        assert!(run_edit_file("x", "", "b", tmp.path(), &[])
             .output
             .contains("Missing required arg: old_string"));
     }
@@ -330,9 +340,9 @@ mod tests {
     fn not_found_and_not_unique_report_lines() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("x.txt"), "foo\nbar\nfoo\nbaz\nfoo\n").unwrap();
-        let out = run_edit_file("x.txt", "nope", "z", tmp.path());
+        let out = run_edit_file("x.txt", "nope", "z", tmp.path(), &[]);
         assert!(out.output.contains("old_string not found"));
-        let out = run_edit_file("x.txt", "foo", "z", tmp.path());
+        let out = run_edit_file("x.txt", "foo", "z", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("matches at lines: 1, 3, 5"));
         // File untouched on failure.
@@ -345,7 +355,7 @@ mod tests {
     #[test]
     fn missing_file_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_edit_file("ghost.txt", "a", "b", tmp.path());
+        let out = run_edit_file("ghost.txt", "a", "b", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("Cannot read file"));
     }
@@ -353,7 +363,7 @@ mod tests {
     #[test]
     fn traversal_rejected() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_edit_file("../../etc/passwd", "a", "b", tmp.path());
+        let out = run_edit_file("../../etc/passwd", "a", "b", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("Path error"));
     }
@@ -409,7 +419,7 @@ mod tests {
     fn lf_old_string_edits_a_crlf_file_and_keeps_crlf() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("c.txt"), "alpha\r\nbeta\r\ngamma\r\n").unwrap();
-        let out = run_edit_file("c.txt", "beta\ngamma", "BETA\nGAMMA", tmp.path());
+        let out = run_edit_file("c.txt", "beta\ngamma", "BETA\nGAMMA", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("c.txt")).unwrap(),
@@ -421,7 +431,7 @@ mod tests {
     fn crlf_old_string_edits_an_lf_file_and_keeps_lf() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("l.txt"), "one\ntwo\n").unwrap();
-        let out = run_edit_file("l.txt", "one\r\ntwo", "ONE\r\nTWO", tmp.path());
+        let out = run_edit_file("l.txt", "one\r\ntwo", "ONE\r\nTWO", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("l.txt")).unwrap(),
@@ -433,7 +443,7 @@ mod tests {
     fn bridged_match_still_requires_uniqueness() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("x.txt"), "a\r\nx\r\na\r\nx\r\n").unwrap();
-        let out = run_edit_file("x.txt", "a\nx", "z", tmp.path());
+        let out = run_edit_file("x.txt", "a\nx", "z", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Failed);
         assert!(out.output.contains("matches at lines: 1, 3"));
         assert_eq!(
@@ -447,10 +457,47 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("c.txt"), "a\r\nb\r\n").unwrap();
         // No newline in the needle — nothing to bridge, genuine not-found.
-        let out = run_edit_file("c.txt", "zzz", "z", tmp.path());
+        let out = run_edit_file("c.txt", "zzz", "z", tmp.path(), &[]);
         assert!(out.output.contains("old_string not found"));
         // Present as a single line, so the exact match already worked:
-        let out = run_edit_file("c.txt", "b", "B", tmp.path());
+        let out = run_edit_file("c.txt", "b", "B", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
+    }
+
+    #[test]
+    fn annex_edit_updates_library_doc() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(library.join("docs")).unwrap();
+        std::fs::write(library.join("docs/kb.md"), "alpha\nbeta\n").unwrap();
+
+        // An ABSOLUTE library target resolves through the write annex.
+        let doc = library.join("docs/kb.md").display().to_string();
+        let out = run_edit_file(&doc, "beta", "BETA", &ws, &[library.clone()]);
+        assert_eq!(out.status, crate::OutcomeStatus::Executed);
+        assert_eq!(
+            std::fs::read_to_string(library.join("docs/kb.md")).unwrap(),
+            "alpha\nBETA\n"
+        );
+
+        // Relative targets never reach the annex — workspace escape error.
+        let out = run_edit_file("../library/docs/kb.md", "alpha", "A", &ws, &[library]);
+        assert_eq!(out.status, crate::OutcomeStatus::Failed);
+        assert!(out.output.contains("Path error"));
+    }
+
+    #[test]
+    fn annex_edit_permission_semantics_stay_write_tiered() {
+        // Same guarantee as write_file: the annex grant is resolution-only
+        // and cannot soften the permission gate — edit_file stays
+        // RiskTier::Write, so plan mode blocks an annex edit exactly like
+        // a workspace edit.
+        assert_eq!(EditFileTool.risk_tier(), RiskTier::Write);
+        assert_eq!(
+            crate::permission::risk_tier_for_call("edit_file", &serde_json::json!({})),
+            RiskTier::Write
+        );
     }
 }
