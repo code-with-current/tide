@@ -171,6 +171,81 @@ pub fn rrf_fuse(vec: Vec<MemoryHit>, fts: Vec<MemoryHit>, k: usize) -> Vec<Memor
     scores.into_iter().map(|(_, hit)| hit).collect()
 }
 
+/// Doc-level aggregation — OpenContext's weighted formula over RRF lane
+/// weights: score = w_top * 0.6 + min(hits/5, 1) * w_top * 0.4, where
+/// w_top is the doc's best chunk weight (1/(RRF_K + rank + 1) of its
+/// position in the input ranking). The representative hit is the doc's
+/// top chunk. `hits` is expected in rank order (the fused output);
+/// grouping is by `path`.
+pub fn aggregate_by_doc(hits: Vec<MemoryHit>, limit: usize) -> Vec<MemoryHit> {
+    struct Agg {
+        top: f64,
+        top_hit: MemoryHit,
+        n: usize,
+    }
+    let score = |a: &Agg| a.top * 0.6 + (a.n as f64 / 5.0).min(1.0) * a.top * 0.4;
+    let mut docs: Vec<Agg> = Vec::new();
+    for (rank, hit) in hits.into_iter().enumerate() {
+        let w = 1.0 / (RRF_K + rank as f64 + 1.0);
+        match docs.iter_mut().find(|a| a.top_hit.path == hit.path) {
+            Some(a) => {
+                a.n += 1;
+                // Defensive: ranks normally arrive in descending weight,
+                // but keep the best hit if an unsorted input says otherwise.
+                if w > a.top {
+                    a.top = w;
+                    a.top_hit = hit;
+                }
+            }
+            None => docs.push(Agg {
+                top: w,
+                top_hit: hit,
+                n: 1,
+            }),
+        }
+    }
+    docs.sort_by(|a, b| {
+        score(b)
+            .partial_cmp(&score(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    docs.truncate(limit);
+    docs.into_iter().map(|a| a.top_hit).collect()
+}
+
+/// Grouping key for source-level aggregation — the knowledge origin
+/// (`source_name`) or, for workspace hits without one, the file's parent
+/// directory (empty for bare filenames).
+fn source_key(h: &MemoryHit) -> String {
+    h.source_name.clone().unwrap_or_else(|| {
+        h.path
+            .rsplit_once(['/', '\\'])
+            .map(|(dir, _)| dir.to_string())
+            .unwrap_or_default()
+    })
+}
+
+/// Source-level aggregation — knowledge origin (source_name) or, for
+/// workspace hits, the file's parent directory. One representative hit
+/// per group. Groups keep first-seen (input rank) order rather than
+/// sorting by count: a "which origins own this topic" triage wants each
+/// group's strongest chunk first, and the first occurrence in a ranked
+/// input IS that group's best chunk — breadth is doc aggregation's
+/// signal (see [`aggregate_by_doc`]), not this one's.
+pub fn aggregate_by_source(hits: Vec<MemoryHit>, limit: usize) -> Vec<MemoryHit> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<MemoryHit> = Vec::new();
+    for hit in hits {
+        let key = source_key(&hit);
+        if !seen.contains(&key) {
+            seen.push(key);
+            out.push(hit);
+        }
+    }
+    out.truncate(limit);
+    out
+}
+
 /// Workspace-relative path for compact display. Falls back to the full
 /// path when it isn't deep enough to shorten (e.g. temp fixture paths).
 pub(crate) fn short_path(abs_path: &str) -> String {
@@ -188,9 +263,14 @@ pub(crate) fn short_path(abs_path: &str) -> String {
 /// workspace_id comes from the caller (the tool pulls it from ToolContext).
 /// `k` is the model's explicit per-call override; `None` resolves through
 /// the configured [`MemoryIndex::top_k`], then the tool default.
+/// `aggregate` selects result granularity: `Some("doc")` / `Some("source")`
+/// collapse the fused chunk ranking into per-file / per-origin
+/// representatives; `None` (and any other value) keeps chunk-level
+/// content — silently, the same posture as k clamping.
 pub(crate) fn run_memory(
     query: &str,
     k: Option<u64>,
+    aggregate: Option<&str>,
     workspace_id: &str,
     index: Option<&dyn MemoryIndex>,
 ) -> ToolOutcome {
@@ -220,16 +300,36 @@ pub(crate) fn run_memory(
         .or_else(|| index.top_k(workspace_id))
         .unwrap_or(DEFAULT_K)
         .clamp(1, MAX_K) as usize;
+    let aggregate = aggregate.filter(|a| matches!(*a, "doc" | "source"));
     // Over-fetch each lane so the fusion — and the optional reranker
     // riding above it — has candidates to choose from, not just reorder.
-    let fetch = (k_clamped * 3).min(30);
+    // Aggregation collapses chunks into representatives and doc coverage
+    // wants up to 5 same-file chunks to develop its full weight, so it
+    // draws from a wider pool (and lets the reranker keep it intact).
+    let fetch = if aggregate.is_some() {
+        (k_clamped * 5).min(50)
+    } else {
+        (k_clamped * 3).min(30)
+    };
     let fused = rrf_fuse(
         index.vector_hits(workspace_id, query, fetch),
         index.fts_hits(workspace_id, query, fetch),
         fetch,
     );
-    let mut ranked = index.rerank(workspace_id, query, fused, k_clamped);
-    ranked.truncate(k_clamped);
+    let rerank_keep = if aggregate.is_some() {
+        fetch
+    } else {
+        k_clamped
+    };
+    let mut ranked = index.rerank(workspace_id, query, fused, rerank_keep);
+    let ranked = match aggregate {
+        Some("doc") => aggregate_by_doc(ranked, k_clamped),
+        Some("source") => aggregate_by_source(ranked, k_clamped),
+        _ => {
+            ranked.truncate(k_clamped);
+            ranked
+        }
+    };
 
     if ranked.is_empty() {
         return ToolOutcome::executed(format!(
@@ -312,7 +412,8 @@ impl Tool for MemoryTool {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Natural language: \"how is authentication handled\", \"database setup\", \"API routes\"." },
-                    "k": { "type": "number", "description": "Top-K results. Omit to use the configured default; max 20." }
+                    "k": { "type": "number", "description": "Top-K results. Omit to use the configured default; max 20." },
+                    "aggregate": { "type": "string", "enum": ["content", "doc", "source"], "description": "Result granularity: content (chunks, default), doc (group by file, coverage-weighted), source (group by knowledge source / directory)." }
                 },
                 "required": ["query"]
             }),
@@ -330,11 +431,12 @@ impl Tool for MemoryTool {
     ) -> Result<ToolOutcome, ToolError> {
         let query = arg_str(&args, "query");
         let k = args.get("k").and_then(|v| v.as_u64());
+        let aggregate = args.get("aggregate").and_then(|v| v.as_str());
         // The constructor-bound index wins (tests); production rides the
         // process-wide slot installed by the RAG command layer.
         let shared = shared_memory_index();
         let index = self.index.as_deref().or(shared.as_deref());
-        Ok(run_memory(&query, k, &ctx.workspace_id, index))
+        Ok(run_memory(&query, k, aggregate, &ctx.workspace_id, index))
     }
 }
 
@@ -405,21 +507,21 @@ mod tests {
 
     #[test]
     fn missing_query_fails() {
-        let out = run_memory("", Some(5), "ws1", None);
+        let out = run_memory("", Some(5), None, "ws1", None);
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert_eq!(out.output, "Missing required arg: query");
     }
 
     #[test]
     fn missing_workspace_fails() {
-        let out = run_memory("auth flow", Some(5), "", None);
+        let out = run_memory("auth flow", Some(5), None, "", None);
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert_eq!(out.output, "No active workspace bound to this session.");
     }
 
     #[test]
     fn no_index_reports_not_enabled_hint() {
-        let out = run_memory("anything", Some(5), "ws1", None);
+        let out = run_memory("anything", Some(5), None, "ws1", None);
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out
             .output
@@ -435,7 +537,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("anything", Some(5), "ws1", Some(&index));
+        let out = run_memory("anything", Some(5), None, "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out
             .output
@@ -450,7 +552,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("zzz", Some(5), "ws1", Some(&index));
+        let out = run_memory("zzz", Some(5), None, "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert_eq!(
             out.output,
@@ -466,7 +568,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("how does login work", Some(5), "ws1", Some(&index));
+        let out = run_memory("how does login work", Some(5), None, "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out
             .output
@@ -490,7 +592,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("hooks", Some(5), "ws1", Some(&index));
+        let out = run_memory("hooks", Some(5), None, "ws1", Some(&index));
         assert!(out.output.contains("[1] [React Docs] react.dev/learn"));
     }
 
@@ -505,7 +607,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("auth", Some(5), "ws1", Some(&index));
+        let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
         assert!(out.output.contains("/repo/src/auth.ts:10-24 (login)"));
         assert!(out.output.contains("/repo/src/util.ts:10\n"));
     }
@@ -524,7 +626,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("auth", Some(5), "ws1", Some(&index));
+        let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
         // Heading goes after the symbol suffix; a None heading leaves the
         // point-hit location exactly as before.
         assert!(out
@@ -545,7 +647,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("install", Some(5), "ws1", Some(&index));
+        let out = run_memory("install", Some(5), None, "ws1", Some(&index));
         assert!(out
             .output
             .contains("[1] [React Docs] react.dev/learn · Installation"));
@@ -562,7 +664,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("install", Some(5), "ws1", Some(&index));
+        let out = run_memory("install", Some(5), None, "ws1", Some(&index));
         assert!(out.output.contains("[1] react.dev/learn:10\n"));
     }
 
@@ -578,7 +680,7 @@ mod tests {
             fts: vec![],
             ..FakeIndex::default()
         };
-        let out = run_memory("long", Some(5), "ws1", Some(&index));
+        let out = run_memory("long", Some(5), None, "ws1", Some(&index));
         assert!(out.output.contains("…[truncated]"));
         assert!(!out.output.contains(&"y".repeat(BODY_CAP + 100)));
     }
@@ -647,7 +749,7 @@ mod tests {
             ..FakeIndex::default()
         };
         // No explicit k → the configured top_k (2) caps the result.
-        let out = run_memory("query", None, "ws1", Some(&index));
+        let out = run_memory("query", None, None, "ws1", Some(&index));
         assert!(out.output.contains("Found 2 relevant chunks"));
     }
 
@@ -663,7 +765,7 @@ mod tests {
             rerank_order: Some(vec!["b".into(), "a".into()]),
             ..FakeIndex::default()
         };
-        let out = run_memory("query", Some(5), "ws1", Some(&index));
+        let out = run_memory("query", Some(5), None, "ws1", Some(&index));
         let b_pos = out.output.find("[1]").unwrap();
         // The reranked winner leads the result body.
         let b_line = out.output.find("content of b").unwrap();
@@ -693,6 +795,94 @@ mod tests {
         let fused = rrf_fuse(vec![unknown], vec![fresh], 5);
         // Same-lane ranks (0 and 0) → equal scores; recency sorts first.
         assert_eq!(fused[0].id, "fresh");
+    }
+
+    #[test]
+    fn aggregate_by_doc_weights_top_and_coverage() {
+        let mk = |i: u64, path: &str| MemoryHit {
+            id: format!("c{i}"),
+            path: path.into(),
+            symbol: None,
+            start_line: i,
+            content: "x".into(),
+            similarity: None,
+            source_name: None,
+            recency: None,
+            end_line: None,
+            heading: None,
+        };
+        // doc A: top weight 1/62 + full coverage (n=5); doc B: single
+        // rank-0 hit → 1/61 top but only 0.68 total weight (coverage
+        // 0.2): 1/61·0.68 ≈ 0.01115 < 1/62·1.0 ≈ 0.01613, so coverage
+        // lifts A over B's top rank.
+        let hits = vec![
+            mk(1, "b.md"),
+            mk(2, "a.md"),
+            mk(3, "a.md"),
+            mk(4, "a.md"),
+            mk(5, "a.md"),
+            mk(6, "a.md"),
+        ];
+        let out = aggregate_by_doc(hits, 5);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].path, "a.md");
+        // The representative is the doc's top chunk (its first hit in
+        // the ranking, start_line 2 for a.md).
+        assert_eq!(out[0].id, "c2");
+    }
+
+    #[test]
+    fn aggregate_by_source_groups_knowledge_origins() {
+        let mk = |path: &str, src: Option<&str>| MemoryHit {
+            id: path.into(),
+            path: path.into(),
+            symbol: None,
+            start_line: 1,
+            content: "x".into(),
+            similarity: None,
+            source_name: src.map(str::to_string),
+            recency: None,
+            end_line: None,
+            heading: None,
+        };
+        let hits = vec![
+            mk("x.md", Some("React Docs")),
+            mk("y.md", Some("React Docs")),
+            mk("z.rs", None),
+        ];
+        let out = aggregate_by_source(hits, 5);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].source_name.as_deref(), Some("React Docs"));
+        assert_eq!(out[1].path, "z.rs");
+    }
+
+    #[test]
+    fn run_memory_aggregates_by_doc_and_unknown_falls_back_to_content() {
+        let index = FakeIndex {
+            total: 12,
+            vector: vec![
+                hit("c1", "/repo/b.md", None, None),
+                hit("c2", "/repo/a.md", None, None),
+                hit("c3", "/repo/a.md", None, None),
+                hit("c4", "/repo/a.md", None, None),
+                hit("c5", "/repo/a.md", None, None),
+                hit("c6", "/repo/a.md", None, None),
+            ],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        // doc-level with k=1: the over-fetched pool (fetch = 5·k) keeps
+        // b@rank0 + a×4; coverage still lifts a.md (1/62·0.92 > 1/61·0.68),
+        // and k truncates the collapsed list to a single doc.
+        let out = run_memory("q", Some(1), Some("doc"), "ws1", Some(&index));
+        assert!(out.output.contains("Found 1 relevant chunk"));
+        assert!(out.output.contains("/repo/a.md"));
+
+        // Unknown granularity silently falls back to chunk-level content
+        // (same posture as k clamping, not an error) — and k=5 caps the
+        // 6 available chunks.
+        let out = run_memory("q", Some(5), Some("banana"), "ws1", Some(&index));
+        assert!(out.output.contains("Found 5 relevant chunks"));
     }
 }
 
