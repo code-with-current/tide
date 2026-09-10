@@ -150,6 +150,16 @@ pub fn resolve_inside_workspace_or_write_annexes(
 ///   new-file-through-parent-symlink hole. Reaching the annex root
 ///   without an existing node (a not-yet-created library, say) is safe:
 ///   the caller's `create_dir_all` builds the whole subtree fresh.
+///
+/// Accepted residual risks (deliberate, not overlooked): there is an
+/// inherent check-then-write TOCTOU window — a symlink can be swapped
+/// in between the canonicalize here and the caller's later `fs::write`,
+/// defeating the re-verification — and hardlinks are not defended at
+/// all (a hardlink to a file outside the annex canonicalizes to itself,
+/// so it passes verification and redirects the write). Exploiting
+/// either requires local-process write access to the user's home
+/// directory, which already implies full user-level file write, so
+/// closing them would buy no additional security.
 fn verify_write_annex_target(
     workspace_root: &Path,
     annex: &Path,

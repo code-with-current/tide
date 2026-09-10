@@ -5,15 +5,31 @@
 use std::path::Path;
 
 const BODIES: &[(&str, &str)] = &[
-    ("kb-context", include_str!("../../../resources/commands/kb-context.md")),
-    ("kb-search", include_str!("../../../resources/commands/kb-search.md")),
-    ("kb-capture", include_str!("../../../resources/commands/kb-capture.md")),
-    ("kb-iterate", include_str!("../../../resources/commands/kb-iterate.md")),
+    (
+        "kb-context",
+        include_str!("../../../resources/commands/kb-context.md"),
+    ),
+    (
+        "kb-search",
+        include_str!("../../../resources/commands/kb-search.md"),
+    ),
+    (
+        "kb-capture",
+        include_str!("../../../resources/commands/kb-capture.md"),
+    ),
+    (
+        "kb-iterate",
+        include_str!("../../../resources/commands/kb-iterate.md"),
+    ),
 ];
 
 /// (name, body) pairs that are not yet present in `dir`.
 pub fn plan_installs(dir: &Path) -> Vec<(&'static str, &'static str)> {
-    BODIES.iter().filter(|(name, _)| !dir.join(format!("{name}.md")).is_file()).copied().collect()
+    BODIES
+        .iter()
+        .filter(|(name, _)| !dir.join(format!("{name}.md")).is_file())
+        .copied()
+        .collect()
 }
 
 /// Copy missing commands into the user's commands dir; returns how many
@@ -31,7 +47,7 @@ pub fn install_kb_commands() -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_installs, BODIES};
+    use super::{BODIES, plan_installs};
 
     #[test]
     fn plan_never_overwrites_existing_commands() {
@@ -54,7 +70,10 @@ mod tests {
         ];
         assert_eq!(BODIES.len(), 4);
         for (name, keyword) in keywords {
-            let (_, body) = BODIES.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("{name} missing"));
+            let (_, body) = BODIES
+                .iter()
+                .find(|(n, _)| n == name)
+                .unwrap_or_else(|| panic!("{name} missing"));
             let first = body
                 .lines()
                 .find(|l| !l.trim().is_empty())
@@ -64,7 +83,10 @@ mod tests {
                 "{name} first line is {} chars (>120): {first}",
                 first.chars().count()
             );
-            assert!(body.contains(keyword), "{name} body missing keyword '{keyword}'");
+            assert!(
+                body.contains(keyword),
+                "{name} body missing keyword '{keyword}'"
+            );
         }
     }
 }
