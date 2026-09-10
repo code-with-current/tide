@@ -1497,6 +1497,36 @@ pub fn open_knowledge() -> Result<KnowledgeStore, String> {
     KnowledgeStore::open(&dir).map_err(|e| e.to_string())
 }
 
+/// Ensure the library source row exists (idempotent — a second call
+/// returns the existing row's id) and the `<data>/library` directory is
+/// present; returns its source id. Called by the settings card before
+/// queueing a reindex; the directory is agent-writable via normal file
+/// tools, so nothing else writes here.
+pub fn ensure_library_source() -> Result<String, String> {
+    let ks = open_knowledge()?;
+    let root = rag::library_root(&data_dir());
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    if let Some(s) = ks
+        .list_sources()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|s| s.kind == "library")
+    {
+        return Ok(s.id);
+    }
+    // None keeps the INSERT default enabledWorkspaceIds = ["*"] —
+    // the library is visible to every workspace.
+    let s = ks
+        .add_source(
+            "Knowledge Library",
+            "library",
+            &root.to_string_lossy(),
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(s.id)
+}
+
 /// Queue one source for (re)indexing; duplicates collapse to a no-op.
 pub fn enqueue_reindex(source_id: &str) {
     let manager = knowledge_manager();
@@ -1523,6 +1553,16 @@ fn reindex_source_sync(source_id: &str) {
     let dir = data_dir();
     let result = (|| -> Result<usize, String> {
         let docs = fetch_documents(&source)?;
+        // Library registry sync (head): mint-or-refresh a stable_id per
+        // fetched doc as soon as the fetch succeeds — rel_path == doc
+        // origin == chunk path, the join key recall decorates docIds
+        // from. description None keeps stored triage text intact.
+        if source.kind == "library" {
+            for d in &docs {
+                ks.library_upsert(&d.origin, &d.title, None)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         // Injection screen over the fetched content (app-generated
         // `memory` facts are exempt — the tool wrote them, not the web).
         // Screening never blocks ingestion: flagged content stays in the
@@ -1581,6 +1621,15 @@ fn reindex_source_sync(source_id: &str) {
                 .unwrap()
                 .insert(source_id.to_owned(), progress);
         })?;
+        // Library registry sync (tail): only after the chunks landed,
+        // tombstone rows whose rel_path no longer exists on disk (v1
+        // rename handling = tombstone, settled). docs is still in scope
+        // here — ingest borrows it, so the keep list needs no pre-collect.
+        if source.kind == "library" {
+            let keep: Vec<String> = docs.iter().map(|d| d.origin.clone()).collect();
+            ks.library_tombstone_missing(&keep)
+                .map_err(|e| e.to_string())?;
+        }
         Ok(count)
     })();
     source_progress_map().lock().unwrap().remove(source_id);
@@ -1596,6 +1645,35 @@ fn reindex_source_sync(source_id: &str) {
     }
 }
 
+/// Library fetch: read markdown under `root` via the docs fetcher (the
+/// allowed roots = the library dir itself), then rewrite each origin to
+/// the library-relative path so citations, chunk paths, and registry
+/// rel_paths all share one key ("proj/d.md"). fetch_docs reports the
+/// CANONICALIZED absolute path as origin, so the strip root must be
+/// canonicalized too — on macOS the raw path is symlinked
+/// (/var/folders → /private/var/folders) and would not prefix-match.
+fn library_fetch_docs(root: &std::path::Path) -> Result<Vec<rag::SourceDocument>, String> {
+    let docs = rag::fetch_docs(&root.to_string_lossy(), &[root.to_path_buf()])?;
+    let canon = root
+        .canonicalize()
+        .unwrap_or_else(|_| root.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+    Ok(docs
+        .into_iter()
+        .map(|mut d| {
+            let rel = d
+                .origin
+                .strip_prefix(canon.as_str())
+                .unwrap_or(&d.origin)
+                .trim_start_matches('/')
+                .to_string();
+            d.origin = rel;
+            d
+        })
+        .collect())
+}
+
 /// Kind dispatch for the fetchers.
 fn fetch_documents(source: &rag::KnowledgeSource) -> Result<Vec<rag::SourceDocument>, String> {
     match source.kind.as_str() {
@@ -1606,6 +1684,9 @@ fn fetch_documents(source: &rag::KnowledgeSource) -> Result<Vec<rag::SourceDocum
             let roots = project_roots();
             rag::fetch_docs(&source.location, &roots)
         }
+        // The canonical root is authoritative (the row's location is
+        // informational and could go stale if TIDE_DATA_DIR moves).
+        "library" => library_fetch_docs(&rag::library_root(&data_dir())),
         other => Err(format!("unknown source kind {other:?}")),
     }
 }
@@ -1995,5 +2076,16 @@ mod tests {
             Some("Setup > Auth")
         );
         assert_eq!(hit_from_row(&flat, None, None, None).heading, None);
+    }
+
+    #[test]
+    fn library_docs_rewrite_origin_to_rel_path() {
+        use super::library_fetch_docs;
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join("library");
+        std::fs::create_dir_all(lib.join("proj")).unwrap();
+        std::fs::write(lib.join("proj/d.md"), "# H\n\nbody").unwrap();
+        let docs = library_fetch_docs(&lib).unwrap();
+        assert_eq!(docs[0].origin, "proj/d.md");
     }
 }

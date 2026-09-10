@@ -21,7 +21,7 @@ use crate::unix_ms_now;
 
 pub type SourceKind = &'static str;
 
-pub const SOURCE_KINDS: &[&str] = &["url", "docs", "crawl", "repo"];
+pub const SOURCE_KINDS: &[&str] = &["url", "docs", "crawl", "repo", "library"];
 
 /// Registry row (TS KnowledgeSource) — wire shape verbatim.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,6 +96,13 @@ pub struct SourceDocument {
 /// `<data>/knowledge/index.db` (TS knowledgeDbPath).
 pub fn knowledge_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join("knowledge").join("index.db")
+}
+
+/// `<data>/library` — the Tide-owned writable knowledge base (plain
+/// markdown the agent writes via the normal file tools; indexed like
+/// any other knowledge source on the shared index).
+pub fn library_root(data_dir: &Path) -> PathBuf {
+    data_dir.join("library")
 }
 
 /// Registry CRUD on top of the shared global index db. Reuses RagStore for
@@ -1596,6 +1603,15 @@ mod tests {
     fn origin_of_joins_host_and_path() {
         assert_eq!(origin_of("https://react.dev/learn/"), "react.dev/learn");
         assert_eq!(origin_of("https://example.com"), "example.com");
+    }
+
+    #[test]
+    fn library_root_lives_under_data_dir() {
+        use super::library_root;
+        assert_eq!(
+            library_root(Path::new("/data")),
+            PathBuf::from("/data/library")
+        );
     }
 
     #[test]
