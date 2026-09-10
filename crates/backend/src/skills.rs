@@ -350,6 +350,48 @@ pub fn trash_skills(dirs: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
+/// Enabled skills visible to a session at `workspace_root` — the
+/// workspace's `.agents`/`.claude` roots plus the user's home pools, folded
+/// to one entry per name. The load_skill catalog advertises exactly this
+/// list, and slash_command resolves `/name` against it.
+pub fn enabled_skills_for_workspace(workspace_root: &Path) -> Vec<tools::SkillSummary> {
+    let mut locations = project_skill_locations(workspace_root, "project");
+    locations.extend(user_skill_locations());
+    scan_skills(&locations)
+        .skills
+        .into_iter()
+        .filter(|skill| skill.enabled)
+        .map(|skill| {
+            // The install path is read before `skill` is destructured —
+            // `primary()` borrows, and the name/description fields move.
+            let abs_path = skill.primary().skill_file.to_string_lossy().into_owned();
+            tools::SkillSummary {
+                name: skill.name,
+                description: skill.description,
+                abs_path,
+            }
+        })
+        .collect()
+}
+
+/// The seam adapter: the tools crate's slash_command consults this
+/// process-wide provider so a `/name` that matches no commands file
+/// resolves to a skill in the same call (multi-word names included) —
+/// no "Unknown command" failure followed by a load_skill retry.
+struct WorkspaceSkillCatalog;
+
+impl tools::SkillCatalogProvider for WorkspaceSkillCatalog {
+    fn skills(&self, workspace_root: &Path) -> Vec<tools::SkillSummary> {
+        enabled_skills_for_workspace(workspace_root)
+    }
+}
+
+/// Install the process-wide skill catalog provider. Called once at daemon
+/// boot, next to the session reader.
+pub fn install_skill_catalog_provider() {
+    tools::set_shared_skill_catalog_provider(Some(std::sync::Arc::new(WorkspaceSkillCatalog)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +416,40 @@ mod tests {
             root: root.to_path_buf(),
             project: None,
         }
+    }
+
+    #[test]
+    fn slash_command_resolves_multi_word_skills_through_the_provider() {
+        // End-to-end over the daemon-installed seam: a `/name` matching no
+        // commands file resolves the workspace skill in ONE tool call —
+        // multi-word name, leftover args preserved.
+        let workspace = temp_root("slash-skill");
+        let skill_dir = workspace.join(".agents/skills/quill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join(SKILL_FILE),
+            "---\nname: Zed Quill Runbook\n---\n# Quill\nSteps",
+        )
+        .unwrap();
+
+        install_skill_catalog_provider();
+        use tools::Tool as _;
+        let out = tools::SlashCommandTool
+            .execute(
+                &tools::ToolContext::new(workspace.clone()),
+                serde_json::json!({ "command": "Zed", "args": "Quill Runbook ship it" }),
+            )
+            .unwrap();
+        tools::set_shared_skill_catalog_provider(None);
+
+        assert_eq!(out.status, tools::OutcomeStatus::Executed, "{}", out.output);
+        assert!(
+            out.output
+                .starts_with("Skill \"Zed Quill Runbook\" loaded.")
+        );
+        assert!(out.output.contains("# Quill"));
+        assert!(out.output.ends_with("Arguments: ship it"));
+        let _ = std::fs::remove_dir_all(&workspace);
     }
 
     #[test]

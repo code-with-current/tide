@@ -70,6 +70,9 @@ impl TideBackend {
         // independent read-only connections, so pages never wait on a
         // streaming save (the session_message_search pattern).
         crate::session_history::install_session_reader(task_store.path());
+        // The slash_command tool resolves `/name` against the workspace's
+        // enabled skills through this provider — one call, command or skill.
+        crate::skills::install_skill_catalog_provider();
         crate::rag::prewarm();
         crate::rag::update_project_roots(
             task_state.projects.iter().map(|p| p.path.clone()).collect(),

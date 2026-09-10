@@ -137,6 +137,39 @@ pub fn build_skill_catalog_md(skills: &[SkillSummary]) -> String {
     lines.join("\n")
 }
 
+/// The workspace skill catalog — the seam the daemon fills in so
+/// slash_command can resolve `/skill-name` invocations (including
+/// multi-word names) in one call instead of failing and forcing a
+/// load_skill retry. Same pattern as the session-history reader:
+/// process-wide slot, consulted at execute time, degraded (absent) in
+/// tools-only binaries and tests.
+pub trait SkillCatalogProvider: Send + Sync {
+    /// Enabled skills visible to a session at `workspace_root` (the
+    /// workspace's `.agents`/`.claude` roots plus the user's home pools).
+    fn skills(&self, workspace_root: &std::path::Path) -> Vec<SkillSummary>;
+}
+
+static SHARED_SKILL_CATALOG: std::sync::RwLock<Option<std::sync::Arc<dyn SkillCatalogProvider>>> =
+    std::sync::RwLock::new(None);
+
+/// Install (or clear) the process-wide skill catalog provider.
+pub fn set_shared_skill_catalog_provider(
+    provider: Option<std::sync::Arc<dyn SkillCatalogProvider>>,
+) {
+    let mut slot = SHARED_SKILL_CATALOG
+        .write()
+        .expect("skill catalog slot poisoned");
+    *slot = provider;
+}
+
+/// The installed provider, if any.
+pub fn shared_skill_catalog_provider() -> Option<std::sync::Arc<dyn SkillCatalogProvider>> {
+    SHARED_SKILL_CATALOG
+        .read()
+        .expect("skill catalog slot poisoned")
+        .clone()
+}
+
 pub struct LoadSkillTool;
 
 impl Tool for LoadSkillTool {

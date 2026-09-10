@@ -13,7 +13,7 @@ use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
 use super::arg_str;
 
-const DESCRIPTION: &str = "Invoke a user-defined slash command. Commands live in <userData>/commands/*.md and bundle a prompt prefix + instructions. Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command body so you can apply its instructions.";
+const DESCRIPTION: &str = "Invoke a user-defined slash command or skill by its /name. Commands live in <userData>/commands/*.md; skills resolve from the workspace's enabled catalog (multi-word names allowed, e.g. \"/AgentDB Advanced Features\"). Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command or skill body so you can apply its instructions — one call resolves both, no fallback needed.";
 
 /// `<userData>/commands` — same resolution as `store::paths::data_dir`
 /// (`~/.tide`, `TIDE_DATA_DIR` override) without taking a crate dependency
@@ -72,10 +72,14 @@ pub(crate) fn clamp_chars(s: &str, max: usize) -> String {
 }
 
 /// Shared body — reads `<userData>/commands/<name>.md`; no ctx dependency.
+/// When no commands file matches, the invocation falls through to the
+/// workspace skill catalog (see [`resolve_skill_fallback`]) so `/name`
+/// resolves to a command OR a skill in one call.
 pub(crate) fn run_slash_command(
     command: &str,
     args: &str,
     commands_dir: &std::path::Path,
+    workspace_root: &std::path::Path,
 ) -> ToolOutcome {
     let name = command.trim_start_matches('/');
     if name.is_empty() {
@@ -91,6 +95,9 @@ pub(crate) fn run_slash_command(
 
     let file = commands_dir.join(format!("{name}.md"));
     if !file.is_file() {
+        if let Some(outcome) = resolve_skill_fallback(name, args, workspace_root) {
+            return outcome;
+        }
         let available = list_slash_commands_in(commands_dir);
         let list = if !available.is_empty() {
             format!(
@@ -105,7 +112,7 @@ pub(crate) fn run_slash_command(
             "No commands are installed. Drop .md files in <userData>/commands/.".to_string()
         };
         return ToolOutcome::failed(format!(
-            "Unknown command: /{name}. {list} If /{name} is a skill, do not use this tool — call load_skill with its SKILL.md path from the Available skills catalog instead."
+            "Unknown command: /{name}. {list} If /{name} is a skill, it is not enabled in this workspace's catalog; no fallback applies."
         ));
     }
 
@@ -145,6 +152,57 @@ pub(crate) fn run_slash_command(
     })
 }
 
+/// An invocation that matched no commands file, tried against the
+/// workspace's enabled skills: longest word-prefix match, case-insensitive,
+/// so `/AgentDB Advanced Features deploy` resolves the three-word skill and
+/// keeps `deploy` as leftover arguments. `None` when no provider is
+/// installed or nothing matches — the plain unknown-command failure then
+/// stands. One call resolves the skill (body in output, load_skill's
+/// shape); the model never needs a follow-up load_skill.
+fn resolve_skill_fallback(
+    command: &str,
+    args: &str,
+    workspace_root: &std::path::Path,
+) -> Option<ToolOutcome> {
+    let provider = super::load_skill::shared_skill_catalog_provider()?;
+    let skills = provider.skills(workspace_root);
+    if skills.is_empty() {
+        return None;
+    }
+    let words: Vec<&str> = command
+        .split_whitespace()
+        .chain(args.split_whitespace())
+        .collect();
+    let mut best: Option<(usize, &super::load_skill::SkillSummary)> = None;
+    for skill in &skills {
+        let name_len = skill.name.split_whitespace().count();
+        if name_len == 0 || name_len > words.len() {
+            continue;
+        }
+        let matches = skill
+            .name
+            .split_whitespace()
+            .zip(&words)
+            .all(|(name_word, word)| name_word.eq_ignore_ascii_case(word));
+        if matches && best.is_none_or(|(len, _)| name_len > len) {
+            best = Some((name_len, skill));
+        }
+    }
+    let (name_len, skill) = best?;
+    let mut outcome = super::load_skill::run_load_skill(&skill.abs_path, workspace_root);
+    if outcome.status == crate::OutcomeStatus::Executed {
+        if let Some(leftover) = words.get(name_len..) {
+            let leftover = leftover.join(" ");
+            if !leftover.is_empty() {
+                outcome
+                    .output
+                    .push_str(&format!("\n\nArguments: {leftover}"));
+            }
+        }
+    }
+    Some(outcome)
+}
+
 pub struct SlashCommandTool;
 
 impl Tool for SlashCommandTool {
@@ -174,7 +232,12 @@ impl Tool for SlashCommandTool {
     ) -> Result<ToolOutcome, ToolError> {
         let command = arg_str(&args, "command");
         let extra = arg_str(&args, "args");
-        Ok(run_slash_command(&command, &extra, &commands_dir_for(ctx)))
+        Ok(run_slash_command(
+            &command,
+            &extra,
+            &commands_dir_for(ctx),
+            &ctx.workspace_root,
+        ))
     }
 }
 
@@ -201,7 +264,7 @@ mod tests {
         )
         .unwrap();
 
-        let out = run_slash_command("refactor", "src/lib", &dir);
+        let out = run_slash_command("refactor", "src/lib", &dir, tmp.path());
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert_eq!(
             out.output,
@@ -234,7 +297,7 @@ mod tests {
         let dir = tmp.path().join("commands");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("x.md"), "Body").unwrap();
-        let out = run_slash_command("/x", "", &dir);
+        let out = run_slash_command("/x", "", &dir, tmp.path());
         assert!(out
             .output
             .starts_with("/x loaded. Apply its instructions to the task at hand.\n\n---\nBody"));
@@ -250,18 +313,20 @@ mod tests {
         std::fs::write(dir.join("beta.md"), "B").unwrap();
         std::fs::write(dir.join("notes.txt"), "not a command").unwrap();
 
-        let out = run_slash_command("nope", "", &dir);
+        let out = run_slash_command("nope", "", &dir, tmp.path());
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert!(out
             .output
             .starts_with("Unknown command: /nope. Available: alpha, beta."));
-        assert!(out.output.contains("call load_skill"));
+        assert!(out
+            .output
+            .contains("not enabled in this workspace's catalog"));
     }
 
     #[test]
     fn missing_command_with_no_commands_installed() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_slash_command("nope", "", &tmp.path().join("commands"));
+        let out = run_slash_command("nope", "", &tmp.path().join("commands"), tmp.path());
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert!(out
             .output
@@ -271,7 +336,7 @@ mod tests {
     #[test]
     fn missing_command_arg_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        let out = run_slash_command("", "", tmp.path());
+        let out = run_slash_command("", "", tmp.path(), tmp.path());
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert_eq!(out.output, "Missing required arg: command");
     }
@@ -306,7 +371,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let long = "x".repeat(200);
         std::fs::write(dir.join("long.md"), format!("{long}\nbody")).unwrap();
-        let out = run_slash_command("long", "", &dir);
+        let out = run_slash_command("long", "", &dir, tmp.path());
         let ToolDisplay::FileLoaded { description, .. } = out.display.unwrap() else {
             panic!("file_loaded display");
         };
@@ -318,7 +383,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("secret.md"), "s").unwrap();
         for bad in ["../secret", "a/b", "..\\secret"] {
-            let out = run_slash_command(bad, "", &tmp.path().join("commands"));
+            let out = run_slash_command(bad, "", &tmp.path().join("commands"), tmp.path());
             assert_eq!(out.status, OutcomeStatus::Failed, "{bad}");
             assert!(out.output.contains("Invalid command name"), "{bad}");
         }
@@ -347,4 +412,119 @@ mod tests {
 
     // set_var/remove_var are process-global; serialize the env-touching test.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct FixedCatalog(Vec<crate::tools::load_skill::SkillSummary>);
+    impl crate::tools::load_skill::SkillCatalogProvider for FixedCatalog {
+        fn skills(
+            &self,
+            _workspace_root: &std::path::Path,
+        ) -> Vec<crate::tools::load_skill::SkillSummary> {
+            self.0.clone()
+        }
+    }
+
+    /// Serializes the fallback tests: they share the process-global
+    /// provider slot, so parallel installs/drops would stomp each other.
+    static CATALOG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Clears the shared provider on scope exit, even on assertion failure —
+    /// the slot is process-global and tests run in parallel.
+    struct CatalogGuard;
+    impl Drop for CatalogGuard {
+        fn drop(&mut self) {
+            crate::tools::load_skill::set_shared_skill_catalog_provider(None);
+        }
+    }
+
+    fn install_catalog(skills: Vec<crate::tools::load_skill::SkillSummary>) -> CatalogGuard {
+        crate::tools::load_skill::set_shared_skill_catalog_provider(Some(std::sync::Arc::new(
+            FixedCatalog(skills),
+        )));
+        CatalogGuard
+    }
+
+    #[test]
+    fn skill_fallback_resolves_multi_word_names_with_leftover_args() {
+        let _lock = CATALOG_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("agentdb");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: AgentDB Advanced Features\n---\n# AgentDB\nBody",
+        )
+        .unwrap();
+        let _guard = install_catalog(vec![crate::tools::load_skill::SkillSummary {
+            name: "AgentDB Advanced Features".into(),
+            description: String::new(),
+            abs_path: skill_dir.join("SKILL.md").to_string_lossy().into_owned(),
+        }]);
+
+        // The model passes only the first word as `command`; the skill
+        // name continues into `args` — longest match still resolves, in
+        // ONE call, and the non-name tail rides along as Arguments.
+        let out = run_slash_command(
+            "AgentDB",
+            "Advanced Features deploy the db",
+            &tmp.path().join("commands"),
+            tmp.path(),
+        );
+        assert_eq!(out.status, OutcomeStatus::Executed, "{}", out.output);
+        assert!(out
+            .output
+            .starts_with("Skill \"AgentDB Advanced Features\" loaded."));
+        assert!(out.output.contains("# AgentDB"));
+        assert!(out.output.ends_with("Arguments: deploy the db"));
+    }
+
+    #[test]
+    fn skill_fallback_matches_single_word_and_prefers_longest() {
+        let _lock = CATALOG_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let mk = |dir: &str, name: &str| {
+            let p = tmp.path().join(dir);
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(
+                p.join("SKILL.md"),
+                format!("---\nname: {name}\n---\nBody {dir}"),
+            )
+            .unwrap();
+            crate::tools::load_skill::SkillSummary {
+                name: name.to_string(),
+                description: String::new(),
+                abs_path: p.join("SKILL.md").to_string_lossy().into_owned(),
+            }
+        };
+        let _guard = install_catalog(vec![mk("short", "deploy"), mk("long", "deploy database")]);
+
+        // Bare name resolves; a name that is a prefix of a longer skill
+        // name picks the longer skill when the words are present.
+        let out = run_slash_command("deploy", "", &tmp.path().join("commands"), tmp.path());
+        assert_eq!(out.status, OutcomeStatus::Executed);
+        assert!(out.output.contains("Body short"));
+
+        let out = run_slash_command(
+            "deploy",
+            "database now",
+            &tmp.path().join("commands"),
+            tmp.path(),
+        );
+        assert_eq!(out.status, OutcomeStatus::Executed);
+        assert!(out.output.contains("Body long"));
+        assert!(out.output.ends_with("Arguments: now"));
+    }
+
+    #[test]
+    fn skill_fallback_no_match_still_fails_with_unknown_command() {
+        let _lock = CATALOG_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = install_catalog(vec![crate::tools::load_skill::SkillSummary {
+            name: "unrelated".into(),
+            description: String::new(),
+            abs_path: "/nowhere/SKILL.md".into(),
+        }]);
+        let out = run_slash_command("nope", "", &tmp.path().join("commands"), tmp.path());
+        assert_eq!(out.status, OutcomeStatus::Failed);
+        assert!(out.output.starts_with("Unknown command: /nope."));
+    }
 }

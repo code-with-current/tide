@@ -42,7 +42,10 @@ pub use tools::ask_followup::{
 pub use tools::compact::{run_compact, DEFAULT_KEEP_LAST};
 pub use tools::computer::{set_shared_computer_backend, shared_computer_backend, ComputerBackend};
 pub use tools::exit_plan_mode::run_exit_plan_mode;
-pub use tools::load_skill::{build_skill_catalog_md, SkillSummary};
+pub use tools::load_skill::{
+    build_skill_catalog_md, set_shared_skill_catalog_provider, shared_skill_catalog_provider,
+    SkillCatalogProvider, SkillSummary,
+};
 pub use tools::memory::{
     rrf_fuse, set_shared_memory_index, set_shared_memory_writer, shared_memory_index,
     shared_memory_writer, MemoryHit, MemoryIndex, MemoryWriter,
@@ -56,11 +59,10 @@ pub use tools::{
     core_tools, AskFollowupTool, BashOutputTool, BashTool, ClickTool, CompactTool,
     DirectoryTreeTool, DispatchAgentTool, DragTool, EditFileTool, ExitPlanModeTool,
     GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, JobKillTool, JobListTool,
-    JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool,
-    LoadSkillTool, MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool,
-    PressKeyTool, ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool,
-    SendMessageTool, SetValueTool, SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool,
-    WebSearchTool, WriteFileTool,
+    JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool, LoadSkillTool,
+    MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool, PressKeyTool,
+    ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool, SendMessageTool, SetValueTool,
+    SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool, WebSearchTool, WriteFileTool,
 };
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`

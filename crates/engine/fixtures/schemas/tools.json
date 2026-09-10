@@ -1126,7 +1126,7 @@
   },
   {
     "name": "slash_command",
-    "description": "Invoke a user-defined slash command. Commands live in <userData>/commands/*.md and bundle a prompt prefix + instructions. Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command body so you can apply its instructions.",
+    "description": "Invoke a user-defined slash command or skill by its /name. Commands live in <userData>/commands/*.md; skills resolve from the workspace's enabled catalog (multi-word names allowed, e.g. \"/AgentDB Advanced Features\"). Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command or skill body so you can apply its instructions — one call resolves both, no fallback needed.",
     "schema": {
       "type": "object",
       "properties": {
@@ -1178,7 +1178,11 @@
         },
         "aggregate": {
           "type": "string",
-          "enum": ["content", "doc", "source"],
+          "enum": [
+            "content",
+            "doc",
+            "source"
+          ],
           "description": "Result granularity: content (chunks, default), doc (group by file, coverage-weighted), source (group by knowledge source, else the file's directory)."
         }
       },
@@ -1229,7 +1233,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "Absolute path to the skill's SKILL.md file, or a `builtin:<name>` id from the Available skills list."
+          "description": "Absolute path to the skill's SKILL.md file."
         }
       },
       "required": [
@@ -1242,7 +1246,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "Absolute path to the skill's SKILL.md file, or a `builtin:<name>` id from the Available skills list."
+          "description": "Absolute path to the skill's SKILL.md file."
         }
       },
       "required": [

@@ -1591,27 +1591,12 @@ fn toolset(workspace_root: &std::path::Path) -> Vec<ToolEntry> {
 /// the list the system prompt promises the model. Enabled skills scanned
 /// from the workspace's `.agents`/`.claude` roots and the user's shared
 /// home pools carry their SKILL.md paths. Without this catalog the model
-/// cannot route `/skill-name` to load_skill — it has no way to learn a
-/// path (the slash_command tool knows nothing of skills), which is exactly
-/// the reported "Unknown command" failure.
+/// cannot learn a skill's path; slash_command resolves `/skill-name`
+/// invocations itself through the same scan (skills.rs seam), so the
+/// catalog's job is pointing load_skill at the right file for
+/// task-matched picks.
 fn with_skill_catalog(base: &str, workspace_root: &std::path::Path) -> String {
-    let mut locations = crate::skills::project_skill_locations(workspace_root, "project");
-    locations.extend(crate::skills::user_skill_locations());
-    let scanned: Vec<tools::SkillSummary> = crate::skills::scan_skills(&locations)
-        .skills
-        .into_iter()
-        .filter(|skill| skill.enabled)
-        .map(|skill| {
-            // The install path is read before `skill` is destructured —
-            // `primary()` borrows, and the name/description fields move.
-            let abs_path = skill.primary().skill_file.to_string_lossy().into_owned();
-            tools::SkillSummary {
-                name: skill.name,
-                description: skill.description,
-                abs_path,
-            }
-        })
-        .collect();
+    let scanned = crate::skills::enabled_skills_for_workspace(workspace_root);
     let catalog = tools::build_skill_catalog_md(&scanned);
     if catalog.is_empty() {
         base.to_owned()
