@@ -579,6 +579,121 @@ pub fn split_prose(content: &str) -> Vec<String> {
     out
 }
 
+/// A prose chunk with citation metadata (heading breadcrumb + 1-based
+/// inclusive line range). Produced by [`split_prose_indexed`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProseChunk {
+    pub content: String,
+    /// "Section > Subsection" ATX breadcrumb; `None` before the first heading.
+    pub heading: Option<String>,
+    pub start_line: i64,
+    pub end_line: i64,
+}
+
+/// Heading- and line-aware variant of `split_prose` used by knowledge
+/// ingestion. Splits at paragraph (blank-line) boundaries only, so line
+/// ranges are exact — which is why, unlike `split_prose`, there is no
+/// tail overlap: an overlapped range would cite lines twice. Oversized
+/// paragraphs flush at the char cap mid-paragraph.
+pub fn split_prose_indexed(content: &str) -> Vec<ProseChunk> {
+    let mut chunks: Vec<ProseChunk> = Vec::new();
+    let mut stack: Vec<(u8, String)> = Vec::new();
+    let mut buf: Vec<&str> = Vec::new();
+    let mut buf_start = 1i64;
+    let mut line_no = 0i64;
+    for line in content.lines() {
+        line_no += 1;
+        if let Some((level, text)) = atx_heading(line) {
+            if !buf.is_empty() {
+                chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
+            }
+            while stack.last().is_some_and(|(l, _)| *l >= level) {
+                stack.pop();
+            }
+            stack.push((level, text));
+            buf_start = line_no + 1;
+            continue;
+        }
+        if line.trim().is_empty() {
+            if !buf.is_empty() {
+                chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
+                buf_start = line_no + 1;
+            }
+            continue;
+        }
+        // Oversized paragraph: a single line longer than the cap can never
+        // flush within budget at a line boundary, so split it at the cap
+        // mid-paragraph — the pieces share the line's number.
+        if line.chars().count() + 1 > MAX_CHUNK_CHARS {
+            if !buf.is_empty() {
+                chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
+            }
+            let mut rest = line;
+            while rest.chars().count() > MAX_CHUNK_CHARS {
+                let (head, tail) = split_at_chars(rest, MAX_CHUNK_CHARS);
+                buf.push(head);
+                chunks.push(flush_prose(&mut buf, line_no, line_no, &stack));
+                rest = tail;
+            }
+            if !rest.is_empty() {
+                buf_start = line_no;
+                buf.push(rest);
+            }
+            continue;
+        }
+        if buf.is_empty() {
+            buf_start = line_no;
+        }
+        buf.push(line);
+        let len: usize = buf.iter().map(|l| l.chars().count() + 1).sum();
+        if len > MAX_CHUNK_CHARS {
+            chunks.push(flush_prose(&mut buf, buf_start, line_no, &stack));
+            buf_start = line_no + 1;
+        }
+    }
+    if !buf.is_empty() {
+        chunks.push(flush_prose(&mut buf, buf_start, line_no, &stack));
+    }
+    chunks
+}
+
+fn atx_heading(line: &str) -> Option<(u8, String)> {
+    let t = line.trim_start();
+    let level = t.chars().take_while(|c| *c == '#').count();
+    if level == 0 || level > 6 {
+        return None;
+    }
+    let rest = t[level..].trim().trim_end_matches('#').trim();
+    (!rest.is_empty()).then(|| (level as u8, rest.to_string()))
+}
+
+/// Emit `buf` (consumed) as a chunk under the current heading stack.
+fn flush_prose(buf: &mut Vec<&str>, start: i64, end: i64, stack: &[(u8, String)]) -> ProseChunk {
+    let heading = (!stack.is_empty()).then(|| {
+        stack
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" > ")
+    });
+    let lines = std::mem::take(buf);
+    ProseChunk {
+        content: lines.join("\n"),
+        heading,
+        start_line: start,
+        end_line: end,
+    }
+}
+
+/// Split `s` at its `n`-th char (char-boundary safe). Callers only split
+/// lines longer than `n`, so the `(s, "")` fallback is unreachable.
+fn split_at_chars(s: &str, n: usize) -> (&str, &str) {
+    match s.char_indices().nth(n) {
+        Some((i, _)) => s.split_at(i),
+        None => (s, ""),
+    }
+}
+
 // ── fetchers ───────────────────────────────────────────────────────────────
 
 const FETCH_TIMEOUT_SECS: u64 = 15;
@@ -1310,5 +1425,38 @@ mod tests {
             &[outside.path().to_path_buf()]
         )
         .is_err());
+    }
+
+    #[test]
+    fn split_prose_indexed_tracks_headings_and_lines() {
+        let md =
+            "# Alpha\n\nfirst para\n\n## Beta Sub\n\nsecond para\nlines too\n\n# Gamma\n\nthird";
+        let chunks = super::split_prose_indexed(md);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].heading.as_deref(), Some("Alpha"));
+        assert_eq!(chunks[0].start_line, 3);
+        assert_eq!(chunks[0].end_line, 3);
+        assert_eq!(chunks[1].heading.as_deref(), Some("Alpha > Beta Sub"));
+        assert_eq!(chunks[1].end_line, 8);
+        assert_eq!(chunks[2].heading.as_deref(), Some("Gamma"));
+    }
+
+    #[test]
+    fn split_prose_indexed_respects_char_cap_and_drops_pop() {
+        let para = "word ".repeat(400); // 2000 chars, one paragraph
+        let md = format!("# T\n\n{para}\n\nafter");
+        let chunks = super::split_prose_indexed(&md);
+        assert!(chunks.len() >= 2);
+        assert!(chunks
+            .iter()
+            .all(|c| c.content.chars().count() <= MAX_CHUNK_CHARS + 6));
+        assert!(chunks.iter().all(|c| c.heading.as_deref() == Some("T")));
+    }
+
+    #[test]
+    fn atx_heading_parses_levels_and_trailing_hashes() {
+        assert_eq!(super::atx_heading("### Deep ###"), Some((3, "Deep".into())));
+        assert_eq!(super::atx_heading("not a heading"), None);
+        assert_eq!(super::atx_heading("####### seven"), None);
     }
 }
