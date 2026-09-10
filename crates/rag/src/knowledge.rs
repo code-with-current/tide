@@ -1,10 +1,11 @@
 //! Knowledge sources — port of `app/core/knowledge/{types,store,ingest,
 //! fetchers/*}.ts`: the registry CRUD on the shared global index
 //! (`<data>/knowledge/index.db`, sibling `sources` table on the same
-//! RagStore schema), the prose chunker (~1200-char paragraphs with a
-//! 100-char tail overlap), and the four fetchers (url / local docs /
-//! same-origin crawl / git repo). The serial job queue (manager) lives in
-//! the Tauri command layer where the async runtime is.
+//! RagStore schema), the heading-aware prose chunker (exact 1-based
+//! line ranges + breadcrumb trails, no overlap), and the four fetchers
+//! (url / local docs / same-origin crawl / git repo). The serial job
+//! queue (manager) lives in the Tauri command layer where the async
+//! runtime is.
 
 use std::path::{Path, PathBuf};
 
@@ -392,7 +393,6 @@ fn getrandom_fill(buf: &mut [u8]) {
 // ── document ingestion ─────────────────────────────────────────────────────
 
 const MAX_CHUNK_CHARS: usize = 1200;
-const OVERLAP_CHARS: usize = 100;
 
 /// Document-level ingestion: chunk fetched prose documents with the
 /// heading/line-aware splitter (exact 1-based ranges + breadcrumbs, no
@@ -451,14 +451,14 @@ pub fn ingest_documents(
             current: Some(doc.origin.clone()),
             error: None,
         });
-        let stale: Vec<String> = store
+        // Stale delete scoped to THIS source at the query level: two
+        // sources can normalize to the same origin string (a url source
+        // and a crawl of the same host), and one source's reindex must
+        // never touch another's chunks for it.
+        let stale = store
             .rag
-            .by_path(&doc.origin)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|c| c.source_id.as_deref() == Some(source_id))
-            .map(|c| c.id)
-            .collect();
+            .chunk_ids_for_source_path(source_id, &doc.origin)
+            .map_err(|e| e.to_string())?;
         store.rag.delete_chunks(&stale).map_err(|e| e.to_string())?;
         for (i, part) in split_prose_indexed(&doc.content).into_iter().enumerate() {
             prepared.push(PreparedChunk {
@@ -507,81 +507,6 @@ pub fn ingest_documents(
     Ok(prepared.len())
 }
 
-/// Split prose into ~1200-char chunks on blank-line paragraph boundaries,
-/// carrying a ~100-char tail overlap between consecutive chunks so
-/// sentences cut at an accumulation boundary stay retrievable from both
-/// sides.
-pub fn split_prose(content: &str) -> Vec<String> {
-    let paragraphs: Vec<&str> = content
-        .split("\n\n")
-        .flat_map(|p| p.split("\r\n\r\n"))
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-
-    let mut out: Vec<String> = Vec::new();
-    let mut buf = String::new();
-    for p in paragraphs {
-        if p.chars().count() > MAX_CHUNK_CHARS {
-            if !buf.is_empty() {
-                let t = buf.trim().to_string();
-                if !t.is_empty() {
-                    out.push(t);
-                }
-                buf.clear();
-            }
-            let chars: Vec<char> = p.chars().collect();
-            let mut start = 0usize;
-            let mut last_end = 0usize;
-            while start < chars.len() {
-                let end = (start + MAX_CHUNK_CHARS).min(chars.len());
-                out.push(chars[start..end].iter().collect());
-                last_end = end;
-                if end == chars.len() {
-                    break;
-                }
-                start += MAX_CHUNK_CHARS - OVERLAP_CHARS;
-            }
-            let overlap_from = last_end.saturating_sub(OVERLAP_CHARS);
-            buf = chars[overlap_from..last_end].iter().collect();
-            continue;
-        }
-        let p_len = p.chars().count();
-        if buf.is_empty() {
-            buf = p.to_string();
-        } else if buf.chars().count() + p_len + 2 <= MAX_CHUNK_CHARS {
-            buf.push_str("\n\n");
-            buf.push_str(p);
-        } else {
-            let t = buf.trim().to_string();
-            if !t.is_empty() {
-                out.push(t);
-            }
-            // Carry a bounded overlap so buf stays within budget.
-            let room = MAX_CHUNK_CHARS.saturating_sub(p_len + 2);
-            let overlap_len = OVERLAP_CHARS.min(room);
-            let buf_chars = buf.chars().count();
-            let overlap: String = if overlap_len > 0 {
-                buf.chars()
-                    .skip(buf_chars.saturating_sub(overlap_len))
-                    .collect()
-            } else {
-                String::new()
-            };
-            buf = if overlap.is_empty() {
-                p.to_string()
-            } else {
-                format!("{overlap}\n\n{p}")
-            };
-        }
-    }
-    let t = buf.trim().to_string();
-    if !t.is_empty() {
-        out.push(t);
-    }
-    out
-}
-
 /// A prose chunk with citation metadata (heading breadcrumb + 1-based
 /// inclusive line range). Produced by [`split_prose_indexed`].
 #[derive(Debug, Clone, PartialEq)]
@@ -593,10 +518,11 @@ pub struct ProseChunk {
     pub end_line: i64,
 }
 
-/// Heading- and line-aware variant of `split_prose` used by knowledge
-/// ingestion. Splits at paragraph (blank-line) boundaries only, so line
-/// ranges are exact — which is why, unlike `split_prose`, there is no
-/// tail overlap: an overlapped range would cite lines twice. A paragraph
+/// The prose splitter used by knowledge ingestion. Splits at paragraph
+/// (blank-line) boundaries only, so line ranges are exact — which is
+/// why there is no tail overlap (the original overlap-based chunker
+/// traded citation precision for retrievability of boundary-crossing
+/// sentences; an overlapped range would cite lines twice). A paragraph
 /// crossing the char cap flushes before the line that crosses it; a
 /// single line longer than the cap splits at the cap mid-paragraph.
 /// Fenced code blocks (backtick runs; tilde fences are not tracked) pass
@@ -1418,21 +1344,35 @@ mod tests {
     }
 
     #[test]
-    fn split_prose_chunks_with_overlap() {
-        let paragraphs = vec!["short one"; 400].join("\n\n");
-        let chunks = split_prose(&paragraphs);
-        assert!(chunks.len() > 1);
-        for chunk in &chunks {
-            assert!(
-                chunk.chars().count() <= MAX_CHUNK_CHARS + 2,
-                "chunk too long"
-            );
-        }
-        // Overlap carries: consecutive chunks share a tail prefix.
-        assert!(chunks[0].chars().count() > OVERLAP_CHARS);
+    fn reindex_scopes_stale_delete_to_own_source() {
+        // Two sources can normalize to the SAME origin string (e.g. a url
+        // source and a crawl of the same host) — reindexing one must
+        // never delete the other's chunks for that shared origin.
+        let (_dir, ks) = store();
+        let a = ks.add_source("A", "url", "site.com/guide", None).unwrap();
+        let b = ks.add_source("B", "crawl", "site.com/guide", None).unwrap();
+        let embedder = crate::store::FakeEmbedder { dim: 384 };
+        let doc = |body: &str| SourceDocument {
+            title: "guide".into(),
+            content: body.into(),
+            origin: "site.com/guide".into(),
+        };
+        ingest_documents(&ks, &embedder, &a.id, &[doc("# A\n\nalpha")], |_| {}).unwrap();
+        ingest_documents(&ks, &embedder, &b.id, &[doc("# B\n\nbeta")], |_| {}).unwrap();
 
-        let single = split_prose("one paragraph");
-        assert_eq!(single, vec!["one paragraph".to_string()]);
+        // Reindex A alone with new content: A's chunk is replaced…
+        ingest_documents(&ks, &embedder, &a.id, &[doc("# A2\n\nalpha two")], |_| {}).unwrap();
+        let a_rows = ks.rag.rows_by_source(&a.id).unwrap();
+        assert_eq!(a_rows.len(), 1);
+        assert_eq!(a_rows[0].content, "alpha two");
+        // …and B's chunk for the same origin survives untouched.
+        let b_rows = ks.rag.rows_by_source(&b.id).unwrap();
+        assert_eq!(
+            b_rows.len(),
+            1,
+            "other source's chunks must survive a reindex"
+        );
+        assert_eq!(b_rows[0].content, "beta");
     }
 
     #[test]

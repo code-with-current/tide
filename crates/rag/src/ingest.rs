@@ -273,8 +273,11 @@ impl From<&crate::chunker::Chunk> for PreparedChunk {
 /// Batched embed + write loop shared by workspace ingestion and knowledge
 /// document ingestion. Skips chunks whose id+path+contentHash+heading
 /// match an existing row; stamps each written row with the active
-/// embedder id. Heading participates so a renamed section re-embeds its
-/// otherwise-unchanged chunks instead of keeping a stale NULL breadcrumb.
+/// embedder id. Heading renames reach storage via the callers'
+/// delete-first rebuild (knowledge ingestion drops the source's rows
+/// for a path before re-embedding), so the heading term below is
+/// defense-in-depth: a future embed-without-delete caller cannot leave
+/// a stale breadcrumb on renamed sections.
 pub fn embed_and_store(
     rag: &RagStore,
     embedder: &dyn Embedder,
@@ -286,8 +289,9 @@ pub fn embed_and_store(
     for batch in rows.chunks(EMBED_BATCH_SIZE) {
         // Partition into needs-embed vs already-stored. A chunk is
         // skipped when its id, path, contentHash AND heading all match
-        // an existing row (heading mismatch → re-embed, so renamed
-        // headings reach stored chunks).
+        // an existing row. Today both callers rebuild delete-first, so
+        // the heading term guards future embed-without-delete callers
+        // rather than gating any live flow.
         let mut to_embed: Vec<ChunkRow> = Vec::with_capacity(batch.len());
         for r in batch {
             let row = ChunkRow {
@@ -703,8 +707,10 @@ mod tests {
             embed_and_store(&rag, &embedder, &[chunk(Some("Old Heading"))], |_| {}).unwrap();
         assert_eq!((embedded, skipped), (1, 0));
 
-        // Same id+path+content but a renamed heading must reach the row —
-        // a content-hash-only skip would keep the stale NULL/old breadcrumb.
+        // Defense-in-depth path (production reaches heading changes via
+        // ingest_documents' delete-first rebuild): same id+path+content
+        // but a renamed heading must still reach the row — a
+        // content-hash-only skip would keep the stale breadcrumb.
         let (embedded, skipped) =
             embed_and_store(&rag, &embedder, &[chunk(Some("New Heading"))], |_| {}).unwrap();
         assert_eq!((embedded, skipped), (1, 0));

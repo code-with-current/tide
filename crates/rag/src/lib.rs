@@ -38,7 +38,6 @@ pub use ingest::{
 };
 pub use knowledge::{
     fetch_crawl, fetch_docs, fetch_repo, fetch_url, ingest_documents, knowledge_db_path,
-    split_prose,
 };
 pub use knowledge::{
     KnowledgeSource, KnowledgeStore, SourceDocument, SourceKind, SourceProgressEvent, SOURCE_KINDS,

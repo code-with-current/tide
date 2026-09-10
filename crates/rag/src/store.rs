@@ -536,6 +536,24 @@ impl RagStore {
         Ok(rows)
     }
 
+    /// Chunk ids for one origin path under one source — the knowledge
+    /// reindex stale-delete feed. Scoped to the source IN SQL: two
+    /// sources can normalize to the same origin string, and one source's
+    /// reindex must never collect another's chunk ids for it.
+    pub fn chunk_ids_for_source_path(
+        &self,
+        source_id: &str,
+        path: &str,
+    ) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM chunks WHERE sourceId = ?1 AND path = ?2")?;
+        let rows = stmt
+            .query_map(params![source_id, path], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
     /// Full chunk rows for one knowledge source — the inline path renders
     /// source content from these.
     pub fn rows_by_source(&self, source_id: &str) -> rusqlite::Result<Vec<ChunkRow>> {

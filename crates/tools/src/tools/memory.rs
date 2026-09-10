@@ -527,7 +527,9 @@ mod tests {
         let out = run_memory("auth", Some(5), "ws1", Some(&index));
         // Heading goes after the symbol suffix; a None heading leaves the
         // point-hit location exactly as before.
-        assert!(out.output.contains("/repo/src/auth.ts:10-24 (login) · Setup > Auth · 87%"));
+        assert!(out
+            .output
+            .contains("/repo/src/auth.ts:10-24 (login) · Setup > Auth · 87%"));
         assert!(out.output.contains("/repo/src/util.ts:10\n"));
 
         // Knowledge-shaped hits cite it after the origin label.
@@ -544,7 +546,9 @@ mod tests {
             ..FakeIndex::default()
         };
         let out = run_memory("install", Some(5), "ws1", Some(&index));
-        assert!(out.output.contains("[1] [React Docs] react.dev/learn · Installation"));
+        assert!(out
+            .output
+            .contains("[1] [React Docs] react.dev/learn · Installation"));
 
         // Empty-string headings render nothing (defensive — some fetchers
         // may emit bare "#").
