@@ -1566,6 +1566,38 @@
     }
   },
   {
+    "name": "browser_navigate",
+    "description": "Open a URL in the browser panel and wait for the page to load. Only http:// and https:// URLs are allowed. Returns the fresh page state (URL, title, viewport and the element tree) once the load settles.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The http:// or https:// URL to open"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "browser_get_state",
+    "description": "Read the browser panel's current page: URL, title, viewport size, ready state and a role/name/ref tree of the visible elements. Refs are scoped to the snapshot that produced them, so call this again whenever the page may have changed.",
+    "schema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "browser_screenshot",
+    "description": "Capture the browser panel's current viewport as a PNG image.",
+    "schema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
     "name": "computer",
     "description": "Control the user's macOS apps: list their windows, take a screenshot, and click, type, scroll, or press keys inside one. Use for app UI that has no CLI or API — check `list` first, then `view` a window and act on coordinates in its captured image. Screen Recording and Accessibility must be granted in System Settings; every action runs visibly in the user's session.",
     "schema": {

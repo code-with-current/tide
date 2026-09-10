@@ -31,14 +31,18 @@ pub fn shared_browser_backend() -> Option<Arc<dyn BrowserBackend>> {
     SHARED_BACKEND.read().unwrap().clone()
 }
 
+/// Serializes every test that drives the one process-wide slot: the
+/// seam's own tests below and the tool tests in
+/// [`super::browser_tools`] both flip it, so they all take this lock
+/// in order to stay deterministic under the parallel test harness.
+#[cfg(test)]
+pub(crate) static TEST_SLOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    // Both tests drive the one process-wide slot; hold this so they
-    // can't interleave under the parallel test harness.
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[derive(Debug)]
     struct StubBackend(bool);
@@ -68,7 +72,7 @@ mod tests {
 
     #[test]
     fn shared_backend_round_trips() {
-        let _guard = LOCK.lock().unwrap();
+        let _guard = super::TEST_SLOT_LOCK.lock().unwrap();
         set_shared_browser_backend(None);
         assert!(shared_browser_backend().is_none());
         set_shared_browser_backend(Some(Arc::new(StubBackend(true))));
@@ -86,7 +90,7 @@ mod tests {
 
     #[test]
     fn invoke_error_propagates() {
-        let _guard = LOCK.lock().unwrap();
+        let _guard = super::TEST_SLOT_LOCK.lock().unwrap();
         set_shared_browser_backend(Some(Arc::new(FailingBackend)));
         let backend = shared_browser_backend().unwrap();
         assert_eq!(

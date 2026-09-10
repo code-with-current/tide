@@ -158,6 +158,11 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
         | "perform_secondary_action"
         | "set_value"
         | "scroll" => RiskTier::Write,
+        // Agentic browser: reading and capturing the live page observe;
+        // navigation drives the surface the user is watching (Task 5's
+        // action tools join the Write side when they land).
+        "browser_get_state" | "browser_screenshot" => RiskTier::ReadOnly,
+        "browser_navigate" => RiskTier::Write,
         // Dynamically bridged MCP tools (`mcp__<server>__<tool>`) — the TS
         // toolMeta `mcp` entry: read-only, auto-approved in all modes (the
         // TS never wrapped MCP executes in the permission wrapper).

@@ -8622,6 +8622,7 @@ dependencies = [
  "smol",
  "store",
  "tokio",
+ "tools",
  "tungstenite 0.30.0",
  "unicode-segmentation",
  "url",

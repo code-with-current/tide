@@ -58,6 +58,10 @@ protocol = { path = "crates/protocol" }
 # from the same config file, so the preview can never disagree with the
 # commit the daemon writes.
 store = { path = "crates/store" }
+# The agentic browser bridge installs the tools crate's process-wide
+# `BrowserBackend` at Tide boot — the one app-side piece that must reach
+# the seam the engine's browser tool calls route through.
+tools = { path = "crates/tools" }
 pulldown-cmark = "0.13"
 # The Remote Control dialog renders the connect link as a scannable QR grid;
 # default features stay off so no image/svg codecs ride along.

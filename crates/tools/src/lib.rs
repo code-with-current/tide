@@ -57,13 +57,14 @@ pub use tools::session_history::{
 };
 pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
 pub use tools::{
-    core_tools, AskFollowupTool, BashOutputTool, BashTool, ClickTool, CompactTool,
-    DirectoryTreeTool, DispatchAgentTool, DragTool, EditFileTool, ExitPlanModeTool,
-    GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, JobKillTool, JobListTool,
-    JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool, LoadSkillTool,
-    MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool, PressKeyTool,
-    ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool, SendMessageTool, SetValueTool,
-    SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool, WebSearchTool, WriteFileTool,
+    core_tools, AskFollowupTool, BashOutputTool, BashTool, BrowserGetStateTool, BrowserNavigateTool,
+    BrowserScreenshotTool, ClickTool, CompactTool, DirectoryTreeTool, DispatchAgentTool, DragTool,
+    EditFileTool, ExitPlanModeTool, GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool,
+    InitTool, JobKillTool, JobListTool, JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool,
+    ListDirTool, LoadSkillTool, MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool,
+    PressKeyTool, ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool, SendMessageTool,
+    SetValueTool, SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool, WebSearchTool,
+    WriteFileTool,
 };
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`
@@ -455,6 +456,9 @@ mod tests {
                 "perform_secondary_action",
                 "set_value",
                 "scroll",
+                "browser_navigate",
+                "browser_get_state",
+                "browser_screenshot",
                 "list_sessions",
                 "read_session",
             ]
@@ -516,8 +520,23 @@ mod tests {
             assert_eq!(tools[index].risk_tier(), expected_tier, "{index}");
         }
         // Session history: pure reads over the saved-session store.
-        assert_eq!(tools[41].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[44].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[45].risk_tier(), RiskTier::ReadOnly);
+        // Agentic browser: reading and capturing the page observe;
+        // navigation drives the surface the user is watching (Write).
+        assert_eq!(tools[41].risk_tier(), RiskTier::Write);
         assert_eq!(tools[42].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[43].risk_tier(), RiskTier::ReadOnly);
+        for name in ["browser_navigate", "browser_get_state", "browser_screenshot"] {
+            assert_eq!(
+                core_tools()
+                    .into_iter()
+                    .find(|t| t.spec().name == name)
+                    .unwrap()
+                    .risk_tier(),
+                permission::risk_tier_for(name)
+            );
+        }
     }
 
     /// Guard drift against the frozen tool schemas the TS stack shipped

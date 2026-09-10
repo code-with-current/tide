@@ -7,6 +7,7 @@ pub mod ask_followup;
 pub mod background_shell;
 pub mod bash;
 pub mod browser;
+pub mod browser_tools;
 pub mod compact;
 pub mod computer;
 pub mod computer_tools;
@@ -46,6 +47,9 @@ pub use ask_followup::{
 pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
 pub use browser::BrowserBackend;
+pub use browser_tools::{
+    is_browser_tool, BrowserGetStateTool, BrowserNavigateTool, BrowserScreenshotTool, BROWSER_TOOLS,
+};
 pub use compact::{CompactTool, DEFAULT_KEEP_LAST};
 pub use computer::ComputerBackend;
 pub use computer_tools::{
@@ -126,6 +130,9 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(PerformSecondaryActionTool),
         Box::new(SetValueTool),
         Box::new(ScrollTool),
+        Box::new(BrowserNavigateTool),
+        Box::new(BrowserGetStateTool),
+        Box::new(BrowserScreenshotTool),
         Box::new(ListSessionsTool),
         Box::new(ReadSessionTool),
     ]

@@ -1410,6 +1410,13 @@ pub struct Tide {
     /// programmatic open — a mermaid diagram's Preview — parks its URL here
     /// until `ensure_right_panel_browser` flushes it.
     right_panel_pending_browser_urls: HashMap<Uuid, String>,
+    /// Agent evals parked for a browser tab whose view does not exist
+    /// yet — the auto-open path's twin of
+    /// [`Self::right_panel_pending_browser_urls`], flushed by the same
+    /// `navigate_pending_browser_url` once the surface's renderer creates
+    /// the view. Each op then rides the view's own load-waiter queue until
+    /// the page it targeted settles.
+    right_panel_pending_agent_ops: HashMap<Uuid, Vec<browser_bridge::PendingAgentOp>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
@@ -1655,6 +1662,7 @@ mod activity_diff;
 mod autocomplete;
 mod background_work;
 mod branches;
+mod browser_bridge;
 mod chat_composer;
 mod command_palette;
 mod commit_dialog;
@@ -2983,6 +2991,7 @@ impl Tide {
                 right_panel_terminals: HashMap::new(),
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_urls: HashMap::new(),
+                right_panel_pending_agent_ops: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
@@ -3112,6 +3121,12 @@ impl Tide {
         // that there is an entity to notify and deliberately not before the
         // first frame.
         entity.update(cx, |this, cx| {
+            // The agentic browser's process-wide backend installs from here
+            // — the app crate — because the main-thread hop needs GPUI
+            // handles. Linux installs nothing: browser tool calls fail
+            // cleanly there per the seam's no-backend test.
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            browser_bridge::install_browser_backend(cx);
             this.restart_task_state_sync();
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);

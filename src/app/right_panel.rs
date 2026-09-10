@@ -2718,6 +2718,17 @@ impl Tide {
         if let Some(url) = self.right_panel_pending_browser_urls.remove(&browser_id) {
             browser.update(cx, |view, cx| view.navigate_to_url(url, cx));
         }
+        // Agent ops parked while the view did not exist ride the same
+        // flush: the navigation that just started parks them in the view's
+        // load-waiter queue, so each answers once the page it targeted
+        // settles (never against the pre-navigation document).
+        for op in self
+            .right_panel_pending_agent_ops
+            .remove(&browser_id)
+            .unwrap_or_default()
+        {
+            browser.update(cx, |view, cx| view.agent_eval(op.script, op.reply, cx));
+        }
     }
 
     /// Drop browser views whose tab no longer exists in any session.
@@ -2738,6 +2749,11 @@ impl Tide {
         // Pending navigations for tabs that no longer exist have nothing left
         // to wait for.
         self.right_panel_pending_browser_urls
+            .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
+        // Parked agent ops for tabs that no longer exist have nothing left
+        // to wait for either: dropping them drops each reply sender, which
+        // the engine side reads as "surface went away" instead of a hang.
+        self.right_panel_pending_agent_ops
             .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
     }
 
