@@ -28,7 +28,7 @@ pub(crate) enum RagOpsEvent {
     /// The Knowledge Library card's ensure reply (source id, doc count,
     /// daemon-side root).
     Library(Result<LibraryState, String>),
-    /// The `/kb-*` command pack install finished (count or error).
+    /// The `/kb-*` copy-to-folder action finished (count or error).
     KbInstall(Result<u32, String>),
     /// One serial rebuild step finished — pop the next from the queue.
     RebuildStep,
@@ -971,8 +971,9 @@ impl Tide {
         );
     }
 
-    /// Install the `/kb-*` command pack (idempotent; 0 installed means
-    /// every command was already present).
+    /// Copy the built-in `/kb-*` bodies into the commands folder as
+    /// editable overrides (idempotent; 0 means copies already exist —
+    /// the commands work either way, built-ins need no files).
     pub(super) fn rag_kb_install(&self) {
         self.rag_settings.kb_pending.set(true);
         self.rag_dispatch_result(
@@ -1361,13 +1362,13 @@ fn library_refresh_after_sources(latch: bool, library_row: Option<&str>) -> bool
     latch && matches!(library_row, Some(status) if status != "queued" && status != "indexing")
 }
 
-/// The install hint line from the reply count: "N installed", or the
-/// quieter "already installed" when nothing needed writing.
+/// The copy hint line from the reply count: "N copied", or the
+/// quieter "already in the commands folder" when nothing needed writing.
 fn kb_install_note(installed: u32) -> String {
     if installed == 0 {
         tr!("settings.rag.library_kb_present").to_string()
     } else {
-        tr!("settings.rag.library_kb_installed", count = installed)
+        tr!("settings.rag.library_kb_copied", count = installed)
     }
 }
 
@@ -3272,8 +3273,9 @@ impl Tide {
         card.child(body)
     }
 
-    /// The Knowledge Library card: where the writable library lives, its
-    /// registry size, reindex/reveal, and the `/kb` command pack install.
+    /// Knowledge Library card: where the writable library lives, its
+    /// registry size, reindex/reveal, and the `/kb` built-ins' copy-to-folder
+    /// affordance.
     /// The idempotent `LibraryEnsure` rides the first render so the source
     /// row + directory exist before anything is clicked; the root path
     /// comes from the daemon's reply (a remote daemon's data dir is not
@@ -3326,15 +3328,12 @@ impl Tide {
 
         // The `/kb` pack install (idempotent — re-running reports what
         // was already present through the row's hint line).
-        let install = CardButton::new(
-            "rag-library-kb-install",
-            tr!("settings.rag.library_install"),
-        )
-        .icon("icons/command.svg")
-        .busy(self.rag_settings.kb_pending.get())
-        .render(*theme, cx, |this, _window, _cx| {
-            this.rag_kb_install();
-        });
+        let install = CardButton::new("rag-library-kb-install", tr!("settings.rag.library_copy"))
+            .icon("icons/command.svg")
+            .busy(self.rag_settings.kb_pending.get())
+            .render(*theme, cx, |this, _window, _cx| {
+                this.rag_kb_install();
+            });
 
         let location = library
             .as_ref()
@@ -3992,6 +3991,6 @@ mod tests {
             kb_install_note(0),
             tr!("settings.rag.library_kb_present").to_string()
         );
-        assert_eq!(kb_install_note(4), "4 installed");
+        assert_eq!(kb_install_note(4), "4 copied to commands folder");
     }
 }

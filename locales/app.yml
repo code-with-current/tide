@@ -491,12 +491,12 @@ settings.rag.library_commands:
   en: Slash commands
 settings.rag.library_commands_hint:
   en: Install the /kb context, search, capture, and iterate commands.
-settings.rag.library_install:
-  en: Install commands
-settings.rag.library_kb_installed:
-  en: "%{count} installed"
+settings.rag.library_copy:
+  en: Copy /kb commands
+settings.rag.library_kb_copied:
+  en: "%{count} copied to commands folder"
 settings.rag.library_kb_present:
-  en: Already installed
+  en: Already in commands folder
 settings.rag.error_name_required:
   en: Name is required.
 settings.rag.error_location_required:

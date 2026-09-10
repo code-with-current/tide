@@ -1126,7 +1126,7 @@
   },
   {
     "name": "slash_command",
-    "description": "Invoke a user-defined slash command or skill by its /name. Commands live in <userData>/commands/*.md; skills resolve from the workspace's enabled catalog (multi-word names allowed, e.g. \"/AgentDB Advanced Features\"). Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command or skill body so you can apply its instructions — one call resolves both, no fallback needed.",
+    "description": "Invoke a user-defined slash command or skill by its /name. Commands live in <userData>/commands/*.md; built-in /kb-* commands (knowledge library) resolve with no file installed — a file with the same name overrides the built-in; skills resolve from the workspace's enabled catalog (multi-word names allowed, e.g. \"/AgentDB Advanced Features\"). Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command or skill body so you can apply its instructions — one call resolves all three, no fallback needed.",
     "schema": {
       "type": "object",
       "properties": {

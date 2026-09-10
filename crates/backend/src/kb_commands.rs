@@ -1,27 +1,12 @@
 //! `/kb-*` command pack — the load → act → ship → persist loop ported
-//! from OpenContext's command defs. Bodies are compile-time embedded
-//! (no runtime resource lookup); install never overwrites user edits.
+//! from OpenContext's command defs. The commands resolve built-in (see
+//! tools::slash_command::BUILTIN_COMMANDS); this installer only
+//! materializes editable copies into the user's commands dir and never
+//! overwrites user edits.
 
 use std::path::Path;
 
-const BODIES: &[(&str, &str)] = &[
-    (
-        "kb-context",
-        include_str!("../../../resources/commands/kb-context.md"),
-    ),
-    (
-        "kb-search",
-        include_str!("../../../resources/commands/kb-search.md"),
-    ),
-    (
-        "kb-capture",
-        include_str!("../../../resources/commands/kb-capture.md"),
-    ),
-    (
-        "kb-iterate",
-        include_str!("../../../resources/commands/kb-iterate.md"),
-    ),
-];
+use tools::tools::slash_command::BUILTIN_COMMANDS as BODIES;
 
 /// (name, body) pairs that are not yet present in `dir`.
 pub fn plan_installs(dir: &Path) -> Vec<(&'static str, &'static str)> {
@@ -32,7 +17,8 @@ pub fn plan_installs(dir: &Path) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
-/// Copy missing commands into the user's commands dir; returns how many
+/// Copy missing built-in bodies into the user's commands dir (editable
+/// overrides); returns how many were written.
 /// were installed (0 = all present or dir created empty).
 pub fn install_kb_commands() -> Result<usize, String> {
     let dir = tools::tools::slash_command::commands_dir();

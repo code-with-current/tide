@@ -1441,9 +1441,9 @@ settings.rag.library_docs_value: "%{count} 篇文档"
 settings.rag.library_reveal: 在文件管理器中显示
 settings.rag.library_commands: 斜杠命令
 settings.rag.library_commands_hint: 安装 /kb 上下文、搜索、捕获与迭代命令。
-settings.rag.library_install: 安装命令
-settings.rag.library_kb_installed: 已安装 %{count} 个
-settings.rag.library_kb_present: 已全部安装
+settings.rag.library_copy: 复制命令
+settings.rag.library_kb_copied: 已复制 %{count} 个到命令文件夹
+settings.rag.library_kb_present: 已在命令文件夹中
 settings.rag.error_name_required: 请填写名称。
 settings.rag.error_location_required: 请填写位置。
 settings.rag.error_http_required: "请输入 http(s):// 网址。"

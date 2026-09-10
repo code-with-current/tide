@@ -1493,9 +1493,9 @@ settings.rag.library_docs_value: "%{count} 件のドキュメント"
 settings.rag.library_reveal: ファイルマネージャーで表示
 settings.rag.library_commands: スラッシュコマンド
 settings.rag.library_commands_hint: /kb の context・search・capture・iterate コマンドをインストールします。
-settings.rag.library_install: コマンドをインストール
-settings.rag.library_kb_installed: "%{count} 件インストール済み"
-settings.rag.library_kb_present: すでにインストール済み
+settings.rag.library_copy: コマンドをコピー
+settings.rag.library_kb_copied: "%{count} 件をコマンドフォルダにコピー"
+settings.rag.library_kb_present: コマンドフォルダにあります
 settings.rag.error_name_required: 名前は必須です。
 settings.rag.error_location_required: 場所は必須です。
 settings.rag.error_http_required: "http(s):// URL を入力してください。"

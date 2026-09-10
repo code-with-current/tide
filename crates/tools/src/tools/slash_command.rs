@@ -13,7 +13,7 @@ use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
 use super::arg_str;
 
-const DESCRIPTION: &str = "Invoke a user-defined slash command or skill by its /name. Commands live in <userData>/commands/*.md; skills resolve from the workspace's enabled catalog (multi-word names allowed, e.g. \"/AgentDB Advanced Features\"). Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command or skill body so you can apply its instructions — one call resolves both, no fallback needed.";
+const DESCRIPTION: &str = "Invoke a user-defined slash command or skill by its /name. Commands live in <userData>/commands/*.md; built-in /kb-* commands (knowledge library) resolve with no file installed — a file with the same name overrides the built-in; skills resolve from the workspace's enabled catalog (multi-word names allowed, e.g. \"/AgentDB Advanced Features\"). Use when the user explicitly references one (e.g. \"run /refactor on src/\") or when a known command matches the task. Returns the command or skill body so you can apply its instructions — one call resolves all three, no fallback needed.";
 
 /// `<userData>/commands` — same resolution as `store::paths::data_dir`
 /// (`~/.tide`, `TIDE_DATA_DIR` override) without taking a crate dependency
@@ -72,9 +72,35 @@ pub(crate) fn clamp_chars(s: &str, max: usize) -> String {
 }
 
 /// Shared body — reads `<userData>/commands/<name>.md`; no ctx dependency.
+/// Built-in `/kb-*` command bodies, compiled in from the repo's
+/// `resources/commands/` — the memory feature's command pack resolves
+/// with no install step. A user file with the same name wins, so
+/// `<userData>/commands/` stays the customization surface; the Settings
+/// card's copy button materializes exactly these bodies for editing.
+/// Single source of truth: backend's installer reads this table too.
+pub const BUILTIN_COMMANDS: &[(&str, &str)] = &[
+    (
+        "kb-context",
+        include_str!("../../../../resources/commands/kb-context.md"),
+    ),
+    (
+        "kb-search",
+        include_str!("../../../../resources/commands/kb-search.md"),
+    ),
+    (
+        "kb-capture",
+        include_str!("../../../../resources/commands/kb-capture.md"),
+    ),
+    (
+        "kb-iterate",
+        include_str!("../../../../resources/commands/kb-iterate.md"),
+    ),
+];
+
 /// When no commands file matches, the invocation falls through to the
-/// workspace skill catalog (see [`resolve_skill_fallback`]) so `/name`
-/// resolves to a command OR a skill in one call.
+/// built-in `/kb-*` table and then the workspace skill catalog (see
+/// [`resolve_skill_fallback`]) so `/name` resolves to a command, a
+/// built-in, or a skill in one call.
 pub(crate) fn run_slash_command(
     command: &str,
     args: &str,
@@ -95,22 +121,22 @@ pub(crate) fn run_slash_command(
 
     let file = commands_dir.join(format!("{name}.md"));
     if !file.is_file() {
+        if let Some((_, raw)) = BUILTIN_COMMANDS.iter().find(|(n, _)| *n == name) {
+            return command_loaded(name, args, raw, true);
+        }
         if let Some(outcome) = resolve_skill_fallback(name, args, workspace_root) {
             return outcome;
         }
-        let available = list_slash_commands_in(commands_dir);
-        let list = if !available.is_empty() {
-            format!(
-                "Available: {}.",
-                available
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        } else {
-            "No commands are installed. Drop .md files in <userData>/commands/.".to_string()
-        };
+        let mut available: Vec<String> = list_slash_commands_in(commands_dir)
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        for (n, _) in BUILTIN_COMMANDS {
+            if !commands_dir.join(format!("{n}.md")).is_file() {
+                available.push(format!("{n} (built-in)"));
+            }
+        }
+        let list = format!("Available: {}.", available.join(", "));
         return ToolOutcome::failed(format!(
             "Unknown command: /{name}. {list} If /{name} is a skill, it is not enabled in this workspace's catalog; no fallback applies."
         ));
@@ -120,6 +146,13 @@ pub(crate) fn run_slash_command(
         Ok(raw) => raw,
         Err(e) => return ToolOutcome::failed(format!("Cannot read command file: {e}")),
     };
+    command_loaded(name, args, &raw, false)
+}
+
+/// Shared load outcome for file and built-in commands: first non-empty
+/// line is the description, args ride as a suffix, and the display card
+/// keeps the same shape so the timeline renders both identically.
+fn command_loaded(name: &str, args: &str, raw: &str, builtin: bool) -> ToolOutcome {
     let bytes = raw.len();
     let body = raw.trim().to_string();
 
@@ -137,14 +170,20 @@ pub(crate) fn run_slash_command(
         format!("\n\nArguments: {args}")
     };
 
+    let origin = if builtin { " (built-in)" } else { "" };
     ToolOutcome::executed(format!(
-        "/{name} loaded. Apply its instructions to the task at hand.{arg_suffix}\n\n---\n{body}"
+        "/{name} loaded{origin}. Apply its instructions to the task at hand.{arg_suffix}\n\n---\n{body}"
     ))
     .with_meta(format!("/{name} · {lines}L"))
     // file_loaded display → renders a compact "loaded <path> · N lines ·
-    // N bytes" card with the body collapsible.
+    // N bytes" card with the body collapsible. Built-ins display their
+    // provenance instead of a filesystem path.
     .with_display(ToolDisplay::FileLoaded {
-        path: format!("commands/{name}.md"),
+        path: if builtin {
+            format!("built-in:/{name}")
+        } else {
+            format!("commands/{name}.md")
+        },
         lines: lines as u64,
         bytes: bytes as u64,
         description: Some(description),
@@ -317,20 +356,51 @@ mod tests {
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert!(out
             .output
-            .starts_with("Unknown command: /nope. Available: alpha, beta."));
+            .starts_with("Unknown command: /nope. Available: alpha, beta,"));
+        assert!(out.output.contains("kb-iterate (built-in)"));
         assert!(out
             .output
             .contains("not enabled in this workspace's catalog"));
     }
 
     #[test]
-    fn missing_command_with_no_commands_installed() {
+    fn missing_command_lists_builtins_when_no_files_exist() {
         let tmp = tempfile::tempdir().unwrap();
         let out = run_slash_command("nope", "", &tmp.path().join("commands"), tmp.path());
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert!(out
-            .output
-            .starts_with("Unknown command: /nope. No commands are installed."));
+        assert!(out.output.contains("kb-context (built-in)"));
+        assert!(out.output.contains("kb-iterate (built-in)"));
+    }
+
+    #[test]
+    fn builtin_kb_commands_resolve_without_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = run_slash_command(
+            "kb-context",
+            "shipping the library",
+            &tmp.path().join("commands"),
+            tmp.path(),
+        );
+        assert_eq!(out.status, OutcomeStatus::Executed);
+        assert!(out.output.contains("(built-in). Apply its instructions"));
+        assert!(out.output.contains("Load project background"));
+        assert!(out.output.contains("Arguments: shipping the library"));
+        let ToolDisplay::FileLoaded { path, .. } = out.display.unwrap() else {
+            panic!("file_loaded display");
+        };
+        assert_eq!(path, "built-in:/kb-context");
+    }
+
+    #[test]
+    fn file_overrides_builtin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("commands");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("kb-search.md"), "Custom body").unwrap();
+        let out = run_slash_command("kb-search", "", &dir, tmp.path());
+        assert_eq!(out.status, OutcomeStatus::Executed);
+        assert!(out.output.contains("Custom body"));
+        assert!(!out.output.contains("(built-in)"));
     }
 
     #[test]

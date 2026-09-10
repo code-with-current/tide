@@ -48,5 +48,7 @@ the original feature bullet instead of adding separate entries for them.
   are allowed, symlink-verified, and confined to the library root. Four slash
   commands ship with an idempotent installer: `/kb-context` (pull library docs
   into the turn), `/kb-search`, `/kb-capture` (save something to the library),
-  and `/kb-iterate`. A Knowledge Library card on the Settings page exposes
-  reveal, re-index, and command install.
+  and `/kb-iterate` — built in and always available, no install step; a file in the
+  commands folder overrides a built-in, and the Settings card's copy button materializes
+  editable versions. A Knowledge Library card on the Settings page exposes
+  reveal, re-index, and that copy action.
