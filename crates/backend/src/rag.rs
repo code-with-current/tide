@@ -200,6 +200,7 @@ fn hit_from_row(
         },
         start_line: start as u64,
         end_line: (end > start).then(|| end as u64),
+        heading: row.heading.clone(),
         content: row.content.clone(),
         similarity,
         source_name,
@@ -1979,10 +1980,20 @@ mod tests {
         let degenerate = ChunkRow {
             start_line: -5,
             end_line: -3,
-            ..flat
+            ..flat.clone()
         };
         let hit = hit_from_row(&degenerate, None, None, None);
         assert_eq!(hit.start_line, 0);
         assert_eq!(hit.end_line, None);
+        // Prose breadcrumbs pass through untouched (null stays null).
+        let headed = ChunkRow {
+            heading: Some("Setup > Auth".into()),
+            ..flat.clone()
+        };
+        assert_eq!(
+            hit_from_row(&headed, None, None, None).heading.as_deref(),
+            Some("Setup > Auth")
+        );
+        assert_eq!(hit_from_row(&flat, None, None, None).heading, None);
     }
 }

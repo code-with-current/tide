@@ -46,6 +46,10 @@ pub struct MemoryHit {
     /// or the backend could not resolve a range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_line: Option<u64>,
+    /// Heading breadcrumb ("A > B") for prose chunks from knowledge
+    /// sources; `None` for workspace code chunks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heading: Option<String>,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub similarity: Option<f64>,
@@ -255,6 +259,15 @@ pub(crate) fn run_memory(
                     )
                 }
             };
+            // Heading breadcrumb appends once for both hit shapes (the
+            // workspace branch cites it after the symbol suffix, the
+            // knowledge branch after the path); code chunks keep None.
+            let heading = hit
+                .heading
+                .as_deref()
+                .filter(|h| !h.is_empty())
+                .map(|h| format!(" · {h}"))
+                .unwrap_or_default();
             let sim = hit
                 .similarity
                 .map(|s| format!(" · {}%", (s * 100.0).round() as u64))
@@ -266,7 +279,7 @@ pub(crate) fn run_memory(
             } else {
                 hit.content.clone()
             };
-            format!("[{}] {loc}{sim}\n{body}", i + 1)
+            format!("[{}] {loc}{heading}{sim}\n{body}", i + 1)
         })
         .collect::<Vec<_>>();
 
@@ -382,6 +395,7 @@ mod tests {
             symbol: symbol.map(str::to_owned),
             start_line: 10,
             end_line: None,
+            heading: None,
             content: format!("content of {id}"),
             similarity,
             source_name: None,
@@ -494,6 +508,58 @@ mod tests {
         let out = run_memory("auth", Some(5), "ws1", Some(&index));
         assert!(out.output.contains("/repo/src/auth.ts:10-24 (login)"));
         assert!(out.output.contains("/repo/src/util.ts:10\n"));
+    }
+
+    #[test]
+    fn heading_breadcrumbs_append_to_location() {
+        let span = MemoryHit {
+            end_line: Some(24),
+            heading: Some("Setup > Auth".into()),
+            ..hit("c1", "/repo/src/auth.ts", Some("login"), Some(0.87))
+        };
+        let point = hit("c2", "/repo/src/util.ts", None, None);
+        let index = FakeIndex {
+            total: 2,
+            vector: vec![span, point],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        let out = run_memory("auth", Some(5), "ws1", Some(&index));
+        // Heading goes after the symbol suffix; a None heading leaves the
+        // point-hit location exactly as before.
+        assert!(out.output.contains("/repo/src/auth.ts:10-24 (login) · Setup > Auth · 87%"));
+        assert!(out.output.contains("/repo/src/util.ts:10\n"));
+
+        // Knowledge-shaped hits cite it after the origin label.
+        let knowledge = MemoryHit {
+            source_name: Some("React Docs".into()),
+            path: "react.dev/learn".into(),
+            heading: Some("Installation".into()),
+            ..hit("k1", "react.dev/learn", None, None)
+        };
+        let index = FakeIndex {
+            total: 1,
+            vector: vec![knowledge],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        let out = run_memory("install", Some(5), "ws1", Some(&index));
+        assert!(out.output.contains("[1] [React Docs] react.dev/learn · Installation"));
+
+        // Empty-string headings render nothing (defensive — some fetchers
+        // may emit bare "#").
+        let bare = MemoryHit {
+            heading: Some(String::new()),
+            ..hit("k2", "react.dev/learn", None, None)
+        };
+        let index = FakeIndex {
+            total: 1,
+            vector: vec![bare],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        let out = run_memory("install", Some(5), "ws1", Some(&index));
+        assert!(out.output.contains("[1] react.dev/learn:10\n"));
     }
 
     #[test]

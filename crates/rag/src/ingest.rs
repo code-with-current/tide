@@ -271,8 +271,10 @@ impl From<&crate::chunker::Chunk> for PreparedChunk {
 }
 
 /// Batched embed + write loop shared by workspace ingestion and knowledge
-/// document ingestion. Skips chunks whose id+path+contentHash match an
-/// existing row; stamps each written row with the active embedder id.
+/// document ingestion. Skips chunks whose id+path+contentHash+heading
+/// match an existing row; stamps each written row with the active
+/// embedder id. Heading participates so a renamed section re-embeds its
+/// otherwise-unchanged chunks instead of keeping a stale NULL breadcrumb.
 pub fn embed_and_store(
     rag: &RagStore,
     embedder: &dyn Embedder,
@@ -282,8 +284,10 @@ pub fn embed_and_store(
     let mut embedded: u64 = 0;
     let mut skipped: u64 = 0;
     for batch in rows.chunks(EMBED_BATCH_SIZE) {
-        // Partition into needs-embed vs already-stored. A chunk is skipped
-        // when both its id and contentHash match an existing row.
+        // Partition into needs-embed vs already-stored. A chunk is
+        // skipped when its id, path, contentHash AND heading all match
+        // an existing row (heading mismatch → re-embed, so renamed
+        // headings reach stored chunks).
         let mut to_embed: Vec<ChunkRow> = Vec::with_capacity(batch.len());
         for r in batch {
             let row = ChunkRow {
@@ -302,7 +306,12 @@ pub fn embed_and_store(
             let existing = rag
                 .by_content_hash(&row.content_hash)
                 .map_err(|e| e.to_string())?;
-            if existing.is_some_and(|existing| existing.id == row.id && existing.path == row.path) {
+            let unchanged = existing.is_some_and(|existing| {
+                existing.id == row.id
+                    && existing.path == row.path
+                    && existing.heading == row.heading
+            });
+            if unchanged {
                 skipped += 1;
             } else {
                 to_embed.push(row);
@@ -671,6 +680,43 @@ mod tests {
         walk_source(root, &mut files, &[&worktree_root], &mut |_| {});
         assert_eq!(files.len(), 1);
         assert!(files[0].ends_with("top.ts"));
+    }
+
+    #[test]
+    fn embed_and_store_heading_change_reembeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let rag = crate::store::RagStore::open_at(&dir.path().join("index.db")).unwrap();
+        let embedder = crate::store::FakeEmbedder { dim: 384 };
+        let chunk = |heading: Option<&str>| PreparedChunk {
+            id: "src:origin.md:0".into(),
+            path: "origin.md".into(),
+            symbol: String::new(),
+            content: "same text".into(),
+            content_hash: crate::sha256_hex("same text"),
+            start_line: 3,
+            end_line: 3,
+            source_id: Some("src".into()),
+            heading: heading.map(str::to_owned),
+        };
+
+        let (embedded, skipped) =
+            embed_and_store(&rag, &embedder, &[chunk(Some("Old Heading"))], |_| {}).unwrap();
+        assert_eq!((embedded, skipped), (1, 0));
+
+        // Same id+path+content but a renamed heading must reach the row —
+        // a content-hash-only skip would keep the stale NULL/old breadcrumb.
+        let (embedded, skipped) =
+            embed_and_store(&rag, &embedder, &[chunk(Some("New Heading"))], |_| {}).unwrap();
+        assert_eq!((embedded, skipped), (1, 0));
+        assert_eq!(
+            rag.by_path("origin.md").unwrap()[0].heading.as_deref(),
+            Some("New Heading")
+        );
+
+        // Fully identical resubmission is still skipped.
+        let (embedded, skipped) =
+            embed_and_store(&rag, &embedder, &[chunk(Some("New Heading"))], |_| {}).unwrap();
+        assert_eq!((embedded, skipped), (0, 1));
     }
 
     #[test]

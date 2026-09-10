@@ -395,10 +395,12 @@ const MAX_CHUNK_CHARS: usize = 1200;
 const OVERLAP_CHARS: usize = 100;
 
 /// Document-level ingestion: chunk fetched prose documents with the
-/// paragraph splitter, embed via the shared embed_and_store helper, and
-/// tag every chunk with the owning sourceId. Re-ingestion deletes this
-/// source's prior chunks per document origin first, so origins never go
-/// stale. Registry status / chunk-count updates stay with the caller.
+/// heading/line-aware splitter (exact 1-based ranges + breadcrumbs, no
+/// overlap — overlap would cite lines twice), embed via the shared
+/// embed_and_store helper, and tag every chunk with the owning sourceId.
+/// Re-ingestion deletes this source's prior chunks per document origin
+/// first, so origins never go stale. Registry status / chunk-count
+/// updates stay with the caller.
 pub fn ingest_documents(
     store: &KnowledgeStore,
     embedder: &dyn Embedder,
@@ -458,17 +460,17 @@ pub fn ingest_documents(
             .map(|c| c.id)
             .collect();
         store.rag.delete_chunks(&stale).map_err(|e| e.to_string())?;
-        for (i, content) in split_prose(&doc.content).into_iter().enumerate() {
+        for (i, part) in split_prose_indexed(&doc.content).into_iter().enumerate() {
             prepared.push(PreparedChunk {
                 id: format!("{source_id}:{}:{}", doc.origin, i),
                 path: doc.origin.clone(),
                 symbol: String::new(),
-                content_hash: crate::sha256_hex(&content),
-                content,
-                start_line: 0,
-                end_line: 0,
+                content_hash: crate::sha256_hex(&part.content),
+                content: part.content,
+                start_line: part.start_line,
+                end_line: part.end_line,
                 source_id: Some(source_id.to_string()),
-                heading: None,
+                heading: part.heading,
             });
         }
     }
@@ -1392,6 +1394,27 @@ mod tests {
         let recovered = ks.get_source(&src2.id).unwrap();
         assert_eq!(recovered.status, "idle");
         assert!(recovered.last_indexed_at.is_none());
+    }
+
+    #[test]
+    fn ingest_documents_stamps_lines_and_heading() {
+        let (_dir, ks) = store();
+        let src = ks.add_source("Docs", "docs", "d.md", None).unwrap();
+        let embedder = crate::store::FakeEmbedder { dim: 384 };
+        let docs = vec![SourceDocument {
+            title: "d.md".into(),
+            content: "# H\n\nhello world paragraph".into(),
+            origin: "d.md".into(),
+        }];
+        let count = ingest_documents(&ks, &embedder, &src.id, &docs, |_| {}).unwrap();
+        assert_eq!(count, 1);
+
+        let rows = ks.rag.by_path("d.md").unwrap();
+        assert_eq!(rows.len(), 1);
+        // Line 1 `# H`, line 2 blank, line 3 the paragraph — exact range.
+        assert_eq!((rows[0].start_line, rows[0].end_line), (3, 3));
+        assert_eq!(rows[0].heading.as_deref(), Some("H"));
+        assert_eq!(rows[0].content, "hello world paragraph");
     }
 
     #[test]
