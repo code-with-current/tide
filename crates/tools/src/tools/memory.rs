@@ -734,7 +734,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.doc_id, None);
-        assert!(!serde_json::to_value(&legacy).unwrap().to_string().contains("docId"));
+        assert!(!serde_json::to_value(&legacy)
+            .unwrap()
+            .to_string()
+            .contains("docId"));
     }
 
     #[test]

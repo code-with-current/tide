@@ -209,18 +209,41 @@ fn hit_from_row(
     }
 }
 
-/// origin(rel_path) → stable_id for the library source, one query per
-/// memory call (hits from other sources skip the lookup entirely —
-/// [`RagMemoryIndex::knowledge_hits`] builds it only when a hit actually
-/// came from a kind="library" source). The join key is the chunk path:
-/// library chunks store the registry rel_path verbatim (Task 8's 1:1
-/// invariant), so a path hit here IS the doc's registry row.
+/// origin(rel_path) → stable_id for the library source, built at most
+/// once per LANE (run_memory drives the vector and fts lanes, and each
+/// gates the manifest query on actually having a library hit — hits
+/// from other sources skip the lookup entirely). The join key is the
+/// chunk path: library chunks store the registry rel_path verbatim
+/// (Task 8's 1:1 invariant), so a path hit here IS the doc's registry
+/// row.
 fn library_doc_id_map(ks: &KnowledgeStore) -> HashMap<String, String> {
     ks.library_manifest()
         .unwrap_or_default()
         .into_iter()
         .map(|d| (d.rel_path, d.stable_id))
         .collect()
+}
+
+/// The docId join itself, extracted for flow coverage: sets docId on
+/// hits whose source_name is in the (kind-derived) library name set AND
+/// whose path is a registered rel_path. Pure — the caller owns the
+/// gate (manifest queried only when a library-named hit exists) and
+/// the name-set construction.
+fn decorate_library_doc_ids(
+    hits: &mut [MemoryHit],
+    library_names: &HashSet<String>,
+    doc_ids: &HashMap<String, String>,
+) {
+    for hit in hits {
+        if hit
+            .source_name
+            .as_deref()
+            .is_some_and(|n| library_names.contains(n))
+            && let Some(id) = doc_ids.get(&hit.path)
+        {
+            hit.doc_id = Some(id.clone());
+        }
+    }
 }
 
 /// File mtime in epoch ms — the recency tiebreaker for workspace hits.
@@ -440,34 +463,42 @@ impl RagMemoryIndex {
                 })
                 .collect(),
         };
-        // docId decoration for Knowledge Library hits. Source matching is
-        // KIND-derived, not name-hardcoded: the source rows are in hand
-        // here, so we collect the display names of kind=="library"
-        // sources — a user renaming the "Knowledge Library" row (an
-        // ordinary update_source edit) keeps the decoration, and a
-        // non-library source that merely shares the name never gains it.
-        // The hit carries only the source's display name (not its id),
-        // so name membership against that kind-derived set is the join
-        // available. The manifest query runs at most once per memory
-        // call, and only when some hit actually came from a library
-        // source; hits whose path isn't in the registry (or from other
-        // sources) keep doc_id None.
-        let library_names: HashSet<&str> = sources
+        // docId decoration for Knowledge Library hits. Source matching
+        // is KIND-derived, not name-hardcoded, and drawn from the same
+        // visible set every other source map here uses: enabled for
+        // this project, and not injection-flagged when blocking is on.
+        // KnowledgeStore::update_source allows renames, so a renamed
+        // "Knowledge Library" row keeps its decoration while a disabled
+        // or blocked one contributes no matching name.
+        //
+        // Residual edge, stated rather than denied: the hit carries only
+        // the source's display name (not its id), so the join is by
+        // name — a non-library source sharing a library source's exact
+        // name AND a hit path string-equal to a library rel_path would
+        // gain a wrong docId. Both conditions must hold; neither is
+        // achievable by accident in practice (names are user-chosen,
+        // library rel_paths live under <data>/library).
+        //
+        // The manifest query runs at most once per LANE — run_memory
+        // drives the vector and fts lanes, each gating independently —
+        // and only when some hit actually came from a library source.
+        // Hits whose path isn't in the registry (or from other sources)
+        // keep doc_id None.
+        let library_names: HashSet<String> = sources
             .iter()
-            .filter(|s| s.kind == "library")
-            .map(|s| s.name.as_str())
+            .filter(|s| {
+                s.kind == "library"
+                    && enabled_ids.contains(&s.id)
+                    && (!block_flagged || !s.injection_flag)
+            })
+            .map(|s| s.name.clone())
             .collect();
-        let from_library =
-            |h: &MemoryHit| h.source_name.as_deref().is_some_and(|n| library_names.contains(n));
-        if hits.iter().any(|h| from_library(h)) {
-            let doc_ids = library_doc_id_map(&ks);
-            for hit in &mut hits {
-                if from_library(hit)
-                    && let Some(id) = doc_ids.get(&hit.path)
-                {
-                    hit.doc_id = Some(id.clone());
-                }
-            }
+        if hits.iter().any(|h| {
+            h.source_name
+                .as_deref()
+                .is_some_and(|n| library_names.contains(n))
+        }) {
+            decorate_library_doc_ids(&mut hits, &library_names, &library_doc_id_map(&ks));
         }
         rrf_fuse(hits, vec![], k)
     }
@@ -2249,5 +2280,56 @@ mod tests {
         let sid = ks.library_upsert("proj/d.md", "d", None).unwrap();
         let map = super::library_doc_id_map(&ks);
         assert_eq!(map.get("proj/d.md"), Some(&sid));
+    }
+
+    #[test]
+    fn decorate_library_doc_ids_sets_only_registered_library_hits() {
+        use super::{MemoryHit, decorate_library_doc_ids};
+        use std::collections::{HashMap, HashSet};
+        let names: HashSet<String> = ["Knowledge Library"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut ids = HashMap::new();
+        ids.insert("proj/d.md".to_owned(), "sid-1".to_owned());
+        let mk = |id: &str, source_name: Option<&str>, path: &str| MemoryHit {
+            id: id.into(),
+            path: path.into(),
+            symbol: None,
+            start_line: 1,
+            end_line: None,
+            heading: None,
+            doc_id: None,
+            content: "x".into(),
+            similarity: None,
+            source_name: source_name.map(str::to_owned),
+            recency: None,
+        };
+        // (a) library-named + registered path → decorated;
+        // (b) library-named + UNregistered path → stays None;
+        // (c) non-library source with a path string-equal to a library
+        // rel_path → the name join declines it;
+        // (d) workspace-shaped (no source) → untouched.
+        let mut hits = vec![
+            mk("a", Some("Knowledge Library"), "proj/d.md"),
+            mk("b", Some("Knowledge Library"), "proj/other.md"),
+            mk("c", Some("React Docs"), "proj/d.md"),
+            mk("d", None, "src/main.rs"),
+        ];
+        decorate_library_doc_ids(&mut hits, &names, &ids);
+        assert_eq!(hits[0].doc_id.as_deref(), Some("sid-1"));
+        assert_eq!(hits[1].doc_id, None);
+        assert_eq!(hits[2].doc_id, None);
+        assert_eq!(hits[3].doc_id, None);
+
+        // Empty name set (no visible library source — the gate case):
+        // nothing is decorated, even for a registered path.
+        let mut hits = vec![
+            mk("a", Some("Knowledge Library"), "proj/d.md"),
+            mk("c", Some("React Docs"), "proj/d.md"),
+        ];
+        let empty: HashSet<String> = HashSet::new();
+        decorate_library_doc_ids(&mut hits, &empty, &ids);
+        assert!(hits.iter().all(|h| h.doc_id.is_none()));
     }
 }
