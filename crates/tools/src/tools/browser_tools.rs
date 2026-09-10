@@ -346,6 +346,58 @@ impl Tool for BrowserScrollTool {
     }
 }
 
+pub struct BrowserSetViewportTool;
+
+impl Tool for BrowserSetViewportTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "browser_set_viewport".to_owned(),
+            description: "Pin the browser panel's viewport to exact CSS-pixel dimensions, enabling device mode — the same state the user's device toolbar toggle drives, so the pinned frame and its controls reflect it immediately. Set enabled to false to release the pin and let the page fill the panel again.".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "width": {
+                        "type": "integer",
+                        "description": "Viewport width in CSS pixels (100-7680)"
+                    },
+                    "height": {
+                        "type": "integer",
+                        "description": "Viewport height in CSS pixels (100-7680)"
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "false releases the pin; defaults to true"
+                    }
+                },
+                "required": ["width", "height"]
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(&self, _ctx: &ToolContext, args: Value) -> Result<ToolOutcome, ToolError> {
+        // Releasing the pin (enabled: false) needs no dimensions; pinning
+        // validates them here so a bad call fails before waking the surface.
+        if args.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+            for key in ["width", "height"] {
+                let dimension = args
+                    .get(key)
+                    .and_then(Value::as_u64)
+                    .filter(|value| *value > 0 && *value <= u32::MAX as u64);
+                if dimension.is_none() {
+                    return Ok(ToolOutcome::failed(
+                        "browser_set_viewport needs width and height as positive integers (CSS pixels).",
+                    ));
+                }
+            }
+        }
+        browser_call("set_viewport", &args)
+    }
+}
+
 /// The native browser tool names — the registry order mirrors
 /// [`super::browser_tools`] registration.
 pub const BROWSER_TOOLS: &[&str] = &[
@@ -356,6 +408,7 @@ pub const BROWSER_TOOLS: &[&str] = &[
     "browser_type",
     "browser_press_key",
     "browser_scroll",
+    "browser_set_viewport",
 ];
 
 pub fn is_browser_tool(name: &str) -> bool {
@@ -551,6 +604,24 @@ mod tests {
             .execute(&ctx, json!({ "direction": "down", "amount": "page" }))
             .unwrap();
         assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        // set_viewport: pinning needs positive integers, in range of u32
+        for args in [
+            json!({}),
+            json!({ "width": 390 }),
+            json!({ "height": 844 }),
+            json!({ "width": 0, "height": 844 }),
+            json!({ "width": 390, "height": -5 }),
+            json!({ "width": "390", "height": 844 }),
+            json!({ "width": 390.5, "height": 844 }),
+        ] {
+            let outcome = BrowserSetViewportTool.execute(&ctx, args.clone()).unwrap();
+            assert_eq!(outcome.status, crate::OutcomeStatus::Failed, "{args}");
+            assert!(
+                outcome.output.contains("width"),
+                "{args}: {}",
+                outcome.output
+            );
+        }
     }
 
     #[test]
@@ -590,6 +661,24 @@ mod tests {
         let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
         assert_eq!(parsed["echo"]["op"], "scroll");
         assert_eq!(parsed["echo"]["args"]["direction"], "up");
+
+        // set_viewport: pinning carries both dimensions; enabled:false
+        // releases and needs none.
+        let outcome = BrowserSetViewportTool
+            .execute(&ctx, json!({ "width": 390, "height": 844 }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Executed);
+        let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
+        assert_eq!(parsed["echo"]["op"], "set_viewport");
+        assert_eq!(parsed["echo"]["args"]["width"], 390);
+        assert_eq!(parsed["echo"]["args"]["height"], 844);
+        let outcome = BrowserSetViewportTool
+            .execute(&ctx, json!({ "enabled": false }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Executed);
+        let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
+        assert_eq!(parsed["echo"]["op"], "set_viewport");
+        assert_eq!(parsed["echo"]["args"]["enabled"], false);
         super::super::browser::set_shared_browser_backend(None);
     }
 
@@ -604,23 +693,27 @@ mod tests {
                 "browser_click",
                 "browser_type",
                 "browser_press_key",
-                "browser_scroll"
+                "browser_scroll",
+                "browser_set_viewport"
             ]
         );
         assert_eq!(risk_tier_for("browser_navigate"), RiskTier::Write);
         assert_eq!(risk_tier_for("browser_get_state"), RiskTier::ReadOnly);
         assert_eq!(risk_tier_for("browser_screenshot"), RiskTier::ReadOnly);
         // The action tools drive the live page like the Computer Use
-        // action tools: Write on both the tool metadata and the gate's
-        // name-keyed table.
+        // action tools, and set_viewport drives the same device mode the
+        // user's toolbar toggle does: Write on both the tool metadata and
+        // the gate's name-keyed table.
         for name in [
             "browser_click",
             "browser_type",
             "browser_press_key",
             "browser_scroll",
+            "browser_set_viewport",
         ] {
             assert_eq!(risk_tier_for(name), RiskTier::Write, "{name}");
         }
+        assert_eq!(BrowserSetViewportTool.risk_tier(), RiskTier::Write);
         assert!(is_browser_tool("browser_click") && !is_browser_tool("click"));
     }
 }

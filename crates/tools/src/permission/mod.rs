@@ -159,10 +159,14 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
         | "set_value"
         | "scroll" => RiskTier::Write,
         // Agentic browser: reading and capturing the live page observe;
-        // navigation drives the surface the user is watching (Task 5's
-        // action tools join the Write side when they land).
+        // navigation and the Task 5 action tools (click/type/press_key/
+        // scroll) drive the surface the user is watching — Write, the
+        // same split the Computer Use tools keep between observing and
+        // acting, so Plan mode blocks them until the user flips to Build.
         "browser_get_state" | "browser_screenshot" => RiskTier::ReadOnly,
-        "browser_navigate" => RiskTier::Write,
+        "browser_navigate" | "browser_click" | "browser_type" | "browser_press_key"
+        | "browser_scroll"
+        | "browser_set_viewport" => RiskTier::Write,
         // Dynamically bridged MCP tools (`mcp__<server>__<tool>`) — the TS
         // toolMeta `mcp` entry: read-only, auto-approved in all modes (the
         // TS never wrapped MCP executes in the permission wrapper).

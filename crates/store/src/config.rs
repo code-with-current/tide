@@ -238,8 +238,27 @@ pub struct GeneralSettings {
     pub commit_message_model: Option<ModelRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_update_check: Option<bool>,
+    /// Browser panel device mode: whether the pinned viewport is on, its
+    /// last size, and the preset that set it (mobile presets carry a
+    /// user-agent override that restores with them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_device: Option<BrowserDevicePrefs>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// The persisted half of the browser's device mode (`general.browserDevice`).
+/// `enabled` false with a size remembers the last viewport without pinning it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserDevicePrefs {
+    pub enabled: bool,
+    pub width: u32,
+    pub height: u32,
+    /// Preset key (`"iphone"`, `"pixel"`, …) when the size came from one;
+    /// absent for custom sizes, so it serializes away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
 }
 
 /// GeneralSettings with the TS DEFAULT_GENERAL_SETTINGS layered over absent
@@ -779,6 +798,43 @@ mod tests {
             serde_json::to_value(&cfg).unwrap()
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn browser_device_prefs_round_trip_and_default_absent() {
+        // Fresh settings carry no prefs, and an old file without the key
+        // decodes to the same absence.
+        let mut general = GeneralSettings::default();
+        assert_eq!(general.browser_device, None);
+        let legacy: GeneralSettings = serde_json::from_str(r#"{"startAtLogin": true}"#).unwrap();
+        assert_eq!(legacy.browser_device, None);
+
+        // Present prefs round-trip through camelCase, preset included.
+        general.browser_device = Some(BrowserDevicePrefs {
+            enabled: true,
+            width: 390,
+            height: 844,
+            preset: Some("iphone".to_owned()),
+        });
+        let value = serde_json::to_value(&general).unwrap();
+        assert_eq!(value["browserDevice"]["enabled"], true);
+        assert_eq!(value["browserDevice"]["width"], 390);
+        assert_eq!(value["browserDevice"]["height"], 844);
+        assert_eq!(value["browserDevice"]["preset"], "iphone");
+        let back: GeneralSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(back.browser_device, general.browser_device);
+
+        // A custom size has no preset, and the absent preset serializes
+        // away rather than writing `"preset": null`.
+        general.browser_device = Some(BrowserDevicePrefs {
+            enabled: false,
+            width: 500,
+            height: 700,
+            preset: None,
+        });
+        let value = serde_json::to_value(&general).unwrap();
+        assert_eq!(value["browserDevice"]["enabled"], false);
+        assert!(value["browserDevice"].get("preset").is_none());
     }
 
     #[test]

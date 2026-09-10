@@ -2074,6 +2074,12 @@ browser.reload:
   en: Reload (%{shortcut})
 browser.device_mode:
   en: Device mode
+browser.preset.laptop:
+  en: Laptop
+browser.preset.desktop:
+  en: Desktop
+browser.preset.custom:
+  en: Custom
 browser.open_external:
   en: Open in default browser
 browser.browse_web:

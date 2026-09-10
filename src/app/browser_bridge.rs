@@ -150,6 +150,24 @@ fn act_script(op: &str, args: &Value) -> Result<String, String> {
     Ok(format!("window.__tideAct({target},\"{op}\",{payload})"))
 }
 
+/// Parse `browser_set_viewport`'s args: `Ok(None)` releases the pin
+/// (`enabled: false`), `Ok(Some((w, h)))` pins. Pinning needs positive
+/// integer dimensions; `enabled` defaults to true.
+fn set_viewport_args(args: &Value) -> Result<Option<(u32, u32)>, String> {
+    if !args.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+        return Ok(None);
+    }
+    let dimension = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0 && *value <= u32::MAX as u64)
+    };
+    match (dimension("width"), dimension("height")) {
+        (Some(width), Some(height)) => Ok(Some((width as u32, height as u32))),
+        _ => Err("set_viewport needs width and height as positive integers".to_owned()),
+    }
+}
+
 /// Did the page-side action answer success? Anything else — the stale
 /// shape, `{ok:false, error}`, unparseable text — skips the settle: there
 /// is no page reaction worth waiting for.
@@ -282,6 +300,7 @@ impl Tide {
             "click" | "type" | "press_key" | "scroll" => {
                 self.browser_act_op(name, &args, reply, cx);
             }
+            "set_viewport" => self.browser_set_viewport_op(&args, reply, cx),
             other => {
                 let _ = reply.send(Err(format!("unknown browser op: {other}")));
             }
@@ -349,6 +368,43 @@ impl Tide {
             return;
         };
         browser.update(cx, |view, cx| view.agent_eval(script, reply, cx));
+    }
+
+    /// The agent's half of the design's one shared viewport state: pin
+    /// (or release) device mode through the very paths the toolbar's
+    /// toggle and fields drive, so every control reflects it immediately.
+    /// Deliberately not persisted — settings record the user's choices,
+    /// not the agent's.
+    fn browser_set_viewport_op(
+        &mut self,
+        args: &Value,
+        reply: std::sync::mpsc::Sender<Result<String, String>>,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match set_viewport_args(args) {
+            Ok(target) => target,
+            Err(error) => {
+                let _ = reply.send(Err(error));
+                return;
+            }
+        };
+        let Some(browser) = self.active_right_panel_browser() else {
+            let _ = reply.send(Err(NO_SURFACE.to_owned()));
+            return;
+        };
+        let answer = match target {
+            Some((width, height)) => {
+                browser.update(cx, |view, cx| {
+                    view.set_device_viewport(width, height, cx);
+                });
+                json!({ "ok": true, "viewport": { "w": width, "h": height } })
+            }
+            None => {
+                browser.update(cx, |view, cx| view.clear_device_mode(cx));
+                json!({ "ok": true, "viewport": null })
+            }
+        };
+        let _ = reply.send(Ok(answer.to_string()));
     }
 
     /// Run one `__tideAct` call on the active surface and settle before
@@ -546,5 +602,43 @@ mod tests {
         assert!(!action_ok("{\"ok\":false,\"error\":\"unknown key\"}"));
         assert!(!action_ok("not json"));
         assert!(!action_ok("null"));
+    }
+
+    #[test]
+    fn set_viewport_args_pin_or_release() {
+        // Pinning: positive integers within u32.
+        assert_eq!(
+            set_viewport_args(&json!({ "width": 390, "height": 844 })),
+            Ok(Some((390, 844)))
+        );
+        assert_eq!(
+            set_viewport_args(&json!({ "width": 1, "height": 1 })),
+            Ok(Some((1, 1)))
+        );
+        // `enabled` defaults to true.
+        assert_eq!(
+            set_viewport_args(&json!({ "width": 390, "height": 844, "enabled": true })),
+            Ok(Some((390, 844)))
+        );
+        // enabled:false releases the pin — no dimensions needed, and any
+        // garbage among them is irrelevant.
+        assert_eq!(set_viewport_args(&json!({ "enabled": false })), Ok(None));
+        assert_eq!(
+            set_viewport_args(&json!({ "enabled": false, "width": 0, "height": -3 })),
+            Ok(None)
+        );
+        // Missing, non-positive, non-integer or out-of-u32 dimensions error.
+        for args in [
+            json!({}),
+            json!({ "width": 390 }),
+            json!({ "height": 844 }),
+            json!({ "width": 0, "height": 844 }),
+            json!({ "width": 390, "height": -5 }),
+            json!({ "width": "390", "height": 844 }),
+            json!({ "width": 390.5, "height": 844 }),
+            json!({ "width": 4_294_967_296_u64, "height": 844 }),
+        ] {
+            assert!(set_viewport_args(&args).is_err(), "{args}");
+        }
     }
 }

@@ -1685,6 +1685,31 @@
     }
   },
   {
+    "name": "browser_set_viewport",
+    "description": "Pin the browser panel's viewport to exact CSS-pixel dimensions, enabling device mode — the same state the user's device toolbar toggle drives, so the pinned frame and its controls reflect it immediately. Set enabled to false to release the pin and let the page fill the panel again.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "description": "Viewport width in CSS pixels (100-7680)"
+        },
+        "height": {
+          "type": "integer",
+          "description": "Viewport height in CSS pixels (100-7680)"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "false releases the pin; defaults to true"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ]
+    }
+  },
+  {
     "name": "computer",
     "description": "Control the user's macOS apps: list their windows, take a screenshot, and click, type, scroll, or press keys inside one. Use for app UI that has no CLI or API — check `list` first, then `view` a window and act on coordinates in its captured image. Screen Recording and Accessibility must be granted in System Settings; every action runs visibly in the user's session.",
     "schema": {

@@ -31,12 +31,12 @@ use gpui::{
     IntoElement, MouseButton, MouseDownEvent, ObjectFit, Render, SharedString, Stateful,
     Subscription, Window, canvas, div, hsla, img, prelude::*, px,
 };
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui::{AsyncApp, ForegroundExecutor, WeakEntity};
 
 use crate::input::{InputEvent, TextInput};
 use crate::theme::{Theme, sp};
 use crate::ui::icon;
+use crate::ui::menu::{ContextMenuHandle, MenuAlign, MenuItem, dropdown_menu};
 use crate::ui::text_field::TextField;
 use crate::ui::tooltip::Tooltip;
 use crate::{
@@ -371,6 +371,15 @@ mod host {
 
         pub fn ns_view(&self) -> &NSView {
             &self.wk
+        }
+
+        /// Override the user agent for subsequent navigations, or restore
+        /// the Safari mirror the builder installed — clearing to `nil`
+        /// would fall back to WebKit's own default, which no longer matches
+        /// what the rest of the app reports.
+        pub fn set_custom_user_agent(&self, user_agent: Option<&str>) {
+            let agent = user_agent.unwrap_or(super::USER_AGENT);
+            unsafe { self.wk.setCustomUserAgent(Some(&NSString::from_str(agent))) };
         }
 
         /// Evaluate `script` and hand the outcome to `done`: `Ok` carrying
@@ -868,9 +877,30 @@ mod host {
         buttons: Cell<i32>,
         hovered: Cell<bool>,
         wheel_scroll: (f32, f32),
+        /// The runtime's user agent as created, read once at attach so a
+        /// released preset override can replay it (`Settings.UserAgent`
+        /// has no unset).
+        default_user_agent: Option<String>,
     }
 
     impl WebviewHost {
+        /// Override the user agent for subsequent navigations, or replay the
+        /// runtime default captured at attach. Silently no-ops on runtimes
+        /// too old for `ICoreWebView2Settings2`.
+        pub fn set_custom_user_agent(&self, user_agent: Option<&str>) {
+            let Some(value) = user_agent
+                .map(HSTRING::from)
+                .or_else(|| self.default_user_agent.clone().map(HSTRING::from))
+            else {
+                return;
+            };
+            if let Ok(settings) = unsafe { self.webview.0.Settings() }
+                && let Ok(settings) = settings.cast::<ICoreWebView2Settings2>()
+            {
+                let _ = unsafe { settings.SetUserAgent(&value) };
+            }
+        }
+
         /// Build a composition-hosted WebView2 and hand it back once it
         /// exists.
         ///
@@ -1231,6 +1261,19 @@ mod host {
         if let Ok(settings) = unsafe { webview.Settings() } {
             let _ = unsafe { settings.SetAreDevToolsEnabled(true) };
         }
+        // A mobile preset's user-agent override rides `Settings.UserAgent`,
+        // which is live for later navigations. The runtime's own default is
+        // captured now: releasing an override replays it, because the
+        // property has no "unset".
+        let mut default_user_agent = None;
+        if let Ok(settings) = unsafe { webview.Settings() }
+            && let Ok(settings) = settings.cast::<ICoreWebView2Settings2>()
+        {
+            let mut value = PWSTR::null();
+            if unsafe { settings.UserAgent(&mut value) }.is_ok() {
+                default_user_agent = Some(take_pwstr(value));
+            }
+        }
         // The agent's page-side half has to exist before any of the page's
         // own scripts run; a document-created script is WebView2's injection
         // point, applied to every future document. The completion only
@@ -1388,6 +1431,7 @@ mod host {
             buttons: Cell::new(0),
             hovered: Cell::new(false),
             wheel_scroll: wheel_scroll_preferences(),
+            default_user_agent,
         }))
     }
 }
@@ -1420,23 +1464,23 @@ mod host {
         pub fn native_focus_within(&self) -> bool {
             false
         }
+        pub fn set_custom_user_agent(&self, _user_agent: Option<&str>) {}
     }
 }
 
 use host::WebviewHost;
 
-/// Schedules entity updates from webview delegate callbacks. The callbacks run
-/// on the main thread but can fire while GPUI holds the app borrow, so the
-/// update always takes the next executor turn instead of re-entering.
+/// Schedules entity updates from webview delegate callbacks — and from the
+/// device-frame drag ghost's drop. The callbacks run on the main thread but
+/// can fire while GPUI holds the app borrow, so the update always takes the
+/// next executor turn instead of re-entering.
 #[derive(Clone)]
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct Deferred {
     executor: ForegroundExecutor,
     cx: AsyncApp,
     view: WeakEntity<BrowserView>,
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Deferred {
     fn update(&self, f: impl FnOnce(&mut BrowserView, &mut Context<BrowserView>) + 'static) {
         let mut cx = self.cx.clone();
@@ -1513,6 +1557,117 @@ const DEFAULT_DEVICE_VIEWPORT: DeviceViewport = DeviceViewport {
     height: 800,
 };
 
+/// The user agents the mobile presets swap in. Real browser strings, so
+/// responsive sites serve the mobile layout the frame is sized for instead
+/// of sniffing an unknown client.
+const IPHONE_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) \
+     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+const PIXEL_UA: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+const IPAD_UA: &str = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) \
+     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+/// One of the design's five device presets. `user_agent` is `Some` only for
+/// the mobile shapes — that override, not the numbers alone, is what makes
+/// responsive sites serve their mobile layout.
+pub(crate) struct DevicePreset {
+    /// Stable key, also what persistence stores.
+    pub(crate) key: &'static str,
+    /// Brand names render as-is; the generic shapes localize through
+    /// [`preset_menu_label`].
+    label: &'static str,
+    width: u32,
+    height: u32,
+    user_agent: Option<&'static str>,
+}
+
+/// The design's preset list, in menu order.
+pub(crate) const DEVICE_PRESETS: [DevicePreset; 5] = [
+    DevicePreset {
+        key: "iphone",
+        label: "iPhone",
+        width: 390,
+        height: 844,
+        user_agent: Some(IPHONE_UA),
+    },
+    DevicePreset {
+        key: "pixel",
+        label: "Pixel",
+        width: 412,
+        height: 915,
+        user_agent: Some(PIXEL_UA),
+    },
+    DevicePreset {
+        key: "ipad",
+        label: "iPad",
+        width: 820,
+        height: 1180,
+        user_agent: Some(IPAD_UA),
+    },
+    DevicePreset {
+        key: "laptop",
+        label: "Laptop",
+        width: 1280,
+        height: 800,
+        user_agent: None,
+    },
+    DevicePreset {
+        key: "desktop",
+        label: "Desktop",
+        width: 1920,
+        height: 1080,
+        user_agent: None,
+    },
+];
+
+fn preset_entry(key: &str) -> Option<&'static DevicePreset> {
+    DEVICE_PRESETS.iter().find(|preset| preset.key == key)
+}
+
+/// The plan's preset lookup: `(width, height, user_agent)`. A test-facing
+/// shape — live code reads the whole entry through [`preset_entry`].
+#[allow(dead_code)]
+fn preset(key: &str) -> Option<(u32, u32, Option<&'static str>)> {
+    preset_entry(key).map(|p| (p.width, p.height, p.user_agent))
+}
+
+/// A preset's menu label: brand names are universal, the generic shapes
+/// localize.
+fn preset_menu_label(preset: &DevicePreset) -> SharedString {
+    match preset.key {
+        "laptop" => tr!("browser.preset.laptop").into(),
+        "desktop" => tr!("browser.preset.desktop").into(),
+        _ => preset.label.into(),
+    }
+}
+
+/// The device-mode state a fresh surface starts from, as a pure mapping
+/// from persisted prefs: the mode, the last size (remembered even while
+/// off), the active preset key and its user agent.
+fn restored_device_state(
+    prefs: Option<store::config::BrowserDevicePrefs>,
+) -> (
+    Option<DeviceViewport>,
+    DeviceViewport,
+    Option<&'static str>,
+    Option<&'static str>,
+) {
+    let Some(prefs) = prefs else {
+        return (None, DEFAULT_DEVICE_VIEWPORT, None, None);
+    };
+    let size = DeviceViewport::new(prefs.width, prefs.height);
+    // Only a preset the table still knows restores a user agent — a stale
+    // key (renamed preset, hand-edited config) falls back to the default
+    // rather than guessing at a mobile shape.
+    let entry = prefs.preset.as_deref().and_then(preset_entry);
+    (
+        prefs.enabled.then_some(size),
+        size,
+        entry.and_then(|preset| preset.user_agent),
+        entry.map(|preset| preset.key),
+    )
+}
+
 /// A device-mode viewport: the exact CSS-pixel frame the webview pins to,
 /// centered in the panel over a dimmed backdrop. Sized in points/DIPs on
 /// both platforms, so CSS pixels are what the numbers say.
@@ -1552,14 +1707,13 @@ fn pinned_bounds(
     }
 }
 
-/// Toggle semantics for the toolbar button: off turns on at the default
-/// viewport, on turns off.
-fn device_mode_toggled(mode: Option<DeviceViewport>) -> Option<DeviceViewport> {
-    if mode.is_some() {
-        None
-    } else {
-        Some(DEFAULT_DEVICE_VIEWPORT)
-    }
+/// Toggle semantics for the toolbar button: off comes back on at the last
+/// size (the default before anything else), on turns off.
+fn device_mode_toggled(
+    mode: Option<DeviceViewport>,
+    last: DeviceViewport,
+) -> Option<DeviceViewport> {
+    mode.is_none().then_some(last)
 }
 
 /// Drag resizing: whole-CSS-pixel snapping from the pointer's total delta
@@ -1589,13 +1743,33 @@ fn device_backdrop(is_dark: bool) -> Hsla {
 
 /// The drag value riding a device-frame resize: the size at grab time, from
 /// which every move recomputes the whole size (no accumulating drift).
-/// Doubles as its own drag ghost — it renders nothing.
 #[derive(Clone)]
 struct DeviceFrameDrag(DeviceViewport);
 
 impl Render for DeviceFrameDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
+    }
+}
+
+/// The drag ghost GPUI drops when a device-frame resize ends — the only
+/// drag-end hook there is, and the moment the settled size persists (a
+/// save per move would rewrite the config on every frame of the drag).
+/// The hop mirrors the webview callbacks' [`Deferred`]: the drop can land
+/// mid-update, so the save takes the next executor turn.
+struct DeviceResizeEnd(Option<Deferred>);
+
+impl Render for DeviceResizeEnd {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
+impl Drop for DeviceResizeEnd {
+    fn drop(&mut self) {
+        if let Some(hop) = self.0.take() {
+            hop.update(|this, _| this.save_device_prefs());
+        }
     }
 }
 
@@ -1648,6 +1822,18 @@ pub struct BrowserView {
     /// Device mode: the exact CSS-pixel frame the page pins to, centered
     /// over a dimmed backdrop; `None` (the default) fills the panel.
     device_mode: Option<DeviceViewport>,
+    /// The last size device mode had, kept while the mode is off so the
+    /// toggle — and a fresh launch — comes back at it rather than the
+    /// default.
+    device_last: DeviceViewport,
+    /// The preset `device_mode` came from, when it did; drags, typed sizes
+    /// and the agent's set_viewport all end it.
+    device_preset: Option<&'static str>,
+    /// The mobile user agent the active preset swapped in; `None` is the
+    /// platform default (the Safari mirror on macOS, Edge on Windows).
+    device_user_agent: Option<&'static str>,
+    /// The toolbar's preset dropdown.
+    device_preset_menu: ContextMenuHandle,
     /// Where the in-flight device-frame drag grabbed, to turn each move into
     /// a size delta.
     device_drag_origin: Option<gpui::Point<gpui::Pixels>>,
@@ -1690,6 +1876,7 @@ impl BrowserView {
 
         let device_width = cx.new(|cx| TextInput::new(window, cx).select_all_on_focus_click());
         let device_height = cx.new(|cx| TextInput::new(window, cx).select_all_on_focus_click());
+        let device_preset_menu = ContextMenuHandle::new(cx);
         let device_width_submit = cx.subscribe(
             &device_width,
             |this: &mut Self, _, event: &InputEvent, cx| {
@@ -1768,6 +1955,20 @@ impl BrowserView {
             }
         });
 
+        // Device-mode persistence: a full surface starts from the last state
+        // the user persisted — mode, last size, preset and its user agent
+        // (which the macOS builder applies below, before the webview loads
+        // anything). The chromeless twins never enter device mode.
+        let (device_mode, device_last, device_user_agent, device_preset) = if chromeless {
+            (None, DEFAULT_DEVICE_VIEWPORT, None, None)
+        } else {
+            let prefs = store::config::load(&store::paths::config_path())
+                .ok()
+                .and_then(|config| config.general_settings)
+                .and_then(|general| general.browser_device);
+            restored_device_state(prefs)
+        };
+
         let mut this = Self {
             focus_handle,
             address,
@@ -1791,7 +1992,11 @@ impl BrowserView {
             snapshot_epoch: 0,
             load_generation: 0,
             agent_queue: Vec::new(),
-            device_mode: None,
+            device_mode,
+            device_last,
+            device_preset,
+            device_user_agent,
+            device_preset_menu,
             device_drag_origin: None,
             device_width,
             device_height,
@@ -1805,6 +2010,9 @@ impl BrowserView {
                 focus_in_device_height,
             ],
         };
+        if this.device_mode.is_some() {
+            this.refresh_device_fields(cx);
+        }
         this.build_webview(window, cx);
         this
     }
@@ -1817,11 +2025,22 @@ impl BrowserView {
     }
 
     /// The one entry point for device-viewport changes — the toolbar fields,
-    /// the drag handle and (later) the agent's set-viewport tool all funnel
-    /// here, so the toggle, the fields and the frame can never disagree.
-    /// Values clamp to the dimension bounds before landing.
+    /// the drag handle, the presets and the agent's set-viewport tool all
+    /// funnel here, so the toggle, the fields and the frame can never
+    /// disagree. Values clamp to the dimension bounds before landing.
+    /// A size no preset has ends the preset — and with it its user agent,
+    /// which belongs to the preset, not the numbers.
     pub fn set_device_viewport(&mut self, width: u32, height: u32, cx: &mut Context<Self>) {
         let device = DeviceViewport::new(width, height);
+        self.device_last = device;
+        if self.device_preset.is_some_and(|key| {
+            preset_entry(key)
+                .is_some_and(|preset| DeviceViewport::new(preset.width, preset.height) != device)
+        }) {
+            self.device_preset = None;
+            self.device_user_agent = None;
+            self.apply_device_user_agent();
+        }
         if self.device_mode != Some(device) {
             self.device_mode = Some(device);
             self.refresh_device_fields(cx);
@@ -1829,18 +2048,77 @@ impl BrowserView {
         }
     }
 
-    fn toggle_device_mode(&mut self, cx: &mut Context<Self>) {
-        self.device_mode = device_mode_toggled(self.device_mode);
-        if self.device_mode.is_some() {
-            self.refresh_device_fields(cx);
+    /// Leave device mode: unpin the frame and restore the default user
+    /// agent. The user's toggle and the agent's `enabled: false` both land
+    /// here; only the user's path persists.
+    pub fn clear_device_mode(&mut self, cx: &mut Context<Self>) {
+        if self.device_mode.take().is_some() {
+            self.device_preset = None;
+            self.device_user_agent = None;
+            self.apply_device_user_agent();
+            cx.notify();
         }
-        cx.notify();
+    }
+
+    fn toggle_device_mode(&mut self, cx: &mut Context<Self>) {
+        match device_mode_toggled(self.device_mode, self.device_last) {
+            Some(size) => self.set_device_viewport(size.width, size.height, cx),
+            None => self.clear_device_mode(cx),
+        }
+        self.save_device_prefs();
+    }
+
+    /// Apply one of the design's presets: pin its size and — for the mobile
+    /// shapes — swap the user agent, which is what makes responsive sites
+    /// serve their mobile layout. Desktop presets and any custom size carry
+    /// the platform default agent. The new agent applies to *subsequent*
+    /// navigations; the loaded page keeps the agent it loaded with, so a
+    /// preset switch pairs naturally with a reload.
+    fn apply_device_preset(&mut self, key: &'static str, cx: &mut Context<Self>) {
+        let Some(entry) = preset_entry(key) else {
+            return;
+        };
+        self.set_device_viewport(entry.width, entry.height, cx);
+        self.device_preset = Some(entry.key);
+        self.device_user_agent = entry.user_agent;
+        self.apply_device_user_agent();
+        self.save_device_prefs();
+    }
+
+    /// Push the current user-agent choice into the live webview. Both
+    /// platforms' setters are live for subsequent navigations.
+    fn apply_device_user_agent(&self) {
+        if let Some(host) = self.host.as_ref() {
+            host.set_custom_user_agent(self.device_user_agent);
+        }
+    }
+
+    /// Persist the device-mode state for the next launch. User actions only
+    /// — the agent's set_viewport deliberately leaves the saved prefs alone
+    /// (settings record the user's choice, not the agent's).
+    fn save_device_prefs(&self) {
+        let path = store::paths::config_path();
+        // Never write over a config that cannot be read: a lost preference
+        // beats a wiped provider list.
+        let Ok(mut config) = store::config::load(&path) else {
+            return;
+        };
+        let general = config
+            .general_settings
+            .get_or_insert_with(store::config::GeneralSettings::default);
+        general.browser_device = Some(store::config::BrowserDevicePrefs {
+            enabled: self.device_mode.is_some(),
+            width: self.device_last.width,
+            height: self.device_last.height,
+            preset: self.device_preset.map(str::to_owned),
+        });
+        let _ = store::config::save(&path, &config);
     }
 
     /// Mirror the pinned size into the free-entry fields, so a drag or an
     /// applied change reads back exactly what the frame now is.
     fn refresh_device_fields(&mut self, cx: &mut Context<Self>) {
-        let device = self.device_mode.unwrap_or(DEFAULT_DEVICE_VIEWPORT);
+        let device = self.device_mode.unwrap_or(self.device_last);
         self.device_width.update(cx, |input, cx| {
             input.set_content(device.width.to_string(), cx)
         });
@@ -1850,9 +2128,12 @@ impl BrowserView {
     }
 
     fn submit_device_width(&mut self, text: &str, cx: &mut Context<Self>) {
-        let current = self.device_mode.unwrap_or(DEFAULT_DEVICE_VIEWPORT);
+        let current = self.device_mode.unwrap_or(self.device_last);
         match parse_dimension(text) {
-            Some(width) => self.set_device_viewport(width, current.height, cx),
+            Some(width) => {
+                self.set_device_viewport(width, current.height, cx);
+                self.save_device_prefs();
+            }
             None => self.device_width.update(cx, |input, cx| {
                 input.set_content(current.width.to_string(), cx)
             }),
@@ -1860,9 +2141,12 @@ impl BrowserView {
     }
 
     fn submit_device_height(&mut self, text: &str, cx: &mut Context<Self>) {
-        let current = self.device_mode.unwrap_or(DEFAULT_DEVICE_VIEWPORT);
+        let current = self.device_mode.unwrap_or(self.device_last);
         match parse_dimension(text) {
-            Some(height) => self.set_device_viewport(current.width, height, cx),
+            Some(height) => {
+                self.set_device_viewport(current.width, height, cx);
+                self.save_device_prefs();
+            }
             None => self.device_height.update(cx, |input, cx| {
                 input.set_content(current.height.to_string(), cx)
             }),
@@ -1926,7 +2210,10 @@ impl BrowserView {
             .with_transparent(self.chromeless)
             .with_accept_first_mouse(true)
             .with_devtools(true)
-            .with_user_agent(USER_AGENT)
+            // A preset restored from settings at creation swaps its mobile
+            // agent in here, before anything loads; otherwise the Safari
+            // mirror.
+            .with_user_agent(self.device_user_agent.unwrap_or(USER_AGENT))
             // The agent's page-side half has to exist before any of the
             // page's own scripts run.
             .with_initialization_script(BROWSER_AGENT_JS)
@@ -2007,9 +2294,10 @@ impl BrowserView {
     /// Nothing exists synchronously here: `create` returns before the
     /// environment and the controller do, and the host lands a few frames
     /// later through `webview_ready`. See [`host`] for why visual hosting is
-    /// worth that. No user agent is set — WebView2's default already
-    /// identifies as desktop Edge, and overriding it only makes sites guess
-    /// worse.
+    /// worth that. No user agent is set at creation — WebView2's default
+    /// already identifies as desktop Edge — but a preset restored from
+    /// settings (or picked before the controller landed) applies its mobile
+    /// agent as soon as the host exists.
     #[cfg(target_os = "windows")]
     fn build_webview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = window_hwnd(window);
@@ -2076,6 +2364,9 @@ impl BrowserView {
         match outcome {
             Ok(host) => {
                 self.host = Some(host);
+                // A preset's user agent chosen before the controller landed
+                // applies the moment there is a webview to carry it.
+                self.apply_device_user_agent();
                 // A URL typed before the page existed waits here rather than
                 // being dropped on the floor.
                 if let Some(url) = self.pending_url.take() {
@@ -2833,7 +3124,8 @@ impl BrowserView {
             })
             .child(self.device_toggle_button(theme, cx))
             .when_some(self.device_mode, |element, _| {
-                element.child(self.render_device_fields(theme))
+                let view = cx.entity().downgrade();
+                element.child(self.render_device_fields(theme, view))
             })
             .child(
                 TextField::new("browser-address", self.address.clone())
@@ -2903,15 +3195,17 @@ impl BrowserView {
     }
 
     /// Free-entry width and height for the pinned frame, joined by a `×` the
-    /// same way the readout spells the size. Enter applies; anything that is
-    /// not a bare integer restores the current dimension.
-    fn render_device_fields(&self, theme: Theme) -> Div {
+    /// same way the readout spells the size — preceded by the preset
+    /// dropdown, the fast path onto the design's five shapes. Enter applies;
+    /// anything that is not a bare integer restores the current dimension.
+    fn render_device_fields(&self, theme: Theme, view: WeakEntity<BrowserView>) -> Div {
         div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(2.0))
             .mx(px(4.0))
+            .child(self.render_device_preset_menu(theme, view))
             .child(TextField::new("browser-device-width", self.device_width.clone()).w(px(54.0)))
             .child(
                 div()
@@ -2921,6 +3215,65 @@ impl BrowserView {
                     .child("×"),
             )
             .child(TextField::new("browser-device-height", self.device_height.clone()).w(px(54.0)))
+    }
+
+    /// What the preset chip shows: the active preset's name, or "Custom"
+    /// once a drag, a typed size or the agent has left the table.
+    fn device_preset_label(&self) -> SharedString {
+        match self.device_preset.and_then(preset_entry) {
+            Some(preset) => preset_menu_label(preset),
+            None => tr!("browser.preset.custom").into(),
+        }
+    }
+
+    /// The preset dropdown: the design's five shapes with the active one
+    /// checked. Picking one pins its size and swaps its user agent (mobile
+    /// presets) through the same one-source path as every other viewport
+    /// change.
+    fn render_device_preset_menu(
+        &self,
+        theme: Theme,
+        view: WeakEntity<BrowserView>,
+    ) -> gpui::AnyElement {
+        let selected = self.device_preset;
+        dropdown_menu(
+            div()
+                .id("browser-device-preset")
+                .flex_none()
+                .h(px(24.0))
+                .px(px(5.0))
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(3.0))
+                .border_1()
+                .border_color(theme.border)
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay))
+                .child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_secondary)
+                        .child(self.device_preset_label()),
+                )
+                .child(icon("icons/chevron-down.svg", 9.0, theme.text_tertiary)),
+            "browser-device-preset-menu",
+            &self.device_preset_menu,
+            MenuAlign::BelowLeft,
+            move |_| {
+                DEVICE_PRESETS
+                    .iter()
+                    .map(|entry| {
+                        let view = view.clone();
+                        MenuItem::new(preset_menu_label(entry), move |_, cx| {
+                            let _ =
+                                view.update(cx, |view, cx| view.apply_device_preset(entry.key, cx));
+                        })
+                        .selected(selected == Some(entry.key))
+                    })
+                    .collect()
+            },
+        )
     }
 
     /// The pinned frame's chrome: an outline the webview fills exactly, the
@@ -2983,9 +3336,18 @@ impl BrowserView {
                     .right(px(-7.0))
                     .size(px(16.0))
                     .cursor_nwse_resize()
-                    .on_drag(DeviceFrameDrag(device), |drag, _, _, cx| {
-                        cx.stop_propagation();
-                        cx.new(|_| drag.clone())
+                    .on_drag(DeviceFrameDrag(device), {
+                        // The ghost's drop is the drag-end hook — the settled
+                        // size persists there, not per move.
+                        let hop = Deferred {
+                            executor: cx.foreground_executor().clone(),
+                            cx: cx.to_async(),
+                            view: cx.entity().downgrade(),
+                        };
+                        move |_, _, _, cx| {
+                            cx.stop_propagation();
+                            cx.new(|_| DeviceResizeEnd(Some(hop.clone())))
+                        }
                     })
                     .on_mouse_down(
                         MouseButton::Left,
@@ -3857,15 +4219,105 @@ mod tests {
         mode = None;
         assert_eq!(mode, None);
 
-        // Toggling on from off starts at the default; toggling again turns
-        // it off.
-        assert_eq!(device_mode_toggled(None), Some(DEFAULT_DEVICE_VIEWPORT));
-        assert_eq!(device_mode_toggled(Some(DEFAULT_DEVICE_VIEWPORT)), None);
+        // Toggling on from off starts at the last size — the default before
+        // anything else — and toggling again turns it off.
+        assert_eq!(
+            device_mode_toggled(None, DEFAULT_DEVICE_VIEWPORT),
+            Some(DEFAULT_DEVICE_VIEWPORT)
+        );
+        assert_eq!(
+            device_mode_toggled(None, DeviceViewport::new(390, 844)),
+            Some(DeviceViewport {
+                width: 390,
+                height: 844
+            })
+        );
+        assert_eq!(
+            device_mode_toggled(Some(DEFAULT_DEVICE_VIEWPORT), DEFAULT_DEVICE_VIEWPORT),
+            None
+        );
 
         // Free-entry fields parse bare integers and nothing else.
         assert_eq!(parse_dimension(" 1280 "), Some(1280));
         assert_eq!(parse_dimension("laptop"), None);
         assert_eq!(parse_dimension(""), None);
+    }
+
+    #[test]
+    fn preset_table_matches_the_design() {
+        // The five design presets; the mobile shapes carry a user agent,
+        // the desktop ones do not.
+        assert_eq!(preset("iphone"), Some((390, 844, Some(IPHONE_UA))));
+        assert_eq!(preset("pixel"), Some((412, 915, Some(PIXEL_UA))));
+        assert_eq!(preset("ipad"), Some((820, 1180, Some(IPAD_UA))));
+        assert_eq!(preset("laptop"), Some((1280, 800, None)));
+        assert_eq!(preset("desktop"), Some((1920, 1080, None)));
+        assert_eq!(preset("nope"), None);
+        // Sizes respect the dimension bounds — every preset is in range.
+        for entry in DEVICE_PRESETS {
+            assert_eq!(
+                DeviceViewport::new(entry.width, entry.height).width,
+                entry.width
+            );
+        }
+    }
+
+    #[test]
+    fn restored_device_state_maps_prefs() {
+        // Nothing persisted: off, at the default size, no preset, no agent.
+        let (mode, last, agent, key) = restored_device_state(None);
+        assert_eq!(mode, None);
+        assert_eq!(last, DEFAULT_DEVICE_VIEWPORT);
+        assert_eq!(agent, None);
+        assert_eq!(key, None);
+
+        // A mobile preset comes back with its agent, even while disabled —
+        // the size is remembered for the next toggle-on.
+        let prefs = store::config::BrowserDevicePrefs {
+            enabled: false,
+            width: 390,
+            height: 844,
+            preset: Some("iphone".to_owned()),
+        };
+        let (mode, last, agent, key) = restored_device_state(Some(prefs));
+        assert_eq!(mode, None);
+        assert_eq!(last, DeviceViewport::new(390, 844));
+        assert_eq!(agent, Some(IPHONE_UA));
+        assert_eq!(key, Some("iphone"));
+
+        // Enabled pins; sizes clamp on the way in like every other path.
+        let prefs = store::config::BrowserDevicePrefs {
+            enabled: true,
+            width: 5,
+            height: 99_999,
+            preset: None,
+        };
+        let (mode, last, agent, key) = restored_device_state(Some(prefs));
+        assert_eq!(
+            mode,
+            Some(DeviceViewport::new(
+                MIN_DEVICE_DIMENSION,
+                MAX_DEVICE_DIMENSION
+            ))
+        );
+        assert_eq!(
+            last,
+            DeviceViewport::new(MIN_DEVICE_DIMENSION, MAX_DEVICE_DIMENSION)
+        );
+        assert_eq!(agent, None);
+        assert_eq!(key, None);
+
+        // A preset the table no longer knows restores no agent — the
+        // desktop default beats guessing at a mobile shape.
+        let prefs = store::config::BrowserDevicePrefs {
+            enabled: true,
+            width: 412,
+            height: 915,
+            preset: Some("nexus".to_owned()),
+        };
+        let (_, _, agent, key) = restored_device_state(Some(prefs));
+        assert_eq!(agent, None);
+        assert_eq!(key, None);
     }
 
     #[test]

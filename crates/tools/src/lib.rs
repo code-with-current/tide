@@ -59,6 +59,7 @@ pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, Todos
 pub use tools::{
     core_tools, AskFollowupTool, BashOutputTool, BashTool, BrowserClickTool, BrowserGetStateTool,
     BrowserNavigateTool, BrowserPressKeyTool, BrowserScreenshotTool, BrowserScrollTool,
+    BrowserSetViewportTool,
     BrowserTypeTool, ClickTool, CompactTool, DirectoryTreeTool, DispatchAgentTool, DragTool,
     EditFileTool, ExitPlanModeTool, GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool,
     InitTool, JobKillTool, JobListTool, JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool,
@@ -464,6 +465,7 @@ mod tests {
                 "browser_type",
                 "browser_press_key",
                 "browser_scroll",
+                "browser_set_viewport",
                 "list_sessions",
                 "read_session",
             ]
@@ -525,8 +527,8 @@ mod tests {
             assert_eq!(tools[index].risk_tier(), expected_tier, "{index}");
         }
         // Session history: pure reads over the saved-session store.
-        assert_eq!(tools[48].risk_tier(), RiskTier::ReadOnly);
         assert_eq!(tools[49].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[50].risk_tier(), RiskTier::ReadOnly);
         // Agentic browser: reading and capturing the page observe;
         // navigation and the action tools drive the surface the user is
         // watching (Write).
@@ -536,6 +538,9 @@ mod tests {
         for index in 44..=47 {
             assert_eq!(tools[index].risk_tier(), RiskTier::Write, "{index}");
         }
+        // set_viewport drives the same device mode the user's toolbar
+        // toggle does.
+        assert_eq!(tools[48].risk_tier(), RiskTier::Write);
         for name in [
             "browser_navigate",
             "browser_get_state",
@@ -544,6 +549,7 @@ mod tests {
             "browser_type",
             "browser_press_key",
             "browser_scroll",
+            "browser_set_viewport",
         ] {
             assert_eq!(
                 core_tools()

@@ -41,23 +41,22 @@ use crate::Tool;
 
 pub use agent_message::{ListAgentsTool, SendMessageTool};
 pub use ask_followup::{
-    followup_pick_outcome, normalize_followup_args, render_followup_text, AskFollowupTool,
-    FollowupAsk, FollowupOption,
+    AskFollowupTool, FollowupAsk, FollowupOption, followup_pick_outcome, normalize_followup_args,
+    render_followup_text,
 };
 pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
 pub use browser::BrowserBackend;
 pub use browser_tools::{
-    is_browser_tool, BrowserClickTool, BrowserGetStateTool, BrowserNavigateTool,
-    BrowserPressKeyTool, BrowserScreenshotTool, BrowserScrollTool, BrowserTypeTool,
-    BROWSER_TOOLS,
+    BROWSER_TOOLS, BrowserClickTool, BrowserGetStateTool, BrowserNavigateTool, BrowserPressKeyTool,
+    BrowserScreenshotTool, BrowserScrollTool, BrowserSetViewportTool, BrowserTypeTool,
+    is_browser_tool,
 };
 pub use compact::{CompactTool, DEFAULT_KEEP_LAST};
 pub use computer::ComputerBackend;
 pub use computer_tools::{
-    is_computer_tool, ClickTool, DragTool, GetAppStateTool, ListAppsTool,
-    PerformSecondaryActionTool, PressKeyTool, ScrollTool, SetValueTool, TypeTextTool,
-    COMPUTER_TOOLS,
+    COMPUTER_TOOLS, ClickTool, DragTool, GetAppStateTool, ListAppsTool, PerformSecondaryActionTool,
+    PressKeyTool, ScrollTool, SetValueTool, TypeTextTool, is_computer_tool,
 };
 pub use directory_tree::DirectoryTreeTool;
 pub use dispatch_agent::DispatchAgentTool;
@@ -78,8 +77,8 @@ pub use read_file::ReadFileTool;
 pub use read_media_file::ReadMediaFileTool;
 pub use remember::RememberTool;
 pub use session_history::{
-    ListSessionsTool, ReadSessionTool, SessionMessage, SessionPage, SessionReader,
-    SessionSummary, set_shared_session_reader, shared_session_reader,
+    ListSessionsTool, ReadSessionTool, SessionMessage, SessionPage, SessionReader, SessionSummary,
+    set_shared_session_reader, shared_session_reader,
 };
 pub use slash_command::SlashCommandTool;
 pub use todo_write::TodoWriteTool;
@@ -139,6 +138,7 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(BrowserTypeTool),
         Box::new(BrowserPressKeyTool),
         Box::new(BrowserScrollTool),
+        Box::new(BrowserSetViewportTool),
         Box::new(ListSessionsTool),
         Box::new(ReadSessionTool),
     ]
