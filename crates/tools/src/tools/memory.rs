@@ -174,9 +174,10 @@ pub fn rrf_fuse(vec: Vec<MemoryHit>, fts: Vec<MemoryHit>, k: usize) -> Vec<Memor
 /// Doc-level aggregation — OpenContext's weighted formula over RRF lane
 /// weights: score = w_top * 0.6 + min(hits/5, 1) * w_top * 0.4, where
 /// w_top is the doc's best chunk weight (1/(RRF_K + rank + 1) of its
-/// position in the input ranking). The representative hit is the doc's
-/// top chunk. `hits` is expected in rank order (the fused output);
-/// grouping is by `path`.
+/// position in the input ranking). Input must arrive in rank order (the
+/// fused output): weights strictly decrease with rank, so a doc's first
+/// hit IS its top chunk and every later hit only adds coverage.
+/// Grouping is by `path`.
 pub fn aggregate_by_doc(hits: Vec<MemoryHit>, limit: usize) -> Vec<MemoryHit> {
     struct Agg {
         top: f64,
@@ -186,19 +187,10 @@ pub fn aggregate_by_doc(hits: Vec<MemoryHit>, limit: usize) -> Vec<MemoryHit> {
     let score = |a: &Agg| a.top * 0.6 + (a.n as f64 / 5.0).min(1.0) * a.top * 0.4;
     let mut docs: Vec<Agg> = Vec::new();
     for (rank, hit) in hits.into_iter().enumerate() {
-        let w = 1.0 / (RRF_K + rank as f64 + 1.0);
         match docs.iter_mut().find(|a| a.top_hit.path == hit.path) {
-            Some(a) => {
-                a.n += 1;
-                // Defensive: ranks normally arrive in descending weight,
-                // but keep the best hit if an unsorted input says otherwise.
-                if w > a.top {
-                    a.top = w;
-                    a.top_hit = hit;
-                }
-            }
+            Some(a) => a.n += 1,
             None => docs.push(Agg {
-                top: w,
+                top: 1.0 / (RRF_K + rank as f64 + 1.0),
                 top_hit: hit,
                 n: 1,
             }),
@@ -305,7 +297,11 @@ pub(crate) fn run_memory(
     // riding above it — has candidates to choose from, not just reorder.
     // Aggregation collapses chunks into representatives and doc coverage
     // wants up to 5 same-file chunks to develop its full weight, so it
-    // draws from a wider pool (and lets the reranker keep it intact).
+    // draws from a wider pool (5×k, cap 50) than the content path (3×k,
+    // cap 30). With a reranker active the backend caps its own pass at
+    // 20 candidates, so the pool actually reaching aggregation is
+    // min(fetch, 20) — the full over-fetch survives only with reranking
+    // off (disabled in config, model absent, or inference failure).
     let fetch = if aggregate.is_some() {
         (k_clamped * 5).min(50)
     } else {
@@ -316,6 +312,8 @@ pub(crate) fn run_memory(
         index.fts_hits(workspace_id, query, fetch),
         fetch,
     );
+    // Widen the reranker's keep too, so the aggregation pool survives
+    // the precision pass (the backend still caps its pass at 20).
     let rerank_keep = if aggregate.is_some() {
         fetch
     } else {
@@ -383,8 +381,15 @@ pub(crate) fn run_memory(
         })
         .collect::<Vec<_>>();
 
+    // The header names what was ranked: chunks (content), docs (doc),
+    // or source groups (source) — same shape, granularity-aware noun.
+    let noun = match aggregate {
+        Some("doc") => "doc",
+        Some("source") => "source group",
+        _ => "chunk",
+    };
     let text = format!(
-        "Found {} relevant chunk{} for \"{query}\" (out of {total}):\n\n{}",
+        "Found {} relevant {noun}{} for \"{query}\" (out of {total}):\n\n{}",
         ranked.len(),
         if ranked.len() == 1 { "" } else { "s" },
         lines.join("\n\n")
@@ -413,7 +418,7 @@ impl Tool for MemoryTool {
                 "properties": {
                     "query": { "type": "string", "description": "Natural language: \"how is authentication handled\", \"database setup\", \"API routes\"." },
                     "k": { "type": "number", "description": "Top-K results. Omit to use the configured default; max 20." },
-                    "aggregate": { "type": "string", "enum": ["content", "doc", "source"], "description": "Result granularity: content (chunks, default), doc (group by file, coverage-weighted), source (group by knowledge source / directory)." }
+                    "aggregate": { "type": "string", "enum": ["content", "doc", "source"], "description": "Result granularity: content (chunks, default), doc (group by file, coverage-weighted), source (group by knowledge source, else the file's directory)." }
                 },
                 "required": ["query"]
             }),
@@ -875,8 +880,13 @@ mod tests {
         // b@rank0 + a×4; coverage still lifts a.md (1/62·0.92 > 1/61·0.68),
         // and k truncates the collapsed list to a single doc.
         let out = run_memory("q", Some(1), Some("doc"), "ws1", Some(&index));
-        assert!(out.output.contains("Found 1 relevant chunk"));
+        assert!(out.output.contains("Found 1 relevant doc"));
         assert!(out.output.contains("/repo/a.md"));
+
+        // source-level: every workspace hit shares the /repo parent, so
+        // they collapse into one source group.
+        let out = run_memory("q", Some(5), Some("source"), "ws1", Some(&index));
+        assert!(out.output.contains("Found 1 relevant source group"));
 
         // Unknown granularity silently falls back to chunk-level content
         // (same posture as k clamping, not an error) — and k=5 caps the

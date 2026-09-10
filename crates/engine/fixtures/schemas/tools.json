@@ -1179,7 +1179,7 @@
         "aggregate": {
           "type": "string",
           "enum": ["content", "doc", "source"],
-          "description": "Result granularity: content (chunks, default), doc (group by file, coverage-weighted), source (group by knowledge source / directory)."
+          "description": "Result granularity: content (chunks, default), doc (group by file, coverage-weighted), source (group by knowledge source, else the file's directory)."
         }
       },
       "required": [
