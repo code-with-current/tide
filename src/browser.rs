@@ -50,11 +50,12 @@ const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
      AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15";
 
 /// The agent's page-side half, injected verbatim from `browser_agent.js`
-/// before any of the page's own scripts run (wry installs it as a
-/// document-creation user script). Agent evals answer with the JSON strings
+/// before any of the page's own scripts run — wry installs it as a
+/// document-creation user script on macOS, `AddScriptToExecuteOnDocumentCreated`
+/// does it on Windows. Agent evals answer with the JSON strings
 /// `window.__tideSnapshot()` produces. Chromeless twins load it too —
 /// harmless, they never call it.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const BROWSER_AGENT_JS: &str = include_str!("browser_agent.js");
 
 /// What the address input resolves to when the user submits it.
@@ -550,13 +551,20 @@ mod host {
     };
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
-        CreateCoreWebView2CompositionControllerCompletedHandler,
+        CapturePreviewCompletedHandler, CreateCoreWebView2CompositionControllerCompletedHandler,
         CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
-        DocumentTitleChangedEventHandler, FocusChangedEventHandler, MoveFocusRequestedEventHandler,
-        NavigationCompletedEventHandler, NavigationStartingEventHandler,
-        NewWindowRequestedEventHandler, SourceChangedEventHandler, take_pwstr,
+        DocumentTitleChangedEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
+        MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
+        NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
+        take_pwstr,
     };
-    use windows::Win32::Foundation::{E_FAIL, E_NOINTERFACE, HWND, POINT, RECT};
+    use windows::Win32::Foundation::{E_FAIL, E_NOINTERFACE, HGLOBAL, HWND, POINT, RECT};
+    // `CreateStreamOnHGlobal` lives in a `windows`-crate feature Tide itself
+    // never names — the feature set is unified across the dependency graph
+    // and GPUI's Windows backend asks for it, so the binding resolves without
+    // Cargo.toml churn here.
+    use windows::Win32::System::Com::IStream;
+    use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
     use windows::core::{BOOL, HSTRING, IUnknown, Interface, PCWSTR, PWSTR};
 
     use super::PageLoad;
@@ -600,6 +608,40 @@ mod host {
         match unsafe { webview.Source(&mut uri) } {
             Ok(()) => take_pwstr(uri),
             Err(_) => String::new(),
+        }
+    }
+
+    /// Drain a stream WebView2 just wrote into raw bytes: size it by
+    /// seeking to the end, rewind, then read back until the stream runs
+    /// dry. `IStream::Read` may return short without erroring, so the loop
+    /// is what makes the buffer whole.
+    fn stream_bytes(stream: &IStream) -> windows::core::Result<Vec<u8>> {
+        use windows::Win32::System::Com::{STREAM_SEEK_END, STREAM_SEEK_SET};
+
+        unsafe {
+            let mut end = 0u64;
+            stream.Seek(0, STREAM_SEEK_END, Some(&mut end))?;
+            stream.Seek(0, STREAM_SEEK_SET, None)?;
+            // A viewport PNG is megabytes at worst; the cap only keeps a
+            // corrupt stream's huge size from aborting the allocation.
+            let mut bytes = vec![0u8; end.min(u32::MAX as u64) as usize];
+            let mut filled = 0usize;
+            while filled < bytes.len() {
+                let mut read = 0u32;
+                stream
+                    .Read(
+                        bytes[filled..].as_mut_ptr().cast(),
+                        (bytes.len() - filled) as u32,
+                        Some(&mut read),
+                    )
+                    .ok()?;
+                if read == 0 {
+                    break;
+                }
+                filled += read as usize;
+            }
+            bytes.truncate(filled);
+            Ok(bytes)
         }
     }
 
@@ -719,6 +761,82 @@ mod host {
             unsafe { self.0.ExecuteScript(&HSTRING::from(script), None) }
         }
 
+        /// Agent eval-with-result: the mirror of [`Self::evaluate_script`]
+        /// that keeps the answer. WebView2 hands the script's result back
+        /// JSON-encoded, so the serializer's string returns arrive as a JSON
+        /// string *of* a JSON string — decoded exactly once here (see
+        /// [`super::unwrap_execute_script_result`]). The reply fires
+        /// whether the completion runs or the call itself fails: a channel
+        /// left silent is a bridge left waiting, so the callback rides in a
+        /// `Cell` taken on its one call, the same single-fire shape the
+        /// macOS host gives its WebKit completion.
+        pub fn evaluate_script_with_callback(
+            &self,
+            script: &str,
+            done: Box<dyn FnOnce(Result<String, String>)>,
+        ) {
+            let done = Rc::new(Cell::new(Some(done)));
+            let completion = done.clone();
+            let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
+                let done = completion
+                    .take()
+                    .expect("WebView2 called the completion twice");
+                done(match result {
+                    Ok(()) => Ok(super::unwrap_execute_script_result(&value)),
+                    Err(error) => Err(error.to_string()),
+                });
+                Ok(())
+            }));
+            let invoked = unsafe { self.0.ExecuteScript(&HSTRING::from(script), Some(&handler)) };
+            if let Err(error) = invoked
+                && let Some(done) = done.take()
+            {
+                done(Err(error.to_string()));
+            }
+        }
+
+        /// Agent screenshot: `CapturePreview` is WebView2's own PNG encode,
+        /// so unlike the macOS capture there is no pixel repacking — only
+        /// the stream it wrote, drained in the completion. The reply's
+        /// single-fire shape matches [`Self::evaluate_script_with_callback`].
+        pub fn capture_preview(&self, done: Box<dyn FnOnce(Result<Vec<u8>, String>)>) {
+            let done = Rc::new(Cell::new(Some(done)));
+            // A null HGLOBAL gives the stream its own growing memory;
+            // release-on-drop returns it.
+            let stream = unsafe { CreateStreamOnHGlobal(HGLOBAL::default(), true) };
+            let Ok(stream) = stream else {
+                if let Some(done) = done.take() {
+                    done(Err("the preview stream could not be created".to_owned()));
+                }
+                return;
+            };
+            let written = stream.clone();
+            let completion = done.clone();
+            let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+                let done = completion
+                    .take()
+                    .expect("WebView2 called the completion twice");
+                done(
+                    result
+                        .and_then(|()| stream_bytes(&written))
+                        .map_err(|error| error.to_string()),
+                );
+                Ok(())
+            }));
+            let invoked = unsafe {
+                self.0.CapturePreview(
+                    COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                    &stream,
+                    &handler,
+                )
+            };
+            if let Err(error) = invoked
+                && let Some(done) = done.take()
+            {
+                done(Err(error.to_string()));
+            }
+        }
+
         /// WebView2 has no "close" or "is open" counterpart — the devtools
         /// window is the user's from here on.
         pub fn open_devtools(&self) -> windows::core::Result<()> {
@@ -806,14 +924,17 @@ mod host {
             }
         }
 
-        /// Agent eval-with-result. Windows will answer through WebView2's
-        /// `ExecuteScript` completion (Task 6); until then the reply
-        /// channel still hears a clean "not yet" instead of waiting on a
-        /// channel that will never speak.
-        pub fn evaluate_json(&self, _script: &str, done: Box<dyn FnOnce(Result<String, String>)>) {
-            done(Err(
-                "agent eval is not implemented on Windows yet".to_owned()
-            ));
+        /// Agent eval-with-result, routed through WebView2's `ExecuteScript`
+        /// completion; see [`Webview::evaluate_script_with_callback`] for
+        /// how the answer is shaped and guaranteed to fire once.
+        pub fn evaluate_json(&self, script: &str, done: Box<dyn FnOnce(Result<String, String>)>) {
+            self.webview.evaluate_script_with_callback(script, done);
+        }
+
+        /// Agent screenshot, routed through WebView2's `CapturePreview`; the
+        /// bytes come back PNG-encoded, ready for base64 up in the caller.
+        pub fn capture_preview(&self, done: Box<dyn FnOnce(Result<Vec<u8>, String>)>) {
+            self.webview.capture_preview(done);
         }
 
         /// Called from the element's paint callback every frame, so an
@@ -1109,6 +1230,14 @@ mod host {
         if let Ok(settings) = unsafe { webview.Settings() } {
             let _ = unsafe { settings.SetAreDevToolsEnabled(true) };
         }
+        // The agent's page-side half has to exist before any of the page's
+        // own scripts run; a document-created script is WebView2's injection
+        // point, applied to every future document. The completion only
+        // reports the id `Remove…` would need, which nothing here ever calls.
+        let _ = unsafe {
+            webview
+                .AddScriptToExecuteOnDocumentCreated(&HSTRING::from(super::BROWSER_AGENT_JS), None)
+        };
 
         let Callbacks {
             page_load,
@@ -1354,6 +1483,19 @@ fn agent_dispatch(loading: bool, op: AgentOp, queued: &mut Vec<AgentOp>) -> Opti
 fn agent_load_finished(generation: &mut u64, queued: &mut Vec<AgentOp>) -> Vec<AgentOp> {
     *generation += 1;
     std::mem::take(queued)
+}
+
+/// WebView2's `ExecuteScript` hands the script's result back JSON-encoded —
+/// and the agent serializer's functions already return what `JSON.stringify`
+/// produces, so a healthy eval arrives as a JSON string *of* a JSON string.
+/// Decode exactly one layer and hand the page's own JSON up. Anything that is
+/// not a string at that outer layer — `null` from a page that clobbered the
+/// serializer, a bare number, an object a hostile page returned directly —
+/// passes through unchanged for the caller to judge, the same corner the
+/// macOS arm reports as "the script did not return a string".
+#[cfg(any(target_os = "windows", test))]
+fn unwrap_execute_script_result(raw: &str) -> String {
+    serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_owned())
 }
 
 pub struct BrowserView {
@@ -2075,10 +2217,35 @@ impl BrowserView {
                     .takeSnapshotWithConfiguration_completionHandler(None, &completion)
             };
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
         {
-            // The WebView2 capture is Task 6's; the channel still hears an
-            // answer so nothing blocks on silence.
+            use base64::Engine as _;
+
+            let Some(host) = self.host.clone() else {
+                let _ = reply.send(Err("the webview is not available".to_owned()));
+                return;
+            };
+            let deferred = Deferred {
+                executor: cx.foreground_executor().clone(),
+                cx: cx.to_async(),
+                view: cx.entity().downgrade(),
+            };
+            host.capture_preview(Box::new(move |png| {
+                // The stream copy happened in the WebView2 callout; the
+                // base64 encode happens in the deferred hop, where
+                // milliseconds of work delay no paint — the same split the
+                // macOS capture gives its PNG encode.
+                deferred.update(move |_, _| {
+                    let _ = reply.send(
+                        png.map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)),
+                    );
+                });
+            }));
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            // Linux has no capture path; the channel still hears an answer
+            // so nothing blocks on silence.
             let _ = cx;
             let _ = reply.send(Err(
                 "agent screenshots are not implemented on this platform yet".to_owned(),
@@ -3191,6 +3358,31 @@ mod tests {
             .is_some()
         );
         assert!(queued.is_empty());
+    }
+
+    #[test]
+    fn execute_script_results_unwrap_exactly_one_json_layer() {
+        // The serializer returns what JSON.stringify produces; WebView2 hands
+        // that back JSON-encoded once more. One decode leaves the page's own
+        // JSON string, escapes and all — building the double-encoded input
+        // with `to_string` mirrors exactly what the completion delivers.
+        let snapshot = r#"{"url":"https://example.com/login","truncated":false,"tree":[{"ref":"s1e2","name":"a \"quoted\" button"}]}"#;
+        let raw = serde_json::to_string(snapshot).unwrap();
+        assert_eq!(unwrap_execute_script_result(&raw), snapshot);
+
+        // Bare results — a page that clobbered the serializer (`null`), a
+        // plain non-string return, an object handed back directly — are not
+        // strings at the outer layer: they pass through untouched for the
+        // caller to judge.
+        assert_eq!(unwrap_execute_script_result("null"), "null");
+        assert_eq!(unwrap_execute_script_result("123"), "123");
+        assert_eq!(unwrap_execute_script_result("true"), "true");
+        assert_eq!(
+            unwrap_execute_script_result(r#"{"ok":false}"#),
+            r#"{"ok":false}"#
+        );
+        // An empty-string return decodes to the empty string, not `""`.
+        assert_eq!(unwrap_execute_script_result(r#""""#), "");
     }
 
     #[test]
