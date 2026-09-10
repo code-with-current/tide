@@ -1031,7 +1031,12 @@ pub fn html_to_text(html: &str) -> String {
 // ── docs fetcher ───────────────────────────────────────────────────────────
 
 const MAX_FILE_BYTES: u64 = 512 * 1024;
-const DOC_EXTENSIONS: &[&str] = &["md", "mdx", "txt"];
+/// Extensions the docs fetcher (and the library keep-list walk in the
+/// backend) treat as documents. Shared deliberately: a file the
+/// fetcher can index must count as "exists" for the library_docs
+/// tombstone pass even when the fetch itself skipped it (oversized,
+/// unreadable).
+pub const DOC_EXTENSIONS: &[&str] = &["md", "mdx", "txt"];
 
 /// Local markdown/text file or directory walk producing one SourceDocument
 /// per file with the absolute path as origin. Locations validated against
@@ -1544,6 +1549,46 @@ mod tests {
         let recovered = ks.get_source(&src2.id).unwrap();
         assert_eq!(recovered.status, "idle");
         assert!(recovered.last_indexed_at.is_none());
+    }
+
+    #[test]
+    fn purge_orphans_is_removal_only_ingest_leaves_chunks_queryable() {
+        // Pins the store-level invariant behind the reindex Ok-arm's
+        // NO-purge rule (backend reindex_source_sync): a successful
+        // ingest leaves its chunks queryable, and purge_orphans is a
+        // removal-only tool that deletes EVERY chunk of a source. Were
+        // a purge re-added after ingest, every "successful" reindex
+        // would end in the mid-test state below — chunkCount N, zero
+        // queryable chunks, recall dead.
+        let (_dir, ks) = store();
+        let src = ks.add_source("Docs", "docs", "d.md", None).unwrap();
+        let embedder = crate::store::FakeEmbedder { dim: 384 };
+        let docs = vec![SourceDocument {
+            title: "d.md".into(),
+            content: "# H\n\nhello world".into(),
+            origin: "d.md".into(),
+        }];
+
+        // Successful ingest → chunks queryable (per-origin delete-first
+        // already handled staleness; nothing more may be deleted).
+        assert_eq!(
+            ingest_documents(&ks, &embedder, &src.id, &docs, |_| {}).unwrap(),
+            1
+        );
+        assert!(!ks.rag.by_path("d.md").unwrap().is_empty());
+
+        // Removal tool: wipes the source's whole chunk set (this is what
+        // a post-ingest purge would leave behind every reindex).
+        assert_eq!(ks.rag.chunks_by_source(&src.id).unwrap().len(), 1);
+        ks.purge_orphans(&src.id);
+        assert!(ks.rag.by_path("d.md").unwrap().is_empty());
+
+        // The cycle is restartable: re-ingest rebuilds queryable chunks.
+        assert_eq!(
+            ingest_documents(&ks, &embedder, &src.id, &docs, |_| {}).unwrap(),
+            1
+        );
+        assert!(!ks.rag.by_path("d.md").unwrap().is_empty());
     }
 
     #[test]

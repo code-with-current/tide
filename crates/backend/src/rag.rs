@@ -1502,6 +1502,14 @@ pub fn open_knowledge() -> Result<KnowledgeStore, String> {
 /// present; returns its source id. Called by the settings card before
 /// queueing a reindex; the directory is agent-writable via normal file
 /// tools, so nothing else writes here.
+///
+/// Find-then-insert races exactly like remember_fact's memory-row
+/// lookup: two concurrent first-calls could mint two library rows.
+/// The single settings-card caller makes that theoretical, and a
+/// duplicate would be benign — the fetch arm reads the canonical
+/// `<data>/library` root regardless of which row's reindex runs
+/// (source.location is informational), and the library_docs registry
+/// is keyed by rel_path, not by source id.
 pub fn ensure_library_source() -> Result<String, String> {
     let ks = open_knowledge()?;
     let root = rag::library_root(&data_dir());
@@ -1623,10 +1631,17 @@ fn reindex_source_sync(source_id: &str) {
         })?;
         // Library registry sync (tail): only after the chunks landed,
         // tombstone rows whose rel_path no longer exists on disk (v1
-        // rename handling = tombstone, settled). docs is still in scope
-        // here — ingest borrows it, so the keep list needs no pre-collect.
+        // rename handling = tombstone, settled). The keep-list is the
+        // directory walk (files that exist), union'd with the fetched
+        // origins defensively — a doc fetch_docs skipped (oversized,
+        // briefly unreadable) must not lose its stable_id.
         if source.kind == "library" {
-            let keep: Vec<String> = docs.iter().map(|d| d.origin.clone()).collect();
+            let mut keep = library_keep_list(&rag::library_root(&data_dir()));
+            for d in &docs {
+                if !keep.contains(&d.origin) {
+                    keep.push(d.origin.clone());
+                }
+            }
             ks.library_tombstone_missing(&keep)
                 .map_err(|e| e.to_string())?;
         }
@@ -1635,7 +1650,16 @@ fn reindex_source_sync(source_id: &str) {
     source_progress_map().lock().unwrap().remove(source_id);
     match result {
         Ok(count) => {
-            let _ = ks.purge_orphans(source_id);
+            // Deliberately NO purge_orphans here. ingest_documents
+            // already removed this source's stale chunks per document
+            // origin (delete-first), so a purge at this point would add
+            // nothing except destruction: it deletes EVERY chunk of the
+            // source, leaving chunkCount = N over zero queryable chunks
+            // (recall dead while the UI shows a healthy source). Chunks
+            // of removed sources are handled by remove_source/
+            // delete_source's own cascade. Regression-tested at the
+            // store level in the rag crate
+            // (purge_orphans_is_removal_only_ingest_leaves_chunks_queryable).
             ks.set_chunk_count(source_id, count as i64);
             ks.mark_status(source_id, "idle", None);
         }
@@ -1643,6 +1667,18 @@ fn reindex_source_sync(source_id: &str) {
             ks.mark_status(source_id, "error", Some(&error));
         }
     }
+}
+
+/// Library-relative key for a path under `canon_root` (the
+/// canonicalized library root): forward slashes only (repo precedent:
+/// `repo_origin`), no leading '/'. Errors instead of passing the raw
+/// origin through when the path is not under the root — a silently
+/// wrong registry key (an absolute path) is worse than a failed
+/// reindex.
+fn library_rel_path(path: &str, canon_root: &str) -> Result<String, String> {
+    path.strip_prefix(canon_root)
+        .map(|rel| rel.replace('\\', "/").trim_start_matches('/').to_string())
+        .ok_or_else(|| format!("library doc {path:?} is outside the library root {canon_root:?}"))
 }
 
 /// Library fetch: read markdown under `root` via the docs fetcher (the
@@ -1659,19 +1695,54 @@ fn library_fetch_docs(root: &std::path::Path) -> Result<Vec<rag::SourceDocument>
         .unwrap_or_else(|_| root.to_path_buf())
         .to_string_lossy()
         .into_owned();
-    Ok(docs
-        .into_iter()
-        .map(|mut d| {
-            let rel = d
-                .origin
-                .strip_prefix(canon.as_str())
-                .unwrap_or(&d.origin)
-                .trim_start_matches('/')
-                .to_string();
-            d.origin = rel;
-            d
-        })
-        .collect())
+    let mut out = Vec::with_capacity(docs.len());
+    for mut d in docs {
+        d.origin = library_rel_path(&d.origin, &canon)?;
+        out.push(d);
+    }
+    Ok(out)
+}
+
+/// Every doc-extension file under the library root as a normalized
+/// library-relative path. This — NOT the fetched docs — is the
+/// tombstone keep-list source of truth: fetch_docs silently skips
+/// oversized or unreadable files, and a file that still exists on disk
+/// must never lose its registry row (its stable_id would be destroyed).
+fn library_keep_list(root: &std::path::Path) -> Vec<String> {
+    let canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let canon_str = canon.to_string_lossy().into_owned();
+    let mut keep: Vec<String> = Vec::new();
+    let mut stack = vec![canon];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                stack.push(path);
+            } else if file_type.is_file() {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .unwrap_or_default();
+                if rag::DOC_EXTENSIONS.contains(&ext.as_str())
+                    // Unwalkable entries (e.g. a symlink escaping the
+                    // root) just don't join the keep list.
+                    && let Ok(rel) = library_rel_path(&path.to_string_lossy(), &canon_str)
+                {
+                    keep.push(rel);
+                }
+            }
+        }
+    }
+    keep.sort();
+    keep.dedup();
+    keep
 }
 
 /// Kind dispatch for the fetchers.
@@ -2087,5 +2158,43 @@ mod tests {
         std::fs::write(lib.join("proj/d.md"), "# H\n\nbody").unwrap();
         let docs = library_fetch_docs(&lib).unwrap();
         assert_eq!(docs[0].origin, "proj/d.md");
+    }
+
+    #[test]
+    fn library_rel_path_errors_outside_root_and_normalizes_separators() {
+        use super::library_rel_path;
+        assert_eq!(
+            library_rel_path("/lib/proj/d.md", "/lib").unwrap(),
+            "proj/d.md"
+        );
+        // Backslashes become forward slashes (Windows; same idiom as
+        // repo_origin) — pure string ops, so this pins on unix too.
+        assert_eq!(library_rel_path("/lib/a\\b.md", "/lib").unwrap(), "a/b.md");
+        // Outside the root is a hard error, never a passthrough: a
+        // silently absolute registry key corrupts every join downstream.
+        let err = library_rel_path("/elsewhere/d.md", "/lib").unwrap_err();
+        assert!(err.contains("outside the library root"), "{err}");
+    }
+
+    #[test]
+    fn library_keep_list_retains_files_fetch_skips() {
+        use super::{library_fetch_docs, library_keep_list};
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join("library");
+        std::fs::create_dir_all(lib.join("proj")).unwrap();
+        std::fs::write(lib.join("proj/d.md"), "# H\n\nbody").unwrap();
+        // > MAX_FILE_BYTES (512 KiB): fetch_docs silently skips it, but
+        // it exists on disk — the tombstone keep-list must retain it or
+        // its registry row (stable_id) is destroyed.
+        let big = format!("# B\n\n{}", "word ".repeat(200_000));
+        std::fs::write(lib.join("proj/big.md"), big).unwrap();
+
+        let docs = library_fetch_docs(&lib).unwrap();
+        assert_eq!(docs.len(), 1, "oversized file is skipped by the fetcher");
+        assert_eq!(docs[0].origin, "proj/d.md");
+
+        let keep = library_keep_list(&lib);
+        assert!(keep.contains(&"proj/d.md".to_owned()), "{keep:?}");
+        assert!(keep.contains(&"proj/big.md".to_owned()), "{keep:?}");
     }
 }
