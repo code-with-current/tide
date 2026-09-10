@@ -15,9 +15,9 @@
 //! reached from the other side.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use gpui::{Context, Entity};
+use gpui::{AsyncApp, Context, Entity, WeakEntity};
 use serde_json::{Value, json};
 use smol::channel::Sender;
 use uuid::Uuid;
@@ -33,6 +33,16 @@ use crate::browser::BrowserView;
 const NAVIGATE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Every other op — evals and captures against an already-settled page.
 const OP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The auto-settle every action runs under (the design's "click/type/scroll
+/// settle ~400 ms for DOM quietness"): the page must stay mutation-free
+/// for this long before the action's result goes back to the engine.
+const SETTLE_QUIET_MS: u64 = 400;
+/// Never hold a reply longer than this, however chatty the page —
+/// animation-loop SPAs mutate forever.
+const SETTLE_CAP_MS: u64 = 2000;
+/// How often the settle loop re-checks the page's quiet predicate.
+const SETTLE_POLL_MS: u64 = 100;
 
 /// Design v1: the agent drives real web pages only. The omnibox resolves
 /// scheme-less text into searches for humans; the tool contract stays
@@ -61,6 +71,95 @@ const SNAPSHOT_SCRIPT: &str = "window.__tideSnapshot()";
 /// cue to navigate first.
 const NO_SURFACE: &str =
     "no browser surface is open - call browser_navigate to open the page first";
+
+/// Build the one eval that runs a `__tideAct` call. Every segment is
+/// JSON-encoded — serde's string output is a valid JavaScript string
+/// literal — so any text (quotes, newlines, `</script>`, unicode) crosses
+/// syntactically intact, and the action rides a single round trip.
+fn act_script(op: &str, args: &Value) -> Result<String, String> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| format!("the {op} args must be an object"))?;
+    let target = object.get("ref").and_then(Value::as_str).unwrap_or("");
+    let encode = |value: &Value| serde_json::to_string(value).map_err(|e| e.to_string());
+    let (target, payload) = match op {
+        "click" => {
+            if target.is_empty() {
+                return Err(
+                    "click needs the ref of the element — take one from a browser_get_state snapshot"
+                        .to_owned(),
+                );
+            }
+            (encode(&json!(target))?, Value::Null)
+        }
+        "type" => {
+            if target.is_empty() {
+                return Err(
+                    "type needs the ref of the element — take one from a browser_get_state snapshot"
+                        .to_owned(),
+                );
+            }
+            let text = object.get("text").and_then(Value::as_str).unwrap_or("");
+            let submit = object
+                .get("submit")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            (
+                encode(&json!(target))?,
+                json!({ "text": text, "submit": submit }),
+            )
+        }
+        "press_key" => {
+            let key = object.get("key").and_then(Value::as_str).unwrap_or("");
+            if key.is_empty() {
+                return Err(
+                    "press_key needs a key — e.g. \"Enter\", \"Tab\" or \"ctrl+a\"".to_owned(),
+                );
+            }
+            (encode(&Value::Null)?, json!({ "key": key }))
+        }
+        "scroll" => {
+            let direction = object
+                .get("direction")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !["up", "down", "left", "right"].contains(&direction) {
+                return Err("scroll direction must be up, down, left or right".to_owned());
+            }
+            let amount = match object.get("amount") {
+                None => 1.0,
+                // Present-but-garbage fails loudly; only a missing amount
+                // takes the one-page default.
+                Some(value) => match value.as_f64() {
+                    Some(amount) if amount.is_finite() && amount > 0.0 => amount.min(100.0),
+                    _ => {
+                        return Err("scroll amount must be a positive number of pages".to_owned());
+                    }
+                },
+            };
+            let target = if target.is_empty() {
+                encode(&Value::Null)?
+            } else {
+                encode(&json!(target))?
+            };
+            (target, json!({ "direction": direction, "amount": amount }))
+        }
+        other => return Err(format!("unknown browser action: {other}")),
+    };
+    let payload = encode(&payload)?;
+    Ok(format!("window.__tideAct({target},\"{op}\",{payload})"))
+}
+
+/// Did the page-side action answer success? Anything else — the stale
+/// shape, `{ok:false, error}`, unparseable text — skips the settle: there
+/// is no page reaction worth waiting for.
+fn action_ok(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|result| result.get("ok").cloned())
+        .and_then(|ok| ok.as_bool())
+        .unwrap_or(false)
+}
 
 /// One parked agent eval: the script to run once the view exists, and
 /// the channel its answer must reach. The auto-open path stores these
@@ -178,6 +277,11 @@ impl Tide {
                 };
                 browser.update(cx, |view, cx| view.agent_screenshot(reply, cx));
             }
+            // The action quartet: resolve refs against the live page, then
+            // hold the reply until the DOM settles.
+            "click" | "type" | "press_key" | "scroll" => {
+                self.browser_act_op(name, &args, reply, cx);
+            }
             other => {
                 let _ = reply.send(Err(format!("unknown browser op: {other}")));
             }
@@ -247,6 +351,57 @@ impl Tide {
         browser.update(cx, |view, cx| view.agent_eval(script, reply, cx));
     }
 
+    /// Run one `__tideAct` call on the active surface and settle before
+    /// the engine hears back. The action itself is one eval answering
+    /// synchronously; the quiet wait polls the page's mutation tracker
+    /// (`__tideSettledFor`) instead of awaiting a Promise because
+    /// WKWebView's `evaluateJavaScript` does not await Promises (WebKit
+    /// awaits them only for `callAsyncJavaScript`) — the plan's
+    /// "chained in the one eval" becomes "one action eval + a native poll
+    /// of the same tracker", single round trip from the engine's view.
+    /// The interposed channel is what makes the reply holdable: the view
+    /// answers the probe, the spawned task owns the engine's reply.
+    fn browser_act_op(
+        &mut self,
+        op: &str,
+        args: &Value,
+        reply: std::sync::mpsc::Sender<Result<String, String>>,
+        cx: &mut Context<Self>,
+    ) {
+        let script = match act_script(op, args) {
+            Ok(script) => script,
+            Err(error) => {
+                let _ = reply.send(Err(error));
+                return;
+            }
+        };
+        let Some(browser) = self.active_right_panel_browser() else {
+            let _ = reply.send(Err(NO_SURFACE.to_owned()));
+            return;
+        };
+        let (acted, acted_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+        browser.update(cx, |view, cx| view.agent_eval(script, acted, cx));
+        cx.spawn(
+            async move |tide, cx| match smol::unblock(move || acted_rx.recv()).await {
+                Ok(Ok(text)) => {
+                    if action_ok(&text) {
+                        wait_for_quiet(&tide, cx, SETTLE_QUIET_MS, SETTLE_CAP_MS).await;
+                    }
+                    let _ = reply.send(Ok(text));
+                }
+                Ok(Err(error)) => {
+                    let _ = reply.send(Err(error));
+                }
+                Err(_) => {
+                    let _ = reply.send(Err(
+                        "the browser surface went away before the action answered".to_owned(),
+                    ));
+                }
+            },
+        )
+        .detach();
+    }
+
     /// The surface an agent op targets: the newest Browser tab carrying a
     /// live view — the tab bar orders `right_panel_surfaces`, the surface
     /// renderer materializes views into `right_panel_browsers`.
@@ -258,6 +413,40 @@ impl Tide {
                 RightPanelSurface::Browser(id) => self.right_panel_browsers.get(id).cloned(),
                 _ => None,
             })
+    }
+}
+
+/// Poll the page's quiet predicate until the DOM has been mutation-free
+/// for `quiet_ms`, capped at `cap_ms`. Each probe is one `agent_eval` —
+/// mid-load probes park behind the navigation and run against the page
+/// they were waiting for, which is exactly the auto-wait a navigating
+/// click needs. Any probe failure ends the settle early (best-effort):
+/// the action already succeeded, its result must still go out.
+async fn wait_for_quiet(tide: &WeakEntity<Tide>, cx: &mut AsyncApp, quiet_ms: u64, cap_ms: u64) {
+    let script = format!("window.__tideSettledFor({quiet_ms})");
+    let started = Instant::now();
+    loop {
+        let (probe, probes) = std::sync::mpsc::channel::<Result<String, String>>();
+        if tide
+            .update(cx, |tide, cx| {
+                tide.browser_eval_op(script.clone(), probe, cx)
+            })
+            .is_err()
+        {
+            return;
+        }
+        match smol::unblock(move || probes.recv()).await {
+            // The eval answers the JSON string "true"/"false" — quiet or
+            // not yet. Everything else (routing error, dropped view)
+            // means there is nothing left to wait on.
+            Ok(Ok(quiet)) if quiet == "true" => return,
+            Ok(Ok(_)) => {}
+            _ => return,
+        }
+        if started.elapsed().as_millis() as u64 >= cap_ms {
+            return;
+        }
+        smol::Timer::after(Duration::from_millis(SETTLE_POLL_MS)).await;
     }
 }
 
@@ -294,5 +483,68 @@ mod tests {
             None
         );
         assert_eq!(viewport_of(&json!({})), None);
+    }
+
+    #[test]
+    fn act_scripts_carry_json_encoded_segments() {
+        assert_eq!(
+            act_script("click", &json!({ "ref": "s3e12" })).unwrap(),
+            "window.__tideAct(\"s3e12\",\"click\",null)"
+        );
+        // hostile text crosses as one syntactically valid JS string
+        assert_eq!(
+            act_script(
+                "type",
+                &json!({ "ref": "s1e5", "text": "line1\nline2 \"q\" </script> ☃", "submit": true })
+            )
+            .unwrap(),
+            "window.__tideAct(\"s1e5\",\"type\",{\"text\":\"line1\\nline2 \\\"q\\\" </script> ☃\",\"submit\":true})"
+        );
+        assert_eq!(
+            act_script("press_key", &json!({ "key": "ctrl+a" })).unwrap(),
+            "window.__tideAct(null,\"press_key\",{\"key\":\"ctrl+a\"})"
+        );
+        // viewport scroll addresses no ref; ref'd scroll addresses the element
+        assert_eq!(
+            act_script("scroll", &json!({ "direction": "up", "amount": 0.5 })).unwrap(),
+            "window.__tideAct(null,\"scroll\",{\"direction\":\"up\",\"amount\":0.5})"
+        );
+        assert_eq!(
+            act_script("scroll", &json!({ "direction": "down", "ref": "s2e1" })).unwrap(),
+            "window.__tideAct(\"s2e1\",\"scroll\",{\"direction\":\"down\",\"amount\":1.0})"
+        );
+    }
+
+    #[test]
+    fn act_scripts_validate_before_touching_the_surface() {
+        // missing ref / key / direction, unknown op, non-object args
+        for (op, args) in [
+            ("click", json!({})),
+            ("type", json!({ "text": "hi" })),
+            ("press_key", json!({})),
+            ("scroll", json!({ "direction": "sideways" })),
+            ("scroll", json!({ "direction": "down", "amount": -1 })),
+            ("reload", json!({})),
+            ("click", json!("s1e1")),
+        ] {
+            assert!(act_script(op, &args).is_err(), "{op} {args}");
+        }
+        // amount falls back to one page when missing
+        assert!(
+            act_script("scroll", &json!({ "direction": "down" }))
+                .unwrap()
+                .ends_with("\"amount\":1.0})")
+        );
+    }
+
+    #[test]
+    fn action_ok_gates_the_settle_on_page_success() {
+        assert!(action_ok("{\"ok\":true,\"action\":\"click\"}"));
+        assert!(!action_ok(
+            "{\"ok\":false,\"stale\":true,\"reason\":\"ref left the document\"}"
+        ));
+        assert!(!action_ok("{\"ok\":false,\"error\":\"unknown key\"}"));
+        assert!(!action_ok("not json"));
+        assert!(!action_ok("null"));
     }
 }

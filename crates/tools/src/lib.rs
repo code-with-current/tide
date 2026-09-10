@@ -57,8 +57,9 @@ pub use tools::session_history::{
 };
 pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
 pub use tools::{
-    core_tools, AskFollowupTool, BashOutputTool, BashTool, BrowserGetStateTool, BrowserNavigateTool,
-    BrowserScreenshotTool, ClickTool, CompactTool, DirectoryTreeTool, DispatchAgentTool, DragTool,
+    core_tools, AskFollowupTool, BashOutputTool, BashTool, BrowserClickTool, BrowserGetStateTool,
+    BrowserNavigateTool, BrowserPressKeyTool, BrowserScreenshotTool, BrowserScrollTool,
+    BrowserTypeTool, ClickTool, CompactTool, DirectoryTreeTool, DispatchAgentTool, DragTool,
     EditFileTool, ExitPlanModeTool, GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool,
     InitTool, JobKillTool, JobListTool, JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool,
     ListDirTool, LoadSkillTool, MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool,
@@ -459,6 +460,10 @@ mod tests {
                 "browser_navigate",
                 "browser_get_state",
                 "browser_screenshot",
+                "browser_click",
+                "browser_type",
+                "browser_press_key",
+                "browser_scroll",
                 "list_sessions",
                 "read_session",
             ]
@@ -520,14 +525,26 @@ mod tests {
             assert_eq!(tools[index].risk_tier(), expected_tier, "{index}");
         }
         // Session history: pure reads over the saved-session store.
-        assert_eq!(tools[44].risk_tier(), RiskTier::ReadOnly);
-        assert_eq!(tools[45].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[48].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[49].risk_tier(), RiskTier::ReadOnly);
         // Agentic browser: reading and capturing the page observe;
-        // navigation drives the surface the user is watching (Write).
+        // navigation and the action tools drive the surface the user is
+        // watching (Write).
         assert_eq!(tools[41].risk_tier(), RiskTier::Write);
         assert_eq!(tools[42].risk_tier(), RiskTier::ReadOnly);
         assert_eq!(tools[43].risk_tier(), RiskTier::ReadOnly);
-        for name in ["browser_navigate", "browser_get_state", "browser_screenshot"] {
+        for index in 44..=47 {
+            assert_eq!(tools[index].risk_tier(), RiskTier::Write, "{index}");
+        }
+        for name in [
+            "browser_navigate",
+            "browser_get_state",
+            "browser_screenshot",
+            "browser_click",
+            "browser_type",
+            "browser_press_key",
+            "browser_scroll",
+        ] {
             assert_eq!(
                 core_tools()
                     .into_iter()

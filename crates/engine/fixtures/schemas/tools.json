@@ -1598,6 +1598,93 @@
     }
   },
   {
+    "name": "browser_click",
+    "description": "Click an element in the browser panel by its ref from the latest browser_get_state snapshot. Scrolls the element into view, fires the full pointer/mouse event sequence, then follows the click's activation (form submit, link navigation, checkbox toggle) and waits for the page to settle. Stale or unknown refs fail with a reminder to call browser_get_state again.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "Element ref from the latest snapshot, e.g. \"s3e12\""
+        }
+      },
+      "required": [
+        "ref"
+      ]
+    }
+  },
+  {
+    "name": "browser_type",
+    "description": "Type text into an element in the browser panel by its ref from the latest browser_get_state snapshot. Focuses the field, selects all existing content, then types the text character by character (falling back to a React-safe whole-value replacement on pages without insertText). Set submit to true to press Enter afterwards and submit the surrounding form. Waits for the page to settle.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "Element ref from the latest snapshot, e.g. \"s3e12\""
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to type; empty text clears the field"
+        },
+        "submit": {
+          "type": "boolean",
+          "description": "Press Enter after typing to submit the form. Defaults to false"
+        }
+      },
+      "required": [
+        "ref",
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "browser_press_key",
+    "description": "Press a key or key combination in the browser panel: synthesizes keydown + keyup on the focused element. Accepts xdotool-style names — \"Enter\", \"Tab\", \"Escape\", \"Backspace\", \"Up\", \"PageDown\", \"Home\", single characters, and modifier combos like \"ctrl+a\", \"alt+Tab\", \"super+k\". Waits for the page to settle.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key or key combination to press, e.g. \"Enter\" or \"ctrl+a\""
+        }
+      },
+      "required": [
+        "key"
+      ]
+    }
+  },
+  {
+    "name": "browser_scroll",
+    "description": "Scroll the browser panel's page (or a ref'd scrollable element) by a fraction of a viewport. direction is up, down, left or right; amount is in pages and defaults to 1 — 0.5 scrolls half a page. Waits for the page to settle.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ],
+          "description": "Direction to scroll"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Pages to scroll; defaults to 1"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Element ref of the scrollable container; omit to scroll the whole page"
+        }
+      },
+      "required": [
+        "direction"
+      ]
+    }
+  },
+  {
     "name": "computer",
     "description": "Control the user's macOS apps: list their windows, take a screenshot, and click, type, scroll, or press keys inside one. Use for app UI that has no CLI or API — check `list` first, then `view` a window and act on coordinates in its captured image. Screen Recording and Accessibility must be granted in System Settings; every action runs visibly in the user's session.",
     "schema": {

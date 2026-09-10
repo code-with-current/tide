@@ -1,13 +1,15 @@
-//! Tide's native browser tools — the agent's read access to the
-//! right-panel webview. Every call rides one `{ op, args }` request
+//! Tide's native browser tools — the agent's access to the right-panel
+//! webview. Every call rides one `{ op, args }` request
 //! through the [`BrowserBackend`] seam in [`super::browser`]; the app
 //! installs the webview bridge at boot, and without it (Linux builds,
 //! tool-only binaries) calls fail with a clean "unavailable" outcome
 //! instead of a panic.
 //!
-//! Task 4 ships the read half — navigate, get_state, screenshot. The
-//! action tools (click, type, press_key, scroll) land with the page-side
-//! `__tideAct` serializer in Task 5 and join this module beside these.
+//! Task 4 shipped the read half — navigate, get_state, screenshot. Task 5
+//! adds the action half — click, type, press_key, scroll — which resolve
+//! snapshot refs against the live page through `__tideAct` and answer the
+//! one stale shape ([`STALE_REF_MESSAGE`]) whenever the page moved under
+//! the model.
 
 use serde_json::{Value, json};
 
@@ -59,6 +61,19 @@ fn render_browser_response(op: &str, response: &Value) -> Result<ToolOutcome, St
             duration_ms: None,
         });
     }
+    // The design's single stale shape: `__tideAct` could not resolve the
+    // ref against the live page. One message, one remedy — re-snapshot.
+    if response.get("stale").and_then(Value::as_bool) == Some(true) {
+        return Ok(ToolOutcome::failed(STALE_REF_MESSAGE));
+    }
+    if response.get("ok").and_then(Value::as_bool) == Some(false) {
+        let detail = response
+            .get("error")
+            .and_then(Value::as_str)
+            .or_else(|| response.get("reason").and_then(Value::as_str))
+            .unwrap_or("the browser action reported an unspecified failure");
+        return Ok(ToolOutcome::failed(detail.to_owned()));
+    }
     let text = serde_json::to_string(response)
         .map_err(|error| format!("the {op} call returned an unserializable result: {error}"))?;
     if text == "null" {
@@ -66,6 +81,13 @@ fn render_browser_response(op: &str, response: &Value) -> Result<ToolOutcome, St
     }
     Ok(ToolOutcome::executed(text))
 }
+
+/// The one model-facing error a stale ref produces — verbatim, so the
+/// remedy (re-snapshot) is always the same instruction. `__tideAct`
+/// answers `{ok:false, stale:true}` for a ref that is missing from the
+/// live map, disconnected, or whose role/name no longer match; this is
+/// its rendering on the tool side.
+pub const STALE_REF_MESSAGE: &str = "The page changed under you — that ref is no longer valid. Call browser_get_state again and retry with the fresh refs.";
 
 /// The agent's URL contract: real web pages only. Validated before the
 /// call so a bad argument fails without waking the browser surface.
@@ -154,12 +176,186 @@ impl Tool for BrowserScreenshotTool {
     }
 }
 
+pub struct BrowserClickTool;
+
+impl Tool for BrowserClickTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "browser_click".to_owned(),
+            description: "Click an element in the browser panel by its ref from the latest browser_get_state snapshot. Scrolls the element into view, fires the full pointer/mouse event sequence, then follows the click's activation (form submit, link navigation, checkbox toggle) and waits for the page to settle. Stale or unknown refs fail with a reminder to call browser_get_state again.".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Element ref from the latest snapshot, e.g. \"s3e12\""
+                    }
+                },
+                "required": ["ref"]
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(&self, _ctx: &ToolContext, args: Value) -> Result<ToolOutcome, ToolError> {
+        if super::arg_str(&args, "ref").is_empty() {
+            return Ok(ToolOutcome::failed(
+                "browser_click needs the ref of the element to click — take one from a browser_get_state snapshot.",
+            ));
+        }
+        browser_call("click", &args)
+    }
+}
+
+pub struct BrowserTypeTool;
+
+impl Tool for BrowserTypeTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "browser_type".to_owned(),
+            description: "Type text into an element in the browser panel by its ref from the latest browser_get_state snapshot. Focuses the field, selects all existing content, then types the text character by character (falling back to a React-safe whole-value replacement on pages without insertText). Set submit to true to press Enter afterwards and submit the surrounding form. Waits for the page to settle.".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "Element ref from the latest snapshot, e.g. \"s3e12\""
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type; empty text clears the field"
+                    },
+                    "submit": {
+                        "type": "boolean",
+                        "description": "Press Enter after typing to submit the form. Defaults to false"
+                    }
+                },
+                "required": ["ref", "text"]
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(&self, _ctx: &ToolContext, args: Value) -> Result<ToolOutcome, ToolError> {
+        if super::arg_str(&args, "ref").is_empty() {
+            return Ok(ToolOutcome::failed(
+                "browser_type needs the ref of the element to type into — take one from a browser_get_state snapshot.",
+            ));
+        }
+        if args.get("text").and_then(Value::as_str).is_none() {
+            return Ok(ToolOutcome::failed(
+                "browser_type needs the text to type (an empty string clears the field).",
+            ));
+        }
+        browser_call("type", &args)
+    }
+}
+
+pub struct BrowserPressKeyTool;
+
+impl Tool for BrowserPressKeyTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "browser_press_key".to_owned(),
+            description: "Press a key or key combination in the browser panel: synthesizes keydown + keyup on the focused element. Accepts xdotool-style names — \"Enter\", \"Tab\", \"Escape\", \"Backspace\", \"Up\", \"PageDown\", \"Home\", single characters, and modifier combos like \"ctrl+a\", \"alt+Tab\", \"super+k\". Waits for the page to settle.".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Key or key combination to press, e.g. \"Enter\" or \"ctrl+a\""
+                    }
+                },
+                "required": ["key"]
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(&self, _ctx: &ToolContext, args: Value) -> Result<ToolOutcome, ToolError> {
+        if super::arg_str(&args, "key").is_empty() {
+            return Ok(ToolOutcome::failed(
+                "browser_press_key needs a key — e.g. \"Enter\", \"Tab\" or \"ctrl+a\".",
+            ));
+        }
+        browser_call("press_key", &args)
+    }
+}
+
+const SCROLL_DIRECTIONS: [&str; 4] = ["up", "down", "left", "right"];
+
+pub struct BrowserScrollTool;
+
+impl Tool for BrowserScrollTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "browser_scroll".to_owned(),
+            description: "Scroll the browser panel's page (or a ref'd scrollable element) by a fraction of a viewport. direction is up, down, left or right; amount is in pages and defaults to 1 — 0.5 scrolls half a page. Waits for the page to settle.".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "description": "Direction to scroll"
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Pages to scroll; defaults to 1"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "Element ref of the scrollable container; omit to scroll the whole page"
+                    }
+                },
+                "required": ["direction"]
+            }),
+        }
+    }
+
+    fn risk_tier(&self) -> RiskTier {
+        RiskTier::Write
+    }
+
+    fn execute(&self, _ctx: &ToolContext, args: Value) -> Result<ToolOutcome, ToolError> {
+        if !SCROLL_DIRECTIONS.contains(&super::arg_str(&args, "direction").as_str()) {
+            return Ok(ToolOutcome::failed(
+                "browser_scroll needs a direction of up, down, left or right.",
+            ));
+        }
+        if let Some(amount) = args.get("amount") {
+            let amount = amount
+                .as_f64()
+                .filter(|amount| amount.is_finite() && *amount > 0.0);
+            if amount.is_none() {
+                return Ok(ToolOutcome::failed(
+                    "browser_scroll's amount must be a positive number of pages.",
+                ));
+            }
+        }
+        browser_call("scroll", &args)
+    }
+}
+
 /// The native browser tool names — the registry order mirrors
-/// [`super::browser_tools`] registration. Task 5's action tools append.
+/// [`super::browser_tools`] registration.
 pub const BROWSER_TOOLS: &[&str] = &[
     "browser_navigate",
     "browser_get_state",
     "browser_screenshot",
+    "browser_click",
+    "browser_type",
+    "browser_press_key",
+    "browser_scroll",
 ];
 
 pub fn is_browser_tool(name: &str) -> bool {
@@ -281,18 +477,150 @@ mod tests {
     }
 
     #[test]
+    fn stale_refs_fail_with_the_verbatim_stale_message() {
+        let outcome = render_browser_response(
+            "click",
+            &json!({ "ok": false, "stale": true, "reason": "ref s1e8 left the document; call browser_get_state for a fresh snapshot" }),
+        )
+        .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        assert_eq!(outcome.output, STALE_REF_MESSAGE);
+        assert!(outcome.output.contains("browser_get_state"));
+    }
+
+    #[test]
+    fn failed_actions_surface_their_detail() {
+        let outcome = render_browser_response(
+            "press_key",
+            &json!({ "ok": false, "error": "press_key does not know the key name hyper" }),
+        )
+        .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        assert!(outcome.output.contains("hyper"), "{}", outcome.output);
+
+        let bare = render_browser_response("press_key", &json!({ "ok": false })).unwrap();
+        assert_eq!(bare.status, crate::OutcomeStatus::Failed);
+        assert!(bare.output.contains("unspecified failure"));
+    }
+
+    #[test]
+    fn successful_actions_pass_their_result_through() {
+        let result = json!({ "ok": true, "action": "click", "activation": "submitted" });
+        let outcome = render_browser_response("click", &result).unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Executed);
+        assert_eq!(
+            serde_json::from_str::<Value>(&outcome.output).unwrap(),
+            result
+        );
+    }
+
+    #[test]
+    fn action_tools_validate_args_before_touching_the_surface() {
+        let ctx = ToolContext::new(".");
+        // click without a ref
+        let outcome = BrowserClickTool.execute(&ctx, json!({})).unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        assert!(outcome.output.contains("ref"), "{}", outcome.output);
+        // type without a ref / without text
+        let outcome = BrowserTypeTool
+            .execute(&ctx, json!({ "text": "hi" }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        let outcome = BrowserTypeTool
+            .execute(&ctx, json!({ "ref": "s1e5" }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        assert!(outcome.output.contains("text"), "{}", outcome.output);
+        // press_key without a key
+        let outcome = BrowserPressKeyTool.execute(&ctx, json!({})).unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        assert!(outcome.output.contains("key"), "{}", outcome.output);
+        // scroll: bad direction, non-positive and non-numeric amounts
+        let outcome = BrowserScrollTool
+            .execute(&ctx, json!({ "direction": "sideways" }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+        assert!(outcome.output.contains("direction"), "{}", outcome.output);
+        for amount in [0, -1] {
+            let outcome = BrowserScrollTool
+                .execute(&ctx, json!({ "direction": "down", "amount": amount }))
+                .unwrap();
+            assert_eq!(outcome.status, crate::OutcomeStatus::Failed, "{amount}");
+        }
+        let outcome = BrowserScrollTool
+            .execute(&ctx, json!({ "direction": "down", "amount": "page" }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Failed);
+    }
+
+    #[test]
+    fn action_calls_carry_op_and_args_through_the_seam() {
+        let _guard = super::super::browser::TEST_SLOT_LOCK.lock().unwrap();
+        super::super::browser::set_shared_browser_backend(Some(Arc::new(StubBackend)));
+        let ctx = ToolContext::new(".");
+        let outcome = BrowserClickTool
+            .execute(&ctx, json!({ "ref": "s3e12" }))
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Executed);
+        let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
+        assert_eq!(parsed["echo"]["op"], "click");
+        assert_eq!(parsed["echo"]["args"]["ref"], "s3e12");
+
+        let outcome = BrowserTypeTool
+            .execute(
+                &ctx,
+                json!({ "ref": "s1e5", "text": "ada@example.com", "submit": true }),
+            )
+            .unwrap();
+        assert_eq!(outcome.status, crate::OutcomeStatus::Executed);
+        let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
+        assert_eq!(parsed["echo"]["op"], "type");
+        assert_eq!(parsed["echo"]["args"]["text"], "ada@example.com");
+
+        let outcome = BrowserPressKeyTool
+            .execute(&ctx, json!({ "key": "ctrl+a" }))
+            .unwrap();
+        let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
+        assert_eq!(parsed["echo"]["op"], "press_key");
+        assert_eq!(parsed["echo"]["args"]["key"], "ctrl+a");
+
+        let outcome = BrowserScrollTool
+            .execute(&ctx, json!({ "direction": "up", "amount": 0.5 }))
+            .unwrap();
+        let parsed: Value = serde_json::from_str(&outcome.output).unwrap();
+        assert_eq!(parsed["echo"]["op"], "scroll");
+        assert_eq!(parsed["echo"]["args"]["direction"], "up");
+        super::super::browser::set_shared_browser_backend(None);
+    }
+
+    #[test]
     fn registry_names_and_tiers_line_up() {
         assert_eq!(
             BROWSER_TOOLS,
             [
                 "browser_navigate",
                 "browser_get_state",
-                "browser_screenshot"
+                "browser_screenshot",
+                "browser_click",
+                "browser_type",
+                "browser_press_key",
+                "browser_scroll"
             ]
         );
         assert_eq!(risk_tier_for("browser_navigate"), RiskTier::Write);
         assert_eq!(risk_tier_for("browser_get_state"), RiskTier::ReadOnly);
         assert_eq!(risk_tier_for("browser_screenshot"), RiskTier::ReadOnly);
-        assert!(is_browser_tool("browser_navigate") && !is_browser_tool("browser"));
+        // The action tools drive the live page like the Computer Use
+        // action tools: Write on both the tool metadata and the gate's
+        // name-keyed table.
+        for name in [
+            "browser_click",
+            "browser_type",
+            "browser_press_key",
+            "browser_scroll",
+        ] {
+            assert_eq!(risk_tier_for(name), RiskTier::Write, "{name}");
+        }
+        assert!(is_browser_tool("browser_click") && !is_browser_tool("click"));
     }
 }

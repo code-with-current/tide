@@ -48,7 +48,9 @@ pub use background_shell::{BashOutputTool, KillShellTool};
 pub use bash::BashTool;
 pub use browser::BrowserBackend;
 pub use browser_tools::{
-    is_browser_tool, BrowserGetStateTool, BrowserNavigateTool, BrowserScreenshotTool, BROWSER_TOOLS,
+    is_browser_tool, BrowserClickTool, BrowserGetStateTool, BrowserNavigateTool,
+    BrowserPressKeyTool, BrowserScreenshotTool, BrowserScrollTool, BrowserTypeTool,
+    BROWSER_TOOLS,
 };
 pub use compact::{CompactTool, DEFAULT_KEEP_LAST};
 pub use computer::ComputerBackend;
@@ -133,6 +135,10 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(BrowserNavigateTool),
         Box::new(BrowserGetStateTool),
         Box::new(BrowserScreenshotTool),
+        Box::new(BrowserClickTool),
+        Box::new(BrowserTypeTool),
+        Box::new(BrowserPressKeyTool),
+        Box::new(BrowserScrollTool),
         Box::new(ListSessionsTool),
         Box::new(ReadSessionTool),
     ]
