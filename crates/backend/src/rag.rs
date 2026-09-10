@@ -199,7 +199,7 @@ fn hit_from_row(
             Some(row.symbol.clone())
         },
         start_line: start as u64,
-        end_line: (end > start).then(|| end as u64),
+        end_line: (end > start).then_some(end as u64),
         heading: row.heading.clone(),
         content: row.content.clone(),
         similarity,
