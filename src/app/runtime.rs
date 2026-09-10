@@ -1388,56 +1388,6 @@ impl Tide {
         }
     }
 
-    /// Record which turn block the mouse is over, driving the v2
-    /// transcript's footer reveal. The claiming surface is remembered: a
-    /// leave event only clears a hover claimed by the same surface, so the
-    /// leave/enter race between the block and the adjacent footer strip
-    /// cannot hide the footer mid-move.
-    pub(super) fn set_turn_footer_hover_enter(
-        &mut self,
-        turn: Uuid,
-        source: TurnFooterHoverSource,
-        cx: &mut Context<Self>,
-    ) {
-        let changed =
-            self.turn_footer_hover != Some(turn) || self.turn_footer_hover_source != Some(source);
-        if changed {
-            self.turn_footer_hover = Some(turn);
-            self.turn_footer_hover_source = Some(source);
-            cx.notify();
-        }
-    }
-
-    /// A hover surface of `turn` stopped being hovered. The clear is
-    /// deferred past the adjacent surface's enter event, and it only fires
-    /// when the claim still matches — a fresh claim from the other surface
-    /// wins.
-    pub(super) fn set_turn_footer_hover_leave(
-        &mut self,
-        turn: Uuid,
-        source: TurnFooterHoverSource,
-        cx: &mut Context<Self>,
-    ) {
-        if self.turn_footer_hover != Some(turn) || self.turn_footer_hover_source != Some(source) {
-            return;
-        }
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(120))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.turn_footer_hover == Some(turn)
-                    && this.turn_footer_hover_source == Some(source)
-                {
-                    this.turn_footer_hover = None;
-                    this.turn_footer_hover_source = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
     /// The turn footer's branch state: whether "fork into a new session"
     /// can run for this settled turn right now, and whether a fork of
     /// exactly this turn is in flight. Never `None` — the button always

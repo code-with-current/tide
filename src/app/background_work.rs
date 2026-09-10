@@ -2141,6 +2141,11 @@ impl Tide {
         if !changes.is_empty() {
             let summary = summarize_changes(changes);
             let id = format!("files-{provider_id}");
+            // One context-menu handle per file pill, through the same menu
+            // registry the transcript's rows use.
+            let menus: Vec<crate::ui::menu::ContextMenuHandle> = (0..summary.files.len())
+                .map(|ix| self.menu_handle(format!("{id}-{ix}"), cx))
+                .collect();
             timeline = timeline.child(render_changed_files(
                 &summary,
                 workspace,
@@ -2149,6 +2154,7 @@ impl Tide {
                 self.subagent_disclosures.contains(&id),
                 &id,
                 toggle,
+                &menus,
             ));
         }
         timeline

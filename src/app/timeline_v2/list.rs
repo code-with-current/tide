@@ -14,7 +14,12 @@ use super::parts::user_bubble::{
 use super::permission::{
     PermissionRespond, permission_deadline, render_permission_card, seconds_left,
 };
-use super::rows::activity_group::{GroupToggle, render_activities};
+use super::rows::activity_group::{
+    GroupToggle, group_id, render_activities, render_group_footer, render_group_header,
+};
+use super::rows::{
+    NarrationRow, is_narration_block, is_narration_message, narration_head, narration_tail,
+};
 use super::rows::changed_files::{files_card_id, render_changed_files, summarize_changes};
 use super::rows::error_block::{
     RetryAction, error_block_id, error_text_for_turn, render_error_block, retry_text_for_turn,
@@ -32,7 +37,7 @@ use crate::app::navigation_rail::{
     navigation_turns, should_show_navigation_rail,
 };
 use crate::app::transcript::message_opens_turn;
-use crate::app::{Tide, TurnFooterHoverSource};
+use crate::app::Tide;
 use crate::input::TextInput;
 use crate::model::{
     ActivityFileChange, ActivityItem, ActivityKind, AgentSession, Message, MessageRole, TurnStatus,
@@ -401,6 +406,127 @@ pub(crate) fn disclosure_row(
         .row_cache
         .iter()
         .position(|row| matches!(row, TimelineV2Row::ActivityGroup { block: b } if *b == block))
+}
+
+/// The narration fold covering one row, when it has one. Running turns
+/// render live (no fold); the turn's prompt and final message, blocks
+/// without a turn, and trailing work past the final message never fold.
+struct NarrationFold {
+    turn_id: uuid::Uuid,
+    /// This row is the fold's first row — the summary header host.
+    head: bool,
+    /// The fold's first row as a descriptor, so the closing footer can
+    /// remeasure from where the fold begins.
+    head_row: NarrationRow,
+    /// This row is the fold's last row — the closing footer host.
+    tail: bool,
+    expanded: bool,
+}
+
+fn narration_fold_for(
+    tide: &Tide,
+    session: Option<&AgentSession>,
+    row: NarrationRow,
+) -> Option<NarrationFold> {
+    let session = session?;
+    let turn_id = match row {
+        NarrationRow::Message { index } => session.messages.get(index)?.turn_id?,
+        NarrationRow::Block { index } => session.transcript_blocks.get(index)?.turn_id?,
+    };
+    let turn = session.turns.iter().position(|turn| turn.id == turn_id)?;
+    if session.turns[turn].status == TurnStatus::Running {
+        return None;
+    }
+    let inside = match row {
+        NarrationRow::Message { index } => is_narration_message(session, index),
+        NarrationRow::Block { index } => is_narration_block(session, index),
+    };
+    if !inside {
+        return None;
+    }
+    let head_row = narration_head(session, turn)?;
+    let expanded = tide
+        .timeline_v2_state
+        .disclosures
+        .contains(&group_id(turn_id));
+    Some(NarrationFold {
+        turn_id,
+        head: head_row == row,
+        head_row,
+        tail: narration_tail(session, turn) == Some(row),
+        expanded,
+    })
+}
+
+/// The list-row position a narration descriptor names, if the cached rows
+/// still know it — the footer's remeasure start.
+fn row_cache_position(state: &TranscriptV2, row: NarrationRow) -> Option<usize> {
+    state.row_cache.iter().position(|cached| match (cached, row) {
+        (TimelineV2Row::Message { index: a }, NarrationRow::Message { index: b }) => *a == b,
+        (TimelineV2Row::ActivityGroup { block: a }, NarrationRow::Block { index: b }) => *a == b,
+        _ => false,
+    })
+}
+
+/// The fold's summary header for a turn, carrying its own toggle wiring
+/// (the changed-files card's synthetic-id pattern): the id names no
+/// activity so no scroll anchor resolves, and because the fold hides and
+/// reveals rows across the turn's span — not just this one — the toggle
+/// re-measures from the header row down.
+fn group_header_for_turn(
+    cx: &Context<Tide>,
+    session: Option<&AgentSession>,
+    turn_id: uuid::Uuid,
+    row_ix: usize,
+    theme: &Theme,
+) -> gpui::Stateful<gpui::Div> {
+    // The header reads the turn's working duration — completed_at minus
+    // started_at, floored at zero for a clock behind the turn's start.
+    let duration_secs = session
+        .and_then(|s| s.turns.iter().find(|turn| turn.id == turn_id))
+        .and_then(turn_duration)
+        .unwrap_or(0);
+    render_group_header(
+        duration_secs,
+        theme,
+        &group_id(turn_id),
+        group_toggle(cx, row_ix),
+    )
+}
+
+/// The fold's closing footer, rendered on the fold's last row. Its toggle
+/// remeasures from the fold's FIRST row — everything between header and
+/// footer changes height when the section folds.
+fn group_footer_for_turn(
+    cx: &Context<Tide>,
+    fold: &NarrationFold,
+    state: &TranscriptV2,
+    theme: &Theme,
+) -> gpui::Stateful<gpui::Div> {
+    let remeasure_from = row_cache_position(state, fold.head_row).unwrap_or_default();
+    render_group_footer(theme, &group_id(fold.turn_id), group_toggle(cx, remeasure_from))
+}
+
+/// A fold affordance's click wiring (the changed-files card's synthetic-id
+/// pattern): the id names no activity so no scroll anchor resolves, and
+/// because the fold hides and reveals rows across the turn's span — not
+/// just the clicked one — the toggle re-measures from `remeasure_from`
+/// down.
+fn group_toggle(cx: &Context<Tide>, remeasure_from: usize) -> GroupToggle {
+    let entity = cx.entity().downgrade();
+    Arc::new(
+        move |id: &str, _: &gpui::ClickEvent, _: &mut gpui::Window, cx: &mut gpui::App| {
+            let Some(entity) = entity.upgrade() else {
+                return;
+            };
+            entity.update(cx, |this, cx| {
+                this.toggle_disclosure(id, cx);
+                let count = this.timeline_v2_state.row_cache.len();
+                active_rows(&this.timeline_v2_state)
+                    .remeasure_items(remeasure_from..count);
+            });
+        },
+    )
 }
 
 impl Tide {
@@ -1555,9 +1681,41 @@ fn timeline_v2_row(
             }
             // v1: every assistant message of a turn renders its text part
             // (multi-message turns are rare); the turn footer stays the only
-            // turn-level chrome.
+            // turn-level chrome. An intermediate assistant message is the
+            // turn's narration: it folds under the group header once the
+            // turn settles (see the ActivityGroup arm), hosting the header
+            // itself when no block sits before it.
             Some(message) if message.role == MessageRole::Assistant => {
-                render_assistant_message(tide, message, index, &theme, cx)
+                match narration_fold_for(tide, session, NarrationRow::Message { index }) {
+                    Some(fold) => div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .when(fold.head, |column| {
+                            column.child(group_header_for_turn(
+                                cx,
+                                session,
+                                fold.turn_id,
+                                ix,
+                                &theme,
+                            ))
+                        })
+                        .when(fold.expanded, |column| {
+                            column.child(render_assistant_message(
+                                tide, message, index, &theme, cx,
+                            ))
+                        })
+                        .when(fold.expanded && fold.tail, |column| {
+                            column.child(group_footer_for_turn(
+                                cx,
+                                &fold,
+                                &tide.timeline_v2_state,
+                                &theme,
+                            ))
+                        }),
+                    None => render_assistant_message(tide, message, index, &theme, cx),
+                }
             }
             Some(message) => {
                 let role = match message.role {
@@ -1626,16 +1784,61 @@ fn timeline_v2_row(
                 mermaid_host: Some(reasoning_mermaid_host),
                 reduce_motion,
             };
-            render_activities(
-                &activities,
-                &tide.timeline_v2_state.disclosures,
-                workspace.as_deref().unwrap_or(fallback_workspace),
-                &tide.transcript_selection,
-                actions,
-                &theme,
-                &mut reasoning_markdown,
-                card_toggle,
-            )
+            // The turn-scoped narration fold: everything between the turn's
+            // prompt and its final answer — the blocks anchored among them
+            // and the intermediate assistant text ("narration") — collapses
+            // under one summary header once the turn settles, unless the
+            // reader toggled it open (the reasoning part's
+            // state-derived-default pattern). A running turn renders live;
+            // a block without a turn, or anchored past the answer (trailing
+            // work), never folds.
+            match narration_fold_for(tide, session, NarrationRow::Block { index: block }) {
+                Some(fold) => div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .when(fold.head, |group| {
+                        group.child(group_header_for_turn(
+                            cx,
+                            session,
+                            fold.turn_id,
+                            ix,
+                            &theme,
+                        ))
+                    })
+                    .when(fold.expanded, |group| {
+                        group.child(render_activities(
+                            &activities,
+                            &tide.timeline_v2_state.disclosures,
+                            workspace.as_deref().unwrap_or(fallback_workspace),
+                            &tide.transcript_selection,
+                            actions,
+                            &theme,
+                            &mut reasoning_markdown,
+                            card_toggle,
+                        ))
+                    })
+                    .when(fold.expanded && fold.tail, |group| {
+                        group.child(group_footer_for_turn(
+                            cx,
+                            &fold,
+                            &tide.timeline_v2_state,
+                            &theme,
+                        ))
+                    }),
+                None => render_activities(
+                    &activities,
+                    &tide.timeline_v2_state.disclosures,
+                    workspace.as_deref().unwrap_or(fallback_workspace),
+                    &tide.transcript_selection,
+                    actions,
+                    &theme,
+                    &mut reasoning_markdown,
+                    card_toggle,
+                ),
+            }
         }
         TimelineV2Row::TurnFooter { turn } => match session.and_then(|s| s.turns.get(turn)) {
             Some(turn_data) => {
@@ -1719,44 +1922,9 @@ fn timeline_v2_row(
                         }
                     },
                 );
-                // DSH's reveal policy: the footer belongs to its turn
-                // block and shows only while that block is hovered.
-                // `opacity(0)` rather than `invisible`: a transparent strip
-                // still hit-tests, so hovering the footer itself keeps it
-                // shown and its buttons clickable. The strip claims the
-                // hover as its own surface, so the leave/enter race between
-                // it and the block cannot hide it mid-move.
-                let footer_tide = cx.entity().downgrade();
-                let footer_turn_id = turn_data.id;
-                let footer = div()
-                    .id(SharedString::from(format!(
-                        "turn-footer-hover-{footer_turn_id}"
-                    )))
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .on_hover(move |hovered: &bool, _, cx| {
-                        let _ = footer_tide.update(cx, |this, cx| {
-                            if *hovered {
-                                this.set_turn_footer_hover_enter(
-                                    footer_turn_id,
-                                    TurnFooterHoverSource::Footer,
-                                    cx,
-                                );
-                            } else {
-                                this.set_turn_footer_hover_leave(
-                                    footer_turn_id,
-                                    TurnFooterHoverSource::Footer,
-                                    cx,
-                                );
-                            }
-                        });
-                    })
-                    .child(
-                        footer.when(tide.turn_footer_hover != Some(turn_data.id), |footer| {
-                            footer.opacity(0.0)
-                        }),
-                    );
+                // The footer always shows for its settled turn — no
+                // hover-reveal policy, no tracking state to keep in sync.
+                let footer = div().w_full().flex().flex_col().child(footer);
                 // A failed turn carries its error card above the footer's
                 // divider — inside the footer row's flow, no new row kind.
                 // Interrupted is a user stop, not an error; the pure fn
@@ -1828,6 +1996,17 @@ fn timeline_v2_row(
                     });
                 },
             );
+            // One context-menu handle per file pill, stable across frames
+            // through the app's menu registry — the same seam the turn
+            // footer's popovers use.
+            let menus: Vec<crate::ui::menu::ContextMenuHandle> = (0..summary.files.len())
+                .map(|ix| {
+                    tide.menu_handle(
+                        SharedString::from(format!("files-menu-{id}-{ix}")),
+                        cx,
+                    )
+                })
+                .collect();
             render_changed_files(
                 &summary,
                 workspace.as_deref().unwrap_or(Path::new("")),
@@ -1836,6 +2015,7 @@ fn timeline_v2_row(
                 expanded,
                 &id,
                 toggle,
+                &menus,
             )
         }
         TimelineV2Row::Working => {
@@ -1857,49 +2037,14 @@ fn timeline_v2_row(
     // about long content so the cards inside can contain their overflow.
     // Every row also reports which turn it belongs to on hover: the footer
     // row reads that to reveal exactly one turn's footer at a time.
-    let row_turn_id = match row {
-        TimelineV2Row::Message { index } => session
-            .and_then(|s| s.messages.get(index))
-            .and_then(|message| message.turn_id),
-        TimelineV2Row::ActivityGroup { block } => session
-            .and_then(|s| s.transcript_blocks.get(block))
-            .and_then(|block| block.turn_id),
-        TimelineV2Row::TurnFooter { turn } | TimelineV2Row::ChangedFiles { turn } => {
-            session.and_then(|s| s.turns.get(turn)).map(|turn| turn.id)
-        }
-        TimelineV2Row::Working => None,
-    };
-    let hover_tide = cx.entity().downgrade();
-    // The footer row is excluded here: it claims the hover through its own
-    // strip as the Footer surface. Letting its generic wrapper claim Block
-    // flapped the claim every frame — parent-enter(Block) over
-    // strip-enter(Footer) — and the deferred clear then fired on a claim
-    // that was never the strip's.
-    let claims_block_hover =
-        row_turn_id.is_some() && !matches!(row, TimelineV2Row::TurnFooter { .. });
-    let mut wrapper = div()
-        .id(SharedString::from(format!("turn-row-hover-{ix}")))
+    div()
+        .id(SharedString::from(format!("turn-row-{ix}")))
         .w_full()
         .min_w_0()
         .flex()
         .justify_center()
         .px(px(20.0))
-        .when(top_spacing > Pixels::ZERO, |row| row.mt(top_spacing));
-    if claims_block_hover {
-        let Some(turn_id) = row_turn_id else {
-            unreachable!("claims_block_hover implies a known turn");
-        };
-        wrapper = wrapper.on_hover(move |hovered: &bool, _, cx| {
-            let _ = hover_tide.update(cx, |this, cx| {
-                if *hovered {
-                    this.set_turn_footer_hover_enter(turn_id, TurnFooterHoverSource::Block, cx);
-                } else {
-                    this.set_turn_footer_hover_leave(turn_id, TurnFooterHoverSource::Block, cx);
-                }
-            });
-        });
-    }
-    wrapper
+        .when(top_spacing > Pixels::ZERO, |row| row.mt(top_spacing))
         .child(
             div()
                 .w_full()

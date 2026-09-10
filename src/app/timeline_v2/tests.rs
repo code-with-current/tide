@@ -25,15 +25,19 @@ use super::parts::tool_part::{
 };
 use super::parts::user_bubble::{
     CLAMP_MAX_HEIGHT, MentionKind, UserBubbleActions, clamp_id, clamp_needed, edit_removals,
-    editor_actions_row, mention_runs, parse_mentions, render_user_bubble,
+    editor_actions_row, mention_runs, parse_mentions, parse_mentions_with_skills,
+    render_user_bubble,
 };
 use super::permission::{
     PermissionRespond, permission_deadline, permission_layout, render_permission_card, seconds_left,
 };
-use super::rows::activity_group::{GroupToggle, render_activities};
+use super::rows::activity_group::{GroupToggle, group_id, render_activities};
+use super::rows::{
+    NarrationRow, is_narration_block, is_narration_message, narration_head, narration_tail,
+};
 use super::rows::changed_files::{
-    ChangesSummary, MAX_VISIBLE_FILES, counts_chip, files_card_id, header_title,
-    render_changed_files, summarize_changes, visible_files,
+    ChangesSummary, MAX_VISIBLE_FILES, files_card_id, header_title, render_changed_files,
+    summarize_changes, visible_files,
 };
 use super::rows::error_block::{
     TURN_FAILED_FALLBACK, error_block_id, error_text_for_turn, render_error_block,
@@ -273,12 +277,12 @@ fn changed_files_row_only_for_file_edits() {
     assert!(
         footer_position
             .zip(changed_position)
-            .is_some_and(|(footer, changed)| footer < changed),
-        "the file-change summary follows the turn footer: {rows:?}"
+            .is_some_and(|(footer, changed)| changed < footer),
+        "the file-change summary precedes the turn footer: {rows:?}"
     );
 
-    // A read-only turn shows neither footer extras nor a changed-files row
-    // while it is still running, edits or not.
+    // A running turn shows its file changes the moment edit work lands, and
+    // still owes its footer until it settles.
     let mut running = session_with_completed_turn(ActivityKind::FileChange);
     running.begin_turn("Edit live");
     running.transcript_blocks.push(TranscriptBlock {
@@ -294,17 +298,154 @@ fn changed_files_row_only_for_file_edits() {
     });
     let rows = derive_rows(&running, true);
     assert!(
-        !rows.contains(&TimelineV2Row::ChangedFiles { turn: 1 }),
-        "a running turn keeps its file changes out of the summary until it settles: {rows:?}"
+        rows.contains(&TimelineV2Row::ChangedFiles { turn: 1 }),
+        "a running turn shows its file-change summary as soon as edits land: {rows:?}"
     );
     assert!(
         !rows.contains(&TimelineV2Row::TurnFooter { turn: 1 }),
-        "nor does it render a footer: {rows:?}"
+        "but it still renders no footer until it settles: {rows:?}"
+    );
+    let changed = rows
+        .iter()
+        .position(|row| *row == TimelineV2Row::ChangedFiles { turn: 1 })
+        .expect("the running summary is present");
+    let working = rows
+        .iter()
+        .position(|row| matches!(row, TimelineV2Row::Working))
+        .expect("the working row closes the list");
+    assert!(
+        changed < working,
+        "the running summary sits above the working row: {rows:?}"
     );
     assert!(
         rows.contains(&TimelineV2Row::ChangedFiles { turn: 0 }),
         "the settled turn above keeps its summary: {rows:?}"
     );
+}
+
+#[test]
+fn running_changed_files_reanchor_below_later_facts() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
+    session.begin_turn("Edit live");
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: session.messages.len(),
+        turn_id: session.active_turn_id(),
+        activities: vec![ActivityItem::new(
+            None,
+            ActivityKind::FileChange,
+            "Editing live",
+            None,
+            false,
+        )],
+    });
+
+    // The summary lands after the turn's last fact so far — the edit block.
+    let before = derive_rows(&session, true);
+    assert_eq!(
+        before,
+        vec![
+            TimelineV2Row::Message { index: 0 },
+            TimelineV2Row::ActivityGroup { block: 0 },
+            TimelineV2Row::ChangedFiles { turn: 0 },
+            TimelineV2Row::Working,
+        ],
+        "the summary follows the turn's last fact so far: {before:?}"
+    );
+
+    // A later fact of the same turn arrives: the summary re-anchors below
+    // it, exactly the way in-flight activity blocks re-anchor as messages
+    // arrive.
+    session.push_message(MessageRole::Assistant, "Still working");
+    let after = derive_rows(&session, true);
+    assert_eq!(
+        after,
+        vec![
+            TimelineV2Row::Message { index: 0 },
+            TimelineV2Row::ActivityGroup { block: 0 },
+            TimelineV2Row::Message { index: 1 },
+            TimelineV2Row::ChangedFiles { turn: 0 },
+            TimelineV2Row::Working,
+        ],
+        "the summary re-anchors under the turn's newest fact: {after:?}"
+    );
+    assert_eq!(
+        splice_decision(&before, &after),
+        SplicePlan::TailReplace { from: 2 },
+        "the re-anchor rewrites the tail, keeping the settled prefix measured"
+    );
+}
+
+#[test]
+fn narration_folds_intermediate_text_and_blocks() {
+    // A workhorse turn with narration: prompt, a tool block, an
+    // intermediate assistant message, a second tool block, the final
+    // answer — plus a trailing block that followed the answer.
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
+    let turn_id = session.begin_turn("Build it");
+    let block = |after: usize| TranscriptBlock {
+        after_message: after,
+        turn_id: Some(turn_id),
+        activities: vec![ActivityItem::new(
+            None,
+            ActivityKind::Command,
+            "Did the work",
+            None,
+            true,
+        )],
+    };
+    session.transcript_blocks.push(block(1));
+    session.push_message(MessageRole::Assistant, "First, looking around.");
+    session.transcript_blocks.push(block(2));
+    session.push_message(MessageRole::Assistant, "Done.");
+    let trailing = block(3);
+    session.transcript_blocks.push(trailing);
+    session.finish_active_turn(TurnStatus::Completed);
+
+    let turn = session
+        .turns
+        .iter()
+        .position(|turn| turn.id == turn_id)
+        .expect("turn exists");
+
+    // The intermediate assistant message is narration; the prompt and the
+    // final answer are not.
+    assert!(!is_narration_message(&session, 0), "the prompt stays");
+    assert!(is_narration_message(&session, 1), "intermediate text folds");
+    assert!(!is_narration_message(&session, 2), "the answer stays");
+
+    // Blocks anchored between prompt and answer fold; the trailing block
+    // does not.
+    assert!(is_narration_block(&session, 0), "prompt-anchored block folds");
+    assert!(is_narration_block(&session, 1), "mid-turn block folds");
+    assert!(!is_narration_block(&session, 2), "trailing work stays");
+
+    // The header hosts on the fold's first row: the block anchored right
+    // after the prompt, before the intermediate message.
+    assert_eq!(
+        narration_head(&session, turn),
+        Some(NarrationRow::Block { index: 0 })
+    );
+    // The fold's last row is the second tool block, just before the answer
+    // — the closing footer lands below it. The trailing block is outside.
+    assert_eq!(
+        narration_tail(&session, turn),
+        Some(NarrationRow::Block { index: 1 })
+    );
+
+    // While the turn runs nothing folds.
+    let mut running = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
+    let running_turn = running.begin_turn("Live");
+    running.push_message(MessageRole::Assistant, "Partial");
+    let turn_ix = running
+        .turns
+        .iter()
+        .position(|turn| turn.id == running_turn)
+        .expect("turn exists");
+    assert!(
+        !is_narration_message(&running, 1),
+        "a running turn's text renders live"
+    );
+    assert_eq!(narration_head(&running, turn_ix), None);
 }
 
 #[test]
@@ -649,14 +790,15 @@ fn turn_end_replaces_the_tail_instead_of_resetting() {
             TimelineV2Row::Message { index: 0 },
             TimelineV2Row::ActivityGroup { block: 0 },
             TimelineV2Row::Message { index: 1 },
+            TimelineV2Row::ChangedFiles { turn: 0 },
             TimelineV2Row::Working,
         ],
-        "the working row closes the streaming list"
+        "the running turn's file-change summary lands before the working row"
     );
 
-    // The turn settles: the working row leaves while the footer and the
-    // file-change summary arrive — the count differs AND the diff sits at
-    // the tail, exactly where the reader is reading.
+    // The turn settles: the working row leaves while the footer arrives —
+    // the count holds, the diff sits at the tail, exactly where the reader
+    // is reading.
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
     let settled = derive_rows(&session, false);
@@ -666,18 +808,18 @@ fn turn_end_replaces_the_tail_instead_of_resetting() {
             TimelineV2Row::Message { index: 0 },
             TimelineV2Row::ActivityGroup { block: 0 },
             TimelineV2Row::Message { index: 1 },
-            TimelineV2Row::TurnFooter { turn: 0 },
             TimelineV2Row::ChangedFiles { turn: 0 },
+            TimelineV2Row::TurnFooter { turn: 0 },
         ]
     );
 
-    // The honest plan rewrites the tail: rows above the working row keep
+    // The honest plan remeasures the tail: rows above the working row keep
     // their measurements and their scroll offset — no full reset yank at
     // the moment the turn's content stops moving.
     assert_eq!(
         splice_decision(&streaming, &settled),
-        SplicePlan::TailReplace { from: 3 },
-        "working → footer(+changed-files) is a tail rewrite, not a reset"
+        SplicePlan::TailRemeasure { from: 4 },
+        "working → footer is a tail remeasure, not a reset"
     );
 
     // The same settle without file edits is same-count — the existing
@@ -832,9 +974,11 @@ fn full_streaming_sequence_never_resets_after_the_initial_fold() {
          {plans:?}"
     );
     // And the shape of the sequence: the seed appends, the send appends, the
-    // three inserts before the working row and the turn end are tail
-    // rewrites, and content-only frames (completions, text deltas) never
-    // touch the structure.
+    // three inserts before the working row are tail rewrites, content-only
+    // frames (completions, text deltas) never touch the structure, and the
+    // turn end is a same-count tail remeasure — the changed-files card is
+    // already on stage from the moment the edits landed, so settling only
+    // swaps the working row for the footer.
     assert_eq!(plans[2], SplicePlan::Append { from: 2 });
     assert_eq!(plans[3], SplicePlan::TailReplace { from: 3 });
     assert_eq!(plans[4], SplicePlan::None);
@@ -842,7 +986,7 @@ fn full_streaming_sequence_never_resets_after_the_initial_fold() {
     assert_eq!(plans[6], SplicePlan::None);
     assert_eq!(plans[7], SplicePlan::TailReplace { from: 5 });
     assert_eq!(plans[8], SplicePlan::None);
-    assert_eq!(plans[9], SplicePlan::TailReplace { from: 6 });
+    assert_eq!(plans[9], SplicePlan::TailRemeasure { from: 7 });
     assert_eq!(
         *plans.last().expect("non-empty"),
         SplicePlan::Append { from: 8 }
@@ -2801,21 +2945,14 @@ fn header_title_reads_singular_only_for_one_file() {
 }
 
 #[test]
-fn counts_chip_omits_zero_segments() {
-    assert_eq!(counts_chip(2, 1).as_deref(), Some("2 created · 1 edited"));
-    assert_eq!(counts_chip(3, 0).as_deref(), Some("3 created"));
-    assert_eq!(counts_chip(0, 4).as_deref(), Some("4 edited"));
-    assert_eq!(counts_chip(0, 0), None, "nothing to distinguish, no chip");
-}
-
-#[test]
 fn visible_files_budgets_the_collapsed_list() {
-    // At the budget everything fits with no expander.
+    // At the budget everything fits with no affordance.
     assert_eq!(visible_files(MAX_VISIBLE_FILES, false), (5, None));
     assert_eq!(visible_files(1, false), (1, None));
-    // One past it: four rows plus the expander naming the rest.
-    assert_eq!(visible_files(6, false), (4, Some(2)));
-    assert_eq!(visible_files(50, false), (4, Some(46)));
+    // One past it: the budget shows in full and "See More" names the rest —
+    // the affordance rides inline, so it costs no pill slot.
+    assert_eq!(visible_files(6, false), (5, Some(1)));
+    assert_eq!(visible_files(50, false), (5, Some(45)));
     // Expanded shows everything, whatever the size.
     assert_eq!(visible_files(50, true), (50, None));
 }
@@ -2856,6 +2993,7 @@ fn render_changed_files_constructs_headlessly() {
         false,
         "files-t",
         std::sync::Arc::clone(&toggle),
+        &[],
     );
     let _ = render_changed_files(
         &summary,
@@ -2865,6 +3003,7 @@ fn render_changed_files_constructs_headlessly() {
         true,
         "files-t",
         toggle,
+        &[],
     );
 
     // The quietest real card: one statless edit, no chip, no totals.
@@ -2877,6 +3016,7 @@ fn render_changed_files_constructs_headlessly() {
         false,
         "files-t",
         std::sync::Arc::new(|_, _, _, _| {}),
+        &[],
     );
 }
 
@@ -3305,13 +3445,62 @@ fn parse_mentions_extracts_files_and_skills() {
         tokens("@\"a b/c d.txt\" here"),
         vec![(MentionKind::File, "@\"a b/c d.txt\"".to_owned())]
     );
-    // Prose emails and mid-line slashes are not mentions.
-    assert_eq!(tokens("mail foo@bar.com and say /deploy mid-line"), vec![]);
-    // Multi-segment paths after a slash are paths, not skills.
+    // Prose emails are not mentions; a slash token pills mid-sentence.
+    assert_eq!(tokens("mail foo@bar.com"), vec![]);
+    assert_eq!(
+        tokens("and say /deploy mid-line"),
+        vec![(MentionKind::Skill, "/deploy".to_owned())]
+    );
+    // End of the sentence pills too, trailing punctuation outside.
+    assert_eq!(
+        tokens("do it /deploy"),
+        vec![(MentionKind::Skill, "/deploy".to_owned())]
+    );
+    assert_eq!(
+        tokens("run /deploy."),
+        vec![(MentionKind::Skill, "/deploy".to_owned())]
+    );
+    // Multi-segment paths after a slash are paths, not skills — wherever
+    // they sit.
     assert_eq!(tokens("/usr/bin runs first"), vec![]);
-    // Skill must lead its line; the file sigil only counts at token starts.
-    assert_eq!(tokens("run:\n    /deploy"), vec![]);
+    assert_eq!(tokens("call /usr/bin/env please"), vec![]);
+    // Fractions and URLs keep their slashes plain.
+    assert_eq!(tokens("split 50/50 and see https://tide.dev/download"), vec![]);
+    // Indented after a newline pills like any other token start.
+    assert_eq!(
+        tokens("run:\n    /deploy"),
+        vec![(MentionKind::Skill, "/deploy".to_owned())]
+    );
+    // The file sigil only counts at whitespace-bounded token starts.
     assert_eq!(tokens("(@README.md)"), vec![]);
+}
+
+/// A token-initial slash pills wherever it sits — including multi-word
+/// catalog names spanning spaces, with sentence punctuation excluded.
+#[test]
+fn parse_mentions_pills_multi_word_skills_anywhere() {
+    let catalog = [
+        "AgentDB Advanced Features".to_owned(),
+        "deploy".to_owned(),
+    ];
+    let pills = |content: &str| {
+        parse_mentions_with_skills(content, &catalog)
+            .into_iter()
+            .map(|mention| content[mention.range.clone()].to_owned())
+            .collect::<Vec<_>>()
+    };
+    // Mid-sentence: the whole name pills, trailing words stay outside.
+    assert_eq!(
+        pills("please run /AgentDB Advanced Features deploy staging"),
+        vec!["/AgentDB Advanced Features".to_owned()]
+    );
+    // End of sentence with punctuation: the period stays outside the pill.
+    assert_eq!(
+        pills("ship it /AgentDB Advanced Features."),
+        vec!["/AgentDB Advanced Features".to_owned()]
+    );
+    // The catalog's single-word name resolves at a bare token start.
+    assert_eq!(pills("/deploy now"), vec!["/deploy".to_owned()]);
 }
 
 /// Mentions render as markdown links: the run over each token carries the

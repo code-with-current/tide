@@ -1028,14 +1028,6 @@ impl Default for ActivityScrollViewport {
     }
 }
 
-/// Which surface claimed the footer hover — a turn block's content row or
-/// the footer strip itself.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum TurnFooterHoverSource {
-    Block,
-    Footer,
-}
-
 pub struct Tide {
     /// Owns the headless provider process for exactly as long as the desktop
     /// app entity. Debug builds can replace it independently after a rebuild;
@@ -1168,12 +1160,10 @@ pub struct Tide {
     /// The turn whose footer the mouse is currently over — the v2
     /// transcript reveals one turn's footer at a time on block hover,
     /// DSH's reveal policy. In-memory, per app run.
-    turn_footer_hover: Option<Uuid>,
     /// Which surface claimed the hover — a turn block's content row or the
     /// footer strip itself. A leave event only clears when it matches the
     /// claiming surface, so the leave/enter race between adjacent rows
     /// (block leave firing after footer enter) cannot hide the footer.
-    turn_footer_hover_source: Option<TurnFooterHoverSource>,
     /// Live event tails for the inspector's Stream log sections. In-memory
     /// rings, capped per session: a tail, not history.
     inspector_stream_log: HashMap<Uuid, VecDeque<StreamLogEntry>>,
@@ -2876,8 +2866,6 @@ impl Tide {
                 timeline_v2,
                 timeline_v2_state: TranscriptV2::new(),
                 inspector: InspectorState::new(),
-                turn_footer_hover: None,
-                turn_footer_hover_source: None,
                 inspector_stream_log: HashMap::new(),
                 tide_edit_request: None,
                 model_picker_scroll: ScrollHandle::new(),

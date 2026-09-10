@@ -38,8 +38,8 @@ use uuid::Uuid;
 
 // ── Mentions, pure ───────────────────────────────────────────────────────────
 
-/// What a mention token refers to: an `@path` file reference or a line-leading
-/// `/skill` invocation.
+/// What a mention token refers to: an `@path` file reference or a
+/// token-initial `/skill` invocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MentionKind {
     File,
@@ -76,16 +76,17 @@ pub(crate) type MentionResolver = Arc<dyn Fn(&str) -> Option<MentionResolution> 
 /// The same tokens the composer and the driver recognize: an `@` mention is a
 /// token-boundary `@` followed by a path (quoted when it holds whitespace),
 /// and only counts when the path looks pathy (`/` or `.` inside — prose
-/// `@handle` shoutouts stay plain text); a skill mention is a `/name` at the
-/// START of a line, alphanumeric-led, and may span spaces when a catalog
-/// skill carries that multi-word name (matched longest-first,
-/// case-insensitively). Trailing sentence punctuation stays outside the pill.
+/// `@handle` shoutouts stay plain text); a skill mention is a `/name` at a
+/// token start — beginning, middle, or end of the sentence — alphanumeric-led,
+/// and may span spaces when a catalog skill carries that multi-word name
+/// (matched longest-first, case-insensitively). Trailing sentence punctuation
+/// stays outside the pill.
 pub(crate) fn parse_mentions(content: &str) -> Vec<Mention> {
     parse_mentions_with_skills(content, &[])
 }
 
 /// [`parse_mentions`], with the skills catalog's names available: a
-/// line-leading `/` first tries the longest catalog name the text carries
+/// token-initial `/` first tries the longest catalog name the text carries
 /// verbatim (so "AgentDB Advanced Features" pills whole), then falls back to
 /// the single-segment heuristic.
 pub(crate) fn parse_mentions_with_skills(content: &str, skill_names: &[String]) -> Vec<Mention> {
@@ -100,7 +101,10 @@ pub(crate) fn parse_mentions_with_skills(content: &str, skill_names: &[String]) 
         }
         let ended = match bytes[index] {
             b'@' => file_mention_end(content, index).map(|end| (MentionKind::File, end)),
-            b'/' if index == 0 || bytes[index - 1] == b'\n' => {
+            // Token-initial `/`, anywhere in the sentence — the same trigger
+            // rule as the composer. skill_mention_end's shape guards reject
+            // the path-like and prose cases (embedded `/`, non-alnum lead).
+            b'/' => {
                 skill_mention_end(content, index, skill_names)
                     .map(|end| (MentionKind::Skill, end))
             }
@@ -142,14 +146,17 @@ fn file_mention_end(content: &str, at: usize) -> Option<usize> {
     Some(at + 1 + token.len())
 }
 
-/// End of a line-leading `/skill` token starting at `at`, or `None` when the
-/// token is not a skill invocation (paths like `/usr/bin` have segments,
-/// `/etc`-style tokens do not start alphanumeric).
+/// End of a `/skill` token starting at `at` (the `/`'s index — always a
+/// token start by the time we get here), or `None` when the token is not a
+/// skill invocation (paths like `/usr/bin` have segments, `/etc`-style
+/// tokens do not start alphanumeric).
 fn skill_mention_end(content: &str, at: usize, skill_names: &[String]) -> Option<usize> {
     let rest = &content[at + 1..];
     // Catalog names win longest-first, so a multi-word skill name ("AgentDB
     // Advanced Features") pills whole instead of splitting at its first
-    // space.
+    // space. Sentence punctuation right after the name still counts as an
+    // edge — "run /AgentDB Advanced Features." pills the name, not the
+    // period — mirroring the single-segment path's trim.
     let mut longest: Option<usize> = None;
     for name in skill_names {
         let Some(candidate) = rest.get(..name.len()) else {
@@ -158,7 +165,7 @@ fn skill_mention_end(content: &str, at: usize, skill_names: &[String]) -> Option
         let followed_by_edge = rest[name.len()..]
             .chars()
             .next()
-            .is_none_or(char::is_whitespace);
+            .is_none_or(|c| c.is_whitespace() || ['.', ',', ';', ':', '!', '?'].contains(&c));
         if followed_by_edge && candidate.eq_ignore_ascii_case(name) {
             let end = at + 1 + name.len();
             longest = Some(longest.map_or(end, |current: usize| current.max(end)));

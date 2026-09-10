@@ -197,10 +197,12 @@ fn walk(session: &AgentSession, streaming: bool) -> impl Iterator<Item = RowFact
         );
     }
 
-    // A settled turn closes after its final row — answer text or trailing
-    // activity, whichever came last — with a footer, plus a file-change
-    // summary when the turn's work edited files.
-    let mut last_row_by_turn: HashMap<usize, usize> = HashMap::new();
+    // A turn's closing rows anchor after its final row so far — answer text
+    // or trailing activity, whichever came last. A settled turn closes with
+    // a footer plus a file-change summary when the turn's work edited
+    // files; a running turn shows that summary the moment edit work lands
+    // (re-anchoring down as the turn grows) and still owes its footer.
+    let mut last_row_by_turn: HashMap<usize, (usize, bool)> = HashMap::new();
     for (fact_index, fact) in facts.iter().enumerate() {
         let turn_id = match *fact {
             RowFact::Message { index, .. } => session.messages[index].turn_id,
@@ -213,30 +215,33 @@ fn walk(session: &AgentSession, streaming: bool) -> impl Iterator<Item = RowFact
         let Some(turn) = session.turns.iter().position(|turn| turn.id == turn_id) else {
             continue;
         };
-        if session.turns[turn].status != TurnStatus::Running {
-            // Facts arrive in order, so the last insert per turn wins.
-            last_row_by_turn.insert(turn, fact_index);
-        }
+        // Facts arrive in order, so the last insert per turn wins.
+        last_row_by_turn.insert(
+            turn,
+            (fact_index, session.turns[turn].status != TurnStatus::Running),
+        );
     }
-    let footer_after: HashMap<usize, usize> = last_row_by_turn
+    let closing_after: HashMap<usize, (usize, bool)> = last_row_by_turn
         .into_iter()
-        .map(|(turn, fact_index)| (fact_index, turn))
+        .map(|(turn, (fact_index, settled))| (fact_index, (turn, settled)))
         .collect();
 
-    let mut with_footers = Vec::with_capacity(facts.len() + footer_after.len() * 2);
+    let mut with_footers = Vec::with_capacity(facts.len() + closing_after.len() * 2);
     for (fact_index, fact) in facts.into_iter().enumerate() {
         with_footers.push(fact);
-        if let Some(&turn) = footer_after.get(&fact_index) {
-            let turn_data = &session.turns[turn];
-            with_footers.push(RowFact::TurnFooter {
-                turn,
-                turn_id: turn_data.id,
-                status: turn_data.status,
-            });
-            if turn_changed_files(session, turn_data.id) {
+        if let Some(&(turn, settled)) = closing_after.get(&fact_index) {
+            if turn_changed_files(session, session.turns[turn].id) {
                 with_footers.push(RowFact::ChangedFiles {
                     turn,
+                    turn_id: session.turns[turn].id,
+                });
+            }
+            if settled {
+                let turn_data = &session.turns[turn];
+                with_footers.push(RowFact::TurnFooter {
+                    turn,
                     turn_id: turn_data.id,
+                    status: turn_data.status,
                 });
             }
         }
@@ -260,6 +265,117 @@ fn turn_changed_files(session: &AgentSession, turn_id: Uuid) -> bool {
                 .iter()
                 .any(|activity| activity.kind == ActivityKind::FileChange)
         })
+}
+
+/// A row that can belong to a turn's narration fold — the work folded
+/// under the collapsed group header once the turn settles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NarrationRow {
+    Message { index: usize },
+    Block { index: usize },
+}
+
+/// The turn's narration span as message indices: its opening prompt and its
+/// final message. `None` when the turn holds a single message (nothing
+/// between them could fold) or names no messages the session still has.
+fn narration_span(session: &AgentSession, turn: usize) -> Option<(usize, usize)> {
+    let turn_id = session.turns.get(turn)?.id;
+    let mut span: Option<(usize, usize)> = None;
+    for (index, message) in session.messages.iter().enumerate() {
+        if message.turn_id == Some(turn_id) {
+            match span {
+                None => span = Some((index, index)),
+                Some((first, _)) => span = Some((first, index)),
+            }
+        }
+    }
+    let (first, last) = span?;
+    (last > first).then_some((first, last))
+}
+
+/// Whether a message row is the turn's narration: an assistant message
+/// strictly between the turn's opening prompt and its final message — the
+/// model's running commentary, not the answer. The prompt and the answer
+/// never fold; a mid-turn user message stays visible too (it is not the
+/// model's voice).
+pub(crate) fn is_narration_message(session: &AgentSession, index: usize) -> bool {
+    let Some(turn_id) = session.messages.get(index).and_then(|message| message.turn_id) else {
+        return false;
+    };
+    let Some(turn) = session.turns.iter().position(|turn| turn.id == turn_id) else {
+        return false;
+    };
+    narration_span(session, turn).is_some_and(|(first, last)| {
+        index > first && index < last && session.messages[index].role == MessageRole::Assistant
+    })
+}
+
+/// Whether a block row sits inside the same fold: anchored after the
+/// turn's prompt and no later than its final message. A block anchored at
+/// `n` renders after message `n-1`, so `n` past the final message is
+/// trailing work — it followed the answer and stays visible.
+pub(crate) fn is_narration_block(session: &AgentSession, block: usize) -> bool {
+    let Some(block_data) = session.transcript_blocks.get(block) else {
+        return false;
+    };
+    let Some(turn_id) = block_data.turn_id else {
+        return false;
+    };
+    let Some(turn) = session.turns.iter().position(|turn| turn.id == turn_id) else {
+        return false;
+    };
+    narration_span(session, turn)
+        .is_some_and(|(first, last)| block_data.after_message > first && block_data.after_message <= last)
+}
+
+/// The fold's header host: the first narration row in walk order. A block
+/// anchored at `n` renders after message `n-1`, so its order key sits just
+/// under message `n`'s — blocks and messages interleave honestly.
+pub(crate) fn narration_head(session: &AgentSession, turn: usize) -> Option<NarrationRow> {
+    narration_edge(session, turn, true)
+}
+
+/// The fold's LAST row in walk order — the expanded section's closing
+/// footer lands below it.
+pub(crate) fn narration_tail(session: &AgentSession, turn: usize) -> Option<NarrationRow> {
+    narration_edge(session, turn, false)
+}
+
+/// The fold's first (`first`) or last row in walk order. A block anchored
+/// at `n` renders after message `n-1`, so its order key sits just under
+/// message `n`'s — blocks and messages interleave honestly.
+fn narration_edge(session: &AgentSession, turn: usize, first: bool) -> Option<NarrationRow> {
+    let (first_msg, last_msg) = narration_span(session, turn)?;
+    let turn_id = session.turns[turn].id;
+    let mut edge: Option<(u64, NarrationRow)> = None;
+    let consider = |key: u64, row: NarrationRow, edge: &mut Option<(u64, NarrationRow)>| {
+        let better = edge
+            .as_ref()
+            .is_none_or(|(best, _)| if first { key < *best } else { key > *best });
+        if better {
+            *edge = Some((key, row));
+        }
+    };
+    for index in first_msg + 1..last_msg {
+        if session.messages[index].turn_id == Some(turn_id)
+            && session.messages[index].role == MessageRole::Assistant
+        {
+            consider(index as u64 * 2 + 1, NarrationRow::Message { index }, &mut edge);
+        }
+    }
+    for (block, block_data) in session.transcript_blocks.iter().enumerate() {
+        if block_data.turn_id == Some(turn_id)
+            && block_data.after_message > first_msg
+            && block_data.after_message <= last_msg
+        {
+            consider(
+                block_data.after_message as u64 * 2,
+                NarrationRow::Block { index: block },
+                &mut edge,
+            );
+        }
+    }
+    edge.map(|(_, row)| row)
 }
 
 /// FNV-1a offset basis and prime: cheap, order-sensitive mixing that stays

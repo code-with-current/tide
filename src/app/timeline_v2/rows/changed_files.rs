@@ -1,30 +1,28 @@
-//! The turn's file-changes card — tide's FileChanges block, ported to the
-//! pane's disclosure vocabulary. A bordered card summarizing everything the
-//! turn's edit/write work did to the working tree: a header reading the file
-//! count, a created/edited chip, and the folded "+A / −D" totals in the
-//! status tokens; under it the file list, budgeted to five rows with a
-//! "+N more files" expander owning the fifth slot. Paths relativize against
-//! the workspace the way every other row's descriptions do, and each row's
-//! hover-revealed Review button hands the path to `view_diff`.
+//! The turn's file changes, container-free: a count reading over a
+//! horizontally wrapping list of fixed-width file pills — name plus the
+//! file's "+n/−m" — budgeted with an expander when the turn touched more
+//! files than the collapsed list shows. A pill's click opens the diff
+//! viewer; its right click opens a context menu (Open, Open Diff) on a
+//! handle `list.rs` builds through the app's menu registry.
 //!
 //! The fold is pure — [`summarize_changes`] collects the turn's prepared
 //! `ActivityFileChange`s, dedupes by path summing stats, and sorts created
-//! files ahead of edited ones (alphabetical inside each bucket) — so the card
-//! reads from one small summary struct instead of rewalking the blocks every
-//! frame. Expansion rides the pane's disclosure set under a synthetic
+//! files ahead of edited ones (alphabetical inside each bucket) — so the
+//! row reads from one small summary struct instead of rewalking the blocks
+//! every frame. Expansion rides the pane's disclosure set under a synthetic
 //! turn-anchored id; because the id names no activity, `list.rs` wires the
-//! toggle with a direct remeasure (the synthetic-id pattern the activity
-//! group's cluster header uses).
+//! toggle with a direct remeasure (the synthetic-id pattern).
 
 use super::super::{
-    TranscriptActions, relative_display, tools_description, tools_dim, tools_title,
+    TranscriptActions, relative_display, split_path_display, tools_description, tools_dim,
+    tools_title,
 };
 use super::activity_group::GroupToggle;
 use crate::model::{ActivityFileChange, ActivityFileChangeStatus};
 use crate::theme::{Theme, sp};
-use crate::ui::{icon, icon_button};
+use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use gpui::prelude::*;
-use gpui::{Div, FontWeight, MouseButton, SharedString, Stateful, div, px};
+use gpui::{AnyElement, Div, FontWeight, SharedString, div, px};
 use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -121,31 +119,19 @@ pub(crate) fn header_title(files: usize) -> String {
     }
 }
 
-/// The counts chip: "2 created · 1 edited", zero segments omitted. `None`
-/// when both are zero — nothing to distinguish, no chip.
-pub(crate) fn counts_chip(created: usize, edited: usize) -> Option<String> {
-    let segments: Vec<String> = [(created, "created"), (edited, "edited")]
-        .iter()
-        .filter(|(count, _)| *count > 0)
-        .map(|(count, noun)| format!("{count} {noun}"))
-        .collect();
-    (!segments.is_empty()).then(|| segments.join(" · "))
-}
-
-/// Rows the collapsed list shows before the expander takes the fifth slot —
-/// tide's MAX_VISIBLE budget, minus one for the expander itself.
+/// The collapsed list's budget — the most pills the row shows before the
+/// inline "See More" affordance names the rest.
 pub(crate) const MAX_VISIBLE_FILES: usize = 5;
 
-/// How many file rows render, and how many the expander names. Expanded
-/// shows everything; at or under the budget everything fits with no expander;
-/// over the budget the collapsed card shows `MAX_VISIBLE_FILES - 1` rows and
-/// the expander counts the rest.
+/// How many pills render, and how many the trailing "See More" affordance
+/// names. Expanded shows everything; at or under the budget everything fits
+/// with no affordance; over the budget the collapsed list shows the budget
+/// and the affordance counts the rest.
 pub(crate) fn visible_files(total: usize, expanded: bool) -> (usize, Option<usize>) {
     if expanded || total <= MAX_VISIBLE_FILES {
         (total, None)
     } else {
-        let shown = MAX_VISIBLE_FILES - 1;
-        (shown, Some(total - shown))
+        (MAX_VISIBLE_FILES, Some(total - MAX_VISIBLE_FILES))
     }
 }
 
@@ -158,11 +144,20 @@ pub(crate) fn files_card_id(turn_id: Uuid) -> String {
 
 // ── Renderer ────────────────────────────────────────────────────────────────
 
-/// The file-changes card: bordered, raised, the header over the budgeted file
-/// list. `id` is the card's disclosure id ([`files_card_id`]); the expander
-/// row's click arrives as the [`GroupToggle`] only `list.rs` can build, and
-/// `expanded` is the disclosure set's answer for that id — the card itself
-/// keeps no state of its own.
+/// The pill's width cap: pills size to their filename (which never
+/// truncates) with the parent directory absorbing the squeeze — past this
+/// width the directory truncates, keeping long paths readable as
+/// "…dir/file.rs +9 −2".
+const PILL_MAX_WIDTH: f32 = 300.0;
+const PILL_HEIGHT: f32 = 20.0;
+
+/// The turn's file changes, container-free: the count reading over a
+/// horizontally wrapping list of fixed-width file pills, with the budget
+/// expander closing the list when the turn touched more files than the
+/// collapsed budget shows. `id` is the row's disclosure id
+/// ([`files_card_id`]); the expander's click arrives as the
+/// [`GroupToggle`] only `list.rs` can build, and `menus` carries one
+/// context-menu handle per file, in the same order as `summary.files`.
 pub(crate) fn render_changed_files(
     summary: &ChangesSummary,
     workspace: &Path,
@@ -171,145 +166,113 @@ pub(crate) fn render_changed_files(
     expanded: bool,
     id: &str,
     toggle: GroupToggle,
+    menus: &[ContextMenuHandle],
 ) -> Div {
     let (shown, hidden) = visible_files(summary.files.len(), expanded);
 
-    let mut card = div()
+    let mut section = div()
         .w_full()
         .mt(px(4.0))
         .flex()
         .flex_col()
-        .gap(px(2.0))
-        .border_1()
-        .border_color(theme.border)
-        .rounded(px(8.0))
-        .bg(theme.raised)
-        .px(px(12.0))
-        .py(px(8.0))
-        .child(render_header(summary, theme));
-
-    if !summary.files.is_empty() {
-        card = card
-            .child(div().h(px(0.5)).w_full().bg(theme.border.opacity(0.6)))
-            .children(
-                summary.files[..shown]
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, file)| render_file_row(file, workspace, actions, theme, id, ix)),
-            );
-        // The expander exists exactly when the budget bit: collapsed it takes
-        // the fifth slot ("+N more files"); expanded it stays as the collapse
-        // affordance so a reader is never stranded at full depth.
-        if summary.files.len() > MAX_VISIBLE_FILES {
-            let label = match hidden {
-                Some(hidden) => format!("+{hidden} more files"),
-                None => "Show less".to_owned(),
-            };
-            card = card.child(render_expander(label, expanded, id, theme, toggle));
-        }
-    }
-    card
-}
-
-/// The header strip: file-diff glyph, the count reading, the created/edited
-/// chip, and — pushed right — the "+A / −D" totals in the success/error
-/// tokens, hidden when the turn's work carried no line stats at all.
-fn render_header(summary: &ChangesSummary, theme: &Theme) -> Div {
-    let mut header = div()
-        .h(px(24.0))
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .child(icon("icons/file-diff.svg", 14.0, tools_dim(theme)))
+        .gap(px(4.0))
         .child(
             div()
-                .flex_none()
+                .h(px(PILL_HEIGHT))
+                .flex()
+                .items_center()
                 .text_size(sp(12.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(tools_title(theme))
-                .child(SharedString::from(header_title(summary.files.len()))),
+                .child(SharedString::from(format!(
+                    "{}:",
+                    header_title(summary.files.len())
+                ))),
         );
-    if let Some(chip) = counts_chip(summary.created, summary.edited) {
-        header = header.child(
-            div()
-                .flex_none()
-                .rounded_full()
-                .bg(theme.overlay)
-                .px(px(8.0))
-                .py(px(1.0))
-                .text_size(sp(11.0))
-                .text_color(tools_dim(theme))
-                .child(SharedString::from(chip)),
-        );
+
+    if !summary.files.is_empty() {
+        let mut pills = div()
+            .w_full()
+            .flex()
+            .flex_wrap()
+            .gap(px(4.0))
+            .children(summary.files[..shown].iter().enumerate().map(
+                |(ix, file)| render_file_pill(file, workspace, actions, theme, id, ix, menus.get(ix)),
+            ));
+        // The affordance rides inline at the end of the list — the last
+        // pill in the wrapping row, never a line of its own: collapsed it
+        // is "See More" naming what the budget cut; expanded it stays as
+        // "Show less" so a reader is never stranded at full depth.
+        if summary.files.len() > MAX_VISIBLE_FILES {
+            let label = match hidden {
+                Some(hidden) => format!("See More ({hidden})"),
+                None => "Show less".to_owned(),
+            };
+            pills = pills.child(render_expander(label, id, theme, toggle));
+        }
+        section = section.child(pills);
     }
-    if summary.additions + summary.deletions > 0 {
-        header = header.child(div().flex_1()).child(render_totals(
-            summary.additions,
-            summary.deletions,
-            theme,
-        ));
-    }
-    header
+    section
 }
 
-/// The folded "+A / −D" reading: each half in its status token, the separator
-/// dim. tide's minus form (U+2212) keeps the glyph visually matched to the
-/// plus at these sizes.
-fn render_totals(additions: u64, deletions: u64, theme: &Theme) -> Div {
-    div()
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(px(4.0))
-        .text_size(sp(11.0))
-        .child(
-            div()
-                .text_color(super::super::diff_added())
-                .child(SharedString::from(format!("+{additions}"))),
-        )
-        .child(div().text_color(tools_dim(theme)).child("/"))
-        .child(
-            div()
-                .text_color(super::super::diff_removed(theme))
-                .child(SharedString::from(format!("\u{2212}{deletions}"))),
-        )
-}
-
-/// One file row: the workspace-relative path truncating in the description
-/// token, the per-file "+n/−m" halves (zero halves omitted, absent when the
-/// change carried no stats), and the hover-revealed Review button handing the
-/// path to `view_diff`. Clicks stop at the button so the row beneath never
-/// feels them.
-fn render_file_row(
+/// One file pill: width from its content, one uniform path style — the
+/// FILENAME never truncates; its parent directory absorbs the squeeze,
+/// truncating past the pill's cap — with the "+n/−m" halves beside it
+/// (zero halves omitted, absent when the change carried no stats). Left click opens the diff
+/// viewer; right click opens the context menu — Open, Open Diff — on the
+/// handle `menu` carries.
+fn render_file_pill(
     file: &ChangedFileSummary,
     workspace: &Path,
     actions: &TranscriptActions,
     theme: &Theme,
     id: &str,
     ix: usize,
-) -> Stateful<Div> {
-    let hover_group = SharedString::from(format!("files-row-hover-{id}-{ix}"));
-    let mut row = div()
-        .id(SharedString::from(format!("files-row-{id}-{ix}")))
-        .group(hover_group.clone())
-        .h(px(24.0))
+    menu: Option<&ContextMenuHandle>,
+) -> AnyElement {
+    let (dir, name) = split_path_display(&relative_display(workspace, &file.path));
+    let mut pill = div()
+        .id(SharedString::from(format!("files-pill-{id}-{ix}")))
+        .max_w(px(PILL_MAX_WIDTH))
+        .h(px(PILL_HEIGHT))
         .flex()
         .items_center()
         .gap(px(6.0))
-        .rounded(px(6.0))
-        .cursor_default()
-        .hover(|style| style.bg(theme.overlay))
+        .px(px(8.0))
+        .rounded(px(10.0))
+        .bg(theme.overlay)
+        .cursor_pointer()
+        .hover(|style| style.bg(theme.border.opacity(0.6)))
         .child(
+            // One unbroken path run: directory and filename sit flush (the
+            // row's own gap must not open a space mid-path), the directory
+            // still the only side that truncates.
             div()
-                .flex_1()
+                .flex_auto()
                 .min_w_0()
-                .truncate()
-                .text_size(sp(11.5))
-                .text_color(tools_description(theme))
-                .child(SharedString::from(relative_display(workspace, &file.path))),
+                .flex()
+                .when(!dir.is_empty(), |path| {
+                    path.child(
+                        div()
+                            .flex_auto()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.0))
+                            .text_color(tools_description(theme))
+                            .child(SharedString::from(format!("{dir}/"))),
+                    )
+                })
+                .child(
+                    div()
+                        .flex_none()
+                        .truncate()
+                        .text_size(sp(11.0))
+                        .text_color(tools_description(theme))
+                        .child(SharedString::from(name)),
+                ),
         );
     if file.additions > 0 {
-        row = row.child(
+        pill = pill.child(
             div()
                 .flex_none()
                 .text_size(sp(10.5))
@@ -318,7 +281,7 @@ fn render_file_row(
         );
     }
     if file.deletions > 0 {
-        row = row.child(
+        pill = pill.child(
             div()
                 .flex_none()
                 .text_size(sp(10.5))
@@ -328,58 +291,59 @@ fn render_file_row(
     }
     let view_diff = Arc::clone(&actions.view_diff);
     let path = file.path.clone();
-    let review = icon_button(
-        SharedString::from(format!("files-review-{id}-{ix}")),
-        // The tool-part view-diff glyph — the pane's Review affordance.
-        "icons/git-commit-horizontal.svg",
-        *theme,
-    )
-    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-    .on_click(move |_, window, cx| {
+    let pill = pill.on_click(move |_, window, cx| {
         cx.stop_propagation();
         view_diff(&path, window, cx);
     });
-    row.child(
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .invisible()
-            .group_hover(hover_group, |style| style.visible())
-            .child(review),
+    let Some(handle) = menu else {
+        return pill.into_any_element();
+    };
+    let view_file = Arc::clone(&actions.view_file);
+    let view_diff = Arc::clone(&actions.view_diff);
+    let path = file.path.clone();
+    context_menu(
+        pill,
+        SharedString::from(format!("files-pill-menu-{id}-{ix}")),
+        handle,
+        move |_| {
+            let open = path.clone();
+            let diff = path.clone();
+            let view_file = Arc::clone(&view_file);
+            let view_diff = Arc::clone(&view_diff);
+            vec![
+                MenuItem::new("Open", move |window, cx| view_file(&open, window, cx))
+                    .icon("icons/file.svg"),
+                MenuItem::new("Open Diff", move |window, cx| view_diff(&diff, window, cx))
+                    .icon("icons/file-diff.svg"),
+            ]
+        },
     )
 }
 
-/// The expander row: chevron plus a dim label brightening on hover, clicking
-/// through the toggle `list.rs` wired (flip the disclosure, remeasure this
-/// row — the synthetic-id pattern, no scroll anchor to park).
+/// The list's inline affordance, pill-shaped so it reads as the last item
+/// of the file row: a dim label brightening on hover, clicking through the
+/// toggle `list.rs` wired (flip the disclosure, remeasure this row — the
+/// synthetic-id pattern, no scroll anchor to park).
 fn render_expander(
     label: String,
-    expanded: bool,
     id: &str,
     theme: &Theme,
     toggle: GroupToggle,
 ) -> gpui::Stateful<Div> {
-    let chevron = if expanded {
-        "icons/chevron-up.svg"
-    } else {
-        "icons/chevron-down.svg"
-    };
     let disclosure = id.to_owned();
     div()
         .id(SharedString::from(format!("files-expander-{id}")))
-        .h(px(22.0))
+        .h(px(PILL_HEIGHT))
         .flex()
         .items_center()
-        .gap(px(6.0))
-        .pl(px(2.0))
-        .rounded(px(6.0))
+        .gap(px(4.0))
+        .px(px(8.0))
+        .rounded(px(10.0))
         .cursor_pointer()
         .hover(|style| style.bg(theme.overlay))
-        .child(icon(chevron, 11.0, tools_dim(theme)))
         .child(
             div()
-                .text_size(sp(11.5))
+                .text_size(sp(11.0))
                 .text_color(tools_dim(theme))
                 .hover(|style| style.text_color(tools_title(theme)))
                 .child(SharedString::from(label)),
