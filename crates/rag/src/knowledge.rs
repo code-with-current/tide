@@ -8,6 +8,7 @@
 //! runtime is.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -413,29 +414,36 @@ impl KnowledgeStore {
 
     /// Delete rows whose rel_path is no longer on disk; returns the
     /// removed stable_ids (v1 rename handling: tombstone, no hash carry).
+    /// ONE statement — no torn partial deletes, no N+1 probe loop. An
+    /// empty `keep` deletes EVERY row: `NOT IN` over the empty set that
+    /// json_each('[]') yields is TRUE for all rows.
     pub fn library_tombstone_missing(&self, keep: &[String]) -> rusqlite::Result<Vec<String>> {
+        // Vec<String> → JSON array text is infallible in practice, but a
+        // hypothetical failure must NOT degrade to "[]" (that would
+        // wipe the registry) — surface it as a statement error instead.
+        let keep_json = serde_json::to_string(keep)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT stable_id, rel_path FROM library_docs")?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()?;
-            let mut gone = Vec::new();
-            for (id, rel) in rows {
-                if !keep.contains(&rel) {
-                    conn.execute("DELETE FROM library_docs WHERE stable_id = ?1", [&id])?;
-                    gone.push(id);
-                }
-            }
+            let mut stmt = conn.prepare(
+                "DELETE FROM library_docs
+                 WHERE rel_path NOT IN (SELECT value FROM json_each(?1))
+                 RETURNING stable_id",
+            )?;
+            let gone = stmt
+                .query_map([keep_json], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(gone)
         })
     }
 
-    /// Manifest ordering: triage list, most recently updated first.
+    /// Manifest ordering: triage list, most recently updated first
+    /// (stable_id tiebreak — bulk syncs stamp many rows in the same
+    /// millisecond and must not reshuffle the list per query).
     pub fn library_manifest(&self) -> rusqlite::Result<Vec<LibraryDoc>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT stable_id, rel_path, title, description, created_at, updated_at
-                 FROM library_docs ORDER BY updated_at DESC",
+                 FROM library_docs ORDER BY updated_at DESC, stable_id",
             )?;
             let rows = stmt
                 .query_map([], Self::library_doc_from_row)?
@@ -465,8 +473,12 @@ impl KnowledgeStore {
 }
 
 fn new_uuid() -> String {
-    // crypto.randomUUID() — 122 random bits via the OS RNG is fine here
-    // (the id is a registry key, not a security boundary).
+    // Registry identity string, UUID-shaped for eyeball comfort. The
+    // ONLY contract is uniqueness — these are opaque keys
+    // (sources.id / library_docs.stable_id), not RFC 4122 tokens and
+    // not a security boundary: the version/variant nibbles below make
+    // the shape v4-like, but the fallback mint is a mixed PRNG, so no
+    // one may read randomness or version semantics out of the bits.
     let mut bytes = [0u8; 16];
     getrandom_fill(&mut bytes);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
@@ -484,13 +496,22 @@ fn new_uuid() -> String {
 
 fn getrandom_fill(buf: &mut [u8]) {
     use std::io::Read as _;
+    // Primary: OS entropy (always available on the POSIX hosts).
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
         if f.read_exact(buf).is_ok() {
             return;
         }
     }
-    // Fallback: time + address entropy (never hit on the supported hosts).
-    let mut state = unix_ms_now() as u64 ^ (buf.as_ptr() as u64);
+    // Fallback for hosts without /dev/urandom: timestamp ^ buffer
+    // address ^ a process-lifetime call counter, run through an LCG.
+    // The counter is the load-bearing part — a bulk upsert loop minting
+    // many ids in the SAME millisecond from the SAME call site (same
+    // stack address, same timestamp) still gets a distinct seed per
+    // call, so a stable_id collision can never abort the whole pass.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let calls = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut state =
+        (unix_ms_now() as u64) ^ (buf.as_ptr() as u64) ^ calls.wrapping_mul(0x9E37_79B9_7F4A_7C15);
     for b in buf.iter_mut() {
         state = state
             .wrapping_mul(6364136223846793005)
@@ -1433,6 +1454,58 @@ mod tests {
         assert_eq!(gone, vec![b]);
         assert!(ks.library_doc_by_path("notes.md").unwrap().is_none());
         assert!(ks.library_manifest().unwrap().len() == 1);
+    }
+
+    #[test]
+    fn library_manifest_orders_most_recent_first_with_stable_tiebreak() {
+        let (_dir, ks) = store();
+        ks.library_upsert("a.md", "A", None).unwrap();
+        ks.library_upsert("b.md", "B", None).unwrap();
+        // Re-touch a: newest by updated_at when timestamps differ.
+        ks.library_upsert("a.md", "A2", None).unwrap();
+        let mut expected: Vec<LibraryDoc> = ["a.md", "b.md"]
+            .iter()
+            .map(|p| ks.library_doc_by_path(p).unwrap().unwrap())
+            .collect();
+        // The contract is updated_at DESC, stable_id ASC on millisecond
+        // ties. Expected is sorted with the very same comparator, so the
+        // pin is deterministic whether or not the loop above produced a
+        // tie — and it FAILS any other ordering.
+        expected.sort_by(|x, y| {
+            y.updated_at
+                .cmp(&x.updated_at)
+                .then_with(|| x.stable_id.cmp(&y.stable_id))
+        });
+        assert_eq!(ks.library_manifest().unwrap(), expected);
+    }
+
+    #[test]
+    fn library_tombstone_with_empty_keep_deletes_everything() {
+        let (_dir, ks) = store();
+        let a = ks.library_upsert("a.md", "A", None).unwrap();
+        let b = ks.library_upsert("b.md", "B", None).unwrap();
+        let mut gone = ks.library_tombstone_missing(&[]).unwrap();
+        gone.sort(); // RETURNING order is scan order — sort both sides.
+        let mut want = vec![a, b];
+        want.sort();
+        assert_eq!(gone, want, "NOT IN over an empty set is TRUE — all rows go");
+        assert!(ks.library_manifest().unwrap().is_empty());
+    }
+
+    #[test]
+    fn library_upsert_mints_distinct_ids_in_a_same_millisecond_loop() {
+        let (_dir, ks) = store();
+        // 200 upserts in a tight loop: same millisecond, same call site.
+        // A duplicate mint would trip the stable_id PK and abort the pass
+        // (urandom path on POSIX; the counter-mixed fallback must hold
+        // the same guarantee on hosts without /dev/urandom).
+        let ids: std::collections::HashSet<String> = (0..200)
+            .map(|i| {
+                ks.library_upsert(&format!("doc-{i:03}.md"), "T", None)
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(ids.len(), 200, "every minted stable_id must be unique");
     }
 
     #[test]
