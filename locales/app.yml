@@ -471,6 +471,32 @@ settings.rag.kind_repo:
   en: Git repo
 settings.rag.kind_repo_hint:
   en: Shallow-clones and code-aware chunks a repository.
+settings.rag.kind_library:
+  en: Library
+settings.rag.library_title:
+  en: Knowledge library
+settings.rag.library_location:
+  en: Location
+settings.rag.library_remote_hint:
+  en: The library lives on the daemon's machine; reveal is local-only.
+settings.rag.library_docs:
+  en: Documents
+settings.rag.library_docs_hint:
+  en: Markdown files the agent writes or that you drop into the folder.
+settings.rag.library_docs_value:
+  en: "%{count} documents"
+settings.rag.library_reveal:
+  en: Reveal
+settings.rag.library_commands:
+  en: Slash commands
+settings.rag.library_commands_hint:
+  en: Install the /kb context, search, capture, and iterate commands.
+settings.rag.library_install:
+  en: Install commands
+settings.rag.library_kb_installed:
+  en: "%{count} installed"
+settings.rag.library_kb_present:
+  en: Already installed
 settings.rag.error_name_required:
   en: Name is required.
 settings.rag.error_location_required:

@@ -288,6 +288,17 @@ pub enum Command {
         /// ["*"] = every workspace/project
         enabled: Vec<String>,
     },
+    /// Ensure the Knowledge Library source row and its `<data>/library`
+    /// directory exist (idempotent — the settings card calls it on open,
+    /// so the row is present before anything is clicked). The reply
+    /// carries the source id, the registry's doc count, and the
+    /// daemon-side root path so the card never guesses the location.
+    LibraryEnsure,
+    /// Install the `/kb-*` slash-command pack into the user's commands
+    /// dir (idempotent, never overwrites existing bodies). The reply
+    /// counts how many were written — 0 means everything was already
+    /// present.
+    KnowledgeInstallCommands,
     GitDiscoverCredentials,
     GithubConnectStart,
     /// One poll of the GitHub device-flow token endpoint; the client owns
@@ -817,6 +828,19 @@ pub enum ResponsePayload {
     Sources {
         sources: Vec<KnowledgeSourceWire>,
     },
+    /// The Knowledge Library card state (the `LibraryEnsure` reply):
+    /// which source row is the library, how many docs the registry
+    /// holds, and where the library root lives on the daemon's disk.
+    Library {
+        source_id: String,
+        doc_count: u32,
+        root: PathBuf,
+    },
+    /// The `/kb-*` command pack install result: how many command bodies
+    /// were written (0 = every command was already installed).
+    KbCommands {
+        installed: u32,
+    },
     /// The session's background action jobs (client polls; registry events
     /// require an attached runtime). `runs` maps each job back to its
     /// project + action so a freshly started UI can seed its row state.
@@ -993,6 +1017,50 @@ mod tests {
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
         assert_eq!(PROTOCOL_VERSION, 7);
+    }
+
+    #[test]
+    fn library_commands_round_trip_with_camel_case_fields() {
+        assert_eq!(
+            serde_json::to_value(Command::LibraryEnsure).unwrap()["type"],
+            "libraryEnsure"
+        );
+        assert_eq!(
+            serde_json::to_value(Command::KnowledgeInstallCommands).unwrap()["type"],
+            "knowledgeInstallCommands"
+        );
+
+        let payload = ResponsePayload::Library {
+            source_id: "src-1".into(),
+            doc_count: 3,
+            root: PathBuf::from("/data/library"),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["type"], "library");
+        assert_eq!(json["sourceId"], "src-1");
+        assert_eq!(json["docCount"], 3);
+        assert_eq!(json["root"], "/data/library");
+        let ResponsePayload::Library {
+            source_id,
+            doc_count,
+            root,
+        } = serde_json::from_value(json).unwrap()
+        else {
+            panic!("unexpected payload variant");
+        };
+        assert_eq!(source_id, "src-1");
+        assert_eq!(doc_count, 3);
+        assert_eq!(root, PathBuf::from("/data/library"));
+
+        let payload = ResponsePayload::KbCommands { installed: 2 };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["type"], "kbCommands");
+        assert_eq!(json["installed"], 2);
+        let ResponsePayload::KbCommands { installed } = serde_json::from_value(json).unwrap()
+        else {
+            panic!("unexpected payload variant");
+        };
+        assert_eq!(installed, 2);
     }
 
     #[test]

@@ -1483,6 +1483,19 @@ settings.rag.kind_crawl: サイトクロール
 settings.rag.kind_crawl_hint: ルート URL から同一オリジンのページをクロールします。
 settings.rag.kind_repo: Git リポジトリ
 settings.rag.kind_repo_hint: リポジトリを浅くクローンし、コード構造を考慮してチャンク化します。
+settings.rag.kind_library: ライブラリ
+settings.rag.library_title: ナレッジライブラリ
+settings.rag.library_location: 場所
+settings.rag.library_remote_hint: ライブラリはデーモン側のマシンにあります。表示はローカルのみです。
+settings.rag.library_docs: ドキュメント
+settings.rag.library_docs_hint: エージェントが書き出した、またはフォルダに置いた Markdown ファイル。
+settings.rag.library_docs_value: "%{count} 件のドキュメント"
+settings.rag.library_reveal: Finder で表示
+settings.rag.library_commands: スラッシュコマンド
+settings.rag.library_commands_hint: /kb の context・search・capture・iterate コマンドをインストールします。
+settings.rag.library_install: コマンドをインストール
+settings.rag.library_kb_installed: "%{count} 件インストール済み"
+settings.rag.library_kb_present: すでにインストール済み
 settings.rag.error_name_required: 名前は必須です。
 settings.rag.error_location_required: 場所は必須です。
 settings.rag.error_http_required: "http(s):// URL を入力してください。"

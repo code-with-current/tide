@@ -1610,6 +1610,19 @@ pub fn ensure_library_source() -> Result<String, String> {
     Ok(s.id)
 }
 
+/// The Knowledge Library card bundle: ensure the row + directory exist
+/// (idempotent), then report the source id, the registry's doc count,
+/// and the daemon-side root path — the card renders the path verbatim
+/// rather than guessing a client-side data dir (remote daemons differ).
+pub fn library_ensure() -> Result<(String, u32, PathBuf), String> {
+    let source_id = ensure_library_source()?;
+    let doc_count = open_knowledge()?
+        .library_manifest()
+        .map_err(|e| e.to_string())?
+        .len() as u32;
+    Ok((source_id, doc_count, rag::library_root(&data_dir())))
+}
+
 /// Queue one source for (re)indexing; duplicates collapse to a no-op.
 pub fn enqueue_reindex(source_id: &str) {
     let manager = knowledge_manager();

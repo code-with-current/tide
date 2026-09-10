@@ -438,6 +438,20 @@ impl Backend for TideBackend {
                     sources: crate::rag::list_sources(),
                 })
             }
+            Command::LibraryEnsure => {
+                let (source_id, doc_count, root) =
+                    crate::rag::library_ensure().map_err(anyhow::Error::msg)?;
+                Ok(ResponsePayload::Library {
+                    source_id,
+                    doc_count,
+                    root,
+                })
+            }
+            Command::KnowledgeInstallCommands => {
+                let installed =
+                    crate::kb_commands::install_kb_commands().map_err(anyhow::Error::msg)? as u32;
+                Ok(ResponsePayload::KbCommands { installed })
+            }
             Command::GitDiscoverCredentials => Ok(ResponsePayload::GitCredentials {
                 items: crate::git_identities::discover_credentials(),
             }),
@@ -1506,6 +1520,8 @@ fn handle_driver_command(
         | Command::SourcesRemove { .. }
         | Command::SourcesReindex { .. }
         | Command::SourcesSetEnabled { .. }
+        | Command::LibraryEnsure
+        | Command::KnowledgeInstallCommands
         | Command::GitDiscoverCredentials
         | Command::GithubConnectStart
         | Command::GithubConnectPoll { .. }

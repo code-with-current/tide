@@ -1431,6 +1431,19 @@ settings.rag.kind_crawl: 站点抓取
 settings.rag.kind_crawl_hint: 从根网址开始抓取同源页面。
 settings.rag.kind_repo: Git 仓库
 settings.rag.kind_repo_hint: 浅克隆仓库并按代码结构分块索引。
+settings.rag.kind_library: 知识库
+settings.rag.library_title: 知识库
+settings.rag.library_location: 位置
+settings.rag.library_remote_hint: 知识库位于守护进程所在的机器上，仅支持本地打开。
+settings.rag.library_docs: 文档
+settings.rag.library_docs_hint: 智能体写入或你放入该文件夹的 Markdown 文件。
+settings.rag.library_docs_value: "%{count} 篇文档"
+settings.rag.library_reveal: 在访达中显示
+settings.rag.library_commands: 斜杠命令
+settings.rag.library_commands_hint: 安装 /kb 上下文、搜索、捕获与迭代命令。
+settings.rag.library_install: 安装命令
+settings.rag.library_kb_installed: 已安装 %{count} 个
+settings.rag.library_kb_present: 已全部安装
 settings.rag.error_name_required: 请填写名称。
 settings.rag.error_location_required: 请填写位置。
 settings.rag.error_http_required: "请输入 http(s):// 网址。"

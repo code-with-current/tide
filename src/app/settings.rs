@@ -567,7 +567,8 @@ impl Tide {
                             .flex()
                             .flex_col()
                             .gap(px(26.0))
-                            .child(self.render_sources_card(&theme, cx)),
+                            .child(self.render_sources_card(&theme, cx))
+                            .child(self.render_library_card(&theme, cx)),
                     ),
             )
             .children(self.render_rag_rebuild_progress(&theme, cx))

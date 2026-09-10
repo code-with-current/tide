@@ -25,6 +25,11 @@ pub(crate) enum RagOpsEvent {
     /// A custom endpoint was added (or the add failed — errors stay
     /// inline in the dialog).
     Endpoint(Result<client::RagEndpointWire, String>),
+    /// The Knowledge Library card's ensure reply (source id, doc count,
+    /// daemon-side root).
+    Library(Result<LibraryState, String>),
+    /// The `/kb-*` command pack install finished (count or error).
+    KbInstall(Result<u32, String>),
     /// One serial rebuild step finished — pop the next from the queue.
     RebuildStep,
     /// The 2 s rebuild heartbeat: stall watchdog plus a status refresh
@@ -37,6 +42,16 @@ pub(crate) struct RagConfigBundle {
     pub config: client::RagConfigWire,
     pub endpoints: Vec<client::RagEndpointWire>,
     pub cloud_configured: bool,
+}
+
+/// The LibraryEnsure payload: which source row is the library, how many
+/// docs its registry holds, and where the root lives on the daemon's
+/// disk (rendered verbatim — a remote daemon's path is not ours).
+#[derive(Clone)]
+pub(crate) struct LibraryState {
+    pub source_id: String,
+    pub doc_count: u32,
+    pub root: PathBuf,
 }
 
 /// Panel state for the Memory & RAG cards.
@@ -92,6 +107,18 @@ pub(crate) struct RagSettingsPanel {
     pub endpoint_dialog: Option<EndpointDialogDraft>,
     /// The rebuild-offer dialog after a settings change or delete.
     pub rebuild: Option<RebuildState>,
+    /// Knowledge Library card state (the LibraryEnsure reply); `None`
+    /// until the first ensure lands or errors.
+    pub library: Option<LibraryState>,
+    pub library_error: Option<String>,
+    /// Guards the on-open ensure call until the first reply (render
+    /// paths take `&self`, same discipline as `config_requested`).
+    pub library_requested: std::cell::Cell<bool>,
+    /// The `/kb` install button is in flight.
+    pub kb_pending: std::cell::Cell<bool>,
+    /// Last install outcome for the row's hint line ("4 installed",
+    /// "Already installed", or the error verbatim).
+    pub kb_note: Option<String>,
     /// Inline numeric/text fields for the retrieval + advanced cards,
     /// created on first render (they need a window) once config loads.
     pub inline: std::cell::RefCell<Option<RagInlineInputs>>,
@@ -183,6 +210,11 @@ impl RagSettingsPanel {
             rebuild_after_update: std::cell::Cell::new(false),
             endpoint_dialog: None,
             rebuild: None,
+            library: None,
+            library_error: None,
+            library_requested: std::cell::Cell::new(false),
+            kb_pending: std::cell::Cell::new(false),
+            kb_note: None,
             inline: std::cell::RefCell::new(None),
         }
     }
@@ -899,6 +931,44 @@ impl Tide {
         );
     }
 
+    /// Ensure the Knowledge Library source row + directory exist and
+    /// fetch the card state (idempotent backend; the card calls it on
+    /// first render so the row exists before anything is clicked).
+    pub(super) fn rag_library_ensure(&self) {
+        self.rag_dispatch_result(
+            |result| match result {
+                Ok(client::ResponsePayload::Library {
+                    source_id,
+                    doc_count,
+                    root,
+                }) => RagOpsEvent::Library(Ok(LibraryState {
+                    source_id,
+                    doc_count,
+                    root,
+                })),
+                Err(error) => RagOpsEvent::Library(Err(error)),
+                Ok(_) => RagOpsEvent::Library(Err("unexpected response".into())),
+            },
+            client::Command::LibraryEnsure,
+        );
+    }
+
+    /// Install the `/kb-*` command pack (idempotent; 0 installed means
+    /// every command was already present).
+    pub(super) fn rag_kb_install(&self) {
+        self.rag_settings.kb_pending.set(true);
+        self.rag_dispatch_result(
+            |result| match result {
+                Ok(client::ResponsePayload::KbCommands { installed }) => {
+                    RagOpsEvent::KbInstall(Ok(installed))
+                }
+                Err(error) => RagOpsEvent::KbInstall(Err(error)),
+                Ok(_) => RagOpsEvent::KbInstall(Err("unexpected response".into())),
+            },
+            client::Command::KnowledgeInstallCommands,
+        );
+    }
+
     /// Drain ops events; keeps a 2 s poll alive while anything transient is
     /// in flight (download, ingestion, indexing, queued).
     pub(super) fn drain_rag_ops_events(&mut self, cx: &mut Context<Self>) -> bool {
@@ -940,6 +1010,15 @@ impl Tide {
                         let transient = sources
                             .iter()
                             .any(|source| source.status == "queued" || source.status == "indexing");
+                        // The library card's doc count refreshes when its
+                        // own reindex settles (was pending, nothing left
+                        // transient) — one ensure per finished reindex,
+                        // never per poll tick.
+                        let refresh_library = library_refresh_after_sources(
+                            self.rag_settings.pending_source.as_deref(),
+                            self.rag_settings.library.as_ref(),
+                            transient,
+                        );
                         self.rag_settings.sources = sources;
                         self.rag_settings.sources_error = None;
                         self.rag_settings.pending_source = None;
@@ -948,6 +1027,9 @@ impl Tide {
                             && dialog.busy
                         {
                             self.rag_settings.dialog = None;
+                        }
+                        if refresh_library {
+                            self.rag_library_ensure();
                         }
                         if transient && self.state.selected_project.is_some() {
                             self.rag_poll_sources();
@@ -1029,6 +1111,25 @@ impl Tide {
                         }
                     }
                 },
+                RagOpsEvent::Library(result) => match result {
+                    Ok(state) => {
+                        self.rag_settings.library = Some(state);
+                        self.rag_settings.library_error = None;
+                    }
+                    // Clearing the guard lets the next render retry the
+                    // ensure instead of stranding the card unloaded.
+                    Err(error) => {
+                        self.rag_settings.library_error = Some(error);
+                        self.rag_settings.library_requested.set(false);
+                    }
+                },
+                RagOpsEvent::KbInstall(result) => {
+                    self.rag_settings.kb_pending.set(false);
+                    self.rag_settings.kb_note = Some(match result {
+                        Ok(installed) => kb_install_note(installed),
+                        Err(error) => error,
+                    });
+                }
                 RagOpsEvent::RebuildStep => {
                     let done = self
                         .rag_settings
@@ -1197,6 +1298,47 @@ fn rag_language_label(languages: &str) -> String {
     match languages {
         "multilingual" => tr!("settings.rag.lang_multilingual").to_string(),
         _ => tr!("settings.rag.lang_english").to_string(),
+    }
+}
+
+/// Display label for an existing row's source kind. `SOURCE_KINDS` (the
+/// add dialog's tile grid) deliberately stays at four kinds — the library
+/// is ensured by the app and `add_source` refuses its kind, so a grid
+/// tile could only ever mint a duplicate row. This map covers the four
+/// addable kinds plus "library"; unknown kinds fall back to the raw wire
+/// string rather than guessing.
+fn source_kind_label(kind: &str) -> String {
+    match kind {
+        "url" => tr!("settings.rag.kind_url").to_string(),
+        "docs" => tr!("settings.rag.kind_docs").to_string(),
+        "crawl" => tr!("settings.rag.kind_crawl").to_string(),
+        "repo" => tr!("settings.rag.kind_repo").to_string(),
+        "library" => tr!("settings.rag.kind_library").to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Whether a Sources reply should refresh the library card: the library's
+/// own reindex just settled (it was the pending mutation and no source is
+/// transient anymore — otherwise every 2 s poll tick would re-ensure).
+fn library_refresh_after_sources(
+    pending: Option<&str>,
+    library: Option<&LibraryState>,
+    transient: bool,
+) -> bool {
+    match (pending, library) {
+        (Some(pending), Some(library)) => !transient && pending == library.source_id,
+        _ => false,
+    }
+}
+
+/// The install hint line from the reply count: "N installed", or the
+/// quieter "already installed" when nothing needed writing.
+fn kb_install_note(installed: u32) -> String {
+    if installed == 0 {
+        tr!("settings.rag.library_kb_present").to_string()
+    } else {
+        tr!("settings.rag.library_kb_installed", count = installed)
     }
 }
 
@@ -2980,7 +3122,7 @@ impl Tide {
                 None => {
                     let base = format!(
                         "{} · {} · {} {}",
-                        source.kind,
+                        source_kind_label(&source.kind),
                         source.status,
                         source.chunk_count,
                         tr!("settings.rag.chunks_suffix")
@@ -3089,6 +3231,122 @@ impl Tide {
             body = body.child(row);
         }
         if let Some(error) = self.rag_settings.sources_error.clone() {
+            body = body.child(
+                div()
+                    .px(px(20.0))
+                    .py(px(10.0))
+                    .text_size(sp(11.0))
+                    .text_color(theme.danger)
+                    .child(SharedString::from(error)),
+            );
+        }
+        card.child(body)
+    }
+
+    /// The Knowledge Library card: where the writable library lives, its
+    /// registry size, reindex/reveal, and the `/kb` command pack install.
+    /// The idempotent `LibraryEnsure` rides the first render so the source
+    /// row + directory exist before anything is clicked; the root path
+    /// comes from the daemon's reply (a remote daemon's data dir is not
+    /// ours to guess).
+    pub(super) fn render_library_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        if self.rag_settings.library.is_none()
+            && self.rag_settings.library_error.is_none()
+            && !self.rag_settings.library_requested.get()
+        {
+            self.rag_settings.library_requested.set(true);
+            self.rag_library_ensure();
+        }
+        let library = self.rag_settings.library.clone();
+        let can_reveal = !self.daemon.is_remote();
+        let row_pending = library.as_ref().is_some_and(|state| {
+            self.rag_settings.pending_source.as_deref() == Some(state.source_id.as_str())
+        });
+
+        // Head actions: reveal the folder (local daemon only — the path
+        // belongs to the daemon's disk) and reindex through the same
+        // generic source flow the sources list rows use.
+        let reveal_path = library.as_ref().map(|state| state.root.clone());
+        let reveal = CardButton::new("rag-library-reveal", tr!("settings.rag.library_reveal"))
+            .icon("icons/folder-open.svg")
+            .disabled(reveal_path.is_none() || !can_reveal)
+            .render(*theme, cx, move |_this, _window, cx| {
+                if let Some(path) = reveal_path.as_ref() {
+                    crate::platform::reveal_in_file_manager(path, cx);
+                }
+            });
+
+        let reindex_id = library.as_ref().map(|state| state.source_id.clone());
+        let reindex = CardButton::new("rag-library-reindex", tr!("settings.rag.reindex"))
+            .busy(row_pending)
+            .disabled(reindex_id.is_none())
+            .render(*theme, cx, move |this, _window, _cx| {
+                if let Some(source_id) = reindex_id.as_ref() {
+                    this.rag_source_command(client::Command::SourcesReindex {
+                        source_id: source_id.clone(),
+                    });
+                }
+            });
+
+        let card = div().w_full().child(settings_group_head(
+            theme,
+            tr!("settings.rag.library_title"),
+            vec![reveal.into_any_element(), reindex.into_any_element()],
+        ));
+
+        // The `/kb` pack install (idempotent — re-running reports what
+        // was already present through the row's hint line).
+        let install = CardButton::new(
+            "rag-library-kb-install",
+            tr!("settings.rag.library_install"),
+        )
+        .icon("icons/command.svg")
+        .busy(self.rag_settings.kb_pending.get())
+        .render(*theme, cx, |this, _window, _cx| {
+            this.rag_kb_install();
+        });
+
+        let location = library
+            .as_ref()
+            .map(|state| SharedString::from(state.root.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| SharedString::from(tr!("settings.rag.loading").to_string()));
+        let mut location_row =
+            CardRow::new(tr!("settings.rag.library_location")).description(location);
+        if !can_reveal {
+            location_row = location_row.hint(tr!("settings.rag.library_remote_hint"));
+        }
+
+        let docs = library
+            .as_ref()
+            .map(|state| {
+                SharedString::from(tr!(
+                    "settings.rag.library_docs_value",
+                    count = state.doc_count
+                ))
+            })
+            .unwrap_or_else(|| SharedString::from("—"));
+
+        let mut commands_row = CardRow::new(tr!("settings.rag.library_commands"))
+            .description(tr!("settings.rag.library_commands_hint"));
+        if let Some(note) = self.rag_settings.kb_note.clone() {
+            commands_row = commands_row.hint(SharedString::from(note));
+        }
+
+        let rows = vec![
+            location_row,
+            CardRow::new(tr!("settings.rag.library_docs"))
+                .description(tr!("settings.rag.library_docs_hint"))
+                .control(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(docs),
+                ),
+            commands_row.control(install),
+        ];
+
+        let mut body = card_body(theme).child(card_rows(theme, rows));
+        if let Some(error) = self.rag_settings.library_error.clone() {
             body = body.child(
                 div()
                     .px(px(20.0))
@@ -3652,5 +3910,76 @@ mod tests {
         assert!(rag_endpoint_validate("n", "https://x", "", "k").is_some());
         assert!(rag_endpoint_validate("n", "https://x", "m", "").is_some());
         assert!(rag_endpoint_validate("n", "http://localhost:11434/v1", "m", "ollama").is_none());
+    }
+
+    fn library_state(source_id: &str) -> LibraryState {
+        LibraryState {
+            source_id: source_id.into(),
+            doc_count: 2,
+            root: PathBuf::from("/data/library"),
+        }
+    }
+
+    #[test]
+    fn source_kind_label_covers_library_and_falls_back_to_raw() {
+        // The four addable kinds reuse the add-dialog labels; library has
+        // its own entry; anything else renders verbatim rather than
+        // borrowing another kind's label.
+        assert_eq!(
+            source_kind_label("url"),
+            tr!("settings.rag.kind_url").to_string()
+        );
+        assert_eq!(
+            source_kind_label("docs"),
+            tr!("settings.rag.kind_docs").to_string()
+        );
+        assert_eq!(
+            source_kind_label("crawl"),
+            tr!("settings.rag.kind_crawl").to_string()
+        );
+        assert_eq!(
+            source_kind_label("repo"),
+            tr!("settings.rag.kind_repo").to_string()
+        );
+        assert_eq!(
+            source_kind_label("library"),
+            tr!("settings.rag.kind_library").to_string()
+        );
+        assert_eq!(source_kind_label("mystery"), "mystery");
+    }
+
+    #[test]
+    fn library_refresh_waits_for_its_own_settled_reindex() {
+        let library = library_state("src-lib");
+        // The library's reindex was pending and nothing is transient.
+        assert!(library_refresh_after_sources(
+            Some("src-lib"),
+            Some(&library),
+            false
+        ));
+        // Still indexing — a poll tick, not a settle: no re-ensure.
+        assert!(!library_refresh_after_sources(
+            Some("src-lib"),
+            Some(&library),
+            true
+        ));
+        // A different source settled: leave the card alone.
+        assert!(!library_refresh_after_sources(
+            Some("src-other"),
+            Some(&library),
+            false
+        ));
+        // No pending mutation (fresh list) or card not loaded yet.
+        assert!(!library_refresh_after_sources(None, Some(&library), false));
+        assert!(!library_refresh_after_sources(Some("src-lib"), None, false));
+    }
+
+    #[test]
+    fn kb_install_note_distinguishes_fresh_installs() {
+        assert_eq!(
+            kb_install_note(0),
+            tr!("settings.rag.library_kb_present").to_string()
+        );
+        assert_eq!(kb_install_note(4), "4 installed");
     }
 }
