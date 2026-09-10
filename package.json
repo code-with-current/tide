@@ -5,7 +5,8 @@
     "dev": "bun ./scripts/dev.ts",
     "release": "bun ./scripts/release.ts",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test:agent": "bun test src/"
   },
   "private": true,
   "devDependencies": {
@@ -13,6 +14,7 @@
     "@types/bun": "latest",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
+    "linkedom": "^0.18.13",
     "typescript": "^7.0.2"
   }
 }

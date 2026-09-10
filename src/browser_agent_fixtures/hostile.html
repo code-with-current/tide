@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+  <title>Hostile page</title>
+</head>
+<body>
+  <h2>Dashboard</h2>
+  <div aria-hidden="true">
+    <button>Hidden from the a11y tree</button>
+  </div>
+  <span style="display:none">Invisible text</span>
+  <img src="/tiny.png" alt="Tiny tracker" style="width:0px;height:0px">
+  <input type="hidden" name="csrf_token" value="abc123">
+  <div class="d1"><div class="d2"><div class="d3"><div class="d4"><div class="d5"><div class="d6"><div class="d7"><div class="d8"><div class="d9"><div class="d10"><div class="d11"><div class="d12"><div class="d13"><div class="d14"><div class="d15"><p class="deep">Way too deep</p></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div>
+  <a href="/next">Visible link</a>
+</body>
+</html>
