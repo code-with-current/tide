@@ -936,6 +936,7 @@ browser.back: 后退（%{shortcut}）
 browser.forward: 前进（%{shortcut}）
 browser.stop_loading: 停止加载（Esc）
 browser.reload: 重新加载（%{shortcut}）
+browser.device_mode: 设备模式
 browser.open_external: 在默认浏览器中打开
 browser.browse_web: 浏览网页
 browser.start_hint: 在上方输入网址或搜索内容 — 按 %{shortcut} 聚焦地址栏

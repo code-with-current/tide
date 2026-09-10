@@ -27,8 +27,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, Context, Div, Entity, FocusHandle, Focusable, HitboxBehavior, IntoElement, ObjectFit,
-    Render, SharedString, Stateful, Subscription, Window, canvas, div, img, prelude::*, px,
+    App, Context, Div, DragMoveEvent, Entity, FocusHandle, Focusable, HitboxBehavior, Hsla,
+    IntoElement, MouseButton, MouseDownEvent, ObjectFit, Render, SharedString, Stateful,
+    Subscription, Window, canvas, div, hsla, img, prelude::*, px,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui::{AsyncApp, ForegroundExecutor, WeakEntity};
@@ -1498,6 +1499,106 @@ fn unwrap_execute_script_result(raw: &str) -> String {
     serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_owned())
 }
 
+// ── Device mode ────────────────────────────────────────────────────────────
+
+/// Dimension bounds for a pinned viewport: never collapse the frame to
+/// nothing mid-drag, never pin something larger than an 8K screen.
+const MIN_DEVICE_DIMENSION: u32 = 100;
+const MAX_DEVICE_DIMENSION: u32 = 7680;
+
+/// Where the toolbar's device toggle starts — the design's Laptop preset, a
+/// shape that reads as a page in any panel.
+const DEFAULT_DEVICE_VIEWPORT: DeviceViewport = DeviceViewport {
+    width: 1280,
+    height: 800,
+};
+
+/// A device-mode viewport: the exact CSS-pixel frame the webview pins to,
+/// centered in the panel over a dimmed backdrop. Sized in points/DIPs on
+/// both platforms, so CSS pixels are what the numbers say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DeviceViewport {
+    width: u32,
+    height: u32,
+}
+
+impl DeviceViewport {
+    fn new(width: u32, height: u32) -> Self {
+        Self {
+            width: width.clamp(MIN_DEVICE_DIMENSION, MAX_DEVICE_DIMENSION),
+            height: height.clamp(MIN_DEVICE_DIMENSION, MAX_DEVICE_DIMENSION),
+        }
+    }
+}
+
+/// Where a device frame lands inside the panel: centered, and never larger
+/// than the panel — an oversized device clamps to the panel rather than
+/// pushing the native view outside it. The result is panel-local, so callers
+/// offset it by the panel's own origin.
+fn pinned_bounds(
+    panel: gpui::Size<gpui::Pixels>,
+    device: DeviceViewport,
+) -> gpui::Bounds<gpui::Pixels> {
+    let panel_width = f32::from(panel.width).max(0.0);
+    let panel_height = f32::from(panel.height).max(0.0);
+    let width = (device.width as f32).min(panel_width);
+    let height = (device.height as f32).min(panel_height);
+    gpui::Bounds {
+        origin: gpui::point(
+            px((panel_width - width) / 2.0),
+            px((panel_height - height) / 2.0),
+        ),
+        size: gpui::size(px(width), px(height)),
+    }
+}
+
+/// Toggle semantics for the toolbar button: off turns on at the default
+/// viewport, on turns off.
+fn device_mode_toggled(mode: Option<DeviceViewport>) -> Option<DeviceViewport> {
+    if mode.is_some() {
+        None
+    } else {
+        Some(DEFAULT_DEVICE_VIEWPORT)
+    }
+}
+
+/// Drag resizing: whole-CSS-pixel snapping from the pointer's total delta
+/// since the grab, clamped to the dimension bounds — the `as u32` cast
+/// saturates negatives to zero, which the clamp then lifts to the minimum.
+fn drag_resized(from: DeviceViewport, dx: gpui::Pixels, dy: gpui::Pixels) -> DeviceViewport {
+    DeviceViewport::new(
+        (from.width as f32 + f32::from(dx)).round() as u32,
+        (from.height as f32 + f32::from(dy)).round() as u32,
+    )
+}
+
+/// Free-entry dimension fields parse as bare integers; anything else keeps
+/// the current size.
+fn parse_dimension(text: &str) -> Option<u32> {
+    text.trim().parse().ok()
+}
+
+/// The dimmed area around a pinned frame — the modal scrim treatment.
+fn device_backdrop(is_dark: bool) -> Hsla {
+    if is_dark {
+        hsla(0.0, 0.0, 0.0, 0.34)
+    } else {
+        hsla(0.0, 0.0, 0.0, 0.16)
+    }
+}
+
+/// The drag value riding a device-frame resize: the size at grab time, from
+/// which every move recomputes the whole size (no accumulating drift).
+/// Doubles as its own drag ghost — it renders nothing.
+#[derive(Clone)]
+struct DeviceFrameDrag(DeviceViewport);
+
+impl Render for DeviceFrameDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
 pub struct BrowserView {
     focus_handle: FocusHandle,
     address: Entity<TextInput>,
@@ -1544,6 +1645,16 @@ pub struct BrowserView {
     /// test without a window.
     load_generation: u64,
     agent_queue: Vec<AgentOp>,
+    /// Device mode: the exact CSS-pixel frame the page pins to, centered
+    /// over a dimmed backdrop; `None` (the default) fills the panel.
+    device_mode: Option<DeviceViewport>,
+    /// Where the in-flight device-frame drag grabbed, to turn each move into
+    /// a size delta.
+    device_drag_origin: Option<gpui::Point<gpui::Pixels>>,
+    /// Free-entry width/height for the pinned frame, mirroring `device_mode`
+    /// into editable text.
+    device_width: Entity<TextInput>,
+    device_height: Entity<TextInput>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1577,6 +1688,25 @@ impl BrowserView {
             },
         );
 
+        let device_width = cx.new(|cx| TextInput::new(window, cx).select_all_on_focus_click());
+        let device_height = cx.new(|cx| TextInput::new(window, cx).select_all_on_focus_click());
+        let device_width_submit = cx.subscribe(
+            &device_width,
+            |this: &mut Self, _, event: &InputEvent, cx| {
+                if let InputEvent::Submit(text) = event {
+                    this.submit_device_width(text, cx);
+                }
+            },
+        );
+        let device_height_submit = cx.subscribe(
+            &device_height,
+            |this: &mut Self, _, event: &InputEvent, cx| {
+                if let InputEvent::Submit(text) = event {
+                    this.submit_device_height(text, cx);
+                }
+            },
+        );
+
         let focus_handle = cx.focus_handle();
         let address_focus = address.read(cx).focus();
         let weak_for_focus_in = cx.entity().downgrade();
@@ -1588,19 +1718,31 @@ impl BrowserView {
         // nothing of ours), so the reclaim rides the window's focus
         // listeners, which fire on every focus change.
         let focus_in_address = window.on_focus_in(&address_focus, cx, {
+            let view = weak_for_focus_in.clone();
+            move |_, cx| {
+                let _ = view.update(cx, |this: &mut Self, cx| {
+                    this.reclaim_keyboard_from_page(cx);
+                });
+            }
+        });
+        // The device-mode size fields deserve the same guarantee: a page
+        // that still holds the native keyboard must not eat the dimensions
+        // being typed into them.
+        let device_width_focus = device_width.read(cx).focus();
+        let device_height_focus = device_height.read(cx).focus();
+        let focus_in_device_width = window.on_focus_in(&device_width_focus, cx, {
+            let view = weak_for_focus_in.clone();
+            move |_, cx| {
+                let _ = view.update(cx, |this: &mut Self, cx| {
+                    this.reclaim_keyboard_from_page(cx);
+                });
+            }
+        });
+        let focus_in_device_height = window.on_focus_in(&device_height_focus, cx, {
             let view = weak_for_focus_in;
             move |_, cx| {
                 let _ = view.update(cx, |this: &mut Self, cx| {
-                    // Clicking, using the focus shortcut, or tabbing into the address bar while
-                    // the page holds the native keyboard: take it back, or
-                    // every keystroke keeps going to the page.
-                    if this
-                        .host
-                        .as_ref()
-                        .is_some_and(|host| host.native_focus_within())
-                    {
-                        this.reclaim_native_keyboard(cx);
-                    }
+                    this.reclaim_keyboard_from_page(cx);
                 });
             }
         });
@@ -1649,7 +1791,19 @@ impl BrowserView {
             snapshot_epoch: 0,
             load_generation: 0,
             agent_queue: Vec::new(),
-            _subscriptions: vec![submit_subscription, focus_in_address, focus_out_surface],
+            device_mode: None,
+            device_drag_origin: None,
+            device_width,
+            device_height,
+            _subscriptions: vec![
+                submit_subscription,
+                focus_in_address,
+                focus_out_surface,
+                device_width_submit,
+                device_height_submit,
+                focus_in_device_width,
+                focus_in_device_height,
+            ],
         };
         this.build_webview(window, cx);
         this
@@ -1660,6 +1814,59 @@ impl BrowserView {
             address.set_placeholder(tr!("input.search_or_enter_address"), cx)
         });
         cx.notify();
+    }
+
+    /// The one entry point for device-viewport changes — the toolbar fields,
+    /// the drag handle and (later) the agent's set-viewport tool all funnel
+    /// here, so the toggle, the fields and the frame can never disagree.
+    /// Values clamp to the dimension bounds before landing.
+    pub fn set_device_viewport(&mut self, width: u32, height: u32, cx: &mut Context<Self>) {
+        let device = DeviceViewport::new(width, height);
+        if self.device_mode != Some(device) {
+            self.device_mode = Some(device);
+            self.refresh_device_fields(cx);
+            cx.notify();
+        }
+    }
+
+    fn toggle_device_mode(&mut self, cx: &mut Context<Self>) {
+        self.device_mode = device_mode_toggled(self.device_mode);
+        if self.device_mode.is_some() {
+            self.refresh_device_fields(cx);
+        }
+        cx.notify();
+    }
+
+    /// Mirror the pinned size into the free-entry fields, so a drag or an
+    /// applied change reads back exactly what the frame now is.
+    fn refresh_device_fields(&mut self, cx: &mut Context<Self>) {
+        let device = self.device_mode.unwrap_or(DEFAULT_DEVICE_VIEWPORT);
+        self.device_width.update(cx, |input, cx| {
+            input.set_content(device.width.to_string(), cx)
+        });
+        self.device_height.update(cx, |input, cx| {
+            input.set_content(device.height.to_string(), cx)
+        });
+    }
+
+    fn submit_device_width(&mut self, text: &str, cx: &mut Context<Self>) {
+        let current = self.device_mode.unwrap_or(DEFAULT_DEVICE_VIEWPORT);
+        match parse_dimension(text) {
+            Some(width) => self.set_device_viewport(width, current.height, cx),
+            None => self.device_width.update(cx, |input, cx| {
+                input.set_content(current.width.to_string(), cx)
+            }),
+        }
+    }
+
+    fn submit_device_height(&mut self, text: &str, cx: &mut Context<Self>) {
+        let current = self.device_mode.unwrap_or(DEFAULT_DEVICE_VIEWPORT);
+        match parse_dimension(text) {
+            Some(height) => self.set_device_viewport(current.width, height, cx),
+            None => self.device_height.update(cx, |input, cx| {
+                input.set_content(current.height.to_string(), cx)
+            }),
+        }
     }
 
     pub fn tab_label(&self) -> Option<String> {
@@ -2332,6 +2539,19 @@ impl BrowserView {
         self.last_window_focus = window_focus;
     }
 
+    /// One of the surface's text fields (address bar, device-size fields)
+    /// taking focus means the page must hand the native keyboard back, or
+    /// every keystroke keeps going to the webview.
+    fn reclaim_keyboard_from_page(&mut self, cx: &mut Context<Self>) {
+        if self
+            .host
+            .as_ref()
+            .is_some_and(|host| host.native_focus_within())
+        {
+            self.reclaim_native_keyboard(cx);
+        }
+    }
+
     /// Return the native first responder to GPUI's view — deferred, since
     /// `makeFirstResponder` runs responder callbacks that may re-enter GPUI.
     fn reclaim_native_keyboard(&mut self, _cx: &mut Context<Self>) {
@@ -2611,6 +2831,10 @@ impl BrowserView {
                     cx,
                 )
             })
+            .child(self.device_toggle_button(theme, cx))
+            .when_some(self.device_mode, |element, _| {
+                element.child(self.render_device_fields(theme))
+            })
             .child(
                 TextField::new("browser-address", self.address.clone())
                     .icon(
@@ -2651,6 +2875,136 @@ impl BrowserView {
                 |this, _, cx| this.open_external(cx),
                 cx,
             ))
+    }
+
+    /// The device-mode toggle: a toolbar button like the others, but with an
+    /// on state — the icon lights up while the viewport is pinned.
+    fn device_toggle_button(&self, theme: Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let tint = if self.device_mode.is_some() {
+            theme.accent
+        } else {
+            theme.text_secondary
+        };
+        let tooltip = tr!("browser.device_mode");
+        div()
+            .id("browser-device-toggle")
+            .size(px(26.0))
+            .rounded(px(6.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon("icons/laptop.svg", 14.0, tint))
+            .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_device_mode(cx)))
+    }
+
+    /// Free-entry width and height for the pinned frame, joined by a `×` the
+    /// same way the readout spells the size. Enter applies; anything that is
+    /// not a bare integer restores the current dimension.
+    fn render_device_fields(&self, theme: Theme) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .mx(px(4.0))
+            .child(TextField::new("browser-device-width", self.device_width.clone()).w(px(54.0)))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child("×"),
+            )
+            .child(TextField::new("browser-device-height", self.device_height.clone()).w(px(54.0)))
+    }
+
+    /// The pinned frame's chrome: an outline the webview fills exactly, the
+    /// live `w × h` readout above it and the corner resize handle — all in
+    /// backdrop space, because on macOS the native webview paints over
+    /// GPUI's base layer and would cover anything inside the frame. The
+    /// frame centers like [`pinned_bounds`] and clamps to the panel through
+    /// percentage max sizes, so outline and webview always coincide.
+    fn render_device_frame(
+        &self,
+        device: DeviceViewport,
+        snapshot: Option<std::sync::Arc<gpui::RenderImage>>,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .relative()
+            .flex_none()
+            .w(px(device.width as f32))
+            .h(px(device.height as f32))
+            .max_w(gpui::relative(1.0))
+            .max_h(gpui::relative(1.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .when_some(snapshot, |element, snapshot| {
+                element.child(
+                    img(snapshot)
+                        .absolute()
+                        .size_full()
+                        .object_fit(ObjectFit::Fill),
+                )
+            })
+            .child(
+                div()
+                    .absolute()
+                    .top(px(-24.0))
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .rounded(px(4.0))
+                            .bg(theme.raised)
+                            .border_1()
+                            .border_color(theme.border)
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_secondary)
+                            .child(format!("{} × {}", device.width, device.height)),
+                    ),
+            )
+            .child(
+                div()
+                    .id("browser-device-handle")
+                    .occlude()
+                    .absolute()
+                    .bottom(px(-7.0))
+                    .right(px(-7.0))
+                    .size(px(16.0))
+                    .cursor_nwse_resize()
+                    .on_drag(DeviceFrameDrag(device), |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, _, _| {
+                            this.device_drag_origin = Some(event.position);
+                        }),
+                    )
+                    .on_drag_move::<DeviceFrameDrag>(cx.listener(
+                        |this, event: &DragMoveEvent<DeviceFrameDrag>, _, cx| {
+                            let Some(origin) = this.device_drag_origin else {
+                                return;
+                            };
+                            let size = event.drag(cx).0;
+                            let delta = event.event.position - origin;
+                            let resized = drag_resized(size, delta.x, delta.y);
+                            this.set_device_viewport(resized.width, resized.height, cx);
+                        },
+                    )),
+            )
     }
 
     fn render_start_page(&self, theme: Theme) -> Div {
@@ -2813,50 +3167,68 @@ impl BrowserView {
     /// only while a fallback snapshot is still being captured. The panel's
     /// resize handle keeps itself entirely left of this area, so the page owns
     /// the full width.
-    fn render_page_area(&self, theme: Theme) -> Div {
+    fn render_page_area(&self, cx: &mut Context<Self>, theme: Theme) -> Div {
         let host = self.host.clone();
         #[cfg(target_os = "windows")]
         let input = self.host.clone();
         #[cfg(target_os = "windows")]
         let focus = self.focus_handle.clone();
-        div()
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .bg(theme.surface)
-            .child(
-                canvas(
-                    move |bounds, window, _| {
-                        if let Some(host) = &host {
-                            host.sync_bounds(bounds, window.scale_factor());
+        let device = self.device_mode;
+        let snapshot = self.occluded.then(|| self.snapshot.clone()).flatten();
+        let mut page = div().flex_1().min_h_0().relative().bg(theme.surface).child(
+            canvas(
+                move |bounds, window, _| {
+                    // In device mode the webview lands at the pinned frame
+                    // — centered, clamped to the panel — and the hitbox
+                    // follows the same rect so input and occlusion track
+                    // the page, never the backdrop around it.
+                    let content = device.map_or(bounds, |device| {
+                        let pinned = pinned_bounds(bounds.size, device);
+                        gpui::Bounds {
+                            origin: bounds.origin + pinned.origin,
+                            size: pinned.size,
                         }
-                        // A hitbox rather than a bare rectangle: it is what
-                        // makes "is the pointer over the page" answer *no*
-                        // while a GPUI menu is open above it, now that the
-                        // page no longer hides itself for one.
-                        window.insert_hitbox(bounds, HitboxBehavior::Normal)
-                    },
-                    move |_, _hitbox, _window, _| {
-                        #[cfg(target_os = "windows")]
-                        if let Some(host) = input {
-                            Self::forward_page_input(host, focus, _hitbox, _window);
-                        }
-                    },
-                )
-                .absolute()
-                .size_full(),
-            )
-            .when_some(
-                self.occluded.then(|| self.snapshot.clone()).flatten(),
-                |element, snapshot| {
-                    element.child(
-                        img(snapshot)
-                            .absolute()
-                            .size_full()
-                            .object_fit(ObjectFit::Fill),
-                    )
+                    });
+                    if let Some(host) = &host {
+                        host.sync_bounds(content, window.scale_factor());
+                    }
+                    // A hitbox rather than a bare rectangle: it is what
+                    // makes "is the pointer over the page" answer *no*
+                    // while a GPUI menu is open above it, now that the
+                    // page no longer hides itself for one.
+                    window.insert_hitbox(content, HitboxBehavior::Normal)
+                },
+                move |_, _hitbox, _window, _| {
+                    #[cfg(target_os = "windows")]
+                    if let Some(host) = input {
+                        Self::forward_page_input(host, focus, _hitbox, _window);
+                    }
                 },
             )
+            .absolute()
+            .size_full(),
+        );
+        if let Some(device) = device {
+            page = page
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(device_backdrop(theme.is_dark)),
+                )
+                .child(self.render_device_frame(device, snapshot, theme, cx));
+        } else if let Some(snapshot) = snapshot {
+            page = page.child(
+                img(snapshot)
+                    .absolute()
+                    .size_full()
+                    .object_fit(ObjectFit::Fill),
+            );
+        }
+        page
     }
 }
 
@@ -3064,7 +3436,7 @@ impl Render for BrowserView {
                 .min_h_0()
                 .flex()
                 .flex_col()
-                .child(self.render_page_area(theme))
+                .child(self.render_page_area(cx, theme))
                 .into_any_element();
         }
 
@@ -3072,7 +3444,7 @@ impl Render for BrowserView {
             self.render_host_error(error.into(), theme)
                 .into_any_element()
         } else if self.navigation_requested {
-            self.render_page_area(theme).into_any_element()
+            self.render_page_area(cx, theme).into_any_element()
         } else {
             self.render_start_page(theme).into_any_element()
         };
@@ -3109,6 +3481,8 @@ impl Render for BrowserView {
 impl BrowserView {
     pub fn overlay_open(&self, cx: &App) -> bool {
         self.address.read(cx).context_menu_open()
+            || self.device_width.read(cx).context_menu_open()
+            || self.device_height.read(cx).context_menu_open()
     }
 }
 
@@ -3404,5 +3778,124 @@ mod tests {
             .unwrap();
         assert_eq!(next.file_name().unwrap().to_str().unwrap(), "file (2).txt");
         std::fs::remove_dir_all(unique).unwrap();
+    }
+
+    #[test]
+    fn pinned_bounds_center_in_panel() {
+        // 1280×800 in a 1500×900 panel: exact device size, 110px side
+        // margins, 50px vertical.
+        let bounds = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 1280,
+                height: 800,
+            },
+        );
+        assert_eq!(bounds.origin, gpui::point(px(110.0), px(50.0)));
+        assert_eq!(bounds.size, gpui::size(px(1280.0), px(800.0)));
+
+        // A device larger than the panel clamps to the panel — the origin
+        // can never go negative.
+        let clamped = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 2000,
+                height: 1000,
+            },
+        );
+        assert_eq!(
+            clamped,
+            gpui::Bounds {
+                origin: gpui::point(px(0.0), px(0.0)),
+                size: gpui::size(px(1500.0), px(900.0)),
+            }
+        );
+
+        // Odd leftover pixels split as evenly as centering allows.
+        let odd = pinned_bounds(
+            gpui::size(px(999.0), px(501.0)),
+            DeviceViewport {
+                width: 500,
+                height: 500,
+            },
+        );
+        assert_eq!(odd.origin, gpui::point(px(249.5), px(0.5)));
+        assert_eq!(odd.size, gpui::size(px(500.0), px(500.0)));
+    }
+
+    #[test]
+    fn device_mode_defaults_and_toggle() {
+        // Off by default: no device mode, the page fills the panel.
+        let mut mode: Option<DeviceViewport> = None;
+        assert_eq!(mode, None);
+
+        // Setting pins exactly what was asked, after dimension clamping.
+        mode = Some(DeviceViewport::new(390, 844));
+        assert_eq!(
+            mode,
+            Some(DeviceViewport {
+                width: 390,
+                height: 844
+            })
+        );
+        assert_eq!(
+            DeviceViewport::new(10, 20),
+            DeviceViewport {
+                width: MIN_DEVICE_DIMENSION,
+                height: MIN_DEVICE_DIMENSION
+            }
+        );
+        assert_eq!(
+            DeviceViewport::new(99_999, 100_000),
+            DeviceViewport {
+                width: MAX_DEVICE_DIMENSION,
+                height: MAX_DEVICE_DIMENSION
+            }
+        );
+
+        // Clearing returns to fill.
+        mode = None;
+        assert_eq!(mode, None);
+
+        // Toggling on from off starts at the default; toggling again turns
+        // it off.
+        assert_eq!(device_mode_toggled(None), Some(DEFAULT_DEVICE_VIEWPORT));
+        assert_eq!(device_mode_toggled(Some(DEFAULT_DEVICE_VIEWPORT)), None);
+
+        // Free-entry fields parse bare integers and nothing else.
+        assert_eq!(parse_dimension(" 1280 "), Some(1280));
+        assert_eq!(parse_dimension("laptop"), None);
+        assert_eq!(parse_dimension(""), None);
+    }
+
+    #[test]
+    fn device_drag_snaps_to_whole_pixels() {
+        let from = DeviceViewport {
+            width: 1024,
+            height: 768,
+        };
+        // Sub-pixel deltas land on the nearest whole CSS pixel.
+        assert_eq!(
+            drag_resized(from, px(0.6), px(-0.4)),
+            DeviceViewport {
+                width: 1025,
+                height: 768
+            }
+        );
+        assert_eq!(
+            drag_resized(from, px(-0.6), px(0.4)),
+            DeviceViewport {
+                width: 1023,
+                height: 768
+            }
+        );
+        // Dragging past the bounds clamps instead of collapsing the frame.
+        assert_eq!(
+            drag_resized(from, px(-5000.0), px(-5000.0)),
+            DeviceViewport {
+                width: MIN_DEVICE_DIMENSION,
+                height: MIN_DEVICE_DIMENSION
+            }
+        );
     }
 }

@@ -2072,6 +2072,8 @@ browser.stop_loading:
   en: Stop loading (Esc)
 browser.reload:
   en: Reload (%{shortcut})
+browser.device_mode:
+  en: Device mode
 browser.open_external:
   en: Open in default browser
 browser.browse_web:
