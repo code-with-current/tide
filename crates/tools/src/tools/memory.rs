@@ -42,6 +42,10 @@ pub struct MemoryHit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
     pub start_line: u64,
+    /// Inclusive end line; `None` when the hit is a point (start == end)
+    /// or the backend could not resolve a range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u64>,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub similarity: Option<f64>,
@@ -235,15 +239,27 @@ pub(crate) fn run_memory(
         .map(|(i, hit)| {
             let loc = match &hit.source_name {
                 Some(source) => format!("[{source}] {}", hit.path),
-                None => format!(
-                    "{}:{}{}",
-                    short_path(&hit.path),
-                    hit.start_line,
-                    hit.symbol
-                        .as_deref()
-                        .map(|s| format!(" ({s})"))
-                        .unwrap_or_default()
-                ),
+                None => match hit.end_line {
+                    Some(e) if e > hit.start_line => format!(
+                        "{}:{}-{}{}",
+                        short_path(&hit.path),
+                        hit.start_line,
+                        e,
+                        hit.symbol
+                            .as_deref()
+                            .map(|s| format!(" ({s})"))
+                            .unwrap_or_default()
+                    ),
+                    _ => format!(
+                        "{}:{}{}",
+                        short_path(&hit.path),
+                        hit.start_line,
+                        hit.symbol
+                            .as_deref()
+                            .map(|s| format!(" ({s})"))
+                            .unwrap_or_default()
+                    ),
+                },
             };
             let sim = hit
                 .similarity
@@ -371,6 +387,7 @@ mod tests {
             path: path.into(),
             symbol: symbol.map(str::to_owned),
             start_line: 10,
+            end_line: None,
             content: format!("content of {id}"),
             similarity,
             source_name: None,
@@ -467,6 +484,22 @@ mod tests {
         };
         let out = run_memory("hooks", Some(5), "ws1", Some(&index));
         assert!(out.output.contains("[1] [React Docs] react.dev/learn"));
+    }
+
+    #[test]
+    fn spanning_hits_cite_ranges_and_point_hits_cite_single_lines() {
+        let mut span = hit("c1", "/repo/src/auth.ts", Some("login"), Some(0.9));
+        span.end_line = Some(24);
+        let point = hit("c2", "/repo/src/util.ts", None, None);
+        let index = FakeIndex {
+            total: 2,
+            vector: vec![span, point],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        let out = run_memory("auth", Some(5), "ws1", Some(&index));
+        assert!(out.output.contains("/repo/src/auth.ts:10-24 (login)"));
+        assert!(out.output.contains("/repo/src/util.ts:10\n"));
     }
 
     #[test]

@@ -195,6 +195,7 @@ fn hit_from_row(
             Some(row.symbol.clone())
         },
         start_line: row.start_line.max(0) as u64,
+        end_line: (row.end_line > row.start_line).then(|| row.end_line.max(0) as u64),
         content: row.content.clone(),
         similarity,
         source_name,
@@ -1946,5 +1947,29 @@ mod tests {
             "custom-ollama-local"
         );
         assert_eq!(super::endpoint_slug("---", &[]), "custom-endpoint");
+    }
+
+    #[test]
+    fn hit_from_row_carries_end_line_only_when_range_spans() {
+        use super::{ChunkRow, hit_from_row};
+        let row = ChunkRow {
+            id: "x".into(),
+            path: "/a/b.md".into(),
+            symbol: String::new(),
+            content: "body".into(),
+            content_hash: "h".into(),
+            start_line: 10,
+            end_line: 24,
+            embedder_id: "local-code-512".into(),
+            created_at: 0,
+            source_id: None,
+        };
+        let hit = hit_from_row(&row, None, None, None);
+        assert_eq!(hit.end_line, Some(24));
+        let flat = ChunkRow {
+            end_line: 10,
+            ..row
+        };
+        assert_eq!(hit_from_row(&flat, None, None, None).end_line, None);
     }
 }
