@@ -92,7 +92,7 @@ describe("__tideSnapshot output contract", () => {
 
   test("exposes caps and starts the serial at 0", async () => {
     const win = await loadFixture("login.html");
-    expect(win.__tideCaps).toEqual({ MAX_NODES: 300, MAX_DEPTH: 12, MAX_NAME: 80 });
+    expect(win.__tideCaps).toEqual({ MAX_NODES: 300, MAX_DEPTH: 12, MAX_NAME: 80, MAX_VISITS: 3000 });
     // serial is 0 before any snapshot, 1 after the first call
     expect(win.__tideSerial).toBe(0);
     win.__tideSnapshot();
@@ -188,6 +188,53 @@ describe("hostile fixture: hidden, zero-size, deep, truncated", () => {
     // the <p> sits at depth 16 inside 15 nested divs — must be cut
     expect(names(s)).not.toContain("Way too deep");
     expect(s.truncated).toBe(true);
+  });
+});
+
+describe("non-rendered metadata and presentational images", () => {
+  test("script/style/noscript/template source text never leaks into the tree", async () => {
+    const s = await loadFixture("nonrendered.html").then(snap);
+    const all = names(s).join("|");
+    expect(all).not.toContain("secret");
+    expect(all).not.toContain("leaky tokens");
+    expect(all).not.toContain("color: red");
+    expect(all).not.toContain("style body text");
+    expect(all).not.toContain("Enable JavaScript to continue");
+    expect(all).not.toContain("Template button");
+    expect(byRole(s, "button").length).toBe(0);
+    expect(s.truncated).toBe(false);
+    // survivors
+    expect(findEntry(s, "heading", "Real content")).toBeDefined();
+    expect(findEntry(s, "text", "After metadata")).toBeDefined();
+  });
+
+  test("img with alt=\"\" is ARIA-presentational and skipped", async () => {
+    const s = await loadFixture("nonrendered.html").then(snap);
+    expect(byRole(s, "img").length).toBe(0);
+    expect(names(s)).not.toContain("");
+  });
+});
+
+describe("depth off-by-one", () => {
+  test("element at exactly depth 12 is emitted; depth 13 is cut and flagged", async () => {
+    const s = await loadFixture("depth_edge.html").then(snap);
+    expect(findEntry(s, "text", "Visible at depth twelve")).toBeDefined();
+    expect(names(s)).not.toContain("Cut at depth thirteen");
+    expect(s.truncated).toBe(true);
+  });
+});
+
+describe("truncated flag hygiene", () => {
+  test("exactly 300 entries followed by whitespace/hidden content stays unflagged", async () => {
+    const s = await loadFixture("exact_cap.html").then(snap);
+    // 1 list + 299 listitems = exactly MAX_NODES; the trailing whitespace
+    // text node, display:none div, and aria-hidden span are dropped without
+    // being emit-able, so they must NOT set truncated.
+    expect(s.tree.length).toBe(300);
+    expect(s.truncated).toBe(false);
+    expect(names(s)).toContain("Item 299");
+    expect(names(s)).not.toContain("ghost");
+    expect(names(s)).not.toContain("phantom");
   });
 });
 

@@ -8,8 +8,20 @@
   var MAX_NODES = 300;
   var MAX_DEPTH = 12;
   var MAX_NAME = 80;
+  // Elements examined (walked or scanned) before the traversal gives up.
+  // Bounds wrapper-heavy pages where emitted entries are rare.
+  var MAX_VISITS = 3000;
+  // Raw-character margin for name collection: collecting a little past
+  // MAX_NAME keeps the post-collapse slice honest (whitespace runs shrink
+  // raw text) without building 100k-char strings.
+  var TEXT_MARGIN = 4 * MAX_NAME;
 
-  window.__tideCaps = { MAX_NODES: MAX_NODES, MAX_DEPTH: MAX_DEPTH, MAX_NAME: MAX_NAME };
+  window.__tideCaps = {
+    MAX_NODES: MAX_NODES,
+    MAX_DEPTH: MAX_DEPTH,
+    MAX_NAME: MAX_NAME,
+    MAX_VISITS: MAX_VISITS
+  };
   window.__tideSerial = 0;
   window.__tideRefs = new Map();
 
@@ -37,6 +49,9 @@
     heading: 1, img: 1, list: 1, listitem: 1, navigation: 1, text: 1
   };
   var STRUCTURAL_ROLES = { list: 1, listitem: 1, navigation: 1 };
+  // Never rendered (UA-stylesheet hidden or inert metadata): their source
+  // text must not leak into names or the tree.
+  var NON_RENDERED = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1 };
 
   // Visibility sniffing works on attributes/inline styles only: webviews give
   // us no computed layout here, and host-side tests run under linkedom, which
@@ -50,6 +65,16 @@
     if (/(?:^|;)\s*width\s*:\s*0(?:\.0+)?\s*(?:px|%)?\s*(?:;|$)/i.test(style)) return true;
     if (/(?:^|;)\s*height\s*:\s*0(?:\.0+)?\s*(?:px|%)?\s*(?:;|$)/i.test(style)) return true;
     return false;
+  }
+
+  function skipped(el) {
+    return NON_RENDERED[el.tagName] === 1 || isHidden(el);
+  }
+
+  // alt="" is ARIA-presentational: the image is decoration, not content.
+  function presentationalImg(el) {
+    return el.tagName === "IMG" && el.hasAttribute("alt") &&
+      collapse(el.getAttribute("alt")) === "";
   }
 
   function deriveRole(el) {
@@ -75,18 +100,38 @@
     return s.length > MAX_NAME ? s.slice(0, MAX_NAME) : s;
   }
 
-  // innerText approximation: concatenates text nodes, skipping hidden subtrees.
-  function visibleText(el) {
+  // innerText approximation: concatenates text nodes, skipping hidden and
+  // non-rendered subtrees, stopping once `limit` raw chars are collected.
+  function visibleText(el, limit) {
     var out = "";
     (function walk(node) {
+      if (limit && out.length >= limit) return;
       if (node.nodeType === 3) {
         out += node.nodeValue || "";
-      } else if (node.nodeType === 1 && !isHidden(node)) {
+      } else if (node.nodeType === 1 && !skipped(node)) {
         var kids = node.childNodes;
-        for (var i = 0; i < kids.length; i++) walk(kids[i]);
+        for (var i = 0; i < kids.length; i++) {
+          walk(kids[i]);
+          if (limit && out.length >= limit) return;
+        }
       }
     })(el);
     return out;
+  }
+
+  // Existence check for visible text: early-exits on the first non-space
+  // character instead of building a string.
+  function hasText(el) {
+    var kids = el.childNodes;
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n.nodeType === 3) {
+        if (/\S/.test(n.nodeValue || "")) return true;
+      } else if (n.nodeType === 1 && !skipped(n) && hasText(n)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Name resolution order: aria-label -> alt/placeholder -> innerText (capped).
@@ -95,7 +140,7 @@
     if (label) return label;
     var attr = attrName(el);
     if (attr) return attr;
-    return cap(visibleText(el));
+    return cap(visibleText(el, TEXT_MARGIN));
   }
 
   // Structural containers with emitting children forgo the innerText fallback:
@@ -129,19 +174,6 @@
     return v == null ? "" : String(v);
   }
 
-  // Would a walk of this subtree emit anything? Used to decide whether a
-  // role-less element is a transparent container or a text leaf. Ignores depth
-  // and node caps on purpose: transparency is about structure, not budget.
-  function subtreeEmits(el) {
-    if (isHidden(el)) return false;
-    if (deriveRole(el)) return true;
-    var kids = el.children;
-    for (var i = 0; i < kids.length; i++) {
-      if (subtreeEmits(kids[i])) return true;
-    }
-    return collapse(visibleText(el)) !== "";
-  }
-
   window.__tideSnapshot = function () {
     window.__tideSerial += 1;
     var serial = window.__tideSerial;
@@ -152,6 +184,11 @@
     var counter = 0;
     var truncated = false;
     var stopped = false;
+    // Walk visits + existence-scan examinations share one budget; memoizing
+    // the scans keeps each element's answer computed at most once per
+    // snapshot, so wrapper-heavy DOMs cost O(visits), not O(depth x visits).
+    var visited = 0;
+    var emits = new Map();
 
     // Every element the walk visits consumes a number (emitted or not), so
     // refs stay unique and deterministic: s<serial>e<counter>.
@@ -160,22 +197,50 @@
       return "s" + serial + "e" + counter;
     }
 
-    function atCap() {
+    // The one place node-cap truncation is flagged: an entry that would be
+    // pushed cannot fit. Whitespace or hidden content past the cap must not
+    // set the flag.
+    function push(ref, el, role, name) {
       if (tree.length >= MAX_NODES) {
         truncated = true;
         stopped = true;
-        return true;
+        return;
       }
-      return false;
-    }
-
-    function push(ref, el, role, name) {
-      if (atCap()) return;
       var entry = { ref: ref, role: role, name: name };
       if (role === "textbox") entry.value = inputValue(el);
       if (role === "heading") entry.level = headingLevel(el);
       tree.push(entry);
       refs.set(ref, el);
+    }
+
+    // Would a walk of this subtree emit anything? Used to decide whether a
+    // role-less element is a transparent container or a text leaf. Ignores
+    // depth and node caps on purpose: transparency is about structure, not
+    // budget. Once the visit budget dies it reports "emits" so every caller
+    // unwinds; the walk's stopped flag ends everything.
+    function subtreeEmits(el) {
+      if (stopped) return true;
+      var cached = emits.get(el);
+      if (cached !== undefined) return cached;
+      if (visited >= MAX_VISITS) {
+        truncated = true;
+        stopped = true;
+        return true;
+      }
+      visited += 1;
+      var result;
+      if (skipped(el)) {
+        result = false;
+      } else if (deriveRole(el)) {
+        result = !presentationalImg(el);
+      } else {
+        result = false;
+        var kids = el.children;
+        for (var i = 0; i < kids.length && !result; i++) result = subtreeEmits(kids[i]);
+        if (!result) result = hasText(el);
+      }
+      emits.set(el, result);
+      return result;
     }
 
     function childEmits(el) {
@@ -187,9 +252,10 @@
     }
 
     // Free-floating text inside a transparent container: addressable via the
-    // parent element.
+    // parent element. Whitespace-only nodes are dropped before any cap logic
+    // so they can never be the reason truncation gets flagged.
     function walkText(node) {
-      if (atCap()) return;
+      if (stopped) return;
       var text = cap(node.nodeValue || "");
       if (!text) return;
       var ref = nextRef();
@@ -215,15 +281,21 @@
 
     function walkElement(el, depth) {
       if (stopped) return;
-      if (atCap()) return;
+      if (visited >= MAX_VISITS) {
+        truncated = true;
+        stopped = true;
+        return;
+      }
+      visited += 1;
       if (depth > MAX_DEPTH) {
         truncated = true;
         return;
       }
       var ref = nextRef();
-      if (isHidden(el)) return;
+      if (skipped(el)) return;
       var role = deriveRole(el);
       if (role) {
+        if (presentationalImg(el)) return;
         if (STRUCTURAL_ROLES[role] && childEmits(el)) {
           push(ref, el, role, labelName(el));
           walkChildren(el, depth + 1);
@@ -238,7 +310,7 @@
         walkChildren(el, depth + 1);
         return;
       }
-      var text = cap(visibleText(el));
+      var text = cap(visibleText(el, TEXT_MARGIN));
       if (text) push(ref, el, "text", text);
     }
 
