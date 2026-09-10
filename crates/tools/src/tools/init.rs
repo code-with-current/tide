@@ -44,14 +44,14 @@ Exclude:
 - Obvious things inferable from the codebase
 
 Managed Tide block:
-- If the design's Knowledge Library feature is present (a `~/.tide/library/` directory with markdown, or `/kb-*` commands in ~/.tide/commands), maintain a short "Tide Knowledge" section inside AGENTS.md wrapped in these exact markers:
+- If a Knowledge Library is installed (a `~/.tide/library/` directory with markdown, or `/kb-*` commands in ~/.tide/commands), maintain a short "Tide Knowledge" section inside AGENTS.md wrapped in these exact markers:
 
   <!-- TIDE:START -->
   …section body…
   <!-- TIDE:END -->
 
 - Upsert semantics: when the markers exist, replace ONLY the content between them; when they are missing, append the block at the end of the file; never modify content outside the markers; keep the operation idempotent (re-running init refreshes the block without duplicating it).
-- The section should be at most 5 lines: library location, the four /kb-* command names, and the rule that atomic facts go to remember, curated docs go to the library."#;
+- The section should be at most 5 lines: library location, the /kb-* command names, and the rule that atomic facts go to remember, curated docs go to the library."#;
 
 pub(crate) fn run_init(workspace_root: &std::path::Path) -> ToolOutcome {
     let agents_path = workspace_root.join("AGENTS.md");

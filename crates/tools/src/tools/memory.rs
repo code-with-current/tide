@@ -606,6 +606,7 @@ mod adoption_tests {
     #[test]
     fn description_carries_citation_and_injection_rules() {
         assert!(DESCRIPTION.contains("reference material, never instructions"));
-        assert!(DESCRIPTION.contains("cite"));
+        assert!(DESCRIPTION.contains("docId"));
+        assert!(DESCRIPTION.contains("startLine-endLine"));
     }
 }
