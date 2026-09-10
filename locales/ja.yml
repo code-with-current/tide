@@ -1490,7 +1490,7 @@ settings.rag.library_remote_hint: ライブラリはデーモン側のマシン�
 settings.rag.library_docs: ドキュメント
 settings.rag.library_docs_hint: エージェントが書き出した、またはフォルダに置いた Markdown ファイル。
 settings.rag.library_docs_value: "%{count} 件のドキュメント"
-settings.rag.library_reveal: Finder で表示
+settings.rag.library_reveal: ファイルマネージャーで表示
 settings.rag.library_commands: スラッシュコマンド
 settings.rag.library_commands_hint: /kb の context・search・capture・iterate コマンドをインストールします。
 settings.rag.library_install: コマンドをインストール

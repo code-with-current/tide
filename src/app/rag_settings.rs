@@ -116,6 +116,10 @@ pub(crate) struct RagSettingsPanel {
     pub library_requested: std::cell::Cell<bool>,
     /// The `/kb` install button is in flight.
     pub kb_pending: std::cell::Cell<bool>,
+    /// Armed by a reindex of the library row; the next Sources reply
+    /// that observes the row settled refreshes the card's doc count
+    /// once, then disarms.
+    pub library_reindexing: std::cell::Cell<bool>,
     /// Last install outcome for the row's hint line ("4 installed",
     /// "Already installed", or the error verbatim).
     pub kb_note: Option<String>,
@@ -214,6 +218,7 @@ impl RagSettingsPanel {
             library_error: None,
             library_requested: std::cell::Cell::new(false),
             kb_pending: std::cell::Cell::new(false),
+            library_reindexing: std::cell::Cell::new(false),
             kb_note: None,
             inline: std::cell::RefCell::new(None),
         }
@@ -922,6 +927,19 @@ impl Tide {
         {
             self.rag_settings.pending_source = Some(source_id.clone());
         }
+        // The doc-count refresh latch: armed only by a reindex of the
+        // library row itself. Remove must never arm it — its Sources
+        // reply would otherwise trigger the ensure that resurrects the
+        // row (and removal is refused server-side regardless).
+        if let client::Command::SourcesReindex { source_id } = &command
+            && self
+                .rag_settings
+                .library
+                .as_ref()
+                .is_some_and(|state| state.source_id == *source_id)
+        {
+            self.rag_settings.library_reindexing.set(true);
+        }
         self.rag_dispatch(
             move |payload| match payload {
                 client::ResponsePayload::Sources { sources } => RagOpsEvent::Sources(Ok(sources)),
@@ -1011,14 +1029,29 @@ impl Tide {
                             .iter()
                             .any(|source| source.status == "queued" || source.status == "indexing");
                         // The library card's doc count refreshes when its
-                        // own reindex settles (was pending, nothing left
-                        // transient) — one ensure per finished reindex,
-                        // never per poll tick.
+                        // reindex settles: the latch was armed by the
+                        // reindex click and this reply observes the row
+                        // non-transient. A row that vanished (removed
+                        // out-of-band) disarms the latch without a
+                        // refresh — the ensure must not resurrect it.
+                        let library_row = self.rag_settings.library.as_ref().and_then(|state| {
+                            sources
+                                .iter()
+                                .find(|source| source.id == state.source_id)
+                                .map(|source| source.status.as_str())
+                        });
                         let refresh_library = library_refresh_after_sources(
-                            self.rag_settings.pending_source.as_deref(),
-                            self.rag_settings.library.as_ref(),
-                            transient,
+                            self.rag_settings.library_reindexing.get(),
+                            library_row,
                         );
+                        if refresh_library
+                            || (self.rag_settings.library_reindexing.get() && library_row.is_none())
+                        {
+                            self.rag_settings.library_reindexing.set(false);
+                        }
+                        if refresh_library {
+                            self.rag_library_ensure();
+                        }
                         self.rag_settings.sources = sources;
                         self.rag_settings.sources_error = None;
                         self.rag_settings.pending_source = None;
@@ -1318,18 +1351,14 @@ fn source_kind_label(kind: &str) -> String {
     }
 }
 
-/// Whether a Sources reply should refresh the library card: the library's
-/// own reindex just settled (it was the pending mutation and no source is
-/// transient anymore — otherwise every 2 s poll tick would re-ensure).
-fn library_refresh_after_sources(
-    pending: Option<&str>,
-    library: Option<&LibraryState>,
-    transient: bool,
-) -> bool {
-    match (pending, library) {
-        (Some(pending), Some(library)) => !transient && pending == library.source_id,
-        _ => false,
-    }
+/// Whether a Sources reply should refresh the library card's doc count:
+/// the reindex latch is armed (the user reindexed the library row) and
+/// that row has settled — status neither queued nor indexing. The first
+/// reply after a reindex request observes the row still transient (the
+/// daemon marks "queued" synchronously), so the refresh fires on the
+/// settle reply, exactly once — never per 2 s poll tick.
+fn library_refresh_after_sources(latch: bool, library_row: Option<&str>) -> bool {
+    latch && matches!(library_row, Some(status) if status != "queued" && status != "indexing")
 }
 
 /// The install hint line from the reply count: "N installed", or the
@@ -3250,10 +3279,11 @@ impl Tide {
     /// comes from the daemon's reply (a remote daemon's data dir is not
     /// ours to guess).
     pub(super) fn render_library_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        if self.rag_settings.library.is_none()
-            && self.rag_settings.library_error.is_none()
-            && !self.rag_settings.library_requested.get()
-        {
+        // Same retry idiom as the config card (`is_none() && !requested`):
+        // a failed ensure clears `library_requested` in the error arm, so
+        // the next render retries instead of stranding the card — the
+        // error strip keeps rendering while the retry is in flight.
+        if self.rag_settings.library.is_none() && !self.rag_settings.library_requested.get() {
             self.rag_settings.library_requested.set(true);
             self.rag_library_ensure();
         }
@@ -3912,14 +3942,6 @@ mod tests {
         assert!(rag_endpoint_validate("n", "http://localhost:11434/v1", "m", "ollama").is_none());
     }
 
-    fn library_state(source_id: &str) -> LibraryState {
-        LibraryState {
-            source_id: source_id.into(),
-            doc_count: 2,
-            root: PathBuf::from("/data/library"),
-        }
-    }
-
     #[test]
     fn source_kind_label_covers_library_and_falls_back_to_raw() {
         // The four addable kinds reuse the add-dialog labels; library has
@@ -3949,29 +3971,19 @@ mod tests {
     }
 
     #[test]
-    fn library_refresh_waits_for_its_own_settled_reindex() {
-        let library = library_state("src-lib");
-        // The library's reindex was pending and nothing is transient.
-        assert!(library_refresh_after_sources(
-            Some("src-lib"),
-            Some(&library),
-            false
-        ));
-        // Still indexing — a poll tick, not a settle: no re-ensure.
-        assert!(!library_refresh_after_sources(
-            Some("src-lib"),
-            Some(&library),
-            true
-        ));
-        // A different source settled: leave the card alone.
-        assert!(!library_refresh_after_sources(
-            Some("src-other"),
-            Some(&library),
-            false
-        ));
-        // No pending mutation (fresh list) or card not loaded yet.
-        assert!(!library_refresh_after_sources(None, Some(&library), false));
-        assert!(!library_refresh_after_sources(Some("src-lib"), None, false));
+    fn library_refresh_fires_once_when_the_reindexed_row_settles() {
+        // Reply 1 — right after the reindex click: the daemon has already
+        // marked the row queued/indexing, so the latch stays armed and
+        // nothing refreshes (this covers every 2 s poll tick too).
+        assert!(!library_refresh_after_sources(true, Some("queued")));
+        assert!(!library_refresh_after_sources(true, Some("indexing")));
+        // Reply 2 — the row settled (idle, or failed): refresh once.
+        assert!(library_refresh_after_sources(true, Some("idle")));
+        assert!(library_refresh_after_sources(true, Some("error")));
+        // An unarmed latch (no reindex clicked — Remove never arms it)
+        // and an absent row never refresh.
+        assert!(!library_refresh_after_sources(false, Some("idle")));
+        assert!(!library_refresh_after_sources(true, None));
     }
 
     #[test]

@@ -1533,11 +1533,16 @@ pub fn add_source(
     Ok(source_wire(&source))
 }
 
-/// Remove a source and its chunks.
+/// Delete a source and its chunks. The Knowledge Library row is managed
+/// by Tide (the card's ensure recreates it), so removal is refused with
+/// an actionable error instead of letting the two fight.
 pub fn remove_source(source_id: &str) -> Result<(), String> {
     let ks = open_knowledge()?;
-    if ks.get_source(source_id).is_none() {
+    let Some(source) = ks.get_source(source_id) else {
         return Err(format!("unknown source {source_id:?}"));
+    };
+    if source.kind == "library" {
+        return Err("the Knowledge Library source cannot be removed; it is managed by Tide".into());
     }
     let _ = ks.delete_source(source_id);
     let _ = ks.purge_orphans(source_id);
@@ -2344,5 +2349,48 @@ mod tests {
         let empty: HashSet<String> = HashSet::new();
         decorate_library_doc_ids(&mut hits, &empty, &ids);
         assert!(hits.iter().all(|h| h.doc_id.is_none()));
+    }
+
+    #[test]
+    fn library_source_refuses_removal_normal_sources_do_not() {
+        // TIDE_DATA_DIR is process-global — serialize on the shared lock
+        // and restore the env even when an assert fails, so parallel
+        // tests never see the scratch dir.
+        let _guard = crate::TIDE_DIR_TEST_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        struct EnvRestore;
+        impl Drop for EnvRestore {
+            fn drop(&mut self) {
+                unsafe { std::env::remove_var(store::paths::DATA_DIR_ENV) };
+            }
+        }
+        let _restore = EnvRestore;
+        unsafe { std::env::set_var(store::paths::DATA_DIR_ENV, tmp.path()) };
+
+        let library_id = super::ensure_library_source().unwrap();
+        let error = super::remove_source(&library_id).unwrap_err();
+        assert!(
+            error.contains("cannot be removed") && error.contains("managed by Tide"),
+            "unexpected refusal text: {error}"
+        );
+        // The refusal left the row in place — the library is always-on.
+        assert!(
+            super::open_knowledge()
+                .unwrap()
+                .get_source(&library_id)
+                .is_some()
+        );
+        // Ensure is idempotent: a second call returns the same row.
+        assert_eq!(super::ensure_library_source().unwrap(), library_id);
+
+        // An ordinary source still removes cleanly, chunks and all.
+        let normal = super::add_source("React Docs", "docs", "/tmp/react-docs", None).unwrap();
+        super::remove_source(&normal.id).unwrap();
+        assert!(
+            super::open_knowledge()
+                .unwrap()
+                .get_source(&normal.id)
+                .is_none()
+        );
     }
 }

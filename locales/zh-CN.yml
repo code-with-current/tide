@@ -1438,7 +1438,7 @@ settings.rag.library_remote_hint: 知识库位于守护进程所在的机器上�
 settings.rag.library_docs: 文档
 settings.rag.library_docs_hint: 智能体写入或你放入该文件夹的 Markdown 文件。
 settings.rag.library_docs_value: "%{count} 篇文档"
-settings.rag.library_reveal: 在访达中显示
+settings.rag.library_reveal: 在文件管理器中显示
 settings.rag.library_commands: 斜杠命令
 settings.rag.library_commands_hint: 安装 /kb 上下文、搜索、捕获与迭代命令。
 settings.rag.library_install: 安装命令
