@@ -50,6 +50,10 @@ pub struct MemoryHit {
     /// sources; `None` for workspace code chunks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heading: Option<String>,
+    /// Stable library doc id — survives renames/moves; cite this for
+    /// Knowledge Library hits instead of the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_id: Option<String>,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub similarity: Option<f64>,
@@ -366,6 +370,16 @@ pub(crate) fn run_memory(
                 .filter(|h| !h.is_empty())
                 .map(|h| format!(" · {h}"))
                 .unwrap_or_default();
+            // The stable library docId appends at the same single suffix
+            // point — full id, not truncated: the model must echo it
+            // verbatim in citations (Task 1's DESCRIPTION says prefer it
+            // over the path; Task 10's /kb-iterate mandates it).
+            let doc = hit
+                .doc_id
+                .as_deref()
+                .filter(|d| !d.is_empty())
+                .map(|d| format!(" · doc {d}"))
+                .unwrap_or_default();
             let sim = hit
                 .similarity
                 .map(|s| format!(" · {}%", (s * 100.0).round() as u64))
@@ -377,7 +391,7 @@ pub(crate) fn run_memory(
             } else {
                 hit.content.clone()
             };
-            format!("[{}] {loc}{heading}{sim}\n{body}", i + 1)
+            format!("[{}] {loc}{heading}{doc}{sim}\n{body}", i + 1)
         })
         .collect::<Vec<_>>();
 
@@ -503,6 +517,7 @@ mod tests {
             start_line: 10,
             end_line: None,
             heading: None,
+            doc_id: None,
             content: format!("content of {id}"),
             similarity,
             source_name: None,
@@ -674,6 +689,55 @@ mod tests {
     }
 
     #[test]
+    fn doc_id_appends_after_heading_and_legacy_payloads_deserialize() {
+        // Knowledge-shaped: label · heading · doc, before the similarity.
+        let knowledge = MemoryHit {
+            source_name: Some("Knowledge Library".into()),
+            path: "proj/d.md".into(),
+            heading: Some("Setup > Auth".into()),
+            doc_id: Some("3f2a1c9e".into()),
+            ..hit("k1", "proj/d.md", None, None)
+        };
+        let index = FakeIndex {
+            total: 1,
+            vector: vec![knowledge],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
+        assert!(out
+            .output
+            .contains("[1] [Knowledge Library] proj/d.md · Setup > Auth · doc 3f2a1c9e\n"));
+
+        // No docId → the location renders exactly as before.
+        let plain = MemoryHit {
+            source_name: Some("Knowledge Library".into()),
+            path: "proj/d.md".into(),
+            heading: Some("Setup > Auth".into()),
+            ..hit("k2", "proj/d.md", None, None)
+        };
+        let index = FakeIndex {
+            total: 1,
+            vector: vec![plain],
+            fts: vec![],
+            ..FakeIndex::default()
+        };
+        let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
+        assert!(out
+            .output
+            .contains("[1] [Knowledge Library] proj/d.md · Setup > Auth\n"));
+
+        // Payloads serialized before the field existed still deserialize
+        // (serde default) and skip serialization when None.
+        let legacy: MemoryHit = serde_json::from_value(serde_json::json!({
+            "id": "x", "path": "p", "startLine": 1, "content": "c"
+        }))
+        .unwrap();
+        assert_eq!(legacy.doc_id, None);
+        assert!(!serde_json::to_value(&legacy).unwrap().to_string().contains("docId"));
+    }
+
+    #[test]
     fn long_bodies_truncate_at_cap() {
         let long = MemoryHit {
             content: "y".repeat(BODY_CAP + 500),
@@ -815,6 +879,7 @@ mod tests {
             recency: None,
             end_line: None,
             heading: None,
+            doc_id: None,
         };
         // doc A: top weight 1/62 + full coverage (n=5); doc B: single
         // rank-0 hit → 1/61 top but only 0.68 total weight (coverage
@@ -849,6 +914,7 @@ mod tests {
             recency: None,
             end_line: None,
             heading: None,
+            doc_id: None,
         };
         let hits = vec![
             mk("x.md", Some("React Docs")),
