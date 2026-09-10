@@ -73,6 +73,9 @@ pub struct ChunkRow {
     /// Knowledge source this chunk belongs to; null for workspace code.
     #[serde(default)]
     pub source_id: Option<String>,
+    /// Heading breadcrumb for prose chunks ("A > B"); null for code chunks.
+    #[serde(default)]
+    pub heading: Option<String>,
 }
 
 /// Vector hit — chunk row + cosine similarity (sqlite-vec returns L2
@@ -124,11 +127,12 @@ fn row_from_db(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChunkRow> {
         embedder_id: row.get("embedderId")?,
         created_at: row.get("createdAt")?,
         source_id: row.get("sourceId")?,
+        heading: row.get("heading")?,
     })
 }
 
 const CHUNK_COLUMNS: &str =
-    "id, path, symbol, content, contentHash, startLine, endLine, embedderId, createdAt, sourceId";
+    "id, path, symbol, content, contentHash, startLine, endLine, embedderId, createdAt, sourceId, heading";
 
 /// Handle to an open RAG index. Methods are sync; `drop` closes the
 /// connection.
@@ -254,6 +258,26 @@ impl RagStore {
         let parsed = stored.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
         // Corrupt/non-numeric values must not silently skip migrations.
         let current = parsed;
+        // `heading` (prose breadcrumbs) rides OUTSIDE the version ladder:
+        // v3 indexes already exist, so the versioned blocks below never
+        // see them again — every open runs this guarded no-op ALTER
+        // instead (same guard idiom as the sourceId block). Fresh dbs
+        // skip it (no chunks table yet) and get the column from the v1
+        // DDL below.
+        let chunks_exists: bool = self
+            .conn
+            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chunks'")?
+            .exists([])?;
+        if chunks_exists {
+            let has_heading: bool = self
+                .conn
+                .prepare("SELECT 1 FROM pragma_table_info('chunks') WHERE name = 'heading'")?
+                .exists([])?;
+            if !has_heading {
+                self.conn
+                    .execute_batch("ALTER TABLE chunks ADD COLUMN heading TEXT;")?;
+            }
+        }
         if current >= SCHEMA_VERSION {
             return Ok(());
         }
@@ -278,7 +302,8 @@ impl RagStore {
                   startLine    INTEGER NOT NULL,
                   endLine      INTEGER NOT NULL,
                   embedderId   TEXT NOT NULL,
-                  createdAt    INTEGER NOT NULL
+                  createdAt    INTEGER NOT NULL,
+                  heading      TEXT
                 );
                 CREATE INDEX IF NOT EXISTS chunks_by_path ON chunks(path);
                 CREATE INDEX IF NOT EXISTS chunks_by_hash ON chunks(contentHash);
@@ -418,8 +443,8 @@ impl RagStore {
         let tx = self.conn.unchecked_transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO chunks(id, path, symbol, content, contentHash, startLine, endLine, embedderId, createdAt, sourceId)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "INSERT INTO chunks(id, path, symbol, content, contentHash, startLine, endLine, embedderId, createdAt, sourceId, heading)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT(id) DO UPDATE SET
                    path = excluded.path,
                    symbol = excluded.symbol,
@@ -428,7 +453,8 @@ impl RagStore {
                    startLine = excluded.startLine,
                    endLine = excluded.endLine,
                    embedderId = excluded.embedderId,
-                   sourceId = excluded.sourceId
+                   sourceId = excluded.sourceId,
+                   heading = excluded.heading
                  RETURNING rowid",
             )?;
             // FTS5 has no UPSERT — delete + insert in the same transaction.
@@ -449,6 +475,7 @@ impl RagStore {
                         r.embedder_id,
                         r.created_at,
                         r.source_id,
+                        r.heading,
                     ],
                     |row| row.get(0),
                 )?;
@@ -626,7 +653,7 @@ impl RagStore {
     /// each token double-quoted so special chars are literal text.
     pub fn query_by_fts(&self, text: &str, k: usize) -> rusqlite::Result<Vec<FtsHit>> {
         let safe = sanitize_fts_query(text);
-        let mut stmt = self.conn.prepare("SELECT c.id, c.path, c.symbol, c.content, c.contentHash, c.startLine, c.endLine, c.embedderId, c.createdAt, c.sourceId, rank
+        let mut stmt = self.conn.prepare("SELECT c.id, c.path, c.symbol, c.content, c.contentHash, c.startLine, c.endLine, c.embedderId, c.createdAt, c.sourceId, c.heading, rank
              FROM chunks_fts f
              JOIN chunks c ON c.id = f.chunkId
              WHERE chunks_fts MATCH ?1
@@ -646,8 +673,9 @@ impl RagStore {
                         embedder_id: row.get(7)?,
                         created_at: row.get(8)?,
                         source_id: row.get(9)?,
+                        heading: row.get(10)?,
                     },
-                    rank: row.get(10)?,
+                    rank: row.get(11)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -749,6 +777,7 @@ mod tests {
             embedder_id: "local-code-512".into(),
             created_at: unix_ms_now(),
             source_id: None,
+            heading: None,
         }
     }
 
@@ -771,6 +800,60 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn heading_column_roundtrips_and_existing_dbs_gain_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        let store = RagStore::open_at(&db).unwrap();
+        let chunk = ChunkRow {
+            id: "h1".into(),
+            path: "doc.md".into(),
+            symbol: String::new(),
+            content: "body".into(),
+            content_hash: "hash".into(),
+            start_line: 1,
+            end_line: 5,
+            embedder_id: "local-code-512".into(),
+            created_at: unix_ms_now(),
+            source_id: Some("s".into()),
+            heading: Some("A > B".into()),
+        };
+        store.upsert_chunks(&[chunk]).unwrap();
+        let back = store.by_path("doc.md").unwrap();
+        assert_eq!(back[0].heading.as_deref(), Some("A > B"));
+
+        // Simulate a pre-heading v3 db (heading ships without a version
+        // bump, so real old dbs sit at schemaVersion 3 without the
+        // column): drop it, reopen — the versionless guarded ALTER must
+        // add it back while keeping existing rows readable.
+        drop(store);
+        Connection::open(&db)
+            .unwrap()
+            .execute_batch("ALTER TABLE chunks DROP COLUMN heading;")
+            .unwrap();
+        let reopened = RagStore::open_at(&db).unwrap();
+        let heading_cols: i64 = reopened
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name = 'heading'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(heading_cols, 1, "reopen must re-add the heading column");
+        let back = reopened.by_path("doc.md").unwrap();
+        assert_eq!(back[0].heading, None, "pre-migration rows read as None");
+        assert_eq!(back[0].content, "body");
+        // The migrated db accepts heading writes again.
+        let mut updated = back[0].clone();
+        updated.heading = Some("C".into());
+        reopened.upsert_chunks(&[updated]).unwrap();
+        assert_eq!(
+            reopened.by_path("doc.md").unwrap()[0].heading.as_deref(),
+            Some("C")
+        );
     }
 
     #[test]

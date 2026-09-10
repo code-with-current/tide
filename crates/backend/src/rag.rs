@@ -1967,6 +1967,7 @@ mod tests {
             embedder_id: "local-code-512".into(),
             created_at: 0,
             source_id: None,
+            heading: None,
         };
         let hit = hit_from_row(&row, None, None, None);
         assert_eq!(hit.end_line, Some(24));

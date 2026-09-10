@@ -250,6 +250,8 @@ pub struct PreparedChunk {
     pub start_line: i64,
     pub end_line: i64,
     pub source_id: Option<String>,
+    /// Heading breadcrumb for prose chunks ("A > B"); null for code chunks.
+    pub heading: Option<String>,
 }
 
 impl From<&crate::chunker::Chunk> for PreparedChunk {
@@ -263,6 +265,7 @@ impl From<&crate::chunker::Chunk> for PreparedChunk {
             start_line: c.start_line as i64,
             end_line: c.end_line as i64,
             source_id: None,
+            heading: None,
         }
     }
 }
@@ -294,6 +297,7 @@ pub fn embed_and_store(
                 embedder_id: embedder.id().to_string(),
                 created_at: unix_ms_now(),
                 source_id: r.source_id.clone(),
+                heading: r.heading.clone(),
             };
             let existing = rag
                 .by_content_hash(&row.content_hash)

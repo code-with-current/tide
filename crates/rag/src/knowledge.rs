@@ -468,6 +468,7 @@ pub fn ingest_documents(
                 start_line: 0,
                 end_line: 0,
                 source_id: Some(source_id.to_string()),
+                heading: None,
             });
         }
     }
