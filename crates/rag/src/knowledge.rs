@@ -593,38 +593,67 @@ pub struct ProseChunk {
 /// Heading- and line-aware variant of `split_prose` used by knowledge
 /// ingestion. Splits at paragraph (blank-line) boundaries only, so line
 /// ranges are exact — which is why, unlike `split_prose`, there is no
-/// tail overlap: an overlapped range would cite lines twice. Oversized
-/// paragraphs flush at the char cap mid-paragraph.
+/// tail overlap: an overlapped range would cite lines twice. A paragraph
+/// crossing the char cap flushes before the line that crosses it; a
+/// single line longer than the cap splits at the cap mid-paragraph.
+/// Fenced code blocks (backtick runs; tilde fences are not tracked) pass
+/// through as their own chunk — nothing inside a fence is a heading.
 pub fn split_prose_indexed(content: &str) -> Vec<ProseChunk> {
     let mut chunks: Vec<ProseChunk> = Vec::new();
     let mut stack: Vec<(u8, String)> = Vec::new();
     let mut buf: Vec<&str> = Vec::new();
+    // Invariant: buf_start is (re)set on every empty→non-empty transition
+    // of buf and is only read while buf is non-empty, so no flush needs a
+    // follow-up assignment.
     let mut buf_start = 1i64;
     let mut line_no = 0i64;
+    let mut fence_len = 0usize; // >0 while inside a backtick fence
     for line in content.lines() {
         line_no += 1;
-        if let Some((level, text)) = atx_heading(line) {
+
+        // Fences: a ≥3-backtick run after indent opens (an info string may
+        // follow); only a bare run at least as long closes. Delimiters and
+        // interior lines accumulate as plain content — `#` inside a fence
+        // is a comment, and blank lines don't split mid-block.
+        let t = line.trim_start();
+        let tick_run = t.chars().take_while(|c| *c == '`').count();
+        let opens = tick_run >= 3 && fence_len == 0;
+        let closes = fence_len > 0 && tick_run >= fence_len && t[tick_run..].trim().is_empty();
+        if opens {
+            // A fenced block is its own block-level unit: emit any pending
+            // prose chunk before it starts.
             if !buf.is_empty() {
                 chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
             }
-            while stack.last().is_some_and(|(l, _)| *l >= level) {
-                stack.pop();
-            }
-            stack.push((level, text));
-            buf_start = line_no + 1;
-            continue;
+            fence_len = tick_run;
+        } else if closes {
+            fence_len = 0;
         }
-        if line.trim().is_empty() {
-            if !buf.is_empty() {
-                chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
-                buf_start = line_no + 1;
+
+        if !(opens || closes || fence_len > 0) {
+            if let Some((level, text)) = atx_heading(line) {
+                if !buf.is_empty() {
+                    chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
+                }
+                while stack.last().is_some_and(|(l, _)| *l >= level) {
+                    stack.pop();
+                }
+                stack.push((level, text));
+                continue;
             }
-            continue;
+            if line.trim().is_empty() {
+                if !buf.is_empty() {
+                    chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
+                }
+                continue;
+            }
         }
-        // Oversized paragraph: a single line longer than the cap can never
-        // flush within budget at a line boundary, so split it at the cap
-        // mid-paragraph — the pieces share the line's number.
+
+        // Content accumulation (prose lines and fence lines alike).
         if line.chars().count() + 1 > MAX_CHUNK_CHARS {
+            // Oversized paragraph: a single line longer than the cap can
+            // never fit at a line boundary, so split it at the cap
+            // mid-paragraph — the pieces share the line's number.
             if !buf.is_empty() {
                 chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
             }
@@ -639,16 +668,21 @@ pub fn split_prose_indexed(content: &str) -> Vec<ProseChunk> {
                 buf_start = line_no;
                 buf.push(rest);
             }
-            continue;
+        } else {
+            // Flush BEFORE the line that would cross the cap, so a chunk
+            // never exceeds it by more than the join newlines.
+            let line_len = line.chars().count() + 1;
+            let buf_len: usize = buf.iter().map(|l| l.chars().count() + 1).sum();
+            if !buf.is_empty() && buf_len + line_len > MAX_CHUNK_CHARS {
+                chunks.push(flush_prose(&mut buf, buf_start, line_no - 1, &stack));
+            }
+            if buf.is_empty() {
+                buf_start = line_no;
+            }
+            buf.push(line);
         }
-        if buf.is_empty() {
-            buf_start = line_no;
-        }
-        buf.push(line);
-        let len: usize = buf.iter().map(|l| l.chars().count() + 1).sum();
-        if len > MAX_CHUNK_CHARS {
+        if closes && !buf.is_empty() {
             chunks.push(flush_prose(&mut buf, buf_start, line_no, &stack));
-            buf_start = line_no + 1;
         }
     }
     if !buf.is_empty() {
@@ -657,14 +691,41 @@ pub fn split_prose_indexed(content: &str) -> Vec<ProseChunk> {
     chunks
 }
 
+/// Parse an ATX heading (`#`..`######` + whitespace + text), CommonMark
+/// style: the opening hashes must be followed by a space/tab (or end the
+/// line), and a trailing `#`-sequence only counts as a closing marker
+/// when whitespace-separated — a heading named `C#` keeps its name.
 fn atx_heading(line: &str) -> Option<(u8, String)> {
     let t = line.trim_start();
     let level = t.chars().take_while(|c| *c == '#').count();
     if level == 0 || level > 6 {
         return None;
     }
-    let rest = t[level..].trim().trim_end_matches('#').trim();
-    (!rest.is_empty()).then(|| (level as u8, rest.to_string()))
+    let after = &t[level..];
+    if !(after.is_empty() || after.starts_with([' ', '\t'])) {
+        return None;
+    }
+    let text = strip_closing_hashes(after.trim());
+    (!text.is_empty()).then(|| (level as u8, text.to_string()))
+}
+
+/// Drop an optional closing `#`-sequence — only when separated from the
+/// text by whitespace (`"Deep ###"` → `"Deep"`; `"C#"` stays `"C#"`).
+/// Hashes alone are an empty heading's closer → `""`.
+fn strip_closing_hashes(body: &str) -> &str {
+    let run = body.chars().rev().take_while(|c| *c == '#').count();
+    if run == 0 {
+        return body;
+    }
+    if run == body.chars().count() {
+        return "";
+    }
+    let head = &body[..body.len() - run];
+    if head.ends_with([' ', '\t']) {
+        head.trim_end()
+    } else {
+        body
+    }
 }
 
 /// Emit `buf` (consumed) as a chunk under the current heading stack.
@@ -1439,6 +1500,14 @@ mod tests {
         assert_eq!(chunks[1].heading.as_deref(), Some("Alpha > Beta Sub"));
         assert_eq!(chunks[1].end_line, 8);
         assert_eq!(chunks[2].heading.as_deref(), Some("Gamma"));
+        // Exact split boundaries — join("\n"), no overlap, no glue.
+        let contents: Vec<&str> = chunks.iter().map(|c| c.content.as_str()).collect();
+        assert_eq!(
+            contents,
+            vec!["first para", "second para\nlines too", "third"]
+        );
+        assert_eq!(chunks[1].start_line, 7);
+        assert_eq!(chunks[2].start_line, 12);
     }
 
     #[test]
@@ -1454,9 +1523,73 @@ mod tests {
     }
 
     #[test]
+    fn split_prose_indexed_caps_multi_line_paragraphs() {
+        // Two 1150-char lines in ONE paragraph: must not merge into a
+        // ~2300-char chunk — flush before the line that crosses the cap.
+        let md = format!("# T\n\n{}\n{}\n\nafter", "a".repeat(1150), "b".repeat(1150));
+        let chunks = super::split_prose_indexed(&md);
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks
+            .iter()
+            .all(|c| c.content.chars().count() <= MAX_CHUNK_CHARS + 6));
+        assert_eq!(chunks[0].content, "a".repeat(1150));
+        assert_eq!((chunks[0].start_line, chunks[0].end_line), (3, 3));
+        assert_eq!(chunks[1].content, "b".repeat(1150));
+        assert_eq!((chunks[1].start_line, chunks[1].end_line), (4, 4));
+        assert_eq!(chunks[2].content, "after");
+    }
+
+    #[test]
+    fn split_prose_indexed_ignores_headings_inside_fences() {
+        let md = "# Install\n\nintro\n\n```sh\n# not a heading\ncurl -o app.tgz https://x.dev\n```\n\n# Next\n\noutro";
+        let chunks = super::split_prose_indexed(md);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].content, "intro");
+        assert_eq!(chunks[1].heading.as_deref(), Some("Install"));
+        assert_eq!(
+            chunks[1].content,
+            "```sh\n# not a heading\ncurl -o app.tgz https://x.dev\n```"
+        );
+        assert_eq!(chunks[2].heading.as_deref(), Some("Next"));
+        assert_eq!(chunks[2].content, "outro");
+
+        // Blank lines and shorter backtick runs don't end a fence; only a
+        // bare closing run at least as long as the opener does.
+        let nested =
+            "# Guide\n\n````md\ninner ``` block\n\n# still not a heading\n````\n\n# After\n\ntail";
+        let chunks = super::split_prose_indexed(nested);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].heading.as_deref(), Some("Guide"));
+        assert_eq!(
+            chunks[0].content,
+            "````md\ninner ``` block\n\n# still not a heading\n````"
+        );
+        assert_eq!(chunks[1].heading.as_deref(), Some("After"));
+        assert_eq!(chunks[1].content, "tail");
+    }
+
+    #[test]
+    fn split_prose_indexed_empty_and_headingless_input() {
+        assert!(super::split_prose_indexed("").is_empty());
+        assert!(super::split_prose_indexed("\n\n\n").is_empty());
+        let chunks = super::split_prose_indexed("intro before any heading\nsecond line");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].heading, None);
+        assert_eq!(chunks[0].content, "intro before any heading\nsecond line");
+        assert_eq!((chunks[0].start_line, chunks[0].end_line), (1, 2));
+    }
+
+    #[test]
     fn atx_heading_parses_levels_and_trailing_hashes() {
         assert_eq!(super::atx_heading("### Deep ###"), Some((3, "Deep".into())));
         assert_eq!(super::atx_heading("not a heading"), None);
         assert_eq!(super::atx_heading("####### seven"), None);
+        // Whitespace is required after the opening hashes; a trailing
+        // #-sequence only counts when whitespace-separated (C# keeps its
+        // name); hashes alone are an empty heading.
+        assert_eq!(super::atx_heading("#nospace"), None);
+        assert_eq!(super::atx_heading("## C#"), Some((2, "C#".into())));
+        assert_eq!(super::atx_heading("## C ##"), Some((2, "C".into())));
+        assert_eq!(super::atx_heading("## ###"), None);
     }
 }
