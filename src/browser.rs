@@ -49,6 +49,14 @@ const TOOLBAR_HEIGHT: f32 = 42.0;
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
      AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15";
 
+/// The agent's page-side half, injected verbatim from `browser_agent.js`
+/// before any of the page's own scripts run (wry installs it as a
+/// document-creation user script). Agent evals answer with the JSON strings
+/// `window.__tideSnapshot()` produces. Chromeless twins load it too —
+/// harmless, they never call it.
+#[cfg(target_os = "macos")]
+const BROWSER_AGENT_JS: &str = include_str!("browser_agent.js");
+
 /// What the address input resolves to when the user submits it.
 #[derive(Debug, PartialEq, Eq)]
 enum AddressTarget {
@@ -361,6 +369,50 @@ mod host {
 
         pub fn ns_view(&self) -> &NSView {
             &self.wk
+        }
+
+        /// Evaluate `script` and hand the outcome to `done`: `Ok` carrying
+        /// the script's result as a string — the agent serializer always
+        /// answers with JSON — or `Err` with the WebKit error. The
+        /// completion runs on the main thread inside a WebKit callout, so
+        /// `done` must hop through `Deferred` before it touches anything
+        /// GPUI owns (the surface passes one in). `Send` is deliberately
+        /// absent: both platforms invoke on the UI thread, and the hop
+        /// handle is main-thread-only by nature.
+        pub fn evaluate_json(&self, script: &str, done: Box<dyn FnOnce(Result<String, String>)>) {
+            use objc2_foundation::NSError;
+
+            // Blocks are typed as callable more than once; a completion
+            // that fired twice would answer twice, so the callback rides in
+            // a `Cell` taken on its one call.
+            let done = Cell::new(Some(done));
+            let completion =
+                block2::RcBlock::new(move |result: *mut AnyObject, error: *mut NSError| {
+                    let done = done.take().expect("WebKit called the completion twice");
+                    done(
+                        match (unsafe { result.as_ref() }, unsafe { error.as_ref() }) {
+                            (Some(result), None) => result
+                                .downcast_ref::<NSString>()
+                                .map(|text| Ok(text.to_string()))
+                                .unwrap_or_else(|| {
+                                    // Anything else — a page clobbered
+                                    // `window.__tideSnapshot` and made the
+                                    // eval resolve to a non-string — is a
+                                    // contract breach the engine can only
+                                    // report, not parse.
+                                    Err("the script did not return a string".to_owned())
+                                }),
+                            (_, Some(error)) => Err(error.localizedDescription().to_string()),
+                            (None, None) => Err("the script returned no value".to_owned()),
+                        },
+                    );
+                });
+            unsafe {
+                self.wk().evaluateJavaScript_completionHandler(
+                    &NSString::from_str(script),
+                    Some(&completion),
+                );
+            }
         }
 
         /// GPUI window coordinates are top-left-origin logical points, which is
@@ -752,6 +804,16 @@ mod host {
             if let Err(error) = created {
                 deliver(&ready, Err(error.to_string()));
             }
+        }
+
+        /// Agent eval-with-result. Windows will answer through WebView2's
+        /// `ExecuteScript` completion (Task 6); until then the reply
+        /// channel still hears a clean "not yet" instead of waiting on a
+        /// channel that will never speak.
+        pub fn evaluate_json(&self, _script: &str, done: Box<dyn FnOnce(Result<String, String>)>) {
+            done(Err(
+                "agent eval is not implemented on Windows yet".to_owned()
+            ));
         }
 
         /// Called from the element's paint callback every frame, so an
@@ -1257,6 +1319,43 @@ impl Deferred {
     }
 }
 
+/// Where an agent operation's outcome lands: the script's JSON-serialized
+/// result, or an error message. Plain mpsc because the receiving end lives
+/// outside GPUI (Task 4's engine-side bridge blocks on it), so the sender
+/// must be `Send` and own nothing from the entity.
+type AgentReply = std::sync::mpsc::Sender<Result<String, String>>;
+
+/// One agent operation: the script to evaluate in the live page, and the
+/// channel its answer must reach — exactly once, whatever happens.
+struct AgentOp {
+    script: String,
+    reply: AgentReply,
+}
+
+/// The load-waiter's admit rule, kept off [`BrowserView`] as a plain
+/// function of the raw fields so it can be tested without a window (the
+/// struct needs a GPUI app to exist): while a load is pending the document
+/// is being torn down, so the op parks in `queued` and returns `None`; on a
+/// settled page it comes straight back for the caller to run now.
+fn agent_dispatch(loading: bool, op: AgentOp, queued: &mut Vec<AgentOp>) -> Option<AgentOp> {
+    if loading {
+        queued.push(op);
+        None
+    } else {
+        Some(op)
+    }
+}
+
+/// The load-waiter's settle rule: a finished load advances the generation
+/// exactly once and hands back everything parked since the last settle.
+/// `Started` contributes nothing — a redirect mid-load re-fires `Started`
+/// without a second page ever having settled, so neither double-bumps the
+/// generation nor drains anything.
+fn agent_load_finished(generation: &mut u64, queued: &mut Vec<AgentOp>) -> Vec<AgentOp> {
+    *generation += 1;
+    std::mem::take(queued)
+}
+
 pub struct BrowserView {
     focus_handle: FocusHandle,
     address: Entity<TextInput>,
@@ -1297,6 +1396,12 @@ pub struct BrowserView {
     snapshot_pending: bool,
     /// Discards snapshot completions that land after their occlusion ended.
     snapshot_epoch: u64,
+    /// Agent load-waiter state: which settled load the page is on, and the
+    /// operations parked until the one in flight finishes. Pure data — the
+    /// rules live in [`agent_dispatch`] and [`agent_load_finished`] so they
+    /// test without a window.
+    load_generation: u64,
+    agent_queue: Vec<AgentOp>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1400,6 +1505,8 @@ impl BrowserView {
             snapshot: None,
             snapshot_pending: false,
             snapshot_epoch: 0,
+            load_generation: 0,
+            agent_queue: Vec::new(),
             _subscriptions: vec![submit_subscription, focus_in_address, focus_out_surface],
         };
         this.build_webview(window, cx);
@@ -1471,6 +1578,9 @@ impl BrowserView {
             .with_accept_first_mouse(true)
             .with_devtools(true)
             .with_user_agent(USER_AGENT)
+            // The agent's page-side half has to exist before any of the
+            // page's own scripts run.
+            .with_initialization_script(BROWSER_AGENT_JS)
             .with_navigation_handler(|_| true)
             .with_on_page_load_handler(move |event, url| {
                 let event = match event {
@@ -1657,7 +1767,15 @@ impl BrowserView {
                 // Committed navigation supersedes whatever was frozen.
                 self.snapshot = None;
             }
-            PageLoad::Finished => self.loading = false,
+            PageLoad::Finished => {
+                self.loading = false;
+                // The document settled: whatever was parked while it loaded
+                // can run against the finished page, each op exactly once.
+                let parked = agent_load_finished(&mut self.load_generation, &mut self.agent_queue);
+                for op in parked {
+                    self.run_agent_script(op.script, op.reply, cx);
+                }
+            }
         }
         if !url.is_empty() {
             self.current_url = Some(url);
@@ -1725,6 +1843,11 @@ impl BrowserView {
         if host.webview.load_url(&url).is_err() {
             return;
         }
+        // Navigating supersedes any load still in flight, which strands the
+        // ops parked behind it on macOS — a load that never finishes never
+        // fires `Finished` — so they fail here rather than leak into the
+        // page now loading.
+        self.fail_parked_agent_ops("the page navigation was superseded");
         self.navigation_requested = true;
         self.loading = true;
         self.current_url = Some(url);
@@ -1882,6 +2005,126 @@ impl BrowserView {
     #[cfg(not(target_os = "macos"))]
     fn request_snapshot(&mut self, _cx: &mut Context<Self>) {}
 
+    /// Agent entry point for "evaluate and give me the result": runs
+    /// `script` against the page once it is safe to — mid-load the document
+    /// is being replaced, so the op parks until the load finishes — and
+    /// answers `reply` with the script's JSON-serialized result, or an
+    /// error message. Called on the main thread; the engine-side bridge
+    /// (Task 4) hops over and blocks on the channel's other end.
+    pub fn agent_eval(&mut self, script: String, reply: AgentReply, cx: &mut Context<Self>) {
+        let op = AgentOp { script, reply };
+        if let Some(op) = agent_dispatch(self.loading, op, &mut self.agent_queue) {
+            self.run_agent_script(op.script, op.reply, cx);
+        }
+    }
+
+    /// A load that will never finish — the user stopped it, or a newer
+    /// navigation superseded it — still has to answer everything parked
+    /// behind it, exactly once: the replies fail now instead of the ops
+    /// lingering until whichever page settles next and running against a
+    /// document they never targeted. (On macOS a failed load fires no
+    /// `Finished` at all — wry maps no failure callback — so supersede and
+    /// stop are the only exits those ops get.)
+    fn fail_parked_agent_ops(&mut self, reason: &str) {
+        for op in std::mem::take(&mut self.agent_queue) {
+            let _ = op.reply.send(Err(reason.to_owned()));
+        }
+    }
+
+    /// Agent entry point for "what does the page look like": captures the
+    /// live page and answers `reply` with a base64-encoded PNG of it.
+    /// Fails cleanly — an `Err` reply — when there is no webview to capture
+    /// or the platform has no capture path yet.
+    pub fn agent_screenshot(&mut self, reply: AgentReply, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_app_kit::NSImage;
+            use objc2_foundation::NSError;
+
+            let Some(host) = self.host.clone() else {
+                let _ = reply.send(Err("the webview is not available".to_owned()));
+                return;
+            };
+            let deferred = Deferred {
+                executor: cx.foreground_executor().clone(),
+                cx: cx.to_async(),
+                view: cx.entity().downgrade(),
+            };
+            // Blocks are typed as callable more than once, but the snapshot
+            // completion fires exactly once — the reply rides in a `Cell`
+            // taken on its one call, the same single-fire shape
+            // `evaluate_json` gives its boxed callback.
+            let reply = std::cell::Cell::new(Some(reply));
+            let completion = block2::RcBlock::new(move |image: *mut NSImage, _: *mut NSError| {
+                // One raw-pixel copy inside the WebKit callout, like
+                // `request_snapshot`; the PNG encode and base64 happen
+                // in the deferred hop below, where milliseconds of work
+                // delay no paint.
+                let pixels = unsafe { image.as_ref() }.and_then(snapshot_pixels);
+                let reply = reply.take().expect("WebKit called the completion twice");
+                deferred.update(move |_, _| {
+                    let _ = reply.send(
+                        pixels
+                            .and_then(snapshot_png)
+                            .ok_or_else(|| "the page could not be captured".to_owned()),
+                    );
+                });
+            });
+            unsafe {
+                host.wk()
+                    .takeSnapshotWithConfiguration_completionHandler(None, &completion)
+            };
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // The WebView2 capture is Task 6's; the channel still hears an
+            // answer so nothing blocks on silence.
+            let _ = cx;
+            let _ = reply.send(Err(
+                "agent screenshots are not implemented on this platform yet".to_owned(),
+            ));
+        }
+    }
+
+    /// Evaluate `script` in the page and send the answer to `reply`. The
+    /// completion lands on the main thread inside a native callout —
+    /// possibly while GPUI is mid-update — so the reply goes out from the
+    /// [`Deferred`] hop, the same shape [`Self::request_snapshot`] gives
+    /// snapshot completions. A view that dies before the completion still
+    /// answers: the dropped sender is the receiver's error, not a hang.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn run_agent_script(&mut self, script: String, reply: AgentReply, cx: &mut Context<Self>) {
+        let Some(host) = self.host.clone() else {
+            let _ = reply.send(Err("the webview is not available".to_owned()));
+            return;
+        };
+        let deferred = Deferred {
+            executor: cx.foreground_executor().clone(),
+            cx: cx.to_async(),
+            view: cx.entity().downgrade(),
+        };
+        host.evaluate_json(
+            &script,
+            Box::new(move |result| {
+                // Nothing in the entity changes on the way by; the hop exists
+                // so the send happens off the native callout stack, ordered
+                // with the entity updates around it.
+                deferred.update(move |_, _| {
+                    let _ = reply.send(result);
+                });
+            }),
+        );
+    }
+
+    /// No native host means no page to evaluate in; the reply still goes
+    /// out so nothing waits on a channel that will never speak.
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    fn run_agent_script(&mut self, _script: String, reply: AgentReply, _cx: &mut Context<Self>) {
+        let _ = reply.send(Err(
+            "the browser surface is unavailable on this platform".to_owned()
+        ));
+    }
+
     /// Keep GPUI focus and the native first responder coherent. They are
     /// separate systems: clicks inside the webview move only the native side,
     /// clicks on GPUI controls move only GPUI's — and Zed's view never hands
@@ -2002,6 +2245,9 @@ impl BrowserView {
     }
 
     fn stop_loading(&mut self, _cx: &mut Context<Self>) {
+        // Stopping abandons the in-flight load; the ops parked behind it
+        // fail now instead of waiting on a finish that will not come.
+        self.fail_parked_agent_ops("the page load was stopped");
         #[cfg(target_os = "macos")]
         if let Some(host) = &self.host {
             unsafe { host.wk().stopLoading() };
@@ -2455,15 +2701,10 @@ enum PageLoad {
     Finished,
 }
 
-/// Convert a WebKit snapshot into pixels GPUI paints synchronously.
-///
-/// The rep wraps the snapshot's `CGImage` without re-encoding; the only cost
-/// is one pass over the pixel buffer into the tightly packed BGRA order
-/// [`gpui::RenderImage`] uploads as-is.
+/// Extract a WebKit snapshot's pixels as a tight BGRA `RgbaImage` — the
+/// byte order [`gpui::RenderImage`] uploads as-is.
 #[cfg(target_os = "macos")]
-fn snapshot_render_image(
-    image: &objc2_app_kit::NSImage,
-) -> Option<std::sync::Arc<gpui::RenderImage>> {
+fn snapshot_pixels(image: &objc2_app_kit::NSImage) -> Option<image::RgbaImage> {
     use objc2::AnyThread;
     use objc2_app_kit::{NSBitmapFormat, NSBitmapImageRep};
 
@@ -2492,10 +2733,42 @@ fn snapshot_render_image(
         format.contains(NSBitmapFormat::AlphaFirst),
         format.contains(NSBitmapFormat::ThirtyTwoBitLittleEndian),
     )?;
-    let buffer = image::RgbaImage::from_raw(width as u32, height as u32, bgra)?;
+    image::RgbaImage::from_raw(width as u32, height as u32, bgra)
+}
+
+/// Convert a WebKit snapshot into pixels GPUI paints synchronously.
+///
+/// The rep wraps the snapshot's `CGImage` without re-encoding; the only cost
+/// is one pass over the pixel buffer into the tightly packed BGRA order
+/// [`gpui::RenderImage`] uploads as-is.
+#[cfg(target_os = "macos")]
+fn snapshot_render_image(
+    image: &objc2_app_kit::NSImage,
+) -> Option<std::sync::Arc<gpui::RenderImage>> {
     Some(std::sync::Arc::new(gpui::RenderImage::new(vec![
-        image::Frame::new(buffer),
+        image::Frame::new(snapshot_pixels(image)?),
     ])))
+}
+
+/// The agent screenshot payload: the snapshot's BGRA pixels repacked to RGBA
+/// and encoded as a base64 PNG. Runs in the deferred hop, off the WebKit
+/// callout — an encode costs real milliseconds and the callout must stay
+/// light. `None` means the encode failed; the caller answers `Err`.
+#[cfg(target_os = "macos")]
+fn snapshot_png(pixels: image::RgbaImage) -> Option<String> {
+    use base64::Engine as _;
+    use std::io::Cursor;
+
+    let (width, height) = (pixels.width(), pixels.height());
+    let mut rgba = pixels.into_raw();
+    for pixel in rgba.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let mut png = Vec::new();
+    image::RgbaImage::from_raw(width, height, rgba)?
+        .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+        .ok()?;
+    Some(base64::engine::general_purpose::STANDARD.encode(png))
 }
 
 /// Repack an `NSBitmapImageRep` pixel buffer as tight BGRA rows.
@@ -2830,6 +3103,94 @@ mod tests {
         assert_eq!(bgra_from_bitmap(&[0; 8], 2, 1, 8, 2, false, false), None);
         assert_eq!(bgra_from_bitmap(&[0; 7], 2, 1, 8, 4, false, false), None);
         assert_eq!(bgra_from_bitmap(&[], 0, 0, 0, 4, false, false), None);
+    }
+
+    #[test]
+    fn load_generation_advances_on_finish() {
+        let (reply, _) = std::sync::mpsc::channel();
+        let mut generation = 0;
+        let mut queued = Vec::new();
+
+        // A load begins — twice, as a redirect mid-load re-fires Started —
+        // and an op arrives while it is in flight: it parks, and neither
+        // Started touches the generation.
+        assert!(
+            agent_dispatch(
+                true,
+                AgentOp {
+                    script: "1".to_owned(),
+                    reply: reply.clone(),
+                },
+                &mut queued
+            )
+            .is_none()
+        );
+        assert!(
+            agent_dispatch(
+                true,
+                AgentOp {
+                    script: "2".to_owned(),
+                    reply,
+                },
+                &mut queued
+            )
+            .is_none()
+        );
+        assert_eq!(queued.len(), 2);
+        assert_eq!(generation, 0);
+
+        // The load settles: the generation advances once and everything
+        // parked during it drains, exactly once.
+        let drained = agent_load_finished(&mut generation, &mut queued);
+        assert_eq!(generation, 1);
+        assert_eq!(drained.len(), 2);
+        assert!(queued.is_empty());
+        assert!(agent_load_finished(&mut generation, &mut queued).is_empty());
+    }
+
+    #[test]
+    fn queued_agent_ops_wait_for_load() {
+        let (reply, received) = std::sync::mpsc::channel();
+        let mut generation = 0;
+        let mut queued = Vec::new();
+
+        // Mid-load the op parks: nothing runs, so nothing answers yet.
+        assert!(
+            agent_dispatch(
+                true,
+                AgentOp {
+                    script: "window.__tideSnapshot()".to_owned(),
+                    reply,
+                },
+                &mut queued
+            )
+            .is_none()
+        );
+        assert_eq!(queued.len(), 1);
+        assert!(received.try_recv().is_err());
+
+        // The load finishing hands the parked op over once — draining is
+        // the running, and no later settle can hand the same op over again.
+        assert_eq!(agent_load_finished(&mut generation, &mut queued).len(), 1);
+        assert!(queued.is_empty());
+        assert!(agent_load_finished(&mut generation, &mut queued).is_empty());
+        assert!(received.try_recv().is_err());
+
+        // With no load in flight, the same submission runs immediately
+        // instead of parking: dispatch returns it, the queue stays empty.
+        let (idle, _) = std::sync::mpsc::channel();
+        assert!(
+            agent_dispatch(
+                false,
+                AgentOp {
+                    script: String::new(),
+                    reply: idle,
+                },
+                &mut queued
+            )
+            .is_some()
+        );
+        assert!(queued.is_empty());
     }
 
     #[test]
