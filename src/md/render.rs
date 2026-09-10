@@ -402,25 +402,19 @@ pub fn linkify_ranges(text: &str) -> Vec<(Range<usize>, String)> {
         // Indices must walk char boundaries — a mid-character byte
         // index panics every slice below on CJK/emoji text.
         let step = window.chars().next().map_or(1, char::len_utf8);
-        let url = window
+        // Both schemes are ASCII, so their `find` offsets are char
+        // boundaries; taking the earliest occurrence's offset as the link
+        // start (rather than reconstructing it from scheme-length
+        // arithmetic, which misaligns when one `http://` follows a
+        // different `https://` token across multibyte text) keeps every
+        // slice below boundary-safe.
+        let scheme_at = window
             .find("http://")
-            .map(|at| at + "http://".len())
-            .or_else(|| {
-                if window.starts_with("https://") {
-                    Some("https://".len())
-                } else {
-                    None
-                }
-            })
-            .map(|scheme_end| scheme_end);
-        if let Some(scheme_end) = url {
-            let start = index
-                + (scheme_end
-                    - if window.starts_with("https://") {
-                        "https://".len()
-                    } else {
-                        "http://".len()
-                    });
+            .into_iter()
+            .chain(window.find("https://"))
+            .min();
+        if let Some(at) = scheme_at {
+            let start = index + at;
             let rest = &text[start..];
             let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
             let token = rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
@@ -849,17 +843,28 @@ fn text_element_with_selection(
     } else {
         let (ranges, urls): (Vec<_>, Vec<_>) = flat.links.iter().cloned().unzip();
         let id = SharedString::from(format!("{}-t{}", key.row, key.index));
-        InteractiveText::new(id, styled)
-            .on_click(ranges, move |clicked, window, cx| {
-                if let Some(url) = urls.get(clicked) {
-                    if let Some(handler) = &link_handler {
-                        handler(url, window, cx);
-                    } else {
-                        cx.open_url(url);
-                    }
+        // Mention pills ride this branch too: their spans are links, and
+        // their hover labels attach to the same interactive element so a
+        // pill can be both clickable and explained.
+        let interactive = InteractiveText::new(id, styled).on_click(ranges, move |clicked, window, cx| {
+            if let Some(url) = urls.get(clicked) {
+                if let Some(handler) = &link_handler {
+                    handler(url, window, cx);
+                } else {
+                    cx.open_url(url);
                 }
-            })
-            .into_any_element()
+            }
+        });
+        match mentions {
+            Some((tooltip_ranges, labels)) => interactive
+                .tooltip(move |index, window, cx| {
+                    let range = tooltip_ranges.iter().find(|range| range.contains(&index))?;
+                    let label = labels.get(&range.start)?;
+                    Some(Tooltip::new(label.clone()).build(window, cx))
+                })
+                .into_any_element(),
+            None => interactive.into_any_element(),
+        }
     };
 
     let underlay = canvas(|_, _, _| (), {
@@ -1043,6 +1048,7 @@ pub fn selectable_mention_text(
     selection: TranscriptSelection,
     mention_wash: Hsla,
     selection_wash: Hsla,
+    link_handler: Option<LinkHandler>,
 ) -> AnyElement {
     text_element_with_selection(
         flat,
@@ -1050,7 +1056,7 @@ pub fn selectable_mention_text(
         key,
         selection,
         None,
-        None,
+        link_handler,
         mention_wash,
         selection_wash,
         gpui::transparent_black(),
@@ -2417,6 +2423,36 @@ mod linkify_tests {
         let links = linkify_ranges("参照http://a.b/c");
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].1, "http://a.b/c");
+    }
+
+    #[test]
+    fn linkify_https_with_later_http_across_multibyte_does_not_panic() {
+        // A window that starts with an `https://` token but contains a
+        // later `http://` used to reconstruct the link start from
+        // scheme-length arithmetic — `found_http_at + len("http://") -
+        // len("https://")` — which lands one byte inside a preceding
+        // multibyte character and aborted the whole app (crash on
+        // expanding a tool card whose description carried both URLs).
+        for text in [
+            "https://日http://",
+            "https://日本http://x",
+            "https:///本http://",
+            "https://a.日本語と http://mirror.example.com/x",
+            "https://first.example.com/日本語 http://second.example.com",
+        ] {
+            let links = linkify_ranges(text);
+            for (range, token) in &links {
+                assert_eq!(&text[range.clone()], token.as_str());
+            }
+        }
+
+        // The earliest scheme in the window wins and the link covers its
+        // whole whitespace-delimited token.
+        let text = "see https://docs.example.com/日本 and http://mirror.example.com";
+        let links = linkify_ranges(text);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].1, "https://docs.example.com/日本");
+        assert_eq!(links[1].1, "http://mirror.example.com");
     }
 }
 

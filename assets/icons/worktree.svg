@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>worktree</title>
+    <g id="worktree" stroke="none" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round" stroke-width="1">
+        <g id="Group" transform="translate(12, 12) scale(1, -1) translate(-12, -12)translate(2, 2)" stroke="#000000">
+            <polyline id="Path" stroke-width="2" points="16 0 20 4 16 8"></polyline>
+            <path d="M0,16.0000936 L1.973,16.0000936 C3.28526524,16.0089632 4.51846049,15.3736808 5.273,14.3 L10.727,5.7 C11.4815395,4.62631916 12.7147348,3.99103676 14.027,3.9999064 L20,3.9999064" id="Path" stroke-width="2"></path>
+            <path d="M20,16 L11.4984236,16" id="Path" stroke-width="2"></path>
+        </g>
+    </g>
+</svg>

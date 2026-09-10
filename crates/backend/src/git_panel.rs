@@ -1476,11 +1476,7 @@ fn pull_rebase_inner(repo: &Repository) -> Result<(), String> {
     if analysis.is_up_to_date() {
         return Ok(());
     }
-    let refname = upstream
-        .get()
-        .name()
-        .map_err(|e| e.to_string())?
-        .to_owned();
+    let refname = upstream.get().name().map_err(|e| e.to_string())?.to_owned();
     let workdir = repo
         .workdir()
         .ok_or_else(|| "bare repository".to_owned())?
@@ -2631,7 +2627,10 @@ mod tests {
         fs::write(root.join("a.txt"), "x\ny\n").unwrap();
 
         let changes = status(&root);
-        let a = changes.iter().find(|change| change.path == "a.txt").unwrap();
+        let a = changes
+            .iter()
+            .find(|change| change.path == "a.txt")
+            .unwrap();
         assert_eq!((a.additions, a.deletions), (2, 0));
 
         let hunks = file_diff(&root, "a.txt", false, 3);

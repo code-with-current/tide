@@ -47,6 +47,11 @@ pub struct MemoryHit {
     pub similarity: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_name: Option<String>,
+    /// Source freshness (epoch ms) — a tiebreaker in the fusion, not a
+    /// score. Workspace hits carry the file's mtime, knowledge hits the
+    /// source's last index time; `None` sorts last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recency: Option<i64>,
 }
 
 /// The write half of the memory seam — the `remember` tool's backend.
@@ -83,6 +88,23 @@ pub trait MemoryIndex: std::fmt::Debug + Send + Sync {
     fn vector_hits(&self, workspace_id: &str, query: &str, k: usize) -> Vec<MemoryHit>;
     /// Top-k full-text ranking for the query.
     fn fts_hits(&self, workspace_id: &str, query: &str, k: usize) -> Vec<MemoryHit>;
+    /// The configured default result count when the model omits k;
+    /// `None` keeps the tool default.
+    fn top_k(&self, _workspace_id: &str) -> Option<u64> {
+        None
+    }
+    /// Optional precision pass over the fused ranking: re-rank `hits`
+    /// for this query and keep at most `keep`. The default is the
+    /// identity — no reranker installed.
+    fn rerank(
+        &self,
+        _workspace_id: &str,
+        _query: &str,
+        hits: Vec<MemoryHit>,
+        _keep: usize,
+    ) -> Vec<MemoryHit> {
+        hits
+    }
 }
 
 /// Process-wide backend slot (the [`TodoState::shared`] pattern): the
@@ -107,7 +129,9 @@ pub fn shared_memory_index() -> Option<std::sync::Arc<dyn MemoryIndex>> {
 
 /// Reciprocal Rank Fusion — zero-parameter merge of two rankings using
 /// rank-only signals; generic id-keyed so vector + FTS hits fuse without
-/// forcing one score shape. Port of the TS `fuse`.
+/// forcing one score shape. Score ties break on `recency` (fresher
+/// first) so equal-scored old and current code resolve deterministically
+/// toward the current. Port of the TS `fuse`.
 pub fn rrf_fuse(vec: Vec<MemoryHit>, fts: Vec<MemoryHit>, k: usize) -> Vec<MemoryHit> {
     let mut scores: Vec<(f64, MemoryHit)> = Vec::with_capacity(vec.len() + fts.len());
     let mut index_of: std::collections::HashMap<String, usize> =
@@ -126,7 +150,15 @@ pub fn rrf_fuse(vec: Vec<MemoryHit>, fts: Vec<MemoryHit>, k: usize) -> Vec<Memor
             }
         }
     }
-    scores.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scores.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.1.recency
+                    .unwrap_or(i64::MIN)
+                    .cmp(&a.1.recency.unwrap_or(i64::MIN))
+            })
+    });
     scores.truncate(k);
     scores.into_iter().map(|(_, hit)| hit).collect()
 }
@@ -146,9 +178,11 @@ pub(crate) fn short_path(abs_path: &str) -> String {
 
 /// Shared body — testable without the trait object wrapper; the
 /// workspace_id comes from the caller (the tool pulls it from ToolContext).
+/// `k` is the model's explicit per-call override; `None` resolves through
+/// the configured [`MemoryIndex::top_k`], then the tool default.
 pub(crate) fn run_memory(
     query: &str,
-    k: u64,
+    k: Option<u64>,
     workspace_id: &str,
     index: Option<&dyn MemoryIndex>,
 ) -> ToolOutcome {
@@ -174,20 +208,28 @@ pub(crate) fn run_memory(
         );
     }
 
-    let k_clamped = k.clamp(1, MAX_K) as usize;
+    let k_clamped = k
+        .or_else(|| index.top_k(workspace_id))
+        .unwrap_or(DEFAULT_K)
+        .clamp(1, MAX_K) as usize;
+    // Over-fetch each lane so the fusion — and the optional reranker
+    // riding above it — has candidates to choose from, not just reorder.
+    let fetch = (k_clamped * 3).min(30);
     let fused = rrf_fuse(
-        index.vector_hits(workspace_id, query, k_clamped),
-        index.fts_hits(workspace_id, query, k_clamped),
-        k_clamped,
+        index.vector_hits(workspace_id, query, fetch),
+        index.fts_hits(workspace_id, query, fetch),
+        fetch,
     );
+    let mut ranked = index.rerank(workspace_id, query, fused, k_clamped);
+    ranked.truncate(k_clamped);
 
-    if fused.is_empty() {
+    if ranked.is_empty() {
         return ToolOutcome::executed(format!(
             "No matches for \"{query}\" across {total} indexed chunks."
         ));
     }
 
-    let lines = fused
+    let lines = ranked
         .iter()
         .enumerate()
         .map(|(i, hit)| {
@@ -220,8 +262,8 @@ pub(crate) fn run_memory(
 
     let text = format!(
         "Found {} relevant chunk{} for \"{query}\" (out of {total}):\n\n{}",
-        fused.len(),
-        if fused.len() == 1 { "" } else { "s" },
+        ranked.len(),
+        if ranked.len() == 1 { "" } else { "s" },
         lines.join("\n\n")
     );
 
@@ -247,7 +289,7 @@ impl Tool for MemoryTool {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Natural language: \"how is authentication handled\", \"database setup\", \"API routes\"." },
-                    "k": { "type": "number", "description": "Top-K results. Default 5, max 20." }
+                    "k": { "type": "number", "description": "Top-K results. Omit to use the configured default; max 20." }
                 },
                 "required": ["query"]
             }),
@@ -264,7 +306,7 @@ impl Tool for MemoryTool {
         args: serde_json::Value,
     ) -> Result<ToolOutcome, ToolError> {
         let query = arg_str(&args, "query");
-        let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_K);
+        let k = args.get("k").and_then(|v| v.as_u64());
         // The constructor-bound index wins (tests); production rides the
         // process-wide slot installed by the RAG command layer.
         let shared = shared_memory_index();
@@ -278,11 +320,13 @@ mod tests {
     use super::*;
     use crate::OutcomeStatus;
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     struct FakeIndex {
         total: u64,
         vector: Vec<MemoryHit>,
         fts: Vec<MemoryHit>,
+        configured_top_k: Option<u64>,
+        rerank_order: Option<Vec<String>>,
     }
 
     impl MemoryIndex for FakeIndex {
@@ -295,6 +339,30 @@ mod tests {
         fn fts_hits(&self, _workspace_id: &str, _query: &str, k: usize) -> Vec<MemoryHit> {
             self.fts.iter().take(k).cloned().collect()
         }
+        fn top_k(&self, _workspace_id: &str) -> Option<u64> {
+            self.configured_top_k
+        }
+        fn rerank(
+            &self,
+            _workspace_id: &str,
+            _query: &str,
+            hits: Vec<MemoryHit>,
+            _keep: usize,
+        ) -> Vec<MemoryHit> {
+            match &self.rerank_order {
+                None => hits,
+                Some(order) => {
+                    let mut sorted = hits;
+                    sorted.sort_by_key(|h| {
+                        order
+                            .iter()
+                            .position(|id| *id == h.id)
+                            .unwrap_or(usize::MAX)
+                    });
+                    sorted
+                }
+            }
+        }
     }
 
     fn hit(id: &str, path: &str, symbol: Option<&str>, similarity: Option<f64>) -> MemoryHit {
@@ -306,26 +374,27 @@ mod tests {
             content: format!("content of {id}"),
             similarity,
             source_name: None,
+            recency: None,
         }
     }
 
     #[test]
     fn missing_query_fails() {
-        let out = run_memory("", 5, "ws1", None);
+        let out = run_memory("", Some(5), "ws1", None);
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert_eq!(out.output, "Missing required arg: query");
     }
 
     #[test]
     fn missing_workspace_fails() {
-        let out = run_memory("auth flow", 5, "", None);
+        let out = run_memory("auth flow", Some(5), "", None);
         assert_eq!(out.status, OutcomeStatus::Failed);
         assert_eq!(out.output, "No active workspace bound to this session.");
     }
 
     #[test]
     fn no_index_reports_not_enabled_hint() {
-        let out = run_memory("anything", 5, "ws1", None);
+        let out = run_memory("anything", Some(5), "ws1", None);
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out
             .output
@@ -339,8 +408,9 @@ mod tests {
             total: 0,
             vector: vec![],
             fts: vec![],
+            ..FakeIndex::default()
         };
-        let out = run_memory("anything", 5, "ws1", Some(&index));
+        let out = run_memory("anything", Some(5), "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out
             .output
@@ -353,8 +423,9 @@ mod tests {
             total: 42,
             vector: vec![],
             fts: vec![],
+            ..FakeIndex::default()
         };
-        let out = run_memory("zzz", 5, "ws1", Some(&index));
+        let out = run_memory("zzz", Some(5), "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert_eq!(
             out.output,
@@ -368,8 +439,9 @@ mod tests {
             total: 7,
             vector: vec![hit("c1", "/repo/src/auth.ts", Some("login"), Some(0.87))],
             fts: vec![],
+            ..FakeIndex::default()
         };
-        let out = run_memory("how does login work", 5, "ws1", Some(&index));
+        let out = run_memory("how does login work", Some(5), "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out
             .output
@@ -391,8 +463,9 @@ mod tests {
             total: 3,
             vector: vec![knowledge],
             fts: vec![],
+            ..FakeIndex::default()
         };
-        let out = run_memory("hooks", 5, "ws1", Some(&index));
+        let out = run_memory("hooks", Some(5), "ws1", Some(&index));
         assert!(out.output.contains("[1] [React Docs] react.dev/learn"));
     }
 
@@ -406,8 +479,9 @@ mod tests {
             total: 1,
             vector: vec![long],
             fts: vec![],
+            ..FakeIndex::default()
         };
-        let out = run_memory("long", 5, "ws1", Some(&index));
+        let out = run_memory("long", Some(5), "ws1", Some(&index));
         assert!(out.output.contains("…[truncated]"));
         assert!(!out.output.contains(&"y".repeat(BODY_CAP + 100)));
     }
@@ -448,6 +522,7 @@ mod tests {
             total: 9,
             vector: vec![hit("c1", "/repo/src/x.ts", Some("f"), Some(0.5))],
             fts: vec![],
+            ..FakeIndex::default()
         })));
         assert_eq!(tool.spec().name, "memory");
         assert_eq!(tool.risk_tier(), RiskTier::ReadOnly);
@@ -458,5 +533,68 @@ mod tests {
             .unwrap();
         assert_eq!(out.status, OutcomeStatus::Executed);
         assert!(out.output.contains("(out of 9)"));
+    }
+
+    #[test]
+    fn k_resolves_from_the_configured_top_k_when_the_arg_is_absent() {
+        let index = FakeIndex {
+            total: 9,
+            vector: vec![
+                hit("a", "/repo/a.ts", None, None),
+                hit("b", "/repo/b.ts", None, None),
+                hit("c", "/repo/c.ts", None, None),
+            ],
+            fts: vec![],
+            configured_top_k: Some(2),
+            rerank_order: None,
+            ..FakeIndex::default()
+        };
+        // No explicit k → the configured top_k (2) caps the result.
+        let out = run_memory("query", None, "ws1", Some(&index));
+        assert!(out.output.contains("Found 2 relevant chunks"));
+    }
+
+    #[test]
+    fn rerank_pass_reorders_the_fused_ranking() {
+        let index = FakeIndex {
+            total: 9,
+            vector: vec![
+                hit("a", "/repo/a.ts", None, None),
+                hit("b", "/repo/b.ts", None, None),
+            ],
+            fts: vec![],
+            rerank_order: Some(vec!["b".into(), "a".into()]),
+            ..FakeIndex::default()
+        };
+        let out = run_memory("query", Some(5), "ws1", Some(&index));
+        let b_pos = out.output.find("[1]").unwrap();
+        // The reranked winner leads the result body.
+        let b_line = out.output.find("content of b").unwrap();
+        let a_line = out.output.find("content of a").unwrap();
+        assert!(b_line < a_line);
+        assert!(b_line > b_pos);
+    }
+
+    #[test]
+    fn recency_breaks_score_ties_toward_fresher() {
+        let mut old = hit("old", "/repo/old.ts", None, None);
+        old.recency = Some(1_000);
+        let mut new = hit("new", "/repo/new.ts", None, None);
+        new.recency = Some(2_000);
+        // One hit per lane at rank 0 → identical RRF scores; the fresher
+        // chunk must lead.
+        let fused = rrf_fuse(vec![old], vec![new], 5);
+        assert_eq!(fused[0].id, "new");
+        assert_eq!(fused.len(), 2);
+    }
+
+    #[test]
+    fn recency_none_sorts_below_known_freshness() {
+        let mut fresh = hit("fresh", "/repo/f.ts", None, None);
+        fresh.recency = Some(5_000);
+        let unknown = hit("unknown", "/repo/u.ts", None, None);
+        let fused = rrf_fuse(vec![unknown], vec![fresh], 5);
+        // Same-lane ranks (0 and 0) → equal scores; recency sorts first.
+        assert_eq!(fused[0].id, "fresh");
     }
 }

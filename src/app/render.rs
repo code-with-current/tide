@@ -254,7 +254,7 @@ impl Render for Tide {
             let rag_endpoint_dialog = self.render_rag_endpoint_dialog(window, cx);
             let rag_model_dialog = self.render_rag_model_dialog(window, cx);
             let tide_wizard = self.render_tide_wizard(window, cx);
-            let projects_remove = self.render_projects_remove_dialog(cx);
+            let projects_remove = self.render_projects_remove_dialog(window, cx);
             let toast = self.render_active_toast(cx);
             let content = div()
                 .relative()

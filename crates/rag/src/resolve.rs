@@ -76,7 +76,9 @@ pub fn resolve_for_build(
         // Same fallback as the TS resolve: local unavailable → cloud only
         // when allowed + configured.
         if config.cloud_allowed && cloud_configured() {
-            return Ok(Arc::new(RemoteEmbedder::system(config.cloud_model_id.clone())));
+            return Ok(Arc::new(RemoteEmbedder::system(
+                config.cloud_model_id.clone(),
+            )));
         }
         if !config.cloud_allowed {
             return Err(format!(
@@ -93,11 +95,11 @@ pub fn resolve_for_build(
     }
     if config.embedder_id == "cloud-base" {
         if !cloud_configured() {
-            return Err(
-                "Cloud embedder selected but TIDE_SYSTEM_API_KEY is not set.".to_string()
-            );
+            return Err("Cloud embedder selected but TIDE_SYSTEM_API_KEY is not set.".to_string());
         }
-        return Ok(Arc::new(RemoteEmbedder::system(config.cloud_model_id.clone())));
+        return Ok(Arc::new(RemoteEmbedder::system(
+            config.cloud_model_id.clone(),
+        )));
     }
     Err(format!(
         "Unknown embedder \"{}\" — it was removed from the configuration. \
@@ -131,7 +133,9 @@ pub fn resolve_for_query(
                     .to_string(),
             );
         }
-        return Ok(Arc::new(RemoteEmbedder::system(config.cloud_model_id.clone())));
+        return Ok(Arc::new(RemoteEmbedder::system(
+            config.cloud_model_id.clone(),
+        )));
     }
     if let Some(spec) = custom_spec(config, index_embedder_id) {
         return Ok(Arc::new(RemoteEmbedder::custom(
@@ -202,10 +206,7 @@ mod tests {
             assert_eq!(id, "cloud-base");
         } else {
             let err = resolve_for_build(&cfg, &dir()).err().unwrap();
-            assert!(
-                err.contains("cloud fallback is disabled"),
-                "was {err}"
-            );
+            assert!(err.contains("cloud fallback is disabled"), "was {err}");
             cfg.cloud_allowed = true;
             let err = resolve_for_build(&cfg, &dir()).err().unwrap();
             assert!(err.contains("TIDE_SYSTEM_API_KEY"), "was {err}");
@@ -240,15 +241,15 @@ mod tests {
             ..Default::default()
         };
         assert!(resolve_for_build(&cfg, &dir())
-            .err().unwrap()
+            .err()
+            .unwrap()
             .contains("Unknown embedder"));
     }
 
     #[test]
     fn query_never_crosses_vector_spaces() {
         let cfg = RagConfigInput::default();
-        let (_, embedder) =
-            resolve_embedder_for_query("local-code-512", &cfg, &dir()).unwrap();
+        let (_, embedder) = resolve_embedder_for_query("local-code-512", &cfg, &dir()).unwrap();
         assert_eq!(embedder.dim(), 384);
 
         // Same dims, DIFFERENT model: the id lock must still block it —
@@ -257,11 +258,15 @@ mod tests {
             embedder_id: "local-mle5-small".into(),
             ..Default::default()
         };
-        let err = resolve_for_query("local-mle5-small", &e5_cfg, &dir()).err().unwrap();
+        let err = resolve_for_query("local-mle5-small", &e5_cfg, &dir())
+            .err()
+            .unwrap();
         assert!(err.contains("no longer downloaded"), "was {err}");
         e5_cfg.embedder_id = "local-code-512".into();
         // And a stale e5 index under the default config errors too.
-        let err = resolve_for_query("local-mle5-small", &e5_cfg, &dir()).err().unwrap();
+        let err = resolve_for_query("local-mle5-small", &e5_cfg, &dir())
+            .err()
+            .unwrap();
         assert!(err.contains("Rebuild required"), "was {err}");
     }
 
@@ -269,13 +274,17 @@ mod tests {
     fn query_resolves_undownloaded_catalog_model_for_rebuild_errors_only() {
         let cfg = RagConfigInput::default();
         // A bge-m3 index whose model was deleted surfaces "rebuild".
-        let err = resolve_for_query("local-bge-m3", &cfg, &dir()).err().unwrap();
+        let err = resolve_for_query("local-bge-m3", &cfg, &dir())
+            .err()
+            .unwrap();
         assert!(err.contains("no longer downloaded"), "was {err}");
         // A cloud-built index without the key surfaces the same tone.
         let err = resolve_for_query("cloud-base", &cfg, &dir()).err().unwrap();
         assert!(err.contains("no longer set"), "was {err}");
         // A deleted custom endpoint ditto.
-        let err = resolve_for_query("custom-gone", &cfg, &dir()).err().unwrap();
+        let err = resolve_for_query("custom-gone", &cfg, &dir())
+            .err()
+            .unwrap();
         assert!(err.contains("no longer configured"), "was {err}");
     }
 }

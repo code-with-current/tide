@@ -572,7 +572,7 @@ impl Tide {
                     .items_center()
                     .gap(px(5.0))
                     .when_some(branch.clone(), |row, branch| {
-                        row.child(icon("icons/git-branch.svg", 11.5, theme.text_tertiary))
+                        row.child(icon("icons/worktree.svg", 11.5, theme.text_tertiary))
                             .child(
                                 div()
                                     .flex_1()

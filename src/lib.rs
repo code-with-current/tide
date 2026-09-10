@@ -49,7 +49,7 @@ mod updater;
 
 pub use client::{
     checkpoint, command_env, composer_complete, git_branch, git_commit, i18n, identity, model,
-    model_catalog, persistence, projectless, skills, usage, usage_history, worktree,
+    model_catalog, persistence, projectless, skills, usage, usage_history, usage_report, worktree,
 };
 
 use gpui::{

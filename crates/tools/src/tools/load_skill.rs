@@ -1,7 +1,9 @@
 //! load_skill — port of `app/core/agent/tools/load-skill.ts` ().
 //! Reads a skill's SKILL.md (via read_file + the skill-root allowlist) and
-//! returns the body as instructions to follow; "execute" = load the
-//! prompt-based skill, not run code.
+//! returns the body as the model-facing instructions — the body rides in
+//! `output` (what the model's history keeps) AND the `FileLoaded` display
+//! card, so one call delivers the skill with no follow-up read_file.
+//! "execute" = load the prompt-based skill, not run code.
 
 use std::sync::OnceLock;
 
@@ -46,9 +48,11 @@ pub(crate) fn run_load_skill(skill_path: &str, workspace_root: &std::path::Path)
 }
 
 fn skill_loaded(name: &str, path: &str, body: &str) -> ToolOutcome {
+    // The body MUST ride in `output`: the driver feeds only `output` back
+    // into the model's history, so a summary here would force a second
+    // read_file round trip to actually see the instructions.
     ToolOutcome::executed(format!(
-        "Skill \"{name}\" loaded ({} chars). Read and follow its instructions before taking any other action on the task.",
-        body.chars().count()
+        "Skill \"{name}\" loaded. Read and follow the instructions below before taking any other action on the task.\n\n{body}",
     ))
     .with_meta(format!("{} · {} chars", name, body.chars().count()))
     .with_display(ToolDisplay::FileLoaded {
@@ -210,7 +214,11 @@ mod tests {
         .unwrap();
         let res = run_load_skill(&skill_dir.join("SKILL.md").to_string_lossy(), tmp.path());
         assert_eq!(res.status, OutcomeStatus::Executed);
-        assert!(res.output.starts_with("Skill \"Custom Skill\" loaded ("));
+        // The instructions land in the model-facing output — no follow-up
+        // read_file needed to see them.
+        assert!(res.output.starts_with("Skill \"Custom Skill\" loaded."));
+        assert!(res.output.contains("# Custom"));
+        assert!(res.output.contains("Body"));
         let ToolDisplay::FileLoaded {
             lines, bytes, body, ..
         } = res.display.unwrap()
@@ -229,7 +237,8 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# No frontmatter\nBody").unwrap();
         let res = run_load_skill(&skill_dir.join("SKILL.md").to_string_lossy(), tmp.path());
-        assert!(res.output.starts_with("Skill \"dir-skill\" loaded ("));
+        assert!(res.output.starts_with("Skill \"dir-skill\" loaded."));
+        assert!(res.output.contains("# No frontmatter"));
     }
 
     #[test]
@@ -318,7 +327,10 @@ mod tests {
         assert_eq!(tool.risk_tier(), RiskTier::ReadOnly);
         let ctx = ToolContext::new(tmp.path().to_path_buf());
         let out = tool
-            .execute(&ctx, json!({ "path": skill_dir.join("SKILL.md").to_string_lossy() }))
+            .execute(
+                &ctx,
+                json!({ "path": skill_dir.join("SKILL.md").to_string_lossy() }),
+            )
             .unwrap();
         assert_eq!(out.status, OutcomeStatus::Executed);
     }

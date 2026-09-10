@@ -28,6 +28,7 @@ pub mod proc;
 pub mod read_file;
 pub mod read_media_file;
 pub mod remember;
+pub mod session_history;
 pub mod slash_command;
 pub mod todo_write;
 pub mod web_fetch;
@@ -68,6 +69,10 @@ pub use notebook_edit::NotebookEditTool;
 pub use read_file::ReadFileTool;
 pub use read_media_file::ReadMediaFileTool;
 pub use remember::RememberTool;
+pub use session_history::{
+    ListSessionsTool, ReadSessionTool, SessionMessage, SessionPage, SessionReader,
+    SessionSummary, set_shared_session_reader, shared_session_reader,
+};
 pub use slash_command::SlashCommandTool;
 pub use todo_write::TodoWriteTool;
 pub use web_fetch::WebFetchTool;
@@ -119,6 +124,8 @@ pub fn core_tools() -> Vec<Box<dyn Tool>> {
         Box::new(PerformSecondaryActionTool),
         Box::new(SetValueTool),
         Box::new(ScrollTool),
+        Box::new(ListSessionsTool),
+        Box::new(ReadSessionTool),
     ]
 }
 

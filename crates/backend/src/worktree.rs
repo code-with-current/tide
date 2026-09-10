@@ -169,7 +169,10 @@ fn parse_porcelain(output: &str) -> Vec<RawWorktree> {
             entry.head = head.to_owned();
         } else if let Some(reference) = line.strip_prefix("branch ") {
             entry.branch = Some(
-                reference.strip_prefix("refs/heads/").unwrap_or(reference).to_owned(),
+                reference
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(reference)
+                    .to_owned(),
             );
         } else if line == "detached" {
             entry.detached = true;
@@ -243,7 +246,10 @@ pub fn remove(cwd: &Path, target: &Path, delete_branch: bool, force: bool) -> Pa
     let target = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
     let entries = parse_porcelain(&output);
     let canonical = |path: &PathBuf| fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-    if entries.first().is_some_and(|first| canonical(&first.path) == target) {
+    if entries
+        .first()
+        .is_some_and(|first| canonical(&first.path) == target)
+    {
         return PanelOpResult::err("the repository's main working tree cannot be removed");
     }
     let Some(entry) = entries
@@ -280,9 +286,7 @@ pub fn remove(cwd: &Path, target: &Path, delete_branch: bool, force: bool) -> Pa
     if !output.status.success() {
         return PanelOpResult::err(command_error(&output));
     }
-    if delete_branch
-        && let Some(branch) = entry.branch.as_deref()
-    {
+    if delete_branch && let Some(branch) = entry.branch.as_deref() {
         let branch_output = crate::command_env::plain_command("git")
             .args(["branch", "-D"])
             .arg(branch)
@@ -295,15 +299,19 @@ pub fn remove(cwd: &Path, target: &Path, delete_branch: bool, force: bool) -> Pa
                 return PanelOpResult::err(format!(
                     "the worktree was removed, but its branch stayed: {}",
                     command_error(&output)
-                ))
+                ));
             }
             Err(error) => {
                 return PanelOpResult::err(format!(
                     "the worktree was removed, but its branch stayed: {error}"
-                ))
+                ));
             }
-        }    }
-    PanelOpResult { ok: true, error: None }
+        }
+    }
+    PanelOpResult {
+        ok: true,
+        error: None,
+    }
 }
 
 fn default_base_ref(repository: &Path) -> anyhow::Result<String> {

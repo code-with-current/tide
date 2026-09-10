@@ -14,21 +14,24 @@
 pub mod catalog;
 pub mod chunker;
 pub mod embedder;
+pub mod eval;
+pub mod guard;
 pub mod ingest;
 pub mod knowledge;
+pub mod rerank;
 pub mod resolve;
 pub mod store;
 
-pub use catalog::{default_entry, entry, CATALOG, LocalModelEntry};
+pub use catalog::{default_entry, entry, reranker_entry, LocalModelEntry, CATALOG};
 pub use chunker::{chunk_file, Chunk};
 pub use embedder::{
     cloud_configured, download_model, local_embedder_shared, local_model_exists,
     local_model_exists_for, models_dir_for, EmbedUse,
 };
+pub use embedder::{Embedder, RemoteEmbedder};
 pub use embedder::{
     LOCAL_EMBEDDER_DIM, LOCAL_EMBEDDER_ID, LOCAL_EMBEDDER_MAX_TOKENS, MODEL_FILES, MODEL_ID,
 };
-pub use embedder::{Embedder, RemoteEmbedder};
 pub use ingest::{
     embed_and_store, ingest_workspace, IngestProgressEvent, IngestResult, WorkspaceIngestInputs,
     CHUNKABLE_EXTS, SKIP_DIRS,

@@ -149,11 +149,14 @@ fn tide_one_shot(
             .and_then(|settings| override_ref(&settings.effective())),
     )?;
     let api_key = crate::driver::tide::tide_api_key(&config, &selection)?;
+    let max_output_tokens = crate::driver::tide::catalog_max_output_tokens(&selection);
     let engine = EngineModel::from_config(&EngineModelConfig {
         api_style: selection.api_style,
         base_url: selection.base_url,
         api_key,
         model_id: selection.model_id,
+        provider_id: selection.provider_id,
+        max_output_tokens: max_output_tokens,
     })
     .map_err(|error| anyhow!("tide engine: {error}"))?;
     let request = TurnRequest {

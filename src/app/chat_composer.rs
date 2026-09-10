@@ -52,12 +52,59 @@ pub enum ChatComposerEvent {
 
 // ── The entity ──────────────────────────────────────────────────────────────
 
+// ── Embedded token decoration ────────────────────────────────────────────
+
+/// The `@mention` / `/command` tokens the composer accepted from its
+/// autocomplete. They live in the field as REAL TEXT — at the caret where
+/// they were accepted, so beginning, middle, or end of the prompt all
+/// work, and editing/moving/copying is ordinary text editing. This list
+/// only drives presentation: the field paints each occurrence as quoted
+/// code (see [`TextInput::set_decorated_ranges`]). A token stops being
+/// decorated the moment no word-boundary occurrence remains.
+/// Byte ranges of `tokens`' word-boundary occurrences in `content`,
+/// sorted, plus the tokens that survived (still present) — the caller
+/// prunes the rest. An occurrence must sit at whitespace or a string edge
+/// so a `@path` inside a URL or word never decorates.
+pub(super) fn token_ranges(content: &str, tokens: &[String]) -> (Vec<Range<usize>>, Vec<String>) {
+    let mut ranges = Vec::new();
+    let mut survivors = Vec::new();
+    for token in tokens {
+        let mut survived = false;
+        let mut search = 0;
+        while let Some(found) = content[search..].find(token.as_str()) {
+            let start = search + found;
+            let end = start + token.len();
+            let bounded_left = content[..start]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace);
+            let bounded_right = content[end..]
+                .chars()
+                .next()
+                .is_none_or(char::is_whitespace);
+            if bounded_left && bounded_right {
+                ranges.push(start..end);
+                survived = true;
+            }
+            search = start + token.len().max(1);
+        }
+        if survived {
+            survivors.push(token.clone());
+        }
+    }
+    ranges.sort_by_key(|range| range.start);
+    (ranges, survivors)
+}
+
 /// The prompt input at the heart of the composer card. Owns its field; the
 /// card renders it as a child.
 pub struct ChatComposer {
     field: Entity<TextInput>,
     /// Clone of the field's handle, so `focus()` needs no `cx`.
     focus_handle: FocusHandle,
+    /// The accepted autocomplete tokens ("/name", "@path") whose
+    /// occurrences decorate as quoted text while they remain in the field.
+    staged_tokens: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -68,6 +115,7 @@ impl ChatComposer {
                 .multi_line()
                 .submit_on_enter()
                 .auto_height()
+                .auto_height_min(px(46.0))
                 .media_paste()
                 .placeholder(tr!("input.do_anything"))
         });
@@ -84,7 +132,12 @@ impl ChatComposer {
                     }
                 }
                 InputEvent::Focus => cx.emit(ChatComposerEvent::Focus),
-                InputEvent::Edited => cx.emit(ChatComposerEvent::Edited),
+                InputEvent::Edited => {
+                    // Edits move token bytes: re-scan before the decorations
+                    // go stale.
+                    composer.refresh_token_decorations(cx);
+                    cx.emit(ChatComposerEvent::Edited);
+                }
                 InputEvent::BackspaceOnEmpty => cx.emit(ChatComposerEvent::BackspaceOnEmpty),
             }),
             cx.subscribe(&field, |_, _, event: &MediaPaste, cx| {
@@ -94,6 +147,7 @@ impl ChatComposer {
         Self {
             field,
             focus_handle,
+            staged_tokens: Vec::new(),
             _subscriptions,
         }
     }
@@ -130,6 +184,40 @@ impl ChatComposer {
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.field.update(cx, |field, cx| field.clear(cx));
+    }
+
+    /// Register an accepted autocomplete token ("/name" / "@path") so its
+    /// occurrences in the field decorate as quoted text, then refresh.
+    /// Call AFTER the token's text is in the field.
+    pub fn stage_token(&mut self, token: impl Into<String>, cx: &mut Context<Self>) {
+        let token = token.into();
+        if !token.is_empty() && !self.staged_tokens.iter().any(|staged| *staged == token) {
+            self.staged_tokens.push(token);
+        }
+        self.refresh_token_decorations(cx);
+    }
+
+    /// The staged tokens, for draft persistence.
+    pub fn staged_tokens(&self) -> &[String] {
+        &self.staged_tokens
+    }
+
+    /// Re-stage tokens (draft restore) and refresh the decorations.
+    pub fn set_staged_tokens(&mut self, tokens: Vec<String>, cx: &mut Context<Self>) {
+        self.staged_tokens = tokens;
+        self.refresh_token_decorations(cx);
+    }
+
+    /// Recompute the decoration ranges from the field's current content,
+    /// pruning staged tokens whose occurrences are all gone — deleting the
+    /// token text retires its decoration with no extra plumbing.
+    pub fn refresh_token_decorations(&mut self, cx: &mut Context<Self>) {
+        let (ranges, survivors) =
+            token_ranges(self.field.read(cx).content(), &self.staged_tokens);
+        self.staged_tokens = survivors;
+        self.field.update(cx, |field, cx| {
+            field.set_decorated_ranges(ranges, cx);
+        });
     }
 
     pub fn set_content(&mut self, content: impl Into<SharedString>, cx: &mut Context<Self>) {
@@ -715,6 +803,66 @@ mod tests {
         ));
         cx.read_entity(&composer, |composer, cx| {
             assert_eq!(composer.content(cx), "")
+        });
+    }
+
+    #[test]
+    fn token_ranges_match_word_boundary_occurrences_only() {
+        use super::token_ranges;
+        let tokens = vec!["/refactor".to_owned(), "@src/a.rs".to_owned()];
+        let (ranges, survivors) =
+            token_ranges("fix @src/a.rs and /refactor @src/a.rs", &tokens);
+        // begin / middle / end all match; duplicates all decorate.
+        assert_eq!(ranges, vec![4..13, 18..27, 28..37]);
+        assert_eq!(survivors, tokens);
+
+        // No word-boundary occurrence: nothing decorates, token retires.
+        let (ranges, survivors) = token_ranges("see https://x/refactor now", &tokens);
+        assert!(ranges.is_empty());
+        assert!(survivors.is_empty());
+
+        // Partial deletion of the token text retires it too.
+        let (ranges, survivors) = token_ranges("fix @src/a. and /refactor", &tokens);
+        assert_eq!(ranges, vec![16..25]);
+        assert_eq!(survivors, vec!["/refactor".to_owned()]);
+    }
+
+    #[gpui::test]
+    fn staged_tokens_decorate_and_retire_with_edits(cx: &mut TestAppContext) {
+        cx.update(init_input);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let composer = cx.new(|cx| ChatComposer::new(window, cx));
+            Harness { composer }
+        });
+        let composer = cx.read_entity(&harness, |harness, _| harness.composer.clone());
+        cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
+        cx.run_until_parked();
+
+        // Stage after the token text is in the field, the autocomplete's
+        // order. Every word-boundary occurrence decorates.
+        composer.update(cx, |composer, cx| {
+            composer.set_content("check @src/a.rs mid /refactor end", cx);
+            composer.stage_token("@src/a.rs", cx);
+            composer.stage_token("/refactor", cx);
+        });
+        cx.read_entity(&composer, |composer, cx| {
+            let field = composer.field.read(cx);
+            assert_eq!(
+                field.decorated_ranges(),
+                &[6..15, 20..29],
+                "decorations follow token positions in the text"
+            );
+        });
+
+        // Deleting a token's text retires its decoration on the next edit;
+        // the survivor keeps decorating wherever it sits.
+        composer.update(cx, |composer, cx| {
+            composer.set_content("check mid /refactor end", cx);
+            composer.refresh_token_decorations(cx);
+        });
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.field.read(cx).decorated_ranges(), &[10..19]);
+            assert_eq!(composer.staged_tokens(), &["/refactor".to_owned()]);
         });
     }
 

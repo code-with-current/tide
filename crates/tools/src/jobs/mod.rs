@@ -33,8 +33,8 @@ use protocol::model::{
 };
 
 pub use api::{
-    JobError, JobHandle, JobHooks, JobOutcome, JobOutputSink, JobRead, JobRegistry, JobStart,
-    KillOutcome, Reader, SettledStatus, global_job_registry,
+    global_job_registry, JobError, JobHandle, JobHooks, JobOutcome, JobOutputSink, JobRead,
+    JobRegistry, JobStart, KillOutcome, Reader, SettledStatus,
 };
 pub use wake::{JobNotice, JobWake, NoticeSource, WakeListener};
 

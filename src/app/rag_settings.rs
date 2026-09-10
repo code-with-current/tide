@@ -1942,7 +1942,9 @@ impl Tide {
             .cursor_pointer()
             .hover(|el| el.bg(theme.overlay))
             .on_click(cx.listener(|this: &mut Tide, _event, _window, cx| {
-                this.rag_settings.advanced_open.set(!this.rag_settings.advanced_open.get());
+                this.rag_settings
+                    .advanced_open
+                    .set(!this.rag_settings.advanced_open.get());
                 cx.notify();
             }))
             .child(icon(
@@ -1961,11 +1963,7 @@ impl Tide {
                     .text_color(theme.text)
                     .child(tr!("settings.rag.advanced_title")),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-            )
+            .child(div().flex_1().min_w_0())
             .child(
                 div()
                     .text_size(sp(10.5))
@@ -1976,20 +1974,17 @@ impl Tide {
         let mut chunk_rows = Vec::new();
         if open {
             chunk_rows.push(
-                CardRow::new(tr!("settings.rag.chunk_size")).control(
-                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
-                        "rag-chunksize-input",
-                        inline.chunk_size,
-                    )),
-                ),
+                CardRow::new(tr!("settings.rag.chunk_size")).control(div().w(px(110.0)).child(
+                    crate::ui::text_field::TextField::new("rag-chunksize-input", inline.chunk_size),
+                )),
             );
             chunk_rows.push(
-                CardRow::new(tr!("settings.rag.chunk_overlap")).control(
-                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
+                CardRow::new(tr!("settings.rag.chunk_overlap")).control(div().w(px(110.0)).child(
+                    crate::ui::text_field::TextField::new(
                         "rag-chunkoverlap-input",
                         inline.chunk_overlap,
-                    )),
-                ),
+                    ),
+                )),
             );
         }
 
@@ -2018,21 +2013,20 @@ impl Tide {
                         )
                         .child(plus),
                 ),
-                CardRow::new(tr!("settings.rag.min_similarity")).control(
-                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
-                        "rag-minsim-input",
-                        min_sim,
-                    )),
-                ),
+                CardRow::new(tr!("settings.rag.min_similarity")).control(div().w(px(110.0)).child(
+                    crate::ui::text_field::TextField::new("rag-minsim-input", min_sim),
+                )),
                 CardRow::new(tr!("settings.rag.rerank"))
                     .control(self.render_rerank_control(theme, cx)),
                 CardRow::new(tr!("settings.rag.block_flagged"))
                     .control(self.render_block_flagged_control(theme, cx)),
                 CardRow::new(tr!("settings.rag.inline_knowledge")).control(
-                    div().w(px(110.0)).child(crate::ui::text_field::TextField::new(
-                        "rag-inlineknowledge-input",
-                        inline.inline_knowledge,
-                    )),
+                    div()
+                        .w(px(110.0))
+                        .child(crate::ui::text_field::TextField::new(
+                            "rag-inlineknowledge-input",
+                            inline.inline_knowledge,
+                        )),
                 ),
             ],
         ));

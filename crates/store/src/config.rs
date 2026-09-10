@@ -352,6 +352,18 @@ pub struct RagSettings {
     pub chunk_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunk_overlap: Option<u64>,
+    /// Cross-encoder reranking of the fused results (needs the optional
+    /// reranker model on disk; absent otherwise regardless).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rerank_enabled: Option<bool>,
+    /// Knowledge sources totalling under this many content chars are
+    /// inlined into the system prompt instead of retrieved; 0 disables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_knowledge_chars: Option<u64>,
+    /// Knowledge sources flagged by the injection screen are excluded
+    /// from recall results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_block_flagged: Option<bool>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -368,6 +380,9 @@ pub struct EffectiveRagSettings {
     pub min_similarity: Option<f64>,
     pub chunk_size: Option<u64>,
     pub chunk_overlap: Option<u64>,
+    pub rerank_enabled: bool,
+    pub inline_knowledge_chars: u64,
+    pub knowledge_block_flagged: bool,
 }
 
 impl Default for EffectiveRagSettings {
@@ -381,6 +396,9 @@ impl Default for EffectiveRagSettings {
             min_similarity: None,
             chunk_size: None,
             chunk_overlap: None,
+            rerank_enabled: true,
+            inline_knowledge_chars: 12_000,
+            knowledge_block_flagged: true,
         }
     }
 }
@@ -401,6 +419,13 @@ impl RagSettings {
             min_similarity: self.min_similarity.or(d.min_similarity),
             chunk_size: self.chunk_size.or(d.chunk_size),
             chunk_overlap: self.chunk_overlap.or(d.chunk_overlap),
+            rerank_enabled: self.rerank_enabled.unwrap_or(d.rerank_enabled),
+            inline_knowledge_chars: self
+                .inline_knowledge_chars
+                .unwrap_or(d.inline_knowledge_chars),
+            knowledge_block_flagged: self
+                .knowledge_block_flagged
+                .unwrap_or(d.knowledge_block_flagged),
         }
     }
 }
@@ -706,7 +731,10 @@ mod tests {
         assert_eq!(serde_json::to_value(&cfg).unwrap(), original);
         let eff = cfg.rag_effective();
         assert_eq!(eff.embedder_id, "cloud-base");
-        assert_eq!(eff.cloud_model_id.as_deref(), Some("text-embedding-3-small"));
+        assert_eq!(
+            eff.cloud_model_id.as_deref(),
+            Some("text-embedding-3-small")
+        );
         assert_eq!(eff.min_similarity, Some(0.2));
         assert_eq!(eff.chunk_size, Some(800));
         assert_eq!(eff.chunk_overlap, Some(120));

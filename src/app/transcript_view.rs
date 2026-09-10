@@ -803,12 +803,24 @@ impl Tide {
                     }
                     // Human and assistant messages share the Markdown path.
                     // Parse only visible rows rather than doing work for every
-                    // driver delta or every off-screen prompt.
+                    // driver delta or every off-screen prompt. User bodies
+                    // rewrite their `@mentions` into code-span links first, so
+                    // the bubble paints them as quoted pills that open the
+                    // right panel's Files surface on click.
                     let mut markdown = self.message_markdown.borrow_mut();
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
-                            view.set_text(message.visible_content(), message.streaming);
+                            let source = if message.role == MessageRole::User {
+                                super::components::user_mention_links(
+                                    message.visible_content(),
+                                    self.selected_workspace_path(),
+                                )
+                                .into_owned()
+                            } else {
+                                message.visible_content().to_owned()
+                            };
+                            view.set_text(&source, message.streaming);
                             &*view
                         });
                     let rendered = render_message(

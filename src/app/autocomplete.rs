@@ -357,24 +357,46 @@ impl Tide {
         let Some(row) = rows.get(index) else {
             return;
         };
-        let insert = match row {
+        match row {
             AutocompleteRow::Command(scored) => {
-                let composer_text = composer_complete::command_composer_text(&scored.item);
-                format!("{composer_text} ")
-            }
-            AutocompleteRow::File(scored) => format!("@{} ", scored.item.path),
-        };
-        if matches!(row, AutocompleteRow::Command(_)) {
-            let mut submission = self.composer.read(cx).content(cx).to_owned();
-            submission.replace_range(trigger.range.clone(), &insert);
-            if self.execute_local_composer_command(&submission, cx) {
+                // Local commands (the /goal bridge) still execute on accept,
+                // before anything is staged — nothing lands in the field.
+                let mut submission = self.composer.read(cx).content(cx).to_owned();
+                submission.replace_range(
+                    trigger.range.clone(),
+                    &format!(
+                        "{} ",
+                        composer_complete::command_composer_text(&scored.item)
+                    ),
+                );
+                if self.execute_local_composer_command(&submission, cx) {
+                    return;
+                }
+                // Everything else lands as real text at the caret — so the
+                // command can sit at the beginning, middle, or end of the
+                // prompt — and registers for the quoted-text decoration.
+                let token = composer_complete::command_composer_text(&scored.item);
+                self.composer.update(cx, |input, cx| {
+                    input.replace_range(trigger.range.clone(), &format!("{token} "), cx);
+                    input.stage_token(token, cx);
+                });
+                self.schedule_composer_draft_save(cx);
+                cx.notify();
                 return;
             }
-        }
-        self.composer.update(cx, |input, cx| {
-            input.replace_range(trigger.range.clone(), &insert, cx);
-        });
-        cx.notify();
+            AutocompleteRow::File(scored) => {
+                // The mention lands as real text at the caret, like commands,
+                // and registers for the quoted-text decoration.
+                let token = format!("@{}", scored.item.path);
+                self.composer.update(cx, |input, cx| {
+                    input.replace_range(trigger.range.clone(), &format!("{token} "), cx);
+                    input.stage_token(token, cx);
+                });
+                self.schedule_composer_draft_save(cx);
+                cx.notify();
+                return;
+            }
+        };
     }
 
     pub(super) fn dismiss_autocomplete(&mut self, cx: &mut Context<Self>) {

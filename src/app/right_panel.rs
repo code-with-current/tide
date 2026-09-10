@@ -102,7 +102,11 @@ fn file_menu_items(
                 });
             }
         })
-        .icon(if staged { "icons/x.svg" } else { "icons/plus.svg" }),
+        .icon(if staged {
+            "icons/x.svg"
+        } else {
+            "icons/plus.svg"
+        }),
     ];
     if !staged {
         items.push(
@@ -194,8 +198,7 @@ fn file_menu_items(
             let tide = tide.clone();
             let path = path.clone();
             move |_, cx| {
-                let _ = tide
-                    .update(cx, |this, cx| this.open_right_panel_file(path.clone(), cx));
+                let _ = tide.update(cx, |this, cx| this.open_right_panel_file(path.clone(), cx));
             }
         })
         .icon("icons/file.svg"),
@@ -1673,6 +1676,28 @@ mod tests {
             file_icon_for_name("unknown.data"),
             "icons/file-types/file.svg"
         );
+    }
+
+    #[test]
+    fn transcript_link_route_resolves_workspace_files_to_the_files_tab() {
+        use super::{TranscriptLinkRoute, transcript_link_route};
+        let workspace = std::path::Path::new("/ws");
+        // An in-workspace absolute path opens the Files surface.
+        assert!(matches!(
+            transcript_link_route("/ws/src/a.rs", Some(workspace)),
+            TranscriptLinkRoute::ProjectFile(relative) if relative == "src/a.rs"
+        ));
+        // Relative targets are NOT file links — mention pills must anchor
+        // their targets to the workspace root or the click no-ops.
+        assert!(matches!(
+            transcript_link_route("src/a.rs", Some(workspace)),
+            TranscriptLinkRoute::External
+        ));
+        // Outside the workspace routes to the file manager, not Files.
+        assert!(matches!(
+            transcript_link_route("/Users/x/.claude/skills/a/SKILL.md", Some(workspace)),
+            TranscriptLinkRoute::Finder(_)
+        ));
     }
 
     #[test]

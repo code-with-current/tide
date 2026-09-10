@@ -65,6 +65,10 @@ const TOOL_SOURCES: &[(&str, &str)] = &[
     ("grep", include_str!("prompts/tools/grep.md")),
     ("init", include_str!("prompts/tools/init.md")),
     ("list_dir", include_str!("prompts/tools/list_dir.md")),
+    (
+        "list_sessions",
+        include_str!("prompts/tools/list_sessions.md"),
+    ),
     ("memory", include_str!("prompts/tools/memory.md")),
     ("multi_edit", include_str!("prompts/tools/multi_edit.md")),
     (
@@ -75,6 +79,10 @@ const TOOL_SOURCES: &[(&str, &str)] = &[
     (
         "read_media_file",
         include_str!("prompts/tools/read_media_file.md"),
+    ),
+    (
+        "read_session",
+        include_str!("prompts/tools/read_session.md"),
     ),
     (
         "slash_command",
@@ -271,8 +279,8 @@ mod tests {
     #[test]
     fn tool_guidance_groups_every_tool_by_category() {
         let guidance = tool_guidance();
-        // All 23 tools' usage lines are present, frontmatter stripped.
-        assert_eq!(TOOL_SOURCES.len(), 23);
+        // All 25 tools' usage lines are present, frontmatter stripped.
+        assert_eq!(TOOL_SOURCES.len(), 25);
         assert!(guidance
             .contains("- `bash` — Run a shell command in the workspace root. Full shell support."));
         assert!(guidance.contains("- `read_file` — Read a file from the workspace"));

@@ -19,7 +19,8 @@ use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatc
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
 use crate::tide::{TideModelWire, TideProviderWire};
-use crate::usage_history::{UsageHistory, UsageWindow};
+use crate::usage_history::UsageHistory;
+use crate::usage_report::{UsageReport, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
 pub const PROTOCOL_VERSION: u32 = 7;
@@ -304,8 +305,11 @@ pub enum Command {
         prompt: bool,
     },
     LoadUsageHistory {
-        window: UsageWindow,
+        window: crate::usage_history::UsageWindow,
         project_roots: Vec<PathBuf>,
+    },
+    LoadUsageReport {
+        window: UsageWindow,
     },
     LoadSkills {
         projects: Vec<(String, PathBuf)>,
@@ -592,6 +596,18 @@ pub struct RagConfigWire {
     pub chunk_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunk_overlap: Option<u64>,
+    pub rerank_enabled: bool,
+    pub inline_knowledge_chars: u64,
+    pub knowledge_block_flagged: bool,
+    /// Reranker model files: "ready" | "downloading" | "failed" |
+    /// "not-downloaded". Rides the config snapshot because the settings
+    /// page re-reads config after every action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reranker_download: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reranker_download_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reranker_download_percent: Option<u32>,
 }
 
 /// A partial settings update — `None` fields keep their stored value.
@@ -613,6 +629,13 @@ pub struct RagConfigPatchWire {
     pub chunk_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunk_overlap: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rerank_enabled: Option<bool>,
+    /// 0 disables knowledge inlining.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_knowledge_chars: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_block_flagged: Option<bool>,
 }
 
 /// A custom embeddings endpoint. The key never rides back — only whether
@@ -667,7 +690,8 @@ pub struct RagAffectedWorkspaceWire {
 /// phase-labeled, determinate during embedding.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct InitProgressWire {    /// "walking" | "chunking" | "embedding" | "done" | "failed"
+pub struct InitProgressWire {
+    /// "walking" | "chunking" | "embedding" | "done" | "failed"
     pub phase: String,
     pub files_seen: u64,
     pub chunks_total: u64,
@@ -714,6 +738,13 @@ pub struct KnowledgeSourceWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedder_id: Option<String>,
     pub enabled_workspace_ids: Vec<String>,
+    /// Injection screen verdict: "clean" | "flagged" (always present on
+    /// post-screening rows; absent → never screened).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub injection: Option<String>,
+    /// First screen findings when flagged ("rule: snippet" lines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub injection_detail: Option<String>,
     /// Live ingestion progress while status is queued/indexing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<SourceProgressWire>,
@@ -810,6 +841,9 @@ pub enum ResponsePayload {
     },
     UsageHistory {
         history: UsageHistory,
+    },
+    UsageReport {
+        report: UsageReport,
     },
     SkillsCatalog {
         catalog: SkillsCatalog,

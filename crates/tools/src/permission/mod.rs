@@ -135,6 +135,8 @@ pub fn risk_tier_for(tool_name: &str) -> RiskTier {
         | "remember"
         | "send_message"
         | "list_agents"
+        | "list_sessions"
+        | "read_session"
         | "ask_followup_question"
         | "exit_plan_mode"
         | "compact" => RiskTier::ReadOnly,

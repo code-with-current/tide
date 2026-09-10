@@ -82,15 +82,18 @@ projects.count_many: "%{count} 件のプロジェクト"
 projects.filter_caption: "%{total} 件中 %{shown} 件を表示"
 projects.select_placeholder: 設定するプロジェクトを選択してください。
 projects.section_general: 一般
+projects.name: 名前
 projects.icon: アイコン
 projects.icon_auto: 自動
 projects.icon_upload: アップロード…
 projects.icon_upload_failed: その画像は使用できません。2 MB 以下の PNG・JPG・WebP を選んでください。
 projects.icon_color: 背景
-projects.default_model: 新しいチャットのデフォルトモデル
+projects.default_model_section: デフォルトモデル
+projects.model_label: モデル
 projects.default_model_global: グローバル設定に従う
 projects.default_model_hint: このプロジェクトの新規チャットはこのモデルで開始します。
 projects.git_identity: Git アイデンティティ
+projects.git_identity_row: コミット名義
 projects.memory_rag: メモリ & RAG
 projects.actions: アクション
 projects.action_name: アクション名
@@ -110,6 +113,8 @@ projects.remove_body: "「%{name}」は Tide で開けなくなります。"
 projects.remove_history: セッションと履歴も削除する
 projects.remove_confirm: 削除
 projects.remove_cancel: キャンセル
+projects.remove_type_name: 確認のため「%{name}」と入力してください
+projects.remove_type_placeholder: プロジェクト名
 projects.rename_commit_hint: Enter で名前を変更
 projects.directory_missing: このフォルダはディスク上にありません。設定は編集できます。
 projects.directory_unavailable: プロジェクトフォルダが存在する場合に利用できます。
@@ -669,14 +674,13 @@ branches.create_and_checkout: 新しいブランチを作成してチェック�
 branches.create_hint: Return キーで作成 · Esc キーでキャンセル
 branches.none_found: ブランチが見つかりません
 branches.create_and_checkout_ellipsis: 新しいブランチを作成してチェックアウト…
-branches.work_in_new_worktree: 新しいワークツリーで作業する
+branches.isolated_worktree: 独立したワークツリー
 branches.title: ブランチ
 branches.choose: ブランチを選択
 branches.checked_out_elsewhere: 別のワークツリーでチェックアウトされています
 
 workspace.work_in: 作業場所
 workspace.local: ローカル
-workspace.new_worktree: 新しいワークツリー
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
 

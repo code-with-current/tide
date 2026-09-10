@@ -252,7 +252,9 @@ mod tests {
 
         let out = run_slash_command("nope", "", &dir);
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert!(out.output.starts_with("Unknown command: /nope. Available: alpha, beta."));
+        assert!(out
+            .output
+            .starts_with("Unknown command: /nope. Available: alpha, beta."));
         assert!(out.output.contains("call load_skill"));
     }
 

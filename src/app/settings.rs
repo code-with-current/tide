@@ -1657,28 +1657,14 @@ impl Tide {
                             .child(icon("icons/github.svg", 14.0, theme.text_secondary)),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(sp(13.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(SharedString::from(format!("@{}", account.login))),
-                            )
-                            .when_some(account.account_id.clone(), |row, account_id| {
-                                row.child(
-                                    div()
-                                        .mt(px(2.0))
-                                        .truncate()
-                                        .font_family(".SystemUIFontMonospaced")
-                                        .text_size(sp(10.5))
-                                        .text_color(theme.text_ghost)
-                                        .child(account_id),
-                                )
-                            }),
+                        div().flex_1().min_w_0().child(
+                            div()
+                                .truncate()
+                                .text_size(sp(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(SharedString::from(format!("@{}", account.login))),
+                        ),
                     )
                     .child(
                         div()
@@ -1907,52 +1893,54 @@ impl Tide {
             );
         }
 
-        // Footer: connected count + browser connect (upstream always shows
-        // the Add button here, empty state or not).
-        body = body.child(
-            div()
-                .px(px(20.0))
-                .py(px(8.0))
-                .flex()
-                .items_center()
-                .justify_between()
-                .when(!connected.is_empty() || !detected.is_empty(), |row| {
-                    row.border_t_1().border_color(theme.border)
-                })
-                .when(!connected.is_empty(), |row| {
-                    row.child(
+        // Footer: connected count + browser connect, only beside existing
+        // accounts — the empty state already carries its own Add button, so
+        // a second one here would duplicate the same device flow.
+        if !connected.is_empty() || !detected.is_empty() {
+            body = body.child(
+                div()
+                    .px(px(20.0))
+                    .py(px(8.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .when(!connected.is_empty(), |row| {
+                        row.child(
+                            div()
+                                .text_size(sp(10.5))
+                                .text_color(theme.text_ghost)
+                                .child(tr!(
+                                    "git.github.n_connected",
+                                    count = connected.len().to_string()
+                                )),
+                        )
+                    })
+                    .child(
                         div()
-                            .text_size(sp(10.5))
-                            .text_color(theme.text_ghost)
-                            .child(tr!(
-                                "git.github.n_connected",
-                                count = connected.len().to_string()
-                            )),
-                    )
-                })
-                .child(
-                    div()
-                        .id("git-github-add-browser")
-                        .tab_index(0)
-                        .focus_visible(|style| style.border_color(theme.accent))
-                        .h(px(24.0))
-                        .px(px(8.0))
-                        .rounded(px(6.0))
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .gap(px(5.0))
-                        .cursor_default()
-                        .text_size(sp(11.5))
-                        .text_color(theme.text_secondary)
-                        .hover(|element| element.bg(theme.overlay))
-                        .child(icon("icons/plus.svg", 11.0, theme.text_tertiary))
-                        .child(tr!("git.github.add_browser"))
-                        .on_activation(cx, |this, _, cx| {
-                            this.git_start_device_flow(cx);
-                        }),
-                ),
-        );
+                            .id("git-github-add-browser")
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
+                            .h(px(24.0))
+                            .px(px(8.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(5.0))
+                            .cursor_default()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_secondary)
+                            .hover(|element| element.bg(theme.overlay))
+                            .child(icon("icons/plus.svg", 11.0, theme.text_tertiary))
+                            .child(tr!("git.github.add_browser"))
+                            .on_activation(cx, |this, _, cx| {
+                                this.git_start_device_flow(cx);
+                            }),
+                    ),
+            );
+        }
         div().child(head).child(body)
     }
 

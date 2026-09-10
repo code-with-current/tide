@@ -1165,6 +1165,8 @@ projects.select_placeholder:
   en: Select a project to configure it.
 projects.section_general:
   en: General
+projects.name:
+  en: Name
 projects.icon:
   en: Icon
 projects.icon_auto:
@@ -1175,8 +1177,10 @@ projects.icon_upload_failed:
   en: Could not use that image. Pick a PNG, JPG, or WebP under 2 MB.
 projects.icon_color:
   en: Background
-projects.default_model:
-  en: Default model for new chats
+projects.default_model_section:
+  en: Default model
+projects.model_label:
+  en: Model
 projects.default_model_global:
   en: Global default
 projects.default_model_hint:
@@ -1209,6 +1213,8 @@ projects.actions_empty:
   en: Run a command in this project with one click.
 projects.git_identity:
   en: Git identity
+projects.git_identity_row:
+  en: Commit as
 projects.git_identity_global:
   en: Global
 projects.memory_rag:
@@ -1225,6 +1231,10 @@ projects.remove_confirm:
   en: Remove
 projects.remove_cancel:
   en: Cancel
+projects.remove_type_name:
+  en: "Type %{name} to confirm"
+projects.remove_type_placeholder:
+  en: Project name
 projects.rename_commit_hint:
   en: Press Enter to rename
 projects.directory_missing:
@@ -1432,8 +1442,8 @@ branches.none_found:
   en: No branches found
 branches.create_and_checkout_ellipsis:
   en: Create and checkout new branch…
-branches.work_in_new_worktree:
-  en: Work in a new worktree
+branches.isolated_worktree:
+  en: Isolated Worktree
 branches.title:
   en: Branches
 branches.choose:
@@ -1445,8 +1455,6 @@ workspace.work_in:
   en: Work in
 workspace.local:
   en: Local
-workspace.new_worktree:
-  en: New worktree
 workspace.workspace:
   en: workspace
 workspace.worktree:

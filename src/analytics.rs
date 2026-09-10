@@ -349,7 +349,12 @@ fn run(
                     .map_err(|error| eprintln!("analytics event send failed: {error:?}"))
             }
             Message::Performance(ttfb_milliseconds) => runtime
-                .block_on(session.performance("/desktop").ttfb(ttfb_milliseconds).send())
+                .block_on(
+                    session
+                        .performance("/desktop")
+                        .ttfb(ttfb_milliseconds)
+                        .send(),
+                )
                 .map_err(|error| eprintln!("analytics performance send failed: {error:?}")),
         };
     }

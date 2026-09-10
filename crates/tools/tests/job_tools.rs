@@ -120,7 +120,11 @@ fn background_flow_deltas_kill_and_stopped_settlement() {
         "{}",
         out.output
     );
-    assert!(out.output.contains("do not re-read in a loop"), "{}", out.output);
+    assert!(
+        out.output.contains("do not re-read in a loop"),
+        "{}",
+        out.output
+    );
     assert!(out.output.contains("wait: true"), "{}", out.output);
     assert!(
         out.meta.as_deref().unwrap().starts_with("running"),
@@ -375,7 +379,8 @@ fn wait_true_on_a_settled_job_delivers_the_final_delta() {
     assert!(started.elapsed() < Duration::from_secs(5));
     assert!(out.output.contains("jt-wait-done"), "{}", out.output);
     assert!(
-        out.output.contains(&format!("[background job {id} finished — completed")),
+        out.output
+            .contains(&format!("[background job {id} finished — completed")),
         "{}",
         out.output
     );

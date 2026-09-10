@@ -2122,15 +2122,13 @@ impl Tide {
             .unwrap_or_default();
         let workspace_label = match &workspace {
             SessionWorkspace::Local => SharedString::from(tr!("workspace.local")),
-            SessionWorkspace::NewWorktree { .. } => {
-                SharedString::from(tr!("workspace.new_worktree"))
-            }
+            SessionWorkspace::NewWorktree { .. } => SharedString::from(tr!("workspace.worktree")),
             SessionWorkspace::Worktree { branch, .. } => SharedString::from(branch.clone()),
         };
         let workspace_icon = if workspace.is_local() {
             "icons/laptop.svg"
         } else {
-            "icons/fork.svg"
+            "icons/worktree.svg"
         };
         let worktree_handle = self.menu_handle("workspace-worktree", cx);
         let worktree_trigger = MenuChip::new("workspace-worktree")
@@ -2161,7 +2159,7 @@ impl Tide {
                         })
                         .icon("icons/laptop.svg")
                         .selected(local_selected),
-                        MenuItem::new(tr!("workspace.new_worktree"), move |_, cx| {
+                        MenuItem::new(tr!("workspace.worktree"), move |_, cx| {
                             let _ = worktree.update(cx, |this, cx| {
                                 this.select_workspace(
                                     SessionWorkspace::NewWorktree { base_branch: None },
@@ -2169,7 +2167,7 @@ impl Tide {
                                 );
                             });
                         })
-                        .icon("icons/fork.svg")
+                        .icon("icons/worktree.svg")
                         .selected(worktree_selected)
                         .disabled(projectless_selected),
                     ]

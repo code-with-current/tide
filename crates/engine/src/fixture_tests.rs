@@ -43,6 +43,7 @@ fn fixture_config(fixture: &Value) -> EngineModelConfig {
         base_url: provider["baseUrl"].as_str().unwrap().to_owned(),
         api_key: "test-key-local-mock".to_owned(),
         model_id: provider["modelId"].as_str().unwrap().to_owned(),
+        provider_id: "p_fixture".to_owned(),
     }
 }
 

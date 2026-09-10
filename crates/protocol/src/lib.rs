@@ -47,6 +47,7 @@ pub mod theme;
 pub mod tide;
 pub mod usage;
 pub mod usage_history;
+pub mod usage_report;
 pub mod workspace;
 
 mod protocol;

@@ -55,10 +55,21 @@ pub(crate) struct Mention {
     pub range: Range<usize>,
 }
 
-/// Resolve a mention token (sigil included) to its hover label — the file's
-/// absolute path, or the skill's SKILL.md location. Built in `list.rs` where
-/// the workspace root and the skills catalog live.
-pub(crate) type MentionResolver = Arc<dyn Fn(&str) -> Option<String> + 'static>;
+/// One mention's resolved presentation: the hover label plus, when the
+/// mention should act as a link, the link's target (an absolute path the
+/// transcript's link router resolves). Built in `list.rs` where the
+/// workspace root and the skills catalog live.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MentionResolution {
+    pub label: String,
+    /// Absolute path the pill opens on click; `None` renders a label-only
+    /// pill.
+    pub target: Option<String>,
+}
+
+/// Resolve a mention token (sigil included) to its hover label and click
+/// target — the file's absolute path, or the skill's SKILL.md location.
+pub(crate) type MentionResolver = Arc<dyn Fn(&str) -> Option<MentionResolution> + 'static>;
 
 /// The `@path` and `/skill` tokens a user message carries, in document order.
 ///
@@ -66,9 +77,18 @@ pub(crate) type MentionResolver = Arc<dyn Fn(&str) -> Option<String> + 'static>;
 /// token-boundary `@` followed by a path (quoted when it holds whitespace),
 /// and only counts when the path looks pathy (`/` or `.` inside — prose
 /// `@handle` shoutouts stay plain text); a skill mention is a `/name` at the
-/// START of a line, single segment, alphanumeric-led. Trailing sentence
-/// punctuation stays outside the pill.
+/// START of a line, alphanumeric-led, and may span spaces when a catalog
+/// skill carries that multi-word name (matched longest-first,
+/// case-insensitively). Trailing sentence punctuation stays outside the pill.
 pub(crate) fn parse_mentions(content: &str) -> Vec<Mention> {
+    parse_mentions_with_skills(content, &[])
+}
+
+/// [`parse_mentions`], with the skills catalog's names available: a
+/// line-leading `/` first tries the longest catalog name the text carries
+/// verbatim (so "AgentDB Advanced Features" pills whole), then falls back to
+/// the single-segment heuristic.
+pub(crate) fn parse_mentions_with_skills(content: &str, skill_names: &[String]) -> Vec<Mention> {
     let bytes = content.as_bytes();
     let mut mentions = Vec::new();
     let mut index = 0usize;
@@ -81,7 +101,8 @@ pub(crate) fn parse_mentions(content: &str) -> Vec<Mention> {
         let ended = match bytes[index] {
             b'@' => file_mention_end(content, index).map(|end| (MentionKind::File, end)),
             b'/' if index == 0 || bytes[index - 1] == b'\n' => {
-                skill_mention_end(content, index).map(|end| (MentionKind::Skill, end))
+                skill_mention_end(content, index, skill_names)
+                    .map(|end| (MentionKind::Skill, end))
             }
             _ => None,
         };
@@ -124,8 +145,28 @@ fn file_mention_end(content: &str, at: usize) -> Option<usize> {
 /// End of a line-leading `/skill` token starting at `at`, or `None` when the
 /// token is not a skill invocation (paths like `/usr/bin` have segments,
 /// `/etc`-style tokens do not start alphanumeric).
-fn skill_mention_end(content: &str, at: usize) -> Option<usize> {
+fn skill_mention_end(content: &str, at: usize, skill_names: &[String]) -> Option<usize> {
     let rest = &content[at + 1..];
+    // Catalog names win longest-first, so a multi-word skill name ("AgentDB
+    // Advanced Features") pills whole instead of splitting at its first
+    // space.
+    let mut longest: Option<usize> = None;
+    for name in skill_names {
+        let Some(candidate) = rest.get(..name.len()) else {
+            continue;
+        };
+        let followed_by_edge = rest[name.len()..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace);
+        if followed_by_edge && candidate.eq_ignore_ascii_case(name) {
+            let end = at + 1 + name.len();
+            longest = Some(longest.map_or(end, |current: usize| current.max(end)));
+        }
+    }
+    if let Some(end) = longest {
+        return Some(end);
+    }
     let raw_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let name = rest[..raw_end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
     let led = name.chars().next().is_some_and(|c| c.is_alphanumeric());
@@ -300,6 +341,8 @@ pub(crate) fn render_user_bubble(
     actions: UserBubbleActions,
     toggle_clamp: GroupToggle,
     mention_resolver: Option<MentionResolver>,
+    skill_names: Vec<String>,
+    link_handler: Option<render::LinkHandler>,
 ) -> Div {
     let group = SharedString::from(format!("user-message-{message_id}"));
     let mut column = div()
@@ -333,6 +376,8 @@ pub(crate) fn render_user_bubble(
                     theme,
                     selection,
                     mention_resolver,
+                    &skill_names,
+                    link_handler,
                 ));
             }
             // The clamp chevron lives in the footer's one row — visible
@@ -374,17 +419,32 @@ fn user_bubble(
     theme: &Theme,
     selection: TranscriptSelection,
     mention_resolver: Option<MentionResolver>,
+    skill_names: &[String],
+    link_handler: Option<render::LinkHandler>,
 ) -> Div {
     let clamped = clamp_needed(content) && !clamp_expanded;
     let key = TextKey::new(format!("user-bubble-{message_id}"), 0);
-    let mentions = parse_mentions(content);
+    let mentions = parse_mentions_with_skills(content, skill_names);
+    let mut labels: HashMap<usize, SharedString> = HashMap::new();
+    let mut links: Vec<(Range<usize>, String)> = Vec::new();
+    if let Some(resolver) = mention_resolver.as_deref() {
+        for mention in &mentions {
+            let token = &content[mention.range.clone()];
+            if let Some(resolution) = resolver(token) {
+                labels.insert(mention.range.start, SharedString::from(resolution.label));
+                if let Some(target) = resolution.target {
+                    links.push((mention.range.clone(), target));
+                }
+            }
+        }
+    }
     let flat = if mentions.is_empty() {
         render::flatten_plain(content, render::SANS_FAMILY, FontWeight::NORMAL, theme.text)
     } else {
         FlatText {
             text: SharedString::from(content.to_owned()),
             runs: mention_runs(content, &mentions, theme.text, theme.accent),
-            links: Vec::new(),
+            links,
             code_ranges: mentions.iter().map(|m| m.range.clone()).collect(),
         }
     };
@@ -398,15 +458,6 @@ fn user_bubble(
             false,
         )
     } else {
-        let mut labels: HashMap<usize, SharedString> = HashMap::new();
-        if let Some(resolver) = mention_resolver.as_deref() {
-            for mention in &mentions {
-                let token = &content[mention.range.clone()];
-                if let Some(label) = resolver(token) {
-                    labels.insert(mention.range.start, SharedString::from(label));
-                }
-            }
-        }
         render::selectable_mention_text(
             &flat,
             mentions.iter().map(|m| m.range.clone()).collect(),
@@ -415,6 +466,7 @@ fn user_bubble(
             selection,
             theme.accent.opacity(0.12),
             theme.selection,
+            link_handler,
         )
     };
     let surface = theme.raised;

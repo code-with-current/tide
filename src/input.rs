@@ -3,14 +3,15 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::md::highlight::{self, Lang, TokenClass};
+use crate::md::render::MONO_FAMILY;
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use gpui::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, DispatchPhase, Element,
     ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
+    Focusable, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
+    Point, ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
     UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -612,6 +613,10 @@ pub(crate) fn paste_becomes_attachment(text: &str) -> bool {
 /// its text scrolls under an overlay scrollbar instead of growing the card.
 const AUTO_HEIGHT_MAX: Pixels = px(300.);
 
+/// Height an [`auto_height`](TextInput::auto_height) field opens at: one
+/// 22px line of text plus the field's vertical breathing room.
+const AUTO_HEIGHT_MIN: Pixels = px(24.);
+
 /// The shared text engine under every box that takes typing — search inputs,
 /// the address bar, file editors, and the composer wrapper: native macOS
 /// editing and IME composition, grouped undo history, mouse selection, and
@@ -627,6 +632,8 @@ pub struct TextInput {
     /// up to [`AUTO_HEIGHT_MAX`] before it scrolls; otherwise a
     /// multi-line field inherits the embedding view's metrics.
     auto_height: bool,
+    /// Per-field override of the [`AUTO_HEIGHT_MIN`] one-line floor.
+    auto_height_floor: Option<Pixels>,
     /// Per-field override of the [`AUTO_HEIGHT_MAX`] growth cap.
     auto_height_cap: Option<Pixels>,
     /// Image and file pastes surface as [`MediaPaste`] instead of being
@@ -657,6 +664,12 @@ pub struct TextInput {
     /// Index into `search_matches` of the match navigation is on, painted
     /// stronger than its siblings.
     active_search_match: Option<usize>,
+    /// Embedded token ranges — `@mentions` and `/commands` the composer
+    /// accepted from its autocomplete — painted as quoted code (wash + mono
+    /// face), sorted and non-overlapping. Purely visual; the tokens are real
+    /// content, so the caret, selection, and edits move through them like
+    /// any other text.
+    decorated_ranges: Vec<Range<usize>>,
     content: SharedString,
     placeholder: SharedString,
     selected_range: Range<usize>,
@@ -734,6 +747,7 @@ impl TextInput {
             read_only: false,
             submit_on_enter: false,
             auto_height: false,
+            auto_height_floor: None,
             auto_height_cap: None,
             accepts_media_paste: false,
             converts_large_text_pastes: false,
@@ -744,6 +758,7 @@ impl TextInput {
             highlight: Vec::new(),
             search_matches: Vec::new(),
             active_search_match: None,
+            decorated_ranges: Vec::new(),
             content: "".into(),
             placeholder: "".into(),
             selected_range: 0..0,
@@ -872,6 +887,13 @@ impl TextInput {
     /// scrollbar that follows the caret.
     pub fn auto_height(mut self) -> Self {
         self.auto_height = true;
+        self
+    }
+
+    /// Raise this field's [`auto_height`](Self::auto_height) opening floor
+    /// above the one-line default (e.g. a composer that starts at two lines).
+    pub fn auto_height_min(mut self, min: Pixels) -> Self {
+        self.auto_height_floor = Some(min);
         self
     }
 
@@ -1013,6 +1035,27 @@ impl TextInput {
         self.search_matches = matches;
         self.active_search_match = active;
         cx.notify();
+    }
+
+    /// Replace the painted embedded-token decorations. Ranges must be
+    /// sorted and non-overlapping. Purely visual — the content is
+    /// untouched, so no [`InputEvent::Edited`] is emitted.
+    pub fn set_decorated_ranges(
+        &mut self,
+        ranges: Vec<Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.decorated_ranges == ranges {
+            return;
+        }
+        self.decorated_ranges = ranges;
+        cx.notify();
+    }
+
+    /// The painted embedded-token decorations, for tests and owners that
+    /// mirror the ranges elsewhere.
+    pub fn decorated_ranges(&self) -> &[Range<usize>] {
+        &self.decorated_ranges
     }
 
     pub fn selected_range(&self) -> Range<usize> {
@@ -2174,6 +2217,13 @@ impl SearchPaint<'static> {
     }
 }
 
+/// One embedded-token decoration's paint: the wash under the glyphs and the
+/// mono face over them — markdown inline-code styling.
+struct DecorationPaint {
+    color: Hsla,
+    font: Font,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn input_text_runs(
     display_len: usize,
@@ -2184,6 +2234,8 @@ fn input_text_runs(
     highlight: &[(Range<usize>, TokenClass)],
     token_color: impl Fn(TokenClass) -> Hsla,
     search: SearchPaint,
+    decorated: &[Range<usize>],
+    decoration: &DecorationPaint,
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
@@ -2198,6 +2250,10 @@ fn input_text_runs(
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
     }
+    for range in decorated {
+        boundaries.push(range.start.min(display_len));
+        boundaries.push(range.end.min(display_len));
+    }
     boundaries.sort_unstable();
     boundaries.dedup();
 
@@ -2209,6 +2265,12 @@ fn input_text_runs(
         let index = search.matches.partition_point(|range| range.end <= start);
         search
             .matches
+            .get(index)
+            .is_some_and(|range| range.start <= start && range.end >= end)
+    };
+    let covering_decoration = |start: usize, end: usize| -> bool {
+        let index = decorated.partition_point(|range| range.end <= start);
+        decorated
             .get(index)
             .is_some_and(|range| range.start <= start && range.end >= end)
     };
@@ -2232,6 +2294,8 @@ fn input_text_runs(
                 Some(selection_color)
             } else if covering_match(start, end) {
                 Some(search.match_color)
+            } else if covering_decoration(start, end) {
+                Some(decoration.color)
             } else {
                 None
             };
@@ -2246,7 +2310,12 @@ fn input_text_runs(
                         thickness: px(1.0),
                         wavy: false,
                     }),
-                ..base_run.clone()
+                font: if covering_decoration(start, end) {
+                    decoration.font.clone()
+                } else {
+                    base_run.font.clone()
+                },
+                strikethrough: base_run.strikethrough,
             })
         })
         .collect()
@@ -2328,6 +2397,18 @@ impl Element for InputElement {
             },
             |class| palette.token(class),
             search,
+            if content_is_empty {
+                &[]
+            } else {
+                &input.decorated_ranges
+            },
+            &DecorationPaint {
+                color: theme.code_wash,
+                font: Font {
+                    family: MONO_FAMILY.into(),
+                    ..style.font()
+                },
+            },
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
@@ -2524,7 +2605,7 @@ impl Render for TextInput {
             // rely on the same line height.
             .when(self.auto_height, |field| {
                 field
-                    .min_h(px(24.0))
+                    .min_h(self.auto_height_floor.unwrap_or(AUTO_HEIGHT_MIN))
                     .max_h(self.auto_height_cap.unwrap_or(AUTO_HEIGHT_MAX))
                     .overflow_y_scroll()
                     .track_scroll(&scroll_handle)
@@ -2631,7 +2712,7 @@ mod tests {
 
     use super::TokenClass;
     use super::{
-        EditHistory, FieldMode, PASTE_ATTACHMENT_MIN_LINES, SearchPaint, TextInput,
+        DecorationPaint, EditHistory, FieldMode, PASTE_ATTACHMENT_MIN_LINES, SearchPaint, TextInput,
         UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, cursor_should_be_visible, input_text_runs,
         media_paste_entries, next_word_boundary, paste_becomes_attachment, pasted_text_for_mode,
         previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
@@ -3208,6 +3289,11 @@ mod tests {
                 _ => plain,
             },
             SearchPaint::none(),
+            &[],
+            &DecorationPaint {
+                color: gpui::transparent_black(),
+                font: font(".SystemUIFont"),
+            },
         );
 
         assert_eq!(
@@ -3248,6 +3334,11 @@ mod tests {
             &[],
             |_| hsla(0.0, 0.0, 1.0, 1.0),
             SearchPaint::none(),
+            &[],
+            &DecorationPaint {
+                color: gpui::transparent_black(),
+                font: font(".SystemUIFont"),
+            },
         );
 
         assert_eq!(
@@ -3302,6 +3393,11 @@ mod tests {
                 active: Some(&active),
                 match_color,
                 active_color,
+            },
+            &[],
+            &DecorationPaint {
+                color: gpui::transparent_black(),
+                font: font(".SystemUIFont"),
             },
         );
 

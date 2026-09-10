@@ -2092,8 +2092,13 @@ fn render_user_message(
     // SKILL.md location from the settings catalog. Pure joins and lookups —
     // no filesystem probes in the frame path.
     let mention_resolver: super::parts::user_bubble::MentionResolver = {
-        let root: Option<PathBuf> =
-            session.and_then(|session| session.workspace.path().map(Path::to_path_buf));
+        // The session's workspace root the router also resolves against —
+        // worktree path when the session runs in one, the project path
+        // otherwise. A LOCAL session's `workspace.path()` is None, so
+        // falling back keeps targets absolute and the Files route live.
+        let root: Option<PathBuf> = session
+            .and_then(|session| tide.workspace_path_for_session(session))
+            .map(Path::to_path_buf);
         let skills = tide.skills_catalog.clone();
         Arc::new(move |token: &str| match token.chars().next() {
             Some('@') => {
@@ -2106,7 +2111,13 @@ fn render_user_message(
                     Some(root) if path.is_relative() => root.join(path),
                     _ => PathBuf::from(raw),
                 };
-                Some(resolved.to_string_lossy().into_owned())
+                let resolved = resolved.to_string_lossy().into_owned();
+                Some(super::parts::user_bubble::MentionResolution {
+                    label: resolved.clone(),
+                    // Absolute targets are what the transcript's link router
+                    // resolves; a click opens the Files surface on the file.
+                    target: Some(resolved),
+                })
             }
             Some('/') => {
                 let name = &token[1..];
@@ -2115,11 +2126,29 @@ fn render_user_message(
                     .skills
                     .iter()
                     .find(|skill| skill.enabled && skill.name == name)?;
-                Some(entry.primary().skill_file.to_string_lossy().into_owned())
+                let skill_file = entry.primary().skill_file.to_string_lossy().into_owned();
+                Some(super::parts::user_bubble::MentionResolution {
+                    label: skill_file.clone(),
+                    target: Some(skill_file),
+                })
             }
             _ => None,
         })
     };
+    // The catalog's names let multi-word skills pill whole.
+    let skill_names: Vec<String> = tide
+        .skills_catalog
+        .as_ref()
+        .map(|catalog| {
+            catalog
+                .skills
+                .iter()
+                .filter(|skill| skill.enabled)
+                .map(|skill| skill.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mention_link_handler = tide.markdown_link_handler.clone();
 
     render_user_bubble(
         message_id,
@@ -2134,6 +2163,8 @@ fn render_user_message(
         actions,
         toggle,
         Some(mention_resolver),
+        skill_names,
+        Some(mention_link_handler),
     )
 }
 

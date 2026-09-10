@@ -28,27 +28,24 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
     if !text.is_char_boundary(cursor) {
         return None;
     }
-    let line_start = text[..cursor].rfind('\n').map_or(0, |index| index + 1);
-    let line_prefix = &text[line_start..cursor];
-    if let Some(query) = line_prefix.strip_prefix('/') {
-        if !query.chars().any(char::is_whitespace) {
-            return Some(Trigger {
-                kind: TriggerKind::Command,
-                query: query.to_owned(),
-                range: line_start..cursor,
-            });
-        }
-        return None;
-    }
+    // The token under the caret, bounded left by whitespace (or the text
+    // start). A token-initial '/' or '@' is the trigger — anywhere in the
+    // sentence — while a '/' or '@' inside a word or URL (https://x,
+    // src/main.rs, user@host) never is.
     let token_start = text[..cursor]
         .rfind(char::is_whitespace)
         .map_or(0, |index| {
             index + text[index..].chars().next().unwrap().len_utf8()
         });
     let token = &text[token_start..cursor];
+    let kind = match token.chars().next() {
+        Some('/') => TriggerKind::Command,
+        Some('@') => TriggerKind::File,
+        _ => return None,
+    };
     Some(Trigger {
-        kind: TriggerKind::File,
-        query: token.strip_prefix('@')?.to_owned(),
+        kind,
+        query: token[1..].to_owned(),
         range: token_start..cursor,
     })
 }
@@ -288,6 +285,40 @@ pub fn highlight_byte_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triggers_fire_on_token_initial_slash_or_at_anywhere() {
+        // Line start still triggers, and so does mid-sentence — the pill
+        // can land anywhere in the prompt.
+        for (text, cursor, kind, query, range) in [
+            ("/ref", 4, TriggerKind::Command, "ref", 0..4),
+            ("fix this /ref", 13, TriggerKind::Command, "ref", 9..13),
+            ("a @src/lib", 10, TriggerKind::File, "src/lib", 2..10),
+            ("see @db/ and /goal", 8, TriggerKind::File, "db/", 4..8),
+            ("see @db/ and /goal", 18, TriggerKind::Command, "goal", 13..18),
+        ] {
+            let trigger = detect_trigger(text, cursor).expect(text);
+            assert_eq!(trigger.kind, kind, "{text}");
+            assert_eq!(trigger.query, query, "{text}");
+            assert_eq!(trigger.range, range, "{text}");
+        }
+    }
+
+    #[test]
+    fn embedded_marks_never_trigger() {
+        // '/' or '@' inside a word/URL is not a trigger gesture.
+        for text in [
+            "https://example.com",
+            "src/main.rs",
+            "user@host",
+            "plain text",
+        ] {
+            assert!(
+                detect_trigger(text, text.len()).is_none(),
+                "{text} must not trigger"
+            );
+        }
+    }
 
     #[test]
     fn merged_command_picker_puts_builtins_first_and_skills_last() {

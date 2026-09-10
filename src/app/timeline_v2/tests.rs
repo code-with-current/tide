@@ -3201,6 +3201,8 @@ fn render_user_bubble_constructs_headlessly() {
         noop_user_actions(),
         std::sync::Arc::clone(&toggle),
         None,
+        Vec::new(),
+        None,
     );
     // Long content clamps collapsed, opens expanded, and hides the pencil
     // while the session is busy.
@@ -3218,6 +3220,8 @@ fn render_user_bubble_constructs_headlessly() {
             &theme,
             noop_user_actions(),
             std::sync::Arc::clone(&toggle),
+            None,
+            Vec::new(),
             None,
         );
     }
@@ -3237,15 +3241,21 @@ fn render_user_bubble_constructs_headlessly() {
         noop_user_actions(),
         std::sync::Arc::clone(&toggle),
         Some(std::sync::Arc::new(|token: &str| {
-            token
+            let resolved = token
                 .strip_prefix('@')
                 .map(|path| format!("/workspace{path}"))
                 .or_else(|| {
                     token
                         .strip_prefix('/')
                         .map(|name| format!("/Users/tester/.claude/skills/{name}/SKILL.md"))
-                })
+                })?;
+            Some(super::parts::user_bubble::MentionResolution {
+                label: resolved.clone(),
+                target: Some(resolved),
+            })
         })),
+        Vec::new(),
+        None,
     );
     // Blank content renders the footer alone, like the legacy pane hides the
     // empty bubble.
@@ -3261,6 +3271,8 @@ fn render_user_bubble_constructs_headlessly() {
         &theme,
         noop_user_actions(),
         toggle,
+        None,
+        Vec::new(),
         None,
     );
 }

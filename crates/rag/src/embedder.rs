@@ -203,7 +203,9 @@ fn build_local_session(
         ));
     };
     let tokenizer_bytes: Vec<u8> = {
-        let tokenizer_path = models_dir_for(data_dir).join(entry.repo).join("tokenizer.json");
+        let tokenizer_path = models_dir_for(data_dir)
+            .join(entry.repo)
+            .join("tokenizer.json");
         if onnx_owned && tokenizer_path.is_file() {
             std::fs::read(&tokenizer_path).map_err(|e| e.to_string())?
         } else if entry.vendored {
@@ -452,7 +454,12 @@ impl Embedder for RemoteEmbedder {
                 "remote embedder {} HTTP {}: {}",
                 self.id,
                 response.status(),
-                response.text().unwrap_or_default().chars().take(200).collect::<String>()
+                response
+                    .text()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             ));
         }
         let payload: serde_json::Value = response.json().map_err(|e| e.to_string())?;
@@ -690,7 +697,14 @@ mod tests {
 
     #[test]
     fn remote_embedder_declared_dims_short_circuit() {
-        let e = RemoteEmbedder::custom("custom-x", "https://example.invalid/v1", "m", "k", 1536, 8191);
+        let e = RemoteEmbedder::custom(
+            "custom-x",
+            "https://example.invalid/v1",
+            "m",
+            "k",
+            1536,
+            8191,
+        );
         assert_eq!(e.ensure_dims().unwrap(), 1536);
         assert_eq!(e.dim(), 1536);
     }

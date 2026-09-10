@@ -1174,7 +1174,7 @@
         },
         "k": {
           "type": "number",
-          "description": "Top-K results. Default 5, max 20."
+          "description": "Top-K results. Omit to use the configured default; max 20."
         }
       },
       "required": [
@@ -1678,6 +1678,76 @@
       "required": [
         "op"
       ]
+    }
+  },
+  {
+    "name": "list_sessions",
+    "description": "List this workspace's saved chat sessions — id, title, model, message count, and last-updated age, newest first. Use it to find a past conversation whose context would help the current task; the current session is marked. Follow with read_session to page through a session's messages.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Maximum sessions to return. Default 20, max 100."
+        }
+      }
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Maximum sessions to return. Default 20, max 100."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "read_session",
+    "description": "Read one saved session's conversation from this workspace — user and assistant messages in conversation order (oldest first), paged by cursor. Use after list_sessions to recover what a past session established. Tool and system traffic is omitted; long messages are truncated. Returns the next cursor when more messages remain.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "The session id from list_sessions."
+        },
+        "cursor": {
+          "type": "string",
+          "description": "The cursor returned by a previous read_session call, to read the next page. Omit to read from the beginning of the session."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum messages to return per page. Default 30, max 100."
+        }
+      },
+      "required": [
+        "session_id"
+      ]
+    },
+    "sdkSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "The session id from list_sessions."
+        },
+        "cursor": {
+          "type": "string",
+          "description": "The cursor returned by a previous read_session call, to read the next page. Omit to read from the beginning of the session."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum messages to return per page. Default 30, max 100."
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false
     }
   }
 ]

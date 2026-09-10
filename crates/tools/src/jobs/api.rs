@@ -428,12 +428,10 @@ impl JobRegistry {
         let bridge_session = spec.owner_session.clone();
         let _ = std::thread::Builder::new()
             .name(format!("jobs-settle-{}", key.provider_id))
-            .spawn(move || {
-                loop {
-                    if let Some(outcome) = producer_done.wait_bounded(Duration::from_secs(60)) {
-                        bridge.settle(&bridge_session, &bridge_key, outcome);
-                        break;
-                    }
+            .spawn(move || loop {
+                if let Some(outcome) = producer_done.wait_bounded(Duration::from_secs(60)) {
+                    bridge.settle(&bridge_session, &bridge_key, outcome);
+                    break;
                 }
             });
         Ok(key)

@@ -1,19 +1,24 @@
-//! The settings Usage page: historical token and cost usage across provider
-//! transcripts, mirroring T3 Code's usage dashboard — a windowed headline with
-//! per-provider share bars, a layered daily chart, a metric strip, a
-//! model/day breakdown, and cost quality. Data comes from
-//! [`crate::usage_history`], scanned by the daemon; frames read only the
-//! snapshot stored on the entity.
+//! The settings Usage page: Tide's own per-turn usage, folded by the daemon
+//! from its ledger (`usage.db`) into a windowed
+//! [`UsageReport`](crate::usage_report::UsageReport) — a windowed headline
+//! with per-provider share bars, a layered chart, a metric strip, and a
+//! provider-grouped model/time breakdown. Daily charts days; Monthly charts
+//! the same dashboard by month with the month statement beneath it, and the
+//! Projects view ranks workspaces. Provider labels join against the
+//! configured Tide provider list; colors come from a fixed palette assigned
+//! by sorted provider id. Frames read only the snapshot stored on the entity.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::{Datelike, Local, NaiveDate};
-use gpui::{PathBuilder, relative};
+use client::tide::TideProviderWire;
+use gpui::{PathBuilder, hsla, relative};
 
 use super::*;
-use crate::usage_history::{
-    self, MONTHLY_WINDOW, MonthSlice, PricingStatus, ProjectSlice, ProviderDay, UsageHistory,
-    UsageProvider, UsageWindow, WINDOW_CHOICES,
+use crate::usage_report::{
+    DaySlice, MONTHLY_WINDOW, ModelSlice, MonthSlice, ProviderUsage, UsageReport, UsageWindow,
+    WINDOW_CHOICES, days_in_month, enumerate_days, enumerate_months, first_of_month,
 };
 
 /// Rendered chart height, matching T3's `h-56` plot.
@@ -26,20 +31,151 @@ const CHART_GUTTER: f32 = 56.0;
 /// Uniform height hint for the virtualized project rows, so the scrollbar
 /// knows the total extent before rows are measured.
 const USAGE_PROJECT_ROW_HEIGHT: f32 = 96.0;
-/// A snapshot older than this rescans when the page is next opened.
-const USAGE_RESCAN_AFTER: Duration = Duration::from_secs(120);
-/// Series colors for the historical usage breakdown. The labels come from
-/// the persisted history's own provider vocabulary, so the hues are theme
-/// accents rather than provider brand marks.
-fn usage_provider_color(theme: &Theme, provider: UsageProvider) -> Hsla {
-    match provider {
-        UsageProvider::Claude => theme.accent,
-        UsageProvider::Codex => theme.gauge,
+/// A snapshot older than this refetches when the page is next opened.
+const USAGE_REFRESH_AFTER: Duration = Duration::from_secs(120);
+
+/// Fixed series hues for the page's provider vocabulary. The first two echo
+/// the chart accents this page has always led with (brand coral, gauge
+/// blue); the rest are picked to stay mutually distinguishable at chart
+/// stroke weight in both themes.
+const USAGE_SERIES_HUES: [f32; 8] = [24.0, 205.0, 145.0, 42.0, 275.0, 190.0, 335.0, 95.0];
+
+fn usage_series_color(theme: &Theme, index: usize) -> Hsla {
+    // The ledger holds thirteen months of history, so series sit next to
+    // hairlines and text on both themes: a lighter fill reads on dark
+    // surfaces, a deeper one on light.
+    let (saturation, lightness) = if theme.is_dark {
+        (0.6, 0.68)
+    } else {
+        (0.56, 0.44)
+    };
+    hsla(
+        USAGE_SERIES_HUES[index % USAGE_SERIES_HUES.len()] / 360.0,
+        saturation,
+        lightness,
+        1.0,
+    )
+}
+
+/// Joins the report's self-describing provider ids against what the UI can
+/// say about them: labels come from the configured Tide provider list (raw
+/// id when the provider has since been deleted), colors from the fixed
+/// palette assigned by *sorted* id — so a provider keeps its color across
+/// windows, slices, and ranking orders, and two providers never swap
+/// mid-session. Built once per frame; every section reads the same maps.
+struct UsageProviders {
+    /// Column, series, and legend order — the report's own cost-descending
+    /// ranking, so the heaviest provider leads everywhere.
+    order: Vec<String>,
+    labels: HashMap<String, String>,
+    colors: HashMap<String, Hsla>,
+    /// For ids outside this window's provider set, which cannot happen from
+    /// the report but keeps a stale frame from panicking.
+    fallback: Hsla,
+}
+
+impl UsageProviders {
+    fn build(report: &UsageReport, configured: &[TideProviderWire], theme: &Theme) -> Self {
+        let mut ids: Vec<&str> = report
+            .providers
+            .iter()
+            .map(|provider| provider.provider_id.as_str())
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut labels = HashMap::new();
+        let mut colors = HashMap::new();
+        for (index, id) in ids.iter().enumerate() {
+            labels.insert(
+                (*id).to_owned(),
+                configured
+                    .iter()
+                    .find(|provider| provider.id == **id)
+                    .map(|provider| provider.name.clone())
+                    .unwrap_or_else(|| (*id).to_owned()),
+            );
+            colors.insert((*id).to_owned(), usage_series_color(theme, index));
+        }
+        Self {
+            order: report
+                .providers
+                .iter()
+                .map(|provider| provider.provider_id.clone())
+                .collect(),
+            labels,
+            colors,
+            fallback: theme.text_ghost,
+        }
+    }
+
+    fn label(&self, provider_id: &str) -> String {
+        self.labels
+            .get(provider_id)
+            .cloned()
+            .unwrap_or_else(|| provider_id.to_owned())
+    }
+
+    fn color(&self, provider_id: &str) -> Hsla {
+        self.colors
+            .get(provider_id)
+            .copied()
+            .unwrap_or(self.fallback)
+    }
+
+    /// Series colors aligned with [`Self::order`], for the chart painter.
+    fn colors_in_order(&self) -> Vec<Hsla> {
+        self.order.iter().map(|id| self.color(id)).collect()
+    }
+}
+
+/// What one chart column aggregates: a calendar day, or a calendar month
+/// (the Monthly view's bin). Both key off a `NaiveDate` — the day itself or
+/// the month's first — so the chart, its readout, and the time-table share
+/// one bin-agnostic path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UsageBin {
+    Day,
+    Month,
+}
+
+impl UsageBin {
+    /// The bin the active view charts.
+    fn for_view(view: UsageViewMode) -> Self {
+        match view {
+            UsageViewMode::Monthly => UsageBin::Month,
+            UsageViewMode::Daily | UsageViewMode::Projects => UsageBin::Day,
+        }
+    }
+
+    /// Every bin key the report's window covers, oldest first — empty bins
+    /// stay on the axis so gaps read as gaps.
+    fn keys(self, report: &UsageReport) -> Vec<NaiveDate> {
+        match self {
+            UsageBin::Day => enumerate_days(report.since_day, report.until_day),
+            UsageBin::Month => enumerate_months(report.since_day, report.until_day),
+        }
+    }
+
+    /// One provider's value inside the bin at `key`, 0.0 when nothing was
+    /// recorded there.
+    fn value(self, report: &UsageReport, key: NaiveDate, provider_id: &str, by_cost: bool) -> f64 {
+        match self {
+            UsageBin::Day => day_provider_value(report.day(key), provider_id, by_cost),
+            UsageBin::Month => month_provider_value(report.month(key), provider_id, by_cost),
+        }
+    }
+
+    /// Axis label for a bin key.
+    fn label(self, key: NaiveDate) -> String {
+        match self {
+            UsageBin::Day => format_day_short(key),
+            UsageBin::Month => format_month_short(key),
+        }
     }
 }
 
 impl Tide {
-    /// Switch the settings view to `page`, warming the Usage scan when that
+    /// Switch the settings view to `page`, warming the Usage report when that
     /// is where the user is heading.
     pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.settings_page = Some(page);
@@ -47,7 +183,7 @@ impl Tide {
         // from the previous page would land mid-content.
         self.settings_scroll.set_offset(gpui::Point::default());
         if page == SettingsPage::Usage {
-            self.ensure_usage_history(false, cx);
+            self.ensure_usage_report(false, cx);
         }
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
@@ -75,7 +211,7 @@ impl Tide {
         cx.notify();
     }
 
-    /// The scan window the active view needs: the statement view always
+    /// The report window the active view needs: the statement view always
     /// covers a year of calendar months; the daily and project views share
     /// the trailing-days selector.
     fn effective_usage_window(&self) -> UsageWindow {
@@ -85,67 +221,58 @@ impl Tide {
         }
     }
 
-    /// Start a background transcript scan unless a current-enough snapshot
-    /// (or an in-flight scan for the same window) already covers it. `force`
-    /// is the refresh button. Results from superseded scans are discarded by
-    /// generation, so a window change mid-scan cannot land stale data.
-    pub(super) fn ensure_usage_history(&mut self, force: bool, cx: &mut Context<Self>) {
+    /// Start a background report fetch unless a current-enough snapshot (or
+    /// an in-flight fetch for the same window) already covers it. `force` is
+    /// the refresh button. Results from superseded fetches are discarded by
+    /// generation, so a window change mid-fetch cannot land stale data.
+    pub(super) fn ensure_usage_report(&mut self, force: bool, cx: &mut Context<Self>) {
         let window = self.effective_usage_window();
         let satisfied = self
-            .usage_history
+            .usage_report
             .as_ref()
-            .is_some_and(|history| history.window == window)
+            .is_some_and(|report| report.window == window)
             && self
-                .usage_history_scanned_at
-                .is_some_and(|scanned| scanned.elapsed() < USAGE_RESCAN_AFTER);
-        // A scan for this window already inbound absorbs even a forced
-        // refresh — it only just started reading the same files, and a
-        // duplicate would burn a background pass to produce the same answer.
-        if self.usage_history_pending_for == Some(window) {
+                .usage_report_scanned_at
+                .is_some_and(|scanned| scanned.elapsed() < USAGE_REFRESH_AFTER);
+        // A fetch for this window already absorbs even a forced refresh — it
+        // only just started reading the same table, and a duplicate would
+        // burn a background pass to produce the same answer.
+        if self.usage_report_pending_for == Some(window) {
             return;
         }
         if !force && satisfied {
             return;
         }
-        self.usage_history_pending_for = Some(window);
-        self.usage_history_generation += 1;
-        let generation = self.usage_history_generation;
+        self.usage_report_pending_for = Some(window);
+        self.usage_report_generation += 1;
+        let generation = self.usage_report_generation;
         let daemon = self.daemon.client();
-        let project_roots: Vec<PathBuf> = self
-            .state
-            .projects
-            .iter()
-            .map(|project| project.path.clone())
-            .collect();
         cx.spawn(async move |this, cx| {
-            let history = cx
+            let report = cx
                 .background_executor()
                 .spawn(async move {
                     match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
-                        client::Command::LoadUsageHistory {
-                            window,
-                            project_roots,
-                        },
+                        client::Command::LoadUsageReport { window },
                     )? {
-                        client::ResponsePayload::UsageHistory { history } => Ok(history),
-                        _ => anyhow::bail!("the daemon returned an invalid usage response"),
+                        client::ResponsePayload::UsageReport { report } => Ok(report),
+                        _ => anyhow::bail!("the daemon returned an invalid usage report"),
                     }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.usage_history_generation != generation {
+                if this.usage_report_generation != generation {
                     return;
                 }
-                this.usage_history_pending_for = None;
+                this.usage_report_pending_for = None;
                 // The day axis may have changed length; a stale index would
                 // point at the wrong day.
                 this.usage_chart_hover = None;
-                match history {
-                    Ok(history) => {
-                        this.usage_history_scanned_at = Some(Instant::now());
-                        this.usage_history = Some(history);
+                match report {
+                    Ok(report) => {
+                        this.usage_report_scanned_at = Some(Instant::now());
+                        this.usage_report = Some(report);
                     }
                     Err(error) => this.show_toast(error.to_string()),
                 }
@@ -161,7 +288,7 @@ impl Tide {
             return;
         }
         self.usage_window = window;
-        self.ensure_usage_history(false, cx);
+        self.ensure_usage_report(false, cx);
         cx.notify();
     }
 
@@ -170,51 +297,46 @@ impl Tide {
             return;
         }
         self.usage_view = view;
-        // The statement view scans a different window; the others share one.
-        self.ensure_usage_history(false, cx);
+        // The statement view fetches a different window; the others share one.
+        self.ensure_usage_report(false, cx);
         cx.notify();
     }
 
     pub(super) fn render_usage_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let pending = self.usage_history_pending_for.is_some();
+        let pending = self.usage_report_pending_for.is_some();
         let expected = self.effective_usage_window();
         // A snapshot of the other shape (statement months vs trailing days)
-        // must not masquerade as this view's data — a 30-day scan rendered as
+        // must not masquerade as this view's data — a 30-day fetch rendered as
         // a monthly statement would label partial months as whole ones. But
         // within a shape, the previous window keeps rendering while its
-        // replacement scans: the range caption names what is actually shown,
+        // replacement fetches: the range caption names what is actually shown,
         // and swapping to a spinner on every window click would blink away a
         // page that is still substantially right.
-        let history = self.usage_history.as_ref().filter(|history| {
+        let report = self.usage_report.as_ref().filter(|report| {
             matches!(
-                (history.window, expected),
+                (report.window, expected),
                 (UsageWindow::TrailingDays(_), UsageWindow::TrailingDays(_))
                     | (UsageWindow::Months(_), UsageWindow::Months(_))
             )
         });
-        let range = history
-            .map(|history| (history.since_day, history.until_day))
+        let range = report
+            .map(|report| (report.since_day, report.until_day))
             .unwrap_or_else(|| expected.bounds(Local::now().date_naive()));
 
         let mut page = div()
             .flex()
             .flex_col()
-            .when(
-                matches!(
-                    self.usage_view,
-                    UsageViewMode::Monthly | UsageViewMode::Projects
-                ),
-                |element| {
-                    // These views' lists own scrolling, so the page fills
-                    // the pane instead of growing it.
-                    element.flex_1().min_h_0().pb(px(16.0))
-                },
-            )
+            .when(self.usage_view == UsageViewMode::Projects, |element| {
+                // This view's list owns scrolling, so the page fills the
+                // pane instead of growing it. The other views ride the
+                // shared scroll container like every settings page.
+                element.flex_1().min_h_0().pb(px(16.0))
+            })
             .child(self.render_usage_header(range, pending, &theme, cx));
 
-        let Some(history) = history else {
-            // First scan (or a window-shape switch) still in flight: a
+        let Some(report) = report else {
+            // First fetch (or a window-shape switch) still in flight: a
             // skeleton in the incoming view's silhouette, so the swap to
             // data doesn't jump.
             return page
@@ -222,58 +344,68 @@ impl Tide {
                 .into_any_element();
         };
 
-        if !history.errors.is_empty() || history.pricing == PricingStatus::Unavailable {
-            page = page.child(usage_notices(history, &theme));
+        // Nothing has ever been recorded — the ledger is empty, not just the
+        // window — so say so plainly instead of showing a dashboard of zeros.
+        if report.tracking_since.is_none() {
+            return page.child(usage_empty_state(&theme)).into_any_element();
         }
 
+        let providers = UsageProviders::build(report, &self.tide.providers, &theme);
+
+        // Daily and Monthly are the same dashboard — summary, layered chart,
+        // metric strip, breakdown — at different bins; only the statement
+        // card and the per-project ranking swap in below.
+        let dashboard = div()
+            .mt(px(20.0))
+            .flex()
+            .items_start()
+            .gap(px(28.0))
+            .child(self.render_usage_summary(report, &providers, &theme, cx))
+            .child(self.render_usage_chart_column(report, &providers, &theme, cx));
         page = match self.usage_view {
             UsageViewMode::Daily => page
+                .child(dashboard)
+                .child(usage_metric_strip(report, &theme))
                 .child(
-                    div()
-                        .mt(px(20.0))
-                        .flex()
-                        .items_start()
-                        .gap(px(28.0))
-                        .child(self.render_usage_summary(history, &theme, cx))
-                        .child(self.render_usage_chart_column(history, &theme, cx)),
-                )
-                .child(usage_metric_strip(history, &theme))
-                .child(
-                    div()
-                        .mt(px(24.0))
-                        .flex()
-                        .items_start()
-                        .gap(px(32.0))
-                        .child(self.render_usage_breakdown(history, &theme, cx))
-                        .child(usage_quality_panel(history, &theme)),
+                    self.render_usage_breakdown(report, &providers, &theme, cx)
+                        .mt(px(24.0)),
                 ),
-            UsageViewMode::Monthly => page.child(usage_month_list(
-                self,
-                history,
-                &theme,
-                &self.usage_months_scroll,
-                &self.usage_months_scrollbar,
-                cx,
-            )),
-            UsageViewMode::Projects => page.child(self.render_usage_projects(history, &theme, cx)),
+            UsageViewMode::Monthly => page
+                .child(dashboard)
+                .child(usage_metric_strip(report, &theme))
+                .child(
+                    self.render_usage_breakdown(report, &providers, &theme, cx)
+                        .mt(px(24.0)),
+                )
+                .child(usage_month_list(
+                    self,
+                    report,
+                    &providers,
+                    &theme,
+                    &self.usage_months_scroll,
+                    &self.usage_months_scrollbar,
+                    cx,
+                )),
+            UsageViewMode::Projects => {
+                page.child(self.render_usage_projects(report, &providers, &theme, cx))
+            }
         };
 
-        page.child(
-            // What the numbers above are built from, so the totals are
-            // auditable at a glance.
-            div()
-                .mt(px(18.0))
-                .text_size(sp(12.5))
-                .text_color(theme.text_ghost)
-                .child(SharedString::from(tr!(
-                    "usage.scan_summary",
-                    scanned = format_count(history.scanned_files as u64),
-                    skipped = format_count(history.skipped_files as u64),
-                    records = format_count(history.records),
-                    seconds = format!("{:.1}", history.scan_duration.as_secs_f64())
-                ))),
-        )
-        .into_any_element()
+        if let Some(since) = report.tracking_since {
+            page = page.child(
+                // What the numbers above are built from: the ledger's own
+                // horizon, so the totals are auditable at a glance.
+                div()
+                    .mt(px(18.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_ghost)
+                    .child(SharedString::from(tr!(
+                        "usage.tracking_since",
+                        date = format_day_long(since)
+                    ))),
+            );
+        }
+        page.into_any_element()
     }
 
     /// The range caption plus the view switcher, the window selector (when
@@ -388,13 +520,13 @@ impl Tide {
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .tooltip(Tooltip::text(if pending {
-                tr!("usage.scanning")
+                tr!("usage.refreshing")
             } else {
-                tr!("usage.rescan")
+                tr!("usage.refresh")
             }))
             .child(refresh_glyph)
             .on_click(cx.listener(|this, _, _, cx| {
-                this.ensure_usage_history(true, cx);
+                this.ensure_usage_report(true, cx);
             }));
 
         let range_label = if monthly {
@@ -435,20 +567,24 @@ impl Tide {
     /// series always read the same units.
     fn render_usage_summary(
         &self,
-        history: &UsageHistory,
+        report: &UsageReport,
+        providers: &UsageProviders,
         theme: &Theme,
         _cx: &mut Context<Self>,
     ) -> Div {
         let metric = self.usage_metric;
         let headline = match metric {
-            UsageMetric::Cost => format!("{}*", format_usd(history.cost_usd)),
-            UsageMetric::Tokens => format_tokens_compact(history.total_tokens as f64),
+            UsageMetric::Cost => format_usd(report.cost_usd),
+            UsageMetric::Tokens => format_tokens_compact(report.total_tokens as f64),
         };
         let caption = match metric {
-            UsageMetric::Cost => tr!("usage.full_api_rate_note"),
+            UsageMetric::Cost => tr!(
+                "usage.reported_cost_note",
+                count = count_noun(report.turns, "turn")
+            ),
             UsageMetric::Tokens => tr!(
                 "usage.sessions_summary",
-                count = format_count(history.sessions)
+                count = format_count(report.sessions)
             ),
         };
 
@@ -468,7 +604,7 @@ impl Tide {
                             .text_size(sp(12.5))
                             .text_color(theme.text_tertiary)
                             .child(match metric {
-                                UsageMetric::Cost => tr!("usage.raw_token_cost"),
+                                UsageMetric::Cost => tr!("usage.cost_upper"),
                                 UsageMetric::Tokens => tr!("usage.processed_tokens_upper"),
                             }),
                     )
@@ -489,12 +625,12 @@ impl Tide {
 
         // Ranked by whatever the toggle is showing, so the bars always
         // descend.
-        let mut providers = history.providers.clone();
+        let mut ranked = report.providers.clone();
         if metric == UsageMetric::Tokens {
-            providers.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+            ranked.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
         }
-        for provider in &providers {
-            let color = usage_provider_color(theme, provider.provider);
+        for provider in &ranked {
+            let color = providers.color(&provider.provider_id);
             let share = match metric {
                 UsageMetric::Cost => provider.cost_share,
                 UsageMetric::Tokens => provider.token_share,
@@ -533,7 +669,9 @@ impl Tide {
                                     .truncate()
                                     .text_size(sp(12.5))
                                     .text_color(theme.text)
-                                    .child(provider.provider.label()),
+                                    .child(SharedString::from(
+                                        providers.label(&provider.provider_id),
+                                    )),
                             )
                             .child(
                                 div()
@@ -564,7 +702,7 @@ impl Tide {
                     ),
             );
         }
-        if history.providers.is_empty() {
+        if report.providers.is_empty() {
             column = column.child(
                 div()
                     .text_size(sp(12.5))
@@ -575,15 +713,18 @@ impl Tide {
         column
     }
 
-    /// The chart header (title, metric toggle, legend), the layered daily
-    /// chart, and its x-axis labels.
+    /// The chart header (title, metric toggle, legend), the layered chart
+    /// over the view's bins (days, or months in the Monthly view), and its
+    /// x-axis labels.
     fn render_usage_chart_column(
         &self,
-        history: &UsageHistory,
+        report: &UsageReport,
+        providers: &UsageProviders,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
         let metric = self.usage_metric;
+        let bin = UsageBin::for_view(self.usage_view);
         let mut toggle = div()
             .rounded(px(7.0))
             .border_1()
@@ -626,24 +767,28 @@ impl Tide {
         }
 
         let mut legend = div().flex().items_center().gap(px(14.0));
-        for provider in UsageProvider::ALL {
-            let color = usage_provider_color(theme, provider);
+        for provider_id in &providers.order {
             legend = legend.child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(5.0))
-                    .child(div().size(px(8.0)).rounded_full().bg(color))
+                    .child(
+                        div()
+                            .size(px(8.0))
+                            .rounded_full()
+                            .bg(providers.color(provider_id)),
+                    )
                     .child(
                         div()
                             .text_size(sp(12.5))
                             .text_color(theme.text_secondary)
-                            .child(provider.label()),
+                            .child(SharedString::from(providers.label(provider_id))),
                     ),
             );
         }
 
-        let days = usage_history::enumerate_days(history.since_day, history.until_day);
+        let keys = bin.keys(report);
         div()
             .flex_1()
             .min_w(px(320.0))
@@ -663,15 +808,21 @@ impl Tide {
                             .text_size(sp(12.5))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(match metric {
-                                UsageMetric::Cost => tr!("usage.daily_cost"),
-                                UsageMetric::Tokens => tr!("usage.daily_processed_tokens"),
+                            .child(match (bin, metric) {
+                                (UsageBin::Day, UsageMetric::Cost) => tr!("usage.daily_cost"),
+                                (UsageBin::Day, UsageMetric::Tokens) => {
+                                    tr!("usage.daily_processed_tokens")
+                                }
+                                (UsageBin::Month, UsageMetric::Cost) => tr!("usage.monthly_cost"),
+                                (UsageBin::Month, UsageMetric::Tokens) => {
+                                    tr!("usage.monthly_processed_tokens")
+                                }
                             }),
                     )
                     .child(toggle)
                     .child(legend),
             )
-            .child(self.render_usage_chart(history, &days, theme, cx))
+            .child(self.render_usage_chart(report, providers, bin, &keys, theme, cx))
             .child(
                 div()
                     .pl(px(CHART_GUTTER + 8.0))
@@ -680,22 +831,15 @@ impl Tide {
                     .text_size(sp(12.5))
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(
-                        days.first()
-                            .copied()
-                            .map(format_day_short)
+                        keys.first().map(|key| bin.label(*key)).unwrap_or_default(),
+                    ))
+                    .child(SharedString::from(
+                        keys.get(keys.len() / 2)
+                            .map(|key| bin.label(*key))
                             .unwrap_or_default(),
                     ))
                     .child(SharedString::from(
-                        days.get(days.len() / 2)
-                            .copied()
-                            .map(format_day_short)
-                            .unwrap_or_default(),
-                    ))
-                    .child(SharedString::from(
-                        days.last()
-                            .copied()
-                            .map(format_day_short)
-                            .unwrap_or_default(),
+                        keys.last().map(|key| bin.label(*key)).unwrap_or_default(),
                     )),
             )
     }
@@ -707,35 +851,30 @@ impl Tide {
     /// other, which reads as "that one is bigger" even on days it is not.
     fn render_usage_chart(
         &self,
-        history: &UsageHistory,
-        days: &[NaiveDate],
+        report: &UsageReport,
+        providers: &UsageProviders,
+        bin: UsageBin,
+        keys: &[NaiveDate],
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
         let metric = self.usage_metric;
-        let day_count = days.len();
-        // One column per day, per provider in ALL order. The chart paths and
-        // the hover readout both consume this, so the number under the cursor
-        // is by construction the number that was plotted.
-        let series: Vec<[f64; 2]> = days
+        let by_cost = metric == UsageMetric::Cost;
+        let key_count = keys.len();
+        // One column per bin, per provider in report order. The chart paths
+        // and the hover readout both consume this, so the number under the
+        // cursor is by construction the number that was plotted.
+        let series: Vec<Vec<f64>> = keys
             .iter()
-            .map(|day| {
-                let slice = history.day(*day);
-                let value = |provider: UsageProvider| {
-                    slice
-                        .map(|slice| {
-                            let entry = slice.by_provider[provider.index()];
-                            match metric {
-                                UsageMetric::Cost => entry.cost_usd,
-                                UsageMetric::Tokens => entry.total_tokens as f64,
-                            }
-                        })
-                        .unwrap_or(0.0)
-                };
-                [value(UsageProvider::Claude), value(UsageProvider::Codex)]
+            .map(|key| {
+                providers
+                    .order
+                    .iter()
+                    .map(|provider_id| bin.value(report, *key, provider_id, by_cost))
+                    .collect()
             })
             .collect();
-        // The scale tops out at the largest single provider-day, not the
+        // The scale tops out at the largest single provider-bin, not the
         // largest sum: layered series each measure from zero, so a combined
         // peak would leave the plot permanently half empty.
         let peak = series
@@ -778,14 +917,12 @@ impl Tide {
             );
         }
 
-        let hover = self.usage_chart_hover.filter(|index| *index < day_count);
-        let colors = [
-            usage_provider_color(theme, UsageProvider::Claude),
-            usage_provider_color(theme, UsageProvider::Codex),
-        ];
+        let hover = self.usage_chart_hover.filter(|index| *index < key_count);
+        let colors = providers.colors_in_order();
         let bounds_cell = self.usage_chart_bounds.clone();
         let paint_series = series.clone();
         let paint_ticks = ticks.clone();
+        let paint_colors = colors.clone();
         let grid_color = theme.border;
         let hover_color = theme.text_ghost;
         let plot_canvas = canvas(
@@ -804,7 +941,7 @@ impl Tide {
                         grid_color,
                     ));
                 }
-                if paint_series.is_empty() {
+                if paint_series.is_empty() || paint_colors.is_empty() {
                     return;
                 }
 
@@ -813,13 +950,14 @@ impl Tide {
                 } else {
                     width / (paint_series.len() - 1) as f32
                 };
-                let mut layers: Vec<(usize, f64)> = (0..colors.len())
+                let mut layers: Vec<(usize, f64)> = (0..paint_colors.len())
                     .map(|provider| {
                         (
                             provider,
                             paint_series
                                 .iter()
-                                .map(|bands| bands[provider])
+                                .filter_map(|bands| bands.get(provider))
+                                .copied()
                                 .sum::<f64>(),
                         )
                     })
@@ -835,11 +973,12 @@ impl Tide {
                         let points: Vec<(f32, f32)> = paint_series
                             .iter()
                             .enumerate()
-                            .map(|(index, bands)| {
-                                (
+                            .filter_map(|(index, bands)| {
+                                let value = *bands.get(*provider)?;
+                                Some((
                                     f32::from(bounds.origin.x) + index as f32 * step,
-                                    f32::from(to_y(bands[*provider])),
-                                )
+                                    f32::from(to_y(value)),
+                                ))
                             })
                             .collect();
                         (*provider, smooth_curve(&points))
@@ -864,7 +1003,7 @@ impl Tide {
                     area.line_to(point(bounds.origin.x, bottom));
                     area.close();
                     if let Ok(path) = area.build() {
-                        window.paint_path(path, colors[*provider].opacity(0.12));
+                        window.paint_path(path, paint_colors[*provider].opacity(0.12));
                     }
                 }
                 for (provider, segments) in &curves {
@@ -881,7 +1020,7 @@ impl Tide {
                         );
                     }
                     if let Ok(path) = line.build() {
-                        window.paint_path(path, colors[*provider]);
+                        window.paint_path(path, paint_colors[*provider]);
                     }
                 }
 
@@ -910,13 +1049,13 @@ impl Tide {
                 let Some(bounds) = this.usage_chart_bounds.get() else {
                     return;
                 };
-                if day_count == 0 || f32::from(bounds.size.width) <= 0.0 {
+                if key_count == 0 || f32::from(bounds.size.width) <= 0.0 {
                     return;
                 }
                 let fraction =
                     ((event.position.x - bounds.origin.x) / bounds.size.width).clamp(0.0, 1.0);
-                let index = ((fraction * day_count.saturating_sub(1) as f32).round() as usize)
-                    .min(day_count - 1);
+                let index = ((fraction * key_count.saturating_sub(1) as f32).round() as usize)
+                    .min(key_count - 1);
                 if this.usage_chart_hover != Some(index) {
                     this.usage_chart_hover = Some(index);
                     cx.notify();
@@ -931,10 +1070,10 @@ impl Tide {
             // The hover readout is also keyboard reachable: focus the plot
             // and step days with the arrows.
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if day_count == 0 {
+                if key_count == 0 {
                     return;
                 }
-                let last = day_count - 1;
+                let last = key_count - 1;
                 let next = match event.keystroke.key.as_str() {
                     "left" => Some(
                         this.usage_chart_hover
@@ -957,15 +1096,17 @@ impl Tide {
             }))
             .child(plot_canvas.size_full())
             .when_some(
-                hover.and_then(|index| days.get(index).map(|day| (index, *day))),
-                |element, (index, day)| {
+                hover.and_then(|index| keys.get(index).map(|key| (index, *key))),
+                |element, (index, key)| {
                     element.child(usage_chart_readout(
-                        history,
-                        day,
-                        if day_count <= 1 {
+                        report,
+                        providers,
+                        bin,
+                        key,
+                        if key_count <= 1 {
                             0.0
                         } else {
-                            index as f32 / (day_count - 1) as f32
+                            index as f32 / (key_count - 1) as f32
                         },
                         metric,
                         theme,
@@ -976,14 +1117,20 @@ impl Tide {
         div().flex().gap(px(8.0)).child(gutter).child(plot)
     }
 
-    /// The breakdown table with its model/day toggle.
+    /// The breakdown table with its model/time toggle. The Model side is the
+    /// centerpiece: provider groups — a header row with the provider's
+    /// subtotal and share bar, then that provider's models — so per-provider
+    /// and per-model stats are first class at once. The time side follows the
+    /// view's bin: days here, months in the Monthly view.
     fn render_usage_breakdown(
         &self,
-        history: &UsageHistory,
+        report: &UsageReport,
+        providers: &UsageProviders,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
         let breakdown = self.usage_breakdown;
+        let bin = UsageBin::for_view(self.usage_view);
         let mut toggle = div()
             .rounded(px(7.0))
             .border_1()
@@ -992,7 +1139,13 @@ impl Tide {
             .overflow_hidden();
         for (option, label) in [
             (UsageBreakdown::Model, tr!("usage.model_upper")),
-            (UsageBreakdown::Day, tr!("usage.day_upper")),
+            (
+                UsageBreakdown::Day,
+                match bin {
+                    UsageBin::Day => tr!("usage.day_upper"),
+                    UsageBin::Month => tr!("usage.month_upper"),
+                },
+            ),
         ] {
             let selected = breakdown == option;
             toggle = toggle.child(
@@ -1046,31 +1199,65 @@ impl Tide {
                     )
                     .child(toggle),
             )
-            .child(match breakdown {
-                UsageBreakdown::Model => usage_model_table(history, theme),
-                UsageBreakdown::Day => usage_day_table(history, theme),
+            .child(match (breakdown, bin) {
+                (UsageBreakdown::Model, _) => usage_model_table(report, providers, theme),
+                (UsageBreakdown::Day, UsageBin::Day) => usage_time_table(
+                    theme,
+                    providers,
+                    tr!("usage.day"),
+                    report
+                        .daily
+                        .iter()
+                        .rev()
+                        .take(8)
+                        .map(|day| TimeRow {
+                            label: format_day_short(day.day),
+                            cost_usd: day.cost_usd,
+                            total_tokens: day.total_tokens,
+                            by_provider: &day.by_provider,
+                        })
+                        .collect(),
+                ),
+                (UsageBreakdown::Day, UsageBin::Month) => usage_time_table(
+                    theme,
+                    providers,
+                    tr!("usage.month"),
+                    report
+                        .months
+                        .iter()
+                        .rev()
+                        .take(8)
+                        .map(|month| TimeRow {
+                            label: format_month_short(month.first_day),
+                            cost_usd: month.cost_usd,
+                            total_tokens: month.total_tokens,
+                            by_provider: &month.by_provider,
+                        })
+                        .collect(),
+                ),
             })
     }
 
-    /// The per-project ranking: one row per working directory the sessions
-    /// ran in, largest first, with the same split-bar vocabulary as the
-    /// monthly statement. The rows live in a virtualized `list()` behind a
-    /// filter field, so element construction stays proportional to what is
-    /// on screen no matter how many directories have usage.
+    /// The per-project ranking: one row per working directory the turns ran
+    /// in, largest first, with the same split-bar vocabulary as the monthly
+    /// statement. The rows live in a virtualized `list()` behind a filter
+    /// field, so element construction stays proportional to what is on screen
+    /// no matter how many directories have usage.
     fn render_usage_projects(
         &self,
-        history: &UsageHistory,
+        report: &UsageReport,
+        providers: &UsageProviders,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let by_cost = rank_by_cost(history);
+        let by_cost = rank_by_cost(report);
         let filter = self
             .usage_project_filter
             .read(cx)
             .content()
             .trim()
             .to_ascii_lowercase();
-        let indices: Vec<usize> = history
+        let indices: Vec<usize> = report
             .projects
             .iter()
             .enumerate()
@@ -1078,9 +1265,9 @@ impl Tide {
                 if filter.is_empty() {
                     return true;
                 }
-                let (name, _) = self.usage_project_identity(project);
+                let (name, _) = self.usage_project_identity(&project.workspace);
                 name.to_ascii_lowercase().contains(&filter)
-                    || project.path.to_ascii_lowercase().contains(&filter)
+                    || project.workspace.to_ascii_lowercase().contains(&filter)
             })
             .map(|(index, _)| index)
             .collect();
@@ -1088,7 +1275,7 @@ impl Tide {
         // this instead of re-deriving it per row.
         let peak = indices
             .iter()
-            .filter_map(|index| history.projects.get(*index))
+            .filter_map(|index| report.projects.get(*index))
             .map(|project| {
                 if by_cost {
                     project.cost_usd
@@ -1103,20 +1290,28 @@ impl Tide {
         let caption = if filter.is_empty() {
             tr!(
                 "usage.projects_caption",
-                projects = count_noun(history.projects.len() as u64, "project"),
-                tokens = format_tokens_compact(history.total_tokens as f64),
-                sessions = count_noun(history.sessions, "session")
+                projects = count_noun(report.projects.len() as u64, "project"),
+                tokens = format_tokens_compact(report.total_tokens as f64),
+                sessions = count_noun(report.sessions, "session")
             )
         } else {
             tr!(
                 "usage.projects_shown",
                 shown = indices.len(),
-                projects = count_noun(history.projects.len() as u64, "project")
+                projects = count_noun(report.projects.len() as u64, "project")
             )
         };
 
         let entity = cx.entity().downgrade();
-        let body: AnyElement = if history.projects.is_empty() {
+        // Built once per frame and shared with every row builder, so the
+        // virtualized list never re-derives labels or colors per row.
+        let palette = Rc::new(UsageProviders {
+            order: providers.order.clone(),
+            labels: providers.labels.clone(),
+            colors: providers.colors.clone(),
+            fallback: providers.fallback,
+        });
+        let body: AnyElement = if report.projects.is_empty() {
             div()
                 .px(px(20.0))
                 .child(usage_list_empty_row(theme, tr!("usage.no_activity_window")))
@@ -1130,6 +1325,7 @@ impl Tide {
             // The relative wrapper is full-bleed so the overlay scrollbar
             // pins to the card's edge; the content padding lives one level
             // in, the same way the sidebar hangs its scrollbar.
+            let palette_for_list = palette.clone();
             div()
                 .flex_1()
                 .min_h_0()
@@ -1139,11 +1335,12 @@ impl Tide {
                         list(
                             self.usage_projects_list.clone(),
                             move |index, _window, cx| {
+                                let palette = palette_for_list.clone();
                                 entity
                                     .upgrade()
                                     .map(|entity| {
                                         entity.update(cx, |this, cx| {
-                                            this.usage_project_row(index, cx)
+                                            this.usage_project_row(index, &palette, cx)
                                         })
                                     })
                                     .unwrap_or_else(|| div().into_any_element())
@@ -1202,7 +1399,7 @@ impl Tide {
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme.text)
                                             .child(SharedString::from(usage_headline_value(
-                                                history, by_cost,
+                                                report, by_cost,
                                             ))),
                                     )
                                     .child(
@@ -1255,26 +1452,30 @@ impl Tide {
     }
 
     /// One project row, built only while visible. Reads the per-frame row
-    /// cache and scale; a stale index from a frame racing a rescan renders
+    /// cache and scale; a stale index from a frame racing a refetch renders
     /// as an empty row for that frame rather than panicking.
-    fn usage_project_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn usage_project_row(
+        &self,
+        row: usize,
+        providers: &UsageProviders,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let (peak, by_cost) = self.usage_projects_scale.get();
-        let colors = usage_provider_colors(&theme);
         let rows = self.usage_projects_rows.borrow();
         let last = row + 1 == rows.len();
         let Some(index) = rows.get(row).copied() else {
             return div().into_any_element();
         };
         let Some(project) = self
-            .usage_history
+            .usage_report
             .as_ref()
-            .and_then(|history| history.projects.get(index))
+            .and_then(|report| report.projects.get(index))
         else {
             return div().into_any_element();
         };
 
-        let (name, path_caption) = self.usage_project_identity(project);
+        let (name, path_caption) = self.usage_project_identity(&project.workspace);
         let row_value = if by_cost {
             project.cost_usd
         } else {
@@ -1298,7 +1499,7 @@ impl Tide {
         let models_control = self.usage_models_control(
             format!(
                 "usage-project-models-{}-{index}",
-                self.usage_history_generation
+                self.usage_report_generation
             ),
             &project.top_models,
             project.cost_usd,
@@ -1362,7 +1563,7 @@ impl Tide {
             )
             .child(div().mt(px(9.0)).child(usage_split_bar(
                 &theme,
-                colors,
+                providers,
                 if peak <= 0.0 {
                     0.0
                 } else {
@@ -1377,7 +1578,12 @@ impl Tide {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(usage_provider_values(&theme, &project.by_provider, by_cost))
+                    .child(usage_provider_values(
+                        &theme,
+                        providers,
+                        &project.by_provider,
+                        by_cost,
+                    ))
                     .child(div().flex_1())
                     .when_some(models_control, |element, control| element.child(control)),
             )
@@ -1438,13 +1644,13 @@ impl Tide {
     }
 
     /// Display name and path caption for a project row: a known Tide
-    /// project's name when the path is one, else the directory's own name
-    /// alongside its complete path, shortening only the home prefix.
-    fn usage_project_identity(&self, project: &ProjectSlice) -> (String, Option<String>) {
-        if project.path.is_empty() {
+    /// project's name when the workspace path is one, else the directory's
+    /// own name alongside its complete path, shortening only the home prefix.
+    fn usage_project_identity(&self, workspace: &str) -> (String, Option<String>) {
+        if workspace.is_empty() {
             return (tr!("usage.other_sessions"), None);
         }
-        let path = Path::new(&project.path);
+        let path = Path::new(workspace);
         let name = self
             .state
             .projects
@@ -1456,7 +1662,7 @@ impl Tide {
                 path.file_name()
                     .map(|name| name.to_string_lossy().into_owned())
             })
-            .unwrap_or_else(|| project.path.clone());
+            .unwrap_or_else(|| workspace.to_owned());
         let home = crate::projectless::home_directory();
         (name, Some(usage_project_path(path, home.as_deref())))
     }
@@ -1466,51 +1672,83 @@ impl Tide {
 /* Stateless sections                                                        */
 /* ------------------------------------------------------------------------- */
 
-/// Says plainly when the totals are incomplete: an unreadable transcript
-/// directory, or no rate table to price against.
-fn usage_notices(history: &UsageHistory, theme: &Theme) -> Div {
-    let mut notice = div()
-        .mt(px(14.0))
-        .px(px(12.0))
-        .py(px(8.0))
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(theme.border)
+/// The plain "nothing recorded yet" panel: the ledger has no rows at all, so
+/// there is nothing to chart until the user's first turns land.
+fn usage_empty_state(theme: &Theme) -> AnyElement {
+    div()
+        .mt(px(48.0))
+        .mb(px(24.0))
         .flex()
         .flex_col()
-        .gap(px(3.0))
-        .text_size(sp(12.5))
-        .text_color(theme.text_tertiary);
-    for error in &history.errors {
-        notice = notice.child(SharedString::from(error.clone()));
-    }
-    if history.pricing == PricingStatus::Unavailable {
-        notice = notice.child(tr!("usage.rates_unavailable"));
-    }
-    notice
+        .items_center()
+        .gap(px(6.0))
+        .child(
+            div()
+                .text_size(sp(13.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .child(tr!("usage.empty_state_title")),
+        )
+        .child(
+            div()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(tr!(
+                    "usage.empty_state_body",
+                    version = env!("CARGO_PKG_VERSION")
+                ))),
+        )
+        .into_any_element()
 }
 
-/// One day's per-provider values under the cursor, anchored to the hovered
+/// One provider's value inside a day slice, 0.0 when the provider recorded
+/// nothing that day.
+fn day_provider_value(slice: Option<&DaySlice>, provider_id: &str, by_cost: bool) -> f64 {
+    slice
+        .and_then(|slice| {
+            slice
+                .by_provider
+                .iter()
+                .find(|entry| entry.provider_id == provider_id)
+        })
+        .map(|entry| provider_entry_value(entry, by_cost))
+        .unwrap_or(0.0)
+}
+
+fn provider_entry_value(entry: &ProviderUsage, by_cost: bool) -> f64 {
+    if by_cost {
+        entry.cost_usd
+    } else {
+        entry.total_tokens as f64
+    }
+}
+
+/// One provider's value inside a month slice, 0.0 when the provider recorded
+/// nothing that month.
+fn month_provider_value(slice: Option<&MonthSlice>, provider_id: &str, by_cost: bool) -> f64 {
+    slice
+        .and_then(|slice| {
+            slice
+                .by_provider
+                .iter()
+                .find(|entry| entry.provider_id == provider_id)
+        })
+        .map(|entry| provider_entry_value(entry, by_cost))
+        .unwrap_or(0.0)
+}
+
+/// One bin's per-provider values under the cursor, anchored to the hovered
 /// column and flipped near the right edge so it stays inside the plot.
 fn usage_chart_readout(
-    history: &UsageHistory,
-    day: NaiveDate,
+    report: &UsageReport,
+    providers: &UsageProviders,
+    bin: UsageBin,
+    key: NaiveDate,
     fraction: f32,
     metric: UsageMetric,
     theme: &Theme,
 ) -> Div {
-    let slice = history.day(day);
-    let value = |provider: UsageProvider| {
-        slice
-            .map(|slice| {
-                let entry = slice.by_provider[provider.index()];
-                match metric {
-                    UsageMetric::Cost => entry.cost_usd,
-                    UsageMetric::Tokens => entry.total_tokens as f64,
-                }
-            })
-            .unwrap_or(0.0)
-    };
+    let by_cost = metric == UsageMetric::Cost;
     let format_value = |value: f64| match metric {
         UsageMetric::Cost => format_usd(value),
         UsageMetric::Tokens => format_tokens_compact(value),
@@ -1538,12 +1776,12 @@ fn usage_chart_readout(
         .child(
             div()
                 .text_color(theme.text_tertiary)
-                .child(SharedString::from(format_day_short(day))),
+                .child(SharedString::from(bin.label(key))),
         );
     let mut total = 0.0;
-    for provider in UsageProvider::ALL {
-        let color = usage_provider_color(theme, provider);
-        let amount = value(provider);
+    for provider_id in &providers.order {
+        let color = providers.color(provider_id);
+        let amount = bin.value(report, key, provider_id, by_cost);
         total += amount;
         readout = readout.child(
             div()
@@ -1554,8 +1792,10 @@ fn usage_chart_readout(
                 .child(
                     div()
                         .flex_1()
+                        .min_w_0()
+                        .truncate()
                         .text_color(theme.text_secondary)
-                        .child(provider.label()),
+                        .child(SharedString::from(providers.label(provider_id))),
                 )
                 .child(
                     div()
@@ -1587,9 +1827,11 @@ fn usage_chart_readout(
     )
 }
 
-/// The five-figure strip under the chart: token mix and cache economics.
-fn usage_metric_strip(history: &UsageHistory, theme: &Theme) -> Div {
-    let active_days = history
+/// The five-figure strip under the chart: the token mix, with the old
+/// rate-table-dependent cache-savings tile replaced by how much of the
+/// observed input was served from cache.
+fn usage_metric_strip(report: &UsageReport, theme: &Theme) -> Div {
+    let active_days = report
         .daily
         .iter()
         .filter(|day| day.total_tokens > 0)
@@ -1597,30 +1839,19 @@ fn usage_metric_strip(history: &UsageHistory, theme: &Theme) -> Div {
     let daily_average = if active_days == 0 {
         0.0
     } else {
-        history.total_tokens as f64 / active_days as f64
+        report.total_tokens as f64 / active_days as f64
     };
-    let observed_input = history.totals.uncached_input + history.totals.cached_input;
+    let observed_input = report.totals.uncached_input + report.totals.cached_input;
     let cached_share = if observed_input == 0 {
         0.0
     } else {
-        history.totals.cached_input as f64 / observed_input as f64
-    };
-    let savings_detail = if history.cost_usd > 0.0 {
-        tr!(
-            "usage.raw_cost_multiple",
-            multiple = format!(
-                "{:.1}",
-                history.quality.cache_savings_usd / history.cost_usd
-            )
-        )
-    } else {
-        tr!("usage.vs_full_input_rates")
+        report.totals.cached_input as f64 / observed_input as f64
     };
 
     let tiles: [(String, String, String); 5] = [
         (
             tr!("usage.processed_tokens"),
-            format_tokens_compact(history.total_tokens as f64),
+            format_tokens_compact(report.total_tokens as f64),
             tr!(
                 "usage.per_active_day",
                 count = format_tokens_compact(daily_average)
@@ -1628,32 +1859,33 @@ fn usage_metric_strip(history: &UsageHistory, theme: &Theme) -> Div {
         ),
         (
             tr!("usage.cached_input"),
-            format_tokens_compact(history.totals.cached_input as f64),
+            format_tokens_compact(report.totals.cached_input as f64),
             tr!(
-                "usage.observed_input_share",
-                share = format_percent(cached_share)
+                "usage.cached_of_input",
+                count = format_tokens_compact(report.totals.cached_input as f64),
+                total = format_tokens_compact(observed_input as f64)
             ),
         ),
         (
             tr!("usage.uncached_input"),
-            format_tokens_compact(history.totals.uncached_input as f64),
+            format_tokens_compact(report.totals.uncached_input as f64),
             tr!(
                 "usage.cache_writes",
-                count = format_tokens_compact(history.totals.cache_creation as f64)
+                count = format_tokens_compact(report.totals.cache_creation as f64)
             ),
         ),
         (
             tr!("usage.output"),
-            format_tokens_compact(history.totals.output as f64),
+            format_tokens_compact(report.totals.output as f64),
             tr!(
                 "usage.includes_reasoning",
-                count = format_tokens_compact(history.totals.reasoning as f64)
+                count = format_tokens_compact(report.totals.reasoning as f64)
             ),
         ),
         (
-            tr!("usage.cache_savings"),
-            format_usd(history.quality.cache_savings_usd),
-            savings_detail,
+            tr!("usage.cache_read_share"),
+            format_percent(cached_share),
+            tr!("usage.of_observed_input"),
         ),
     ];
 
@@ -1717,14 +1949,40 @@ fn usage_cell(width: f32, text: String, color: Hsla) -> Div {
     div()
         .w(px(width))
         .flex_none()
+        .min_w_0()
         .flex()
         .justify_end()
+        .truncate()
         .text_color(color)
         .child(SharedString::from(text))
 }
 
-/// Per-model costs, largest first.
-fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
+/// Day-table column head for one provider: its palette dot keeps the column
+/// readable even when the label truncates.
+fn usage_provider_header_cell(width: f32, label: String, color: Hsla, theme: &Theme) -> Div {
+    div()
+        .w(px(width))
+        .flex_none()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_end()
+        .gap(px(5.0))
+        .child(div().size(px(7.0)).flex_none().rounded_full().bg(color))
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(label)),
+        )
+}
+
+/// Per-model costs, grouped under their provider: a header row per provider
+/// (dot, label, share bar, subtotal) followed by that provider's models
+/// sorted by cost. Groups follow the report's provider ranking, so the
+/// heaviest provider leads.
+fn usage_model_table(report: &UsageReport, providers: &UsageProviders, theme: &Theme) -> Div {
     let mut table = div().flex().flex_col().text_size(sp(12.5)).child(
         div()
             .pb(px(7.0))
@@ -1740,14 +1998,28 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
             .child(usage_cell(64.0, tr!("usage.share"), theme.text_tertiary))
             .child(usage_cell(84.0, tr!("usage.tokens"), theme.text_tertiary)),
     );
-    if history.models.is_empty() {
+    if report.models.is_empty() {
         return table.child(usage_table_empty_row(theme));
     }
-    for model in &history.models {
-        let color = usage_provider_color(theme, model.provider);
+    for provider in &report.providers {
+        // The report sorts models by cost within the whole window; filtering
+        // preserves that order, so each group reads largest-first.
+        let models: Vec<&ModelSlice> = report
+            .models
+            .iter()
+            .filter(|model| model.provider_id == provider.provider_id)
+            .collect();
+        if models.is_empty() {
+            continue;
+        }
+        let color = providers.color(&provider.provider_id);
         table = table.child(
+            // Provider subtotal row: identity and share bar to the left, the
+            // subtotal's cost/tokens in the same columns as the model rows
+            // below, so the eye can audit the group against its parts.
             div()
-                .py(px(8.0))
+                .pt(px(10.0))
+                .pb(px(6.0))
                 .border_b_1()
                 .border_color(theme.border)
                 .flex()
@@ -1760,33 +2032,100 @@ fn usage_model_table(history: &UsageHistory, theme: &Theme) -> Div {
                         .flex()
                         .items_center()
                         .gap(px(7.0))
-                        .child(div().size(px(8.0)).rounded_full().bg(color))
+                        .child(div().size(px(9.0)).flex_none().rounded_full().bg(color))
                         .child(
                             div()
                                 .min_w_0()
                                 .truncate()
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text)
-                                .child(SharedString::from(model.model.clone())),
+                                .child(SharedString::from(providers.label(&provider.provider_id))),
+                        )
+                        .child(
+                            div()
+                                .h(px(4.0))
+                                .w(px(120.0))
+                                .flex_none()
+                                .rounded_full()
+                                .bg(theme.overlay_strong)
+                                .child(
+                                    div()
+                                        .h_full()
+                                        .w(relative((provider.cost_share as f32).clamp(0.0, 1.0)))
+                                        .rounded_full()
+                                        .bg(color),
+                                ),
                         ),
                 )
-                .child(usage_cell(84.0, format_usd(model.cost_usd), theme.text))
-                .child(usage_cell(
-                    64.0,
-                    format_percent(model.cost_share),
-                    theme.text_tertiary,
-                ))
+                .child(usage_cell(84.0, format_usd(provider.cost_usd), theme.text))
+                .child(usage_cell(64.0, String::new(), theme.text_tertiary))
                 .child(usage_cell(
                     84.0,
-                    format_tokens_compact(model.total_tokens as f64),
+                    format_tokens_compact(provider.total_tokens as f64),
                     theme.text_tertiary,
                 )),
         );
+        for model in models {
+            table = table.child(
+                div()
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .pl(px(16.0))
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(theme.text_secondary)
+                                    .child(SharedString::from(model.model.clone())),
+                            ),
+                    )
+                    .child(usage_cell(84.0, format_usd(model.cost_usd), theme.text))
+                    .child(usage_cell(
+                        64.0,
+                        format_percent(model.cost_share),
+                        theme.text_tertiary,
+                    ))
+                    .child(usage_cell(
+                        84.0,
+                        format_tokens_compact(model.total_tokens as f64),
+                        theme.text_tertiary,
+                    )),
+            );
+        }
     }
     table
 }
 
-/// The most recent active days, newest first, with per-provider cost columns.
-fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
+/// One row of the time-binned breakdown table, borrowed from the report's
+/// day or month slices.
+struct TimeRow<'a> {
+    label: String,
+    cost_usd: f64,
+    total_tokens: u64,
+    by_provider: &'a [ProviderUsage],
+}
+
+/// The time-binned breakdown — the most recent active days, or months in the
+/// Monthly view, newest first — with one cost column per provider seen in the
+/// window. Column count follows the window's provider set, so a provider
+/// added mid-window appears without a code change and one that recorded
+/// nothing in a bin reads as an em dash.
+fn usage_time_table(
+    theme: &Theme,
+    providers: &UsageProviders,
+    first_column: String,
+    rows: Vec<TimeRow<'_>>,
+) -> Div {
     let mut header = div()
         .pb(px(7.0))
         .border_b_1()
@@ -1796,12 +2135,13 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
         .gap(px(12.0))
         .text_size(sp(12.5))
         .text_color(theme.text_tertiary)
-        .child(div().flex_1().min_w_0().child(tr!("usage.day")));
-    for provider in UsageProvider::ALL {
-        header = header.child(usage_cell(
+        .child(div().flex_1().min_w_0().child(first_column));
+    for provider in &providers.order {
+        header = header.child(usage_provider_header_cell(
             84.0,
-            provider.label().to_owned(),
-            theme.text_tertiary,
+            providers.label(provider),
+            providers.color(provider),
+            theme,
         ));
     }
     header = header
@@ -1809,11 +2149,11 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
         .child(usage_cell(84.0, tr!("usage.tokens"), theme.text_tertiary));
 
     let mut table = div().flex().flex_col().text_size(sp(12.5)).child(header);
-    if history.daily.is_empty() {
+    if rows.is_empty() {
         return table.child(usage_table_empty_row(theme));
     }
-    for day in history.daily.iter().rev().take(8) {
-        let mut row = div()
+    for row in &rows {
+        let mut element = div()
             .py(px(8.0))
             .border_b_1()
             .border_color(theme.border)
@@ -1825,20 +2165,35 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
                     .flex_1()
                     .min_w_0()
                     .text_color(theme.text)
-                    .child(SharedString::from(format_day_short(day.day))),
+                    .child(SharedString::from(row.label.clone())),
             );
-        for provider in UsageProvider::ALL {
-            row = row.child(usage_cell(
+        for provider in &providers.order {
+            let present = row
+                .by_provider
+                .iter()
+                .any(|entry| entry.provider_id == *provider);
+            element = element.child(usage_cell(
                 84.0,
-                format_usd(day.by_provider[provider.index()].cost_usd),
+                if present {
+                    let cost = row
+                        .by_provider
+                        .iter()
+                        .find(|entry| entry.provider_id == *provider)
+                        .map(|entry| entry.cost_usd)
+                        .unwrap_or(0.0);
+                    format_usd(cost)
+                } else {
+                    "—".to_owned()
+                },
                 theme.text_tertiary,
             ));
         }
         table = table.child(
-            row.child(usage_cell(84.0, format_usd(day.cost_usd), theme.text))
+            element
+                .child(usage_cell(84.0, format_usd(row.cost_usd), theme.text))
                 .child(usage_cell(
                     84.0,
-                    format_tokens_compact(day.total_tokens as f64),
+                    format_tokens_compact(row.total_tokens as f64),
                     theme.text_tertiary,
                 )),
         );
@@ -1846,66 +2201,11 @@ fn usage_day_table(history: &UsageHistory, theme: &Theme) -> Div {
     table
 }
 
-/// How much of the window's cost is provider-reported, table-priced, or
-/// unpriced — the reader's confidence in the headline number.
-fn usage_quality_panel(history: &UsageHistory, theme: &Theme) -> Div {
-    let row = |label: String, value: String| {
-        div()
-            .py(px(8.0))
-            .border_b_1()
-            .border_color(theme.border)
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .text_size(sp(12.5))
-            .child(div().flex_1().text_color(theme.text_secondary).child(label))
-            .child(
-                div()
-                    .text_color(theme.text)
-                    .child(SharedString::from(value)),
-            )
-    };
-    div()
-        .w(px(240.0))
-        .flex_none()
-        .flex()
-        .flex_col()
-        .gap(px(10.0))
-        .child(
-            div()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text)
-                .child(tr!("usage.cost_quality")),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .child(row(
-                    tr!("usage.provider_reported"),
-                    format_percent(history.quality.provider_reported_share),
-                ))
-                .child(row(
-                    tr!("usage.model_priced"),
-                    format_percent(history.quality.model_priced_share),
-                ))
-                .child(row(
-                    tr!("usage.unpriced"),
-                    format_percent(history.quality.unpriced_share),
-                ))
-                .child(row(
-                    tr!("usage.cache_savings"),
-                    format_usd(history.quality.cache_savings_usd),
-                )),
-        )
-}
-
 /* ------------------------------------------------------------------------- */
 /* Loading skeleton                                                          */
 /* ------------------------------------------------------------------------- */
 
-/// Placeholder for the page while the first transcript scan is in flight,
+/// Placeholder for the page while the first report fetch is in flight,
 /// shaped like the view it will become and pulsing gently. `with_animation`
 /// honors the system's reduce-motion setting on its own.
 fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
@@ -1927,7 +2227,9 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
     };
 
     let body = match view {
-        UsageViewMode::Daily => {
+        // Daily and Monthly are the same dashboard at different bins, so one
+        // silhouette covers both.
+        UsageViewMode::Daily | UsageViewMode::Monthly => {
             let provider_group = || {
                 div()
                     .flex()
@@ -2001,7 +2303,8 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
                 )
                 .into_any_element()
         }
-        UsageViewMode::Monthly | UsageViewMode::Projects => {
+        // The per-project ranking: a card of rows behind a filter field.
+        UsageViewMode::Projects => {
             let row = || {
                 div()
                     .py(px(13.0))
@@ -2041,16 +2344,14 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
                                 .child(bar(90.0, 12.0))
                                 .child(bar(170.0, 8.0)),
                         )
-                        .when(view == UsageViewMode::Projects, |element| {
-                            element.child(
-                                div()
-                                    .h(px(26.0))
-                                    .w(px(240.0))
-                                    .flex_none()
-                                    .rounded(px(7.0))
-                                    .bg(theme.overlay_strong),
-                            )
-                        }),
+                        .child(
+                            div()
+                                .h(px(26.0))
+                                .w(px(240.0))
+                                .flex_none()
+                                .rounded(px(7.0))
+                                .bg(theme.overlay_strong),
+                        ),
                 );
             for _ in 0..4 {
                 card = card.child(row());
@@ -2075,23 +2376,16 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
 
 /// Whether the lists rank by cost, falling back to tokens when nothing in
 /// the window could be priced so the bars still mean something.
-fn rank_by_cost(history: &UsageHistory) -> bool {
-    history.cost_usd > 0.0
-}
-
-fn usage_provider_colors(theme: &Theme) -> [Hsla; 2] {
-    [
-        usage_provider_color(theme, UsageProvider::Claude),
-        usage_provider_color(theme, UsageProvider::Codex),
-    ]
+fn rank_by_cost(report: &UsageReport) -> bool {
+    report.cost_usd > 0.0
 }
 
 /// The period total in the ranking unit.
-fn usage_headline_value(history: &UsageHistory, by_cost: bool) -> String {
+fn usage_headline_value(report: &UsageReport, by_cost: bool) -> String {
     if by_cost {
-        format_usd(history.cost_usd)
+        format_usd(report.cost_usd)
     } else {
-        format_tokens_compact(history.total_tokens as f64)
+        format_tokens_compact(report.total_tokens as f64)
     }
 }
 
@@ -2160,16 +2454,16 @@ fn usage_list_empty_row(theme: &Theme, message: String) -> Div {
 /// one glance carries both size and mix.
 fn usage_split_bar(
     theme: &Theme,
-    colors: [Hsla; 2],
+    providers: &UsageProviders,
     length: f32,
-    by_provider: &[ProviderDay; 2],
+    by_provider: &[ProviderUsage],
     by_cost: bool,
 ) -> Div {
-    let values = [
-        usage_provider_value(&by_provider[0], by_cost),
-        usage_provider_value(&by_provider[1], by_cost),
-    ];
-    let sum = values[0] + values[1];
+    let values: Vec<f64> = by_provider
+        .iter()
+        .map(|entry| provider_entry_value(entry, by_cost))
+        .collect();
+    let sum: f64 = values.iter().sum();
     let length = if length > 0.0 {
         length.clamp(0.02, 1.0)
     } else {
@@ -2183,12 +2477,14 @@ fn usage_split_bar(
         .flex();
     if sum > 0.0 {
         for (index, value) in values.into_iter().enumerate() {
-            if value > 0.0 {
+            if value > 0.0
+                && let Some(entry) = by_provider.get(index)
+            {
                 bar = bar.child(
                     div()
                         .h_full()
                         .w(relative((value / sum) as f32))
-                        .bg(colors[index]),
+                        .bg(providers.color(&entry.provider_id)),
                 );
             }
         }
@@ -2201,24 +2497,20 @@ fn usage_split_bar(
         .child(bar)
 }
 
-fn usage_provider_value(entry: &ProviderDay, by_cost: bool) -> f64 {
-    if by_cost {
-        entry.cost_usd
-    } else {
-        entry.total_tokens as f64
-    }
-}
-
 /// Per-provider amounts with their marks, skipping providers absent from
 /// the row.
-fn usage_provider_values(theme: &Theme, by_provider: &[ProviderDay; 2], by_cost: bool) -> Div {
+fn usage_provider_values(
+    theme: &Theme,
+    providers: &UsageProviders,
+    by_provider: &[ProviderUsage],
+    by_cost: bool,
+) -> Div {
     let mut row = div().flex().items_center().gap(px(14.0));
-    for provider in UsageProvider::ALL {
-        let entry = by_provider[provider.index()];
+    for entry in by_provider {
         if entry.total_tokens == 0 && entry.cost_usd <= 0.0 {
             continue;
         }
-        let color = usage_provider_color(theme, provider);
+        let color = providers.color(&entry.provider_id);
         row = row.child(
             div()
                 .flex()
@@ -2333,25 +2625,21 @@ fn usage_models_menu_items(top_models: Rc<Vec<(String, f64)>>, total_cost: f64) 
 /// months are honestly comparable at a glance. Decorative texture — every
 /// number it hints at is printed in the row.
 fn usage_month_strip(
-    history: &UsageHistory,
+    report: &UsageReport,
+    series: Rc<[(String, Hsla)]>,
     first_day: NaiveDate,
     peak: f64,
     by_cost: bool,
-    colors: [Hsla; 2],
 ) -> impl IntoElement {
-    let day_count = usage_history::days_in_month(first_day);
-    let values: Vec<[f64; 2]> = (0..day_count)
+    let day_count = days_in_month(first_day);
+    let values: Vec<Vec<f64>> = (0..day_count)
         .map(|offset| {
             let day = first_day + chrono::Days::new(u64::from(offset));
-            history
-                .day(day)
-                .map(|slice| {
-                    [
-                        usage_provider_value(&slice.by_provider[0], by_cost),
-                        usage_provider_value(&slice.by_provider[1], by_cost),
-                    ]
-                })
-                .unwrap_or([0.0, 0.0])
+            let slice = report.day(day);
+            series
+                .iter()
+                .map(|(provider_id, _)| day_provider_value(slice, provider_id, by_cost))
+                .collect()
         })
         .collect();
     canvas(
@@ -2368,7 +2656,7 @@ fn usage_month_strip(
             for (index, bands) in values.iter().enumerate() {
                 let x = bounds.origin.x + px(index as f32 * (bar_width + gap));
                 let mut top = bounds.origin.y + bounds.size.height;
-                for (band, color) in bands.iter().zip(colors) {
+                for (band, (_, color)) in bands.iter().zip(series.iter()) {
                     if *band <= 0.0 {
                         continue;
                     }
@@ -2382,7 +2670,7 @@ fn usage_month_strip(
                             point(x, top),
                             gpui::size(px(bar_width), px(band_height)),
                         ),
-                        color,
+                        *color,
                     ));
                 }
             }
@@ -2394,18 +2682,26 @@ fn usage_month_strip(
 
 /// The statement: one row per calendar month, newest first, from the current
 /// month back to the earliest with activity — gap months stay as dim rows so
-/// the timeline reads honestly. The card pins its header and scrolls the
-/// rows internally, matching the projects view.
+/// the timeline reads honestly. It rides below the Monthly dashboard as an
+/// in-flow section; the card pins its header and scrolls the rows internally,
+/// capped so twelve-plus months never stretch the page.
 fn usage_month_list(
     tide: &Tide,
-    history: &UsageHistory,
+    report: &UsageReport,
+    providers: &UsageProviders,
     theme: &Theme,
     scroll: &ScrollHandle,
     scrollbar_state: &Rc<ScrollbarState>,
     cx: &mut Context<Tide>,
 ) -> Div {
-    let by_cost = rank_by_cost(history);
-    let colors = usage_provider_colors(theme);
+    let by_cost = rank_by_cost(report);
+    // Fixed series order shared by every row's split bar and month strip, so
+    // a provider stacks in the same slot all the way down the statement.
+    let series: Rc<[(String, Hsla)]> = providers
+        .order
+        .iter()
+        .map(|id| (id.clone(), providers.color(id)))
+        .collect();
     let month_value = |month: &MonthSlice| {
         if by_cost {
             month.cost_usd
@@ -2413,12 +2709,12 @@ fn usage_month_list(
             month.total_tokens as f64
         }
     };
-    let peak = history
+    let peak = report
         .months
         .iter()
         .map(month_value)
         .fold(0.0_f64, f64::max);
-    let day_peak = history
+    let day_peak = report
         .daily
         .iter()
         .map(|day| {
@@ -2429,15 +2725,15 @@ fn usage_month_list(
             }
         })
         .fold(0.0_f64, f64::max);
-    let current_month = usage_history::first_of_month(history.until_day);
+    let current_month = first_of_month(report.until_day);
 
     let mut rows = div().px(px(20.0)).flex().flex_col();
-    if let Some(earliest) = history.months.first().map(|month| month.first_day) {
-        let months = usage_history::enumerate_months(earliest, history.until_day);
+    if let Some(earliest) = report.months.first().map(|month| month.first_day) {
+        let months = enumerate_months(earliest, report.until_day);
         let count = months.len();
         for (index, first_day) in months.iter().rev().enumerate() {
             let last = index + 1 == count;
-            rows = rows.child(match history.month(*first_day) {
+            rows = rows.child(match report.month(*first_day) {
                 Some(month) => {
                     let models_control = tide.usage_models_control(
                         format!("usage-month-models-{first_day}"),
@@ -2447,10 +2743,11 @@ fn usage_month_list(
                         cx,
                     );
                     usage_month_row(
-                        history,
+                        report,
+                        providers,
+                        &series,
                         month,
                         theme,
-                        colors,
                         by_cost,
                         peak,
                         day_peak,
@@ -2470,9 +2767,11 @@ fn usage_month_list(
     }
 
     div()
-        .mt(px(20.0))
-        .flex_1()
-        .min_h_0()
+        .mt(px(28.0))
+        // An in-flow section under the dashboard: content-sized, but capped
+        // so the internally scrolling rows never stretch the page.
+        .flex_none()
+        .max_h(px(460.0))
         .pb(px(8.0))
         .rounded(px(13.0))
         .bg(theme.raised)
@@ -2484,10 +2783,10 @@ fn usage_month_list(
                 tr!("usage.last_12_months"),
                 tr!(
                     "usage.tokens_and_sessions",
-                    tokens = format_tokens_compact(history.total_tokens as f64),
-                    sessions = count_noun(history.sessions, "session")
+                    tokens = format_tokens_compact(report.total_tokens as f64),
+                    sessions = count_noun(report.sessions, "session")
                 ),
-                usage_headline_value(history, by_cost),
+                usage_headline_value(report, by_cost),
             )
             .flex_none(),
         )
@@ -2512,10 +2811,11 @@ fn usage_month_list(
 
 #[allow(clippy::too_many_arguments)]
 fn usage_month_row(
-    history: &UsageHistory,
+    report: &UsageReport,
+    providers: &UsageProviders,
+    series: &Rc<[(String, Hsla)]>,
     month: &MonthSlice,
     theme: &Theme,
-    colors: [Hsla; 2],
     by_cost: bool,
     peak: f64,
     day_peak: f64,
@@ -2590,16 +2890,16 @@ fn usage_month_row(
                         ))),
                 )
                 .child(usage_month_strip(
-                    history,
+                    report,
+                    series.clone(),
                     month.first_day,
                     day_peak,
                     by_cost,
-                    colors,
                 )),
         )
         .child(div().mt(px(9.0)).child(usage_split_bar(
             theme,
-            colors,
+            providers,
             if peak <= 0.0 {
                 0.0
             } else {
@@ -2614,7 +2914,12 @@ fn usage_month_row(
                 .flex()
                 .items_center()
                 .gap(px(12.0))
-                .child(usage_provider_values(theme, &month.by_provider, by_cost))
+                .child(usage_provider_values(
+                    theme,
+                    providers,
+                    &month.by_provider,
+                    by_cost,
+                ))
                 .child(div().flex_1())
                 .when_some(models_control, |element, control| element.child(control)),
         )
@@ -2841,6 +3146,16 @@ fn format_day_short(day: NaiveDate) -> String {
     }
 }
 
+/// `2026-09-09` → `Sep 9, 2026` — the tracking-since footer needs the year,
+/// because the ledger holds thirteen months of history.
+fn format_day_long(day: NaiveDate) -> String {
+    if crate::i18n::uses_east_asian_date_format() {
+        format!("{}年{}月{}日", day.year(), day.month(), day.day())
+    } else {
+        day.format("%b %-d, %Y").to_string()
+    }
+}
+
 /// `2026-08-01` → `August 2026`.
 fn format_month(first_day: NaiveDate) -> String {
     if crate::i18n::uses_east_asian_date_format() {
@@ -2878,6 +3193,7 @@ fn count_noun(count: u64, noun: &str) -> String {
         "project" => ("usage.project_one", "usage.project_many"),
         "session" => ("usage.session_one", "usage.session_many"),
         "model" => ("usage.model_one", "usage.model_many"),
+        "turn" => ("usage.turn_one", "usage.turn_many"),
         "active day" => ("usage.active_day_one", "usage.active_day_many"),
         _ => return format!("{} {noun}", format_count(count)),
     };
@@ -2890,6 +3206,7 @@ fn count_noun(count: u64, noun: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage_report::ProviderSlice;
 
     #[test]
     fn token_counts_compact_to_three_significant_figures() {
@@ -2985,5 +3302,89 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn provider_slice(id: &str, cost_usd: f64) -> ProviderSlice {
+        ProviderSlice {
+            provider_id: id.to_owned(),
+            cost_usd,
+            total_tokens: 100,
+            cost_share: 0.0,
+            token_share: 0.0,
+        }
+    }
+
+    fn report_with_providers(providers: Vec<ProviderSlice>) -> UsageReport {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 9).unwrap();
+        UsageReport {
+            window: UsageWindow::TrailingDays(30),
+            since_day: today - chrono::Days::new(29),
+            until_day: today,
+            totals: Default::default(),
+            total_tokens: 0,
+            cost_usd: 0.0,
+            turns: 0,
+            sessions: 0,
+            providers,
+            models: vec![],
+            daily: vec![],
+            months: vec![],
+            projects: vec![],
+            tracking_since: None,
+        }
+    }
+
+    fn configured(id: &str, name: &str) -> TideProviderWire {
+        TideProviderWire {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            api_style: "anthropic".to_owned(),
+            base_url: String::new(),
+            enabled: true,
+            has_key: true,
+            models: vec![],
+        }
+    }
+
+    #[test]
+    fn provider_palette_assigns_by_sorted_id_and_joins_labels() {
+        let theme = Theme::dark();
+        // Report order is cost-ranked, not alphabetical.
+        let report = report_with_providers(vec![
+            provider_slice("zeta", 2.0),
+            provider_slice("alpha", 1.0),
+        ]);
+        let configured = vec![configured("alpha", "Anthropic")];
+
+        let providers = UsageProviders::build(&report, &configured, &theme);
+
+        // Column and series order follow the report's ranking.
+        assert_eq!(providers.order, vec!["zeta".to_owned(), "alpha".to_owned()]);
+        // Labels join the configured provider list; a provider deleted since
+        // it recorded usage falls back to its raw id.
+        assert_eq!(providers.label("alpha"), "Anthropic");
+        assert_eq!(providers.label("zeta"), "zeta");
+        // Colors are assigned by sorted id, so a provider keeps its hue no
+        // matter where cost ranking places it.
+        assert_eq!(providers.color("alpha"), usage_series_color(&theme, 0));
+        assert_eq!(providers.color("zeta"), usage_series_color(&theme, 1));
+    }
+
+    #[test]
+    fn day_values_read_zero_for_providers_absent_that_day() {
+        let day = DaySlice {
+            day: NaiveDate::from_ymd_opt(2026, 9, 8).unwrap(),
+            cost_usd: 1.0,
+            total_tokens: 100,
+            by_provider: vec![ProviderUsage {
+                provider_id: "alpha".to_owned(),
+                cost_usd: 1.0,
+                total_tokens: 100,
+            }],
+        };
+        assert_eq!(day_provider_value(Some(&day), "alpha", true), 1.0);
+        assert_eq!(day_provider_value(Some(&day), "zeta", true), 0.0);
+        assert_eq!(day_provider_value(Some(&day), "alpha", false), 100.0);
+        assert_eq!(day_provider_value(None, "alpha", true), 0.0);
     }
 }

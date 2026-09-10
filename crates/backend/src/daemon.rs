@@ -66,6 +66,10 @@ impl TideBackend {
         // docs-fetcher roots follow the project list (refreshed on saves).
         crate::rag::install_memory_index();
         crate::rag::install_memory_writer();
+        // The session-history tools' backend reads the same db through
+        // independent read-only connections, so pages never wait on a
+        // streaming save (the session_message_search pattern).
+        crate::session_history::install_session_reader(task_store.path());
         crate::rag::prewarm();
         crate::rag::update_project_roots(
             task_state.projects.iter().map(|p| p.path.clone()).collect(),
@@ -478,6 +482,13 @@ impl Backend for TideBackend {
                 );
                 Ok(ResponsePayload::UsageHistory { history })
             }
+            Command::LoadUsageReport { window } => Ok(ResponsePayload::UsageReport {
+                report: crate::usage_report::build_report(
+                    &store::paths::data_dir(),
+                    window,
+                    store::usage::unix_ms_now(),
+                ),
+            }),
             Command::LoadSkills { projects } => {
                 let locations = crate::skills::skill_locations(&projects);
                 Ok(ResponsePayload::SkillsCatalog {
@@ -1513,6 +1524,7 @@ fn handle_driver_command(
         | Command::TideTestConnection { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::LoadUsageHistory { .. }
+        | Command::LoadUsageReport { .. }
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }
         | Command::TrashSkills { .. }

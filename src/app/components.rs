@@ -493,6 +493,79 @@ fn render_markdown_message_body<'a>(
         })
 }
 
+/// Word-boundary `@mention` tokens — the composer's file mentions — as a
+/// rewrite source. Mention tokens rewrite into a code-span-in-link so the
+/// bubble paints them as quoted pills (code wash + mono) whose click routes
+/// through the transcript's link handler to the right panel's Files surface.
+static USER_MENTION_TOKEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"(?m)(^|[\s(])@([^\s`@()<>]+)").expect("user mention token regex")
+});
+
+/// Rewrite a user message's `@path` mentions into `` [`@path`](<abs path>) ``
+/// links whose label is a code span — the bubble paints them as quoted
+/// pills (code wash + mono) and a click routes through the transcript's
+/// link handler to the right panel's Files surface. Emails (`user@host`),
+/// URLs, and mentions inside code spans never match: the token must start
+/// at a boundary (text start or whitespace/`(`) and carry no
+/// markdown-hostile characters. The boundary character re-emits verbatim
+/// and the rendered label keeps the exact `@path` bytes, so find-in-page
+/// spans over the flattened text stay aligned.
+pub(super) fn user_mention_links<'a>(
+    content: &'a str,
+    workspace: Option<&Path>,
+) -> std::borrow::Cow<'a, str> {
+    USER_MENTION_TOKEN.replace_all(content, |captures: &regex::Captures| {
+        let boundary = &captures[1];
+        let path = &captures[2];
+        // The router only resolves absolute or `file:` targets, so anchor
+        // the mention to the workspace when there is one.
+        let target = match workspace {
+            Some(workspace) => workspace.join(path).to_string_lossy().into_owned(),
+            None => path.to_owned(),
+        };
+        format!("{boundary}[@{path}](<{target}>)")
+    })
+}
+
+#[cfg(test)]
+mod user_mention_tests {
+    use super::user_mention_links;
+    use std::path::Path;
+
+    #[test]
+    fn mentions_rewrite_to_workspace_anchored_code_links() {
+        let workspace = Path::new("/ws");
+        assert_eq!(
+            user_mention_links("check @src/a.rs and @db/ now", Some(workspace)),
+            "check [@src/a.rs](</ws/src/a.rs>) and [@db/](</ws/db/>) now"
+        );
+        assert_eq!(
+            user_mention_links("@top alone", Some(workspace)),
+            "[@top](</ws/top>) alone"
+        );
+        // No workspace: the bare path stays the target.
+        assert_eq!(user_mention_links("@a.rs", None), "[@a.rs](<a.rs>)");
+        // Line-boundary mentions keep their newline.
+        assert_eq!(
+            user_mention_links("fix\n@src/a.rs", Some(workspace)),
+            "fix\n[@src/a.rs](</ws/src/a.rs>)"
+        );
+        // A boundary-only left edge: emails, URLs, and code spans stay text.
+        assert_eq!(
+            user_mention_links("mail user@host.com", Some(Path::new("/ws"))),
+            "mail user@host.com"
+        );
+        assert_eq!(
+            user_mention_links("see https://x/@y", Some(Path::new("/ws"))),
+            "see https://x/@y"
+        );
+        assert_eq!(
+            user_mention_links("code `@a.rs` span", Some(Path::new("/ws"))),
+            "code `@a.rs` span"
+        );
+    }
+}
+
 pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement {
     let MessageRender {
         theme,

@@ -244,11 +244,13 @@ const ICONS: &[(&str, &[u8])] = icons![
     "terminal",
     "terminal-square",
     "trash",
+    "triangle-alert",
     "whole-word",
     "wrench",
     "window-maximize",
     "window-minimize",
     "window-restore",
+    "worktree",
     "x",
     "zap",
 ];

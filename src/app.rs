@@ -1101,20 +1101,20 @@ pub struct Tide {
     last_permission_probe: Option<Instant>,
     /// The floating drag-to-authorize panel state (macOS guidance flow).
     permission_flow: permission_flow::PermissionFlowHost,
-    /// The settings Usage page's snapshot: historical token/cost usage
-    /// scanned from provider transcripts off-thread. Frames read only this.
-    usage_history: Option<crate::usage_history::UsageHistory>,
-    /// The window a scan is currently in flight for, so a repeat request for
+    /// The settings Usage page's snapshot: token/cost usage folded from the
+    /// per-turn ledger off-thread. Frames read only this.
+    usage_report: Option<crate::usage_report::UsageReport>,
+    /// The window a build is currently in flight for, so a repeat request for
     /// the same window coalesces while a changed window supersedes it.
-    usage_history_pending_for: Option<crate::usage_history::UsageWindow>,
-    /// Bumped per scan; a result from a superseded scan is discarded.
-    usage_history_generation: u64,
+    usage_report_pending_for: Option<crate::usage_report::UsageWindow>,
+    /// Bumped per build; a result from a superseded build is discarded.
+    usage_report_generation: u64,
     /// When the current snapshot landed, for the reopen-staleness check.
-    usage_history_scanned_at: Option<Instant>,
+    usage_report_scanned_at: Option<Instant>,
     usage_view: UsageViewMode,
     /// The selected window for the daily and project views; the statement
     /// view fixes its own.
-    usage_window: crate::usage_history::UsageWindow,
+    usage_window: crate::usage_report::UsageWindow,
     usage_metric: UsageMetric,
     usage_breakdown: UsageBreakdown,
     /// Scroll position of the monthly statement card, which scrolls
@@ -1127,7 +1127,7 @@ pub struct Tide {
     /// build elements no matter how many working directories have usage.
     usage_projects_list: ListState,
     usage_projects_scrollbar: Rc<ScrollbarState>,
-    /// Indices into `usage_history.projects` the filter leaves visible — the
+    /// Indices into `usage_report.projects` the filter leaves visible — the
     /// row builder reads only this.
     usage_projects_rows: RefCell<Vec<usize>>,
     /// `(peak value, rank-by-cost)` for the visible rows' bars, refreshed
@@ -2228,6 +2228,7 @@ impl Tide {
         let crate::persistence::ComposerDraft {
             text: initial_composer_text,
             attachments: initial_composer_attachments,
+            ..
         } = initial_composer_draft;
         if !initial_composer_text.is_empty() {
             composer.update(cx, |input, cx| input.set_content(initial_composer_text, cx));
@@ -2640,10 +2641,19 @@ impl Tide {
             .detach();
             cx.subscribe(
                 &projects_action_name,
-                |this: &mut Self, _, event: &InputEvent, cx| {
-                    if let InputEvent::Submit(_) = event {
-                        this.add_project_action_from_selection(cx);
-                    }
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.add_project_action_from_selection(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &projects_action_command,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.add_project_action_from_selection(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
                 },
             )
             .detach();
@@ -2839,12 +2849,12 @@ impl Tide {
                 computer_permission_request_pending: false,
                 last_permission_probe: None,
                 permission_flow: permission_flow::PermissionFlowHost::default(),
-                usage_history: None,
-                usage_history_pending_for: None,
-                usage_history_generation: 0,
-                usage_history_scanned_at: None,
+                usage_report: None,
+                usage_report_pending_for: None,
+                usage_report_generation: 0,
+                usage_report_scanned_at: None,
                 usage_view: UsageViewMode::Daily,
-                usage_window: crate::usage_history::UsageWindow::TrailingDays(30),
+                usage_window: crate::usage_report::UsageWindow::TrailingDays(30),
                 usage_metric: UsageMetric::Cost,
                 usage_breakdown: UsageBreakdown::Model,
                 usage_months_scroll: ScrollHandle::new(),

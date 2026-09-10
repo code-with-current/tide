@@ -492,9 +492,9 @@ impl Tide {
             .try_global::<crate::updater::UpdaterState>()
             .and_then(|updater| updater.0.as_ref())
             .is_some_and(|updater| updater.automatically_checks_for_updates());
-        // Warm the Usage page's transcript scan while the user is still on
+        // Warm the Usage page's report while the user is still on
         // General, so clicking Usage lands on data instead of a spinner.
-        self.ensure_usage_history(false, cx);
+        self.ensure_usage_report(false, cx);
         window.focus(&self.settings_focus, cx);
         cx.notify();
     }

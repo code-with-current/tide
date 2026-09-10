@@ -17,6 +17,7 @@ macro_rules! tr {
     };
 }
 
+pub mod action_jobs;
 pub mod attachments;
 pub mod blob_store;
 pub mod checkpoint;
@@ -32,13 +33,13 @@ pub mod git_identities;
 pub mod git_panel;
 pub mod i18n;
 pub mod identity;
-pub mod action_jobs;
 pub mod model;
 pub mod model_metadata;
 pub mod or_catalog;
 pub mod persistence;
 pub mod projectless;
 pub mod rag;
+pub mod session_history;
 pub mod settings;
 pub mod skills;
 pub mod terminal;
@@ -46,6 +47,7 @@ pub mod theme;
 pub mod tide_providers;
 pub mod usage;
 pub mod usage_history;
+pub mod usage_report;
 pub mod workspace;
 pub mod worktree;
 

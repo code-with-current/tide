@@ -57,6 +57,14 @@ pub struct EngineModelConfig {
     pub base_url: String,
     pub api_key: String,
     pub model_id: String,
+    /// The Tide provider config id (p_…) the credentials belong to — the
+    /// usage ledger's grouping key.
+    pub provider_id: String,
+    /// The model's published max output tokens (models.dev catalog),
+    /// resolved for ANY provider/model pair; `None` → the quirk default
+    /// pool (8192, floored to 16384 with tools).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
 }
 
 /// A constructed provider model. An enum (not a trait object) because rig's
@@ -70,7 +78,9 @@ pub struct EngineModelConfig {
 #[derive(Clone)]
 pub struct EngineModel {
     provider_base_url: String,
+    provider_id: String,
     model_id: String,
+    max_output_tokens: Option<u64>,
     inner: EngineModelInner,
 }
 
@@ -129,7 +139,9 @@ impl EngineModel {
                 }
                 Ok(Self {
                     provider_base_url: base.to_owned(),
+                    provider_id: config.provider_id.clone(),
                     model_id: config.model_id.clone(),
+                    max_output_tokens: config.max_output_tokens,
                     inner: EngineModelInner::Anthropic(completion_model),
                 })
             }
@@ -144,7 +156,9 @@ impl EngineModel {
                     .map_err(|e| EngineError::Config(e.to_string()))?;
                 Ok(Self {
                     provider_base_url: base.to_owned(),
+                    provider_id: config.provider_id.clone(),
                     model_id: config.model_id.clone(),
+                    max_output_tokens: config.max_output_tokens,
                     inner: EngineModelInner::OpenAiCompatible(
                         client.completion_model(config.model_id.clone()),
                     ),
@@ -171,8 +185,18 @@ impl EngineModel {
         &self.provider_base_url
     }
 
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    /// The model's catalog-published output ceiling, when the resolver
+    /// knew one — the quirk pool defaults apply otherwise.
+    pub fn max_output_tokens(&self) -> Option<u64> {
+        self.max_output_tokens
     }
 }
 

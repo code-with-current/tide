@@ -757,7 +757,7 @@ impl Tide {
                             )
                             .hover(|element| element.bg(theme.overlay))
                             .active(|element| element.opacity(0.85))
-                            .child(icon("icons/fork.svg", 12.0, theme.text_secondary))
+                            .child(icon("icons/worktree.svg", 12.0, theme.text_secondary))
                             .child(
                                 div()
                                     .min_w_0()
@@ -766,7 +766,7 @@ impl Tide {
                                     .text_size(sp(12.5))
                                     .line_height(sp(15.0))
                                     .text_color(theme.text)
-                                    .child(tr!("branches.work_in_new_worktree")),
+                                    .child(tr!("branches.isolated_worktree")),
                             )
                             .when(planned_worktree, |element| {
                                 element.child(icon("icons/check.svg", 11.0, theme.text_secondary))

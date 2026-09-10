@@ -47,15 +47,20 @@ pub use tools::memory::{
     rrf_fuse, set_shared_memory_index, set_shared_memory_writer, shared_memory_index,
     shared_memory_writer, MemoryHit, MemoryIndex, MemoryWriter,
 };
+pub use tools::session_history::{
+    set_shared_session_reader, shared_session_reader, ListSessionsTool, ReadSessionTool,
+    SessionMessage, SessionPage, SessionReader, SessionSummary,
+};
 pub use tools::todo_write::{TodoItem, TodoPriority, TodoState, TodoStatus, TodosUpdated};
 pub use tools::{
     core_tools, AskFollowupTool, BashOutputTool, BashTool, ClickTool, CompactTool,
     DirectoryTreeTool, DispatchAgentTool, DragTool, EditFileTool, ExitPlanModeTool,
     GetAppStateTool, GitRepoTool, GitTool, GlobTool, GrepTool, InitTool, JobKillTool, JobListTool,
-    JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool, LoadSkillTool,
-    MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool, PressKeyTool,
-    ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool, SendMessageTool, SetValueTool,
-    SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool, WebSearchTool, WriteFileTool,
+    JobOutputTool, KillShellTool, ListAgentsTool, ListAppsTool, ListDirTool,
+    LoadSkillTool, MemoryTool, MultiEditTool, NotebookEditTool, PerformSecondaryActionTool,
+    PressKeyTool, ReadFileTool, ReadMediaFileTool, RememberTool, ScrollTool,
+    SendMessageTool, SetValueTool, SlashCommandTool, TodoWriteTool, TypeTextTool, WebFetchTool,
+    WebSearchTool, WriteFileTool,
 };
 
 /// A tool offered to the model — shape mirrors the engine's `ToolSpec`
@@ -364,7 +369,10 @@ pub enum ToolConcurrency {
 pub fn concurrency_for(name: &str) -> ToolConcurrency {
     match name {
         "read_file" | "list_dir" | "directory_tree" | "read_media_file" | "glob" | "grep"
-        | "web_fetch" | "web_search" => ToolConcurrency::Parallel,
+        | "web_fetch" | "web_search"
+        // Session-history pages are stateless reads over independent
+        // read-only connections — they commute like the file reads.
+        | "list_sessions" | "read_session" => ToolConcurrency::Parallel,
         // Dispatched children never mutate parent-owned state: each child
         // owns its history, sink, and todo key (dsh's opt-in invariant —
         // the one parent-owned write, registry insertion, commutes). Same-
@@ -434,6 +442,8 @@ mod tests {
                 "perform_secondary_action",
                 "set_value",
                 "scroll",
+                "list_sessions",
+                "read_session",
             ]
         );
         for t in &tools {
@@ -492,6 +502,9 @@ mod tests {
         ] {
             assert_eq!(tools[index].risk_tier(), expected_tier, "{index}");
         }
+        // Session history: pure reads over the saved-session store.
+        assert_eq!(tools[41].risk_tier(), RiskTier::ReadOnly);
+        assert_eq!(tools[42].risk_tier(), RiskTier::ReadOnly);
     }
 
     /// Guard drift against the frozen tool schemas the TS stack shipped
@@ -626,6 +639,8 @@ mod tests {
             "grep",
             "web_fetch",
             "web_search",
+            "list_sessions",
+            "read_session",
             // Children own their histories/sinks/todo keys; registry
             // insertion commutes — the dsh opt-in invariant.
             "dispatch_agent",

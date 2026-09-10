@@ -45,8 +45,10 @@ pub struct TurnParams {
     /// The model's published reasoning contracts (models.dev); empty for
     /// manually-entered models.
     pub reasoning_contracts: Vec<ReasoningOption>,
-    /// The model's max output tokens from the catalog; `None` → 8192
-    /// default (floored to 16384 when tools are present).
+    /// Explicit per-request override of the output pool; `None` falls back
+    /// to the engine model's own catalog max
+    /// ([`EngineModel::max_output_tokens`]), then the 8192 default
+    /// (floored to 16384 when tools are present).
     pub model_max_output_tokens: Option<u64>,
 }
 
@@ -80,17 +82,20 @@ pub fn stream_step(
     async_stream::stream! {
         let TurnRequest { messages, tools, params } = request;
 
+        let model_max_output_tokens = params
+            .model_max_output_tokens
+            .or_else(|| model.max_output_tokens());
         let ctx = ProtocolContext {
             has_tools: !tools.is_empty(),
             model_id: Some(model.model_id().to_owned()),
-            max_output_tokens: params.model_max_output_tokens,
+            max_output_tokens: model_max_output_tokens,
             provider_base_url: Some(model.provider_base_url().to_owned()),
         };
         let reasoning = resolve_reasoning(
             params.thinking_level,
             &params.reasoning_contracts,
             model.api_style(),
-            params.model_max_output_tokens.unwrap_or(crate::quirk::DEFAULT_MAX_TOKENS),
+            model_max_output_tokens.unwrap_or(crate::quirk::DEFAULT_MAX_TOKENS),
         );
         let options = match model.api_style() {
             ProviderApiStyle::Anthropic => anthropic_call_options(reasoning.as_ref(), &ctx),

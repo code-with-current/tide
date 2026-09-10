@@ -66,18 +66,27 @@ fn environment_section(cwd: &Path, model_id: &str) -> String {
 /// enforces. Build is the unstated default and adds nothing.
 const PLAN_MODE_SECTION: &str = "\n\n# Interaction mode\n\nPlan mode is active — work is read-only. Explore, read, and analyze; tools that modify anything are blocked. When a change is warranted, present the plan and what you would run; the user switches the mode to Build to execute it.";
 
-/// Compose one loop's system prompt: the static base (or a sub-agent's own
-/// prompt) plus the environment tail, plus the Plan-mode notice when the
-/// chip is set. Composed per turn — one short format — so the variables
-/// stay fresh with no cache to invalidate, in both root loops and
-/// dispatched children (they share the workspace and the mode gate).
+/// Compose one loop's system prompt: the static base (or a sub-agent's
+/// own prompt), plus the inlined knowledge section when the project's
+/// enabled sources fit the budget, plus the environment tail, plus the
+/// Plan-mode notice when the chip is set. The knowledge text is
+/// session-stable, so it rides INSIDE the cacheable prefix — only the
+/// short tail after it re-renders per turn. Composed per turn in both
+/// root loops and dispatched children (they share the workspace and the
+/// mode gate).
 fn contextualize_system_prompt(
     base: &str,
     cwd: &Path,
     model_id: &str,
     mode: InteractionMode,
+    knowledge: Option<&str>,
 ) -> String {
-    let mut prompt = format!("{base}{}", environment_section(cwd, model_id));
+    let mut prompt = String::from(base);
+    if let Some(section) = knowledge {
+        prompt.push_str("\n\n");
+        prompt.push_str(section.trim_end());
+    }
+    prompt.push_str(&environment_section(cwd, model_id));
     if mode == InteractionMode::Plan {
         prompt.push_str(PLAN_MODE_SECTION);
     }
@@ -93,6 +102,12 @@ fn contextualize_system_prompt(
 const ORCHESTRATOR_OWNED_TOOLS: [&str; 2] = ["exit_plan_mode", "compact"];
 
 const MAX_STEPS: usize = 100;
+
+/// Auto-continuations for an output-token cut (`stop_reason: max_tokens`):
+/// the partial answer stays in history and the model resumes where it
+/// stopped. Bounded so a model wedged at its limit every step still ends
+/// the turn with the error instead of burning the whole step budget.
+const MAX_TOKEN_LIMIT_CONTINUES: u32 = 8;
 
 /// Ceiling on concurrently-running parallel-safe calls within one step.
 /// Mirrors dsh's `maxParallelToolCalls` default shape: overlap reads
@@ -410,7 +425,11 @@ struct EngineSelection {
     base_url: String,
     api_key: String,
     model_id: String,
+    provider_id: String,
     context_window: Option<u64>,
+    /// The model's catalog-published output ceiling — `None` when no
+    /// catalog entry matched, leaving the engine defaults in force.
+    max_output_tokens: Option<u64>,
 }
 
 impl TideDriver {
@@ -749,18 +768,34 @@ fn parse_api_style(style: &str) -> Option<ProviderApiStyle> {
     }
 }
 
+/// The catalog's published output ceiling for the selected model — any
+/// provider, any protocol. Only a real catalog match counts: the auto-match
+/// fallback would hand back the conservative 8192 cap as if it were the
+/// model's own limit.
+pub(crate) fn catalog_max_output_tokens(selection: &TideModelSelection) -> Option<u64> {
+    let meta = crate::model_metadata::resolve_model_meta(
+        selection.catalog_id.as_deref(),
+        &selection.model_id,
+        selection.context_window.unwrap_or(0),
+    );
+    (meta.resolved_catalog_id.is_some()).then_some(meta.max_output_tokens)
+}
+
 /// Resolve the engine for the current model selection.
 fn resolve_engine(inner: &Inner) -> anyhow::Result<EngineSelection> {
     let config = store::config::load(&store::paths::config_path())
         .map_err(|error| anyhow!("could not load the tide config: {error}"))?;
     let selection = resolve_tide_model(&config, inner.opts.lock().unwrap().model.as_deref())?;
     let api_key = tide_api_key(&config, &selection)?;
+    let max_output_tokens = catalog_max_output_tokens(&selection);
     Ok(EngineSelection {
         api_style: selection.api_style,
         base_url: selection.base_url,
         api_key,
         model_id: selection.model_id,
+        provider_id: selection.provider_id,
         context_window: selection.context_window,
+        max_output_tokens: max_output_tokens,
     })
 }
 
@@ -775,6 +810,7 @@ pub(crate) struct TideModelSelection {
     pub(crate) provider_name: String,
     pub(crate) model_id: String,
     pub(crate) context_window: Option<u64>,
+    pub(crate) catalog_id: Option<String>,
 }
 
 fn selection_from_provider(
@@ -783,11 +819,12 @@ fn selection_from_provider(
 ) -> anyhow::Result<TideModelSelection> {
     let api_style = parse_api_style(&provider.api_style)
         .with_context(|| format!("unknown api style {:?}", provider.api_style))?;
-    let context_window = provider
+    let model = provider
         .models
         .iter()
-        .find(|model| model.model_id == model_id)
-        .map(|model| model.context_window);
+        .find(|model| model.model_id == model_id);
+    let context_window = model.map(|model| model.context_window);
+    let catalog_id = model.and_then(|model| model.catalog_id.clone());
     Ok(TideModelSelection {
         api_style,
         base_url: provider.base_url.clone(),
@@ -795,6 +832,7 @@ fn selection_from_provider(
         provider_name: provider.name.clone(),
         model_id: model_id.to_owned(),
         context_window,
+        catalog_id,
     })
 }
 
@@ -1804,6 +1842,15 @@ fn interrupted_prompt() -> String {
         .to_owned()
 }
 
+/// The nudge that resumes a turn the provider cut off at the output-token
+/// limit: the partial answer stands in history and the model picks up
+/// mid-stream. Model-facing, so it states the constraint rather than the
+/// mechanism.
+fn output_limit_prompt() -> String {
+    "You were cut off at your output token limit before finishing. Continue exactly where you left off — do not repeat what you already wrote."
+        .to_owned()
+}
+
 /// Emit one step's usage breakdown with its timing attached. Called once
 /// per step, after the step's tool phase has run (tool_ms measured) or
 /// immediately when the step ended without tool calls (tool_ms zero), so
@@ -1896,6 +1943,10 @@ async fn drive_engine(
     // text, no calls, and no error. First-of-session provider hiccups
     // recover on the immediate retry; a repeat falls through to wrap-up.
     let mut degenerate_retries = 0u32;
+    // Continuations spent recovering from output-token cuts (see
+    // [`MAX_TOKEN_LIMIT_CONTINUES`]); once exhausted, the cut lands as the
+    // turn error instead of another nudge.
+    let mut token_continues = 0u32;
     'steps: for step in 0..max_steps {
         steps_run = step + 1;
         if abort.is_aborted() {
@@ -2152,9 +2203,13 @@ async fn drive_engine(
         if outcome.ttft_ms.is_none() {
             outcome.ttft_ms = ttft_ms;
         }
-        let runs_tools = step_stop
-            .as_ref()
-            .is_some_and(|s| matches!(s, EngineStopReason::ToolUse));
+        // A stop that will execute tool calls holds the usage breakdown
+        // until the tool phase ends: the tool-use stop, and a length cut
+        // that still delivered parseable calls (they run below too).
+        let runs_tools = !pending_calls.is_empty()
+            && step_stop.as_ref().is_some_and(|s| {
+                matches!(s, EngineStopReason::ToolUse | EngineStopReason::MaxTokens)
+            });
         if !runs_tools && matches!(sink, LoopSink::Transcript) {
             if let Some(usage) = step_usage.take() {
                 emit_step_usage(inner, &usage, Some(llm_ms), ttft_ms, Some(0));
@@ -2162,7 +2217,9 @@ async fn drive_engine(
         }
         let stop = step_stop.unwrap_or(EngineStopReason::Other("stream ended".into()));
         match stop {
-            EngineStopReason::ToolUse if !pending_calls.is_empty() => {
+            EngineStopReason::ToolUse | EngineStopReason::MaxTokens
+                if !pending_calls.is_empty() =>
+            {
                 let tools_started = std::time::Instant::now();
                 // One user message carrying every result — tide's orchestrator
                 // shape. Splitting results across consecutive user messages
@@ -2325,6 +2382,15 @@ async fn drive_engine(
                 break 'steps;
             }
             EngineStopReason::MaxTokens => {
+                // A length cut is recoverable, not fatal: the partial answer
+                // stands in history and one nudge resumes the model where it
+                // stopped. Only a model that stays wedged at the limit (see
+                // [`MAX_TOKEN_LIMIT_CONTINUES`]) keeps the turn error.
+                if token_continues < MAX_TOKEN_LIMIT_CONTINUES {
+                    token_continues += 1;
+                    push_user_message(history, HistoryMessage::user_text(output_limit_prompt()));
+                    continue 'steps;
+                }
                 outcome.error = Some("the model hit its output limit".into());
                 break 'steps;
             }
@@ -2650,8 +2716,14 @@ fn prepare_dispatch(
         .clone()
         .map(|level| thinking_level(Some(level.as_str())))
         .unwrap_or(inherited_thinking);
-    let system =
-        contextualize_system_prompt(&agent.system_prompt, &inner.cwd, engine.model_id(), mode);
+    let knowledge = crate::rag::inline_knowledge_section(inner.project_id.as_deref());
+    let system = contextualize_system_prompt(
+        &agent.system_prompt,
+        &inner.cwd,
+        engine.model_id(),
+        mode,
+        knowledge.as_deref(),
+    );
     Ok(PreparedDispatch {
         started,
         child_id,
@@ -2704,6 +2776,7 @@ async fn run_child_loop(
         ),
     )
     .await;
+    record_turn_usage(inner, engine, &outcome);
 
     // Close the timeline: the final message renders once, as the Result
     // card — when the child completed one, its Text block pops into the
@@ -2801,6 +2874,31 @@ impl PreparedDispatch {
 /// Map a settled child loop onto the job outcome's vocabulary: a cancel
 /// (job_kill, session teardown) aborts the child's own flag, so aborted-
 /// with-no-error means stopped; a broken loop means failed.
+/// Record a finished loop's usage into the per-provider ledger. Best-effort
+/// by contract: a failed write logs nothing and never disturbs the turn,
+/// matching the window meter's degrade-to-zero reads on a locked db.
+fn record_turn_usage(inner: &Inner, engine: &EngineModel, outcome: &LoopOutcome) {
+    let Some(usage) = outcome.usage.as_ref() else {
+        return;
+    };
+    let _ = store::usage::record_provider_usage(
+        &store::paths::data_dir(),
+        engine.provider_id(),
+        engine.model_id(),
+        &inner.cwd.to_string_lossy(),
+        &inner.session_id,
+        &store::usage::UsageDelta {
+            input_tokens: usage.input_tokens as i64,
+            output_tokens: usage.output_tokens as i64,
+            cache_read: usage.cache_read as i64,
+            cache_write: usage.cache_write as i64,
+            reasoning_tokens: usage.reasoning_tokens as i64,
+            cost_usd: usage.cost_usd,
+        },
+        store::usage::unix_ms_now(),
+    );
+}
+
 fn settled_job_status(outcome: &LoopOutcome) -> (SettledStatus, Option<String>) {
     if let Some(error) = &outcome.error {
         (SettledStatus::Failed, Some(error.clone()))
@@ -3456,6 +3554,8 @@ async fn run_turn(inner: &Arc<Inner>, message: StepMessage) {
         base_url: selection.base_url.clone(),
         api_key: selection.api_key.clone(),
         model_id: selection.model_id.clone(),
+        provider_id: selection.provider_id.clone(),
+        max_output_tokens: selection.max_output_tokens,
     }) {
         Ok(engine) => engine,
         Err(error) => {
@@ -3484,7 +3584,14 @@ async fn run_turn(inner: &Arc<Inner>, message: StepMessage) {
             opts.interaction_mode,
         )
     };
-    let system = contextualize_system_prompt(&SYSTEM_PROMPT, &inner.cwd, engine.model_id(), mode);
+    let knowledge = crate::rag::inline_knowledge_section(inner.project_id.as_deref());
+    let system = contextualize_system_prompt(
+        &SYSTEM_PROMPT,
+        &inner.cwd,
+        engine.model_id(),
+        mode,
+        knowledge.as_deref(),
+    );
     let mut sink = LoopSink::Transcript;
     let outcome = drive_engine(
         inner,
@@ -3500,6 +3607,7 @@ async fn run_turn(inner: &Arc<Inner>, message: StepMessage) {
         DispatchCtx::ROOT,
     )
     .await;
+    record_turn_usage(inner, &engine, &outcome);
     if let Some(ref error) = outcome.error {
         emit(inner, DriverEvent::Error(error.clone()));
     }
@@ -4281,6 +4389,7 @@ mod tests {
             Path::new("/tmp/repo"),
             "glm-4.7",
             InteractionMode::Build,
+            None,
         );
         // The static base stays a strict prefix — the cacheable part of the
         // prompt never shifts mid-session.
@@ -4295,9 +4404,31 @@ mod tests {
     }
 
     #[test]
+    fn knowledge_section_sits_inside_the_cacheable_prefix() {
+        let prompt = contextualize_system_prompt(
+            "STATIC BASE",
+            Path::new("/tmp/repo"),
+            "glm-4.7",
+            InteractionMode::Build,
+            Some("# Knowledge\n\nReference text."),
+        );
+        // Order: base → knowledge → environment. The stable knowledge
+        // text must not sit after the per-turn tail.
+        let base_end = prompt.find("STATIC BASE").unwrap();
+        let knowledge_at = prompt.find("# Knowledge").unwrap();
+        let env_at = prompt.find("# Environment").unwrap();
+        assert!(base_end < knowledge_at && knowledge_at < env_at);
+    }
+
+    #[test]
     fn plan_mode_notice_matches_the_gate_language() {
-        let prompt =
-            contextualize_system_prompt("BASE", Path::new("/tmp"), "m", InteractionMode::Plan);
+        let prompt = contextualize_system_prompt(
+            "BASE",
+            Path::new("/tmp"),
+            "m",
+            InteractionMode::Plan,
+            None,
+        );
         assert!(prompt.contains("Plan mode is active"));
         assert!(prompt.contains("read-only"));
         // The same escalation path the gate's rejection names.
@@ -4313,6 +4444,7 @@ mod tests {
             Path::new("/repo"),
             "glm-4.7",
             InteractionMode::Plan,
+            None,
         );
         assert!(prompt.starts_with("You are the scout agent."));
         assert!(prompt.contains("# Environment"));
@@ -5594,6 +5726,20 @@ mod background_fixtures {
         )
     }
 
+    /// One streamed text block cut off at the output limit —
+    /// `stop_reason: max_tokens`.
+    fn sse_text_cut(text: &str) -> String {
+        format!(
+            "{}event: content_block_start\ndata: {}\n\nevent: content_block_delta\ndata: {}\n\nevent: content_block_stop\ndata: {}\n\nevent: message_delta\ndata: {}\n\nevent: message_stop\ndata: {}\n\n",
+            sse_message_start(),
+            serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+            serde_json::json!({"type":"content_block_stop","index":0}),
+            serde_json::json!({"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":16384}}),
+            serde_json::json!({"type":"message_stop"}),
+        )
+    }
+
     /// One streamed tool_use block (a single whole-JSON input delta) with
     /// `stop_reason: tool_use`.
     fn sse_tool_use(call_id: &str, tool: &str, arguments: &serde_json::Value) -> String {
@@ -5627,9 +5773,25 @@ mod background_fixtures {
             Self::start_routed(Vec::new(), responses)
         }
 
+        /// [`Self::start`] on the OpenAI-compatible protocol — the same
+        /// mock model, but the engine speaks chat.completions chunks, so
+        /// protocol-splitting behaviors (stop reasons, wire shapes) can be
+        /// exercised against the other half of the adapter stack.
+        fn start_openai(responses: Vec<String>) -> Self {
+            Self::start_with_style("openai", Vec::new(), responses)
+        }
+
         /// [`Self::start`] with content-routed responses for detached child
         /// loops (see [`MockModel::spawn_routed`]).
         fn start_routed(routes: Vec<(&'static str, u64, String)>, responses: Vec<String>) -> Self {
+            Self::start_with_style("anthropic", routes, responses)
+        }
+
+        fn start_with_style(
+            api_style: &str,
+            routes: Vec<(&'static str, u64, String)>,
+            responses: Vec<String>,
+        ) -> Self {
             let mock = MockModel::spawn_routed(routes, responses);
             let workspace = tempfile::tempdir().unwrap();
             let data_dir = tempfile::tempdir().unwrap();
@@ -5638,7 +5800,7 @@ mod background_fixtures {
                 "providers": [{
                     "id": "fixture",
                     "name": "Fixture",
-                    "apiStyle": "anthropic",
+                    "apiStyle": api_style,
                     "baseUrl": mock.base_url,
                     "encryptedKey": encrypted,
                     "enabled": true,
@@ -5787,6 +5949,93 @@ mod background_fixtures {
             ),
             source: NoticeSource::Job,
         }
+    }
+
+    // ── Stage 2.5: the output-limit continuation ────────────────────────
+
+    /// A length cut (`stop_reason: max_tokens`) is recovered in-loop: the
+    /// partial answer stays, the continue nudge lands as the next user
+    /// message, and the model's completion streams on — one turn, no error.
+    #[test]
+    fn output_limit_cut_continues_the_turn_to_completion() {
+        let _guard = TIDE_DIR_TEST_LOCK.lock().unwrap();
+        let fixture = FixtureDriver::start(vec![
+            sse_text_cut("The first half of the answer "),
+            sse_text("and the second half."),
+        ]);
+
+        fixture.driver.prompt("write a long answer".to_owned());
+        wait_for_requests(&fixture, 2, Duration::from_secs(20));
+        wait_for_idle(&fixture);
+
+        // The continuation request carries the nudge after the partial
+        // assistant message — never adjacent user messages.
+        let requests = fixture.mock.captured();
+        let nudges = user_messages(&requests[1]);
+        let nudge = nudges
+            .last()
+            .expect("the continuation carries a user message");
+        assert!(nudge.contains("output token limit"), "nudge: {nudge}");
+        let serde_text = serde_json::to_string(&requests[1]).unwrap();
+        assert!(
+            serde_text.contains("The first half of the answer"),
+            "the partial answer must stand in history"
+        );
+
+        let events = drain_all(&fixture.events);
+        assert_eq!(turn_starts(&events), 1, "events: {events:?}");
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, DriverEvent::Error(_))),
+            "the cut must not surface as a turn error: {events:?}"
+        );
+        let success = events
+            .iter()
+            .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. }));
+        assert!(success, "the turn completes cleanly: {events:?}");
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::TextDelta(delta) => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "The first half of the answer and the second half.");
+        teardown(fixture);
+    }
+
+    /// A model wedged at the limit every step stops continuing once the
+    /// budget is spent: the turn ends with the output-limit error rather
+    /// than burning the whole step budget.
+    #[test]
+    fn output_limit_cut_stuck_at_the_cap_lands_as_the_turn_error() {
+        let _guard = TIDE_DIR_TEST_LOCK.lock().unwrap();
+        // Every response is the same cut: enough copies to cover the initial
+        // request plus every capped continuation (the queue serves empty
+        // bodies once exhausted, which would exercise a different path).
+        let fixture = FixtureDriver::start(vec![sse_text_cut("stuck "); 12]);
+
+        fixture.driver.prompt("write forever".to_owned());
+        wait_for_idle(&fixture);
+
+        let requests = fixture.mock.captured();
+        assert_eq!(
+            requests.len(),
+            (MAX_TOKEN_LIMIT_CONTINUES + 1) as usize,
+            "one cut plus the capped continuations: {} requests",
+            requests.len()
+        );
+        let events = drain_all(&fixture.events);
+        assert_eq!(turn_starts(&events), 1);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                DriverEvent::Error(error) if error.contains("output limit")
+            )),
+            "the exhausted cut must surface as the error: {events:?}"
+        );
+        teardown(fixture);
     }
 
     // ── Stage 3: the transport glue ─────────────────────────────────────
