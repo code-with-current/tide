@@ -186,6 +186,10 @@ fn hit_from_row(
     source_name: Option<String>,
     recency: Option<i64>,
 ) -> MemoryHit {
+    // Clamp before comparing so the guard matches the payload: a
+    // degenerate row (both lines negative, end > start) must yield a
+    // point hit, not startLine 0 with endLine Some(0).
+    let (start, end) = (row.start_line.max(0), row.end_line.max(0));
     MemoryHit {
         id: row.id.clone(),
         path: row.path.clone(),
@@ -194,8 +198,8 @@ fn hit_from_row(
         } else {
             Some(row.symbol.clone())
         },
-        start_line: row.start_line.max(0) as u64,
-        end_line: (row.end_line > row.start_line).then(|| row.end_line.max(0) as u64),
+        start_line: start as u64,
+        end_line: (end > start).then(|| end as u64),
         content: row.content.clone(),
         similarity,
         source_name,
@@ -1971,5 +1975,13 @@ mod tests {
             ..row
         };
         assert_eq!(hit_from_row(&flat, None, None, None).end_line, None);
+        let degenerate = ChunkRow {
+            start_line: -5,
+            end_line: -3,
+            ..flat
+        };
+        let hit = hit_from_row(&degenerate, None, None, None);
+        assert_eq!(hit.start_line, 0);
+        assert_eq!(hit.end_line, None);
     }
 }
