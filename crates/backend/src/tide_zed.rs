@@ -4,7 +4,7 @@
 //! verbatim as `EngineModelConfig::api_key`.
 
 use anyhow::{Context as _, bail};
-use protocol::tide::TideModelWire;
+use protocol::tide::{TideModelWire, TideZedOrganization, TideZedSignInResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
@@ -59,7 +59,6 @@ fn ensure_creds(cred: &ZedCredential) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)] // used from task 5
 pub(crate) fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -160,7 +159,6 @@ pub(crate) fn zed_models(
     parse_zed_models(&json)
 }
 
-#[allow(dead_code)] // used from task 5
 pub(crate) fn zed_users_me(
     client: &reqwest::blocking::Client,
     cred: &ZedCredential,
@@ -179,6 +177,43 @@ pub(crate) fn zed_users_me(
         bail!("users/me endpoint HTTP {status}");
     }
     serde_json::from_str(&text).context("the users/me response was not JSON")
+}
+
+pub fn zed_sign_in(
+    fetch_credential: impl FnOnce() -> anyhow::Result<ZedCredential>,
+) -> anyhow::Result<TideZedSignInResult> {
+    let cred = fetch_credential()?;
+    let client = http_client()?;
+    let me = zed_users_me(&client, &cred)?;
+    let user = me.get("user").cloned().unwrap_or(Value::Null);
+    let plans = me.get("plans_by_organization").cloned().unwrap_or(Value::Null);
+    let mut organizations = Vec::new();
+    if let Some(list) = me.get("organizations").and_then(Value::as_array) {
+        for org in list {
+            let id = org.get("id").and_then(Value::as_str).unwrap_or_default();
+            if id.trim().is_empty() {
+                continue;
+            }
+            let id = id.to_owned();
+            organizations.push(TideZedOrganization {
+                plan: plans.get(&id).and_then(Value::as_str).map(str::to_owned),
+                id,
+                name: org.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                is_personal: org.get("is_personal").and_then(Value::as_bool).unwrap_or(false),
+            });
+        }
+    }
+    Ok(TideZedSignInResult {
+        user_id: cred.user_id,
+        access_token: cred.access_token,
+        username: user.get("username").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        display_name: user.get("name").and_then(Value::as_str).map(str::to_owned),
+        organizations,
+        default_organization_id: me
+            .get("default_organization_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    })
 }
 
 #[cfg(test)]
@@ -479,6 +514,54 @@ mod tests {
         let outage_err = zed_users_me(&http_client().unwrap(), &cred).unwrap_err().to_string();
         assert!(outage_err.contains("500"), "{outage_err}");
         assert!(!outage_err.to_lowercase().contains("sign"), "{outage_err}");
+    }
+
+    #[test]
+    fn sign_in_merges_orgs_with_plans() {
+        let me = r#"{"user":{"id":605409,"username":"yodeput","name":"Yogi"},
+            "organizations":[{"id":"org_p","name":"yodeput's Organization","is_personal":true},{"id":"org_v","name":"Zed VIP","is_personal":false}],
+            "default_organization_id":"org_v",
+            "plans_by_organization":{"org_p":"zed_student","org_v":"zed_vip"}}"#;
+        let cloud = FakeCloud::spawn(vec![http_ok_json(me)]);
+        let _cloud_guard = cloud_guard(cloud.base_url.clone());
+        let result = zed_sign_in(|| Ok(ZedCredential {
+            user_id: "605409".into(), access_token: "acc".into(), organization_id: None,
+        }))
+        .unwrap();
+        assert_eq!(result.username, "yodeput");
+        assert_eq!(result.display_name.as_deref(), Some("Yogi"));
+        assert_eq!(result.user_id, "605409");
+        assert_eq!(result.access_token, "acc");
+        assert_eq!(result.organizations.len(), 2);
+        assert_eq!(result.organizations[0].id, "org_p");
+        assert!(result.organizations[0].is_personal);
+        assert!(!result.organizations[1].is_personal);
+        assert_eq!(result.organizations[0].plan.as_deref(), Some("zed_student"));
+        assert_eq!(result.organizations[1].plan.as_deref(), Some("zed_vip"));
+        assert_eq!(result.default_organization_id.as_deref(), Some("org_v"));
+    }
+
+    #[test]
+    fn sign_in_propagates_keychain_error() {
+        let result = zed_sign_in(|| Err(anyhow::anyhow!("denied")));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sign_in_tolerates_missing_optional_fields() {
+        // organizations absent, default_organization_id absent, plans absent,
+        // user without name — must still succeed with empty orgs and None fields.
+        let me = r#"{"user":{"username":"solo"},"organizations":[{"id":"","name":"Ghost","is_personal":false}]}"#;
+        let cloud = FakeCloud::spawn(vec![http_ok_json(me)]);
+        let _cloud_guard = cloud_guard(cloud.base_url.clone());
+        let result = zed_sign_in(|| Ok(ZedCredential {
+            user_id: "7".into(), access_token: "t".into(), organization_id: None,
+        }))
+        .unwrap();
+        assert!(result.organizations.is_empty());
+        assert_eq!(result.display_name, None);
+        assert_eq!(result.default_organization_id, None);
+        assert_eq!(result.organizations.len(), 0);
     }
 
     #[test]
