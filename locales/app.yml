@@ -2074,6 +2074,8 @@ browser.reload:
   en: Reload (%{shortcut})
 browser.device_mode:
   en: Device mode
+browser.agent_activity:
+  en: Agent tools are using this browser
 browser.zoom_fit:
   en: Fit to Window
 browser.rotate:

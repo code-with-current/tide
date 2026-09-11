@@ -1976,6 +1976,10 @@ pub struct BrowserView {
     /// test without a window.
     load_generation: u64,
     agent_queue: Vec<AgentOp>,
+    /// Agent tool calls routed onto this view whose engine-side wait has
+    /// not resolved yet. The toolbar's activity indicator lights while
+    /// this is non-zero.
+    agent_tool_calls: usize,
     /// Device mode: the exact CSS-pixel frame the page pins to, centered
     /// over a dimmed backdrop; `None` (the default) fills the panel.
     device_mode: Option<DeviceViewport>,
@@ -2165,6 +2169,7 @@ impl BrowserView {
             snapshot_epoch: 0,
             load_generation: 0,
             agent_queue: Vec::new(),
+            agent_tool_calls: 0,
             device_mode,
             device_last,
             device_preset,
@@ -2879,6 +2884,21 @@ impl BrowserView {
     #[cfg(not(target_os = "macos"))]
     fn request_snapshot(&mut self, _cx: &mut Context<Self>) {}
 
+    /// Agent tool call in flight: the bridge marks one from
+    /// `route_browser_op` before dispatching, and clears it once the
+    /// engine's blocking wait resolved — by answer, error, or timeout.
+    pub fn agent_tool_started(&mut self, cx: &mut Context<Self>) {
+        self.agent_tool_calls += 1;
+        cx.notify();
+    }
+
+    /// The bridge's counterpart to [`BrowserView::agent_tool_started`].
+    /// Saturating: an op that opened this surface had nothing to mark.
+    pub fn agent_tool_ended(&mut self, cx: &mut Context<Self>) {
+        self.agent_tool_calls = self.agent_tool_calls.saturating_sub(1);
+        cx.notify();
+    }
+
     /// Agent entry point for "evaluate and give me the result": runs
     /// `script` against the page once it is safe to — mid-load the document
     /// is being replaced, so the op parks until the load finishes — and
@@ -3391,6 +3411,7 @@ impl BrowserView {
             // among the navigation buttons; the row it opens lives under
             // this toolbar.
             .child(self.device_toggle_button(theme, cx))
+            .children(self.agent_activity_indicator(theme))
             .child(self.toolbar_button(
                 "browser-open-external",
                 "icons/external-link.svg",
@@ -3400,6 +3421,26 @@ impl BrowserView {
                 |this, _, cx| this.open_external(cx),
                 cx,
             ))
+    }
+
+    /// Lights beside the device toggle while agent tool calls are driving
+    /// this view — the browser is momentarily not only the user's. Not a
+    /// control: nothing to click, it only reports.
+    fn agent_activity_indicator(&self, theme: Theme) -> Option<Stateful<Div>> {
+        (self.agent_tool_calls > 0).then(|| {
+            div()
+                .id("browser-agent-activity")
+                .size(px(26.0))
+                .rounded(px(6.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon("icons/square-mouse-pointer.svg", 14.0, theme.accent))
+                .tooltip(move |window, cx| {
+                    Tooltip::new(tr!("browser.agent_activity")).build(window, cx)
+                })
+        })
     }
 
     /// The device-mode toggle: a toolbar button like the others, but with an

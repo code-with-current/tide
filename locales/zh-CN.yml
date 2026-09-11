@@ -937,6 +937,7 @@ browser.forward: 前进（%{shortcut}）
 browser.stop_loading: 停止加载（Esc）
 browser.reload: 重新加载（%{shortcut}）
 browser.device_mode: 设备模式
+browser.agent_activity: 智能体工具正在使用此浏览器
 browser.zoom_fit: 适合窗口
 browser.rotate: 旋转
 browser.preset.laptop: 笔记本

@@ -229,7 +229,7 @@ impl BrowserBackend for AppBrowserBackend {
                 reply,
             })
             .map_err(|_| "the browser surface is shutting down".to_owned())?;
-        match answers.recv_timeout(timeout) {
+        let result = match answers.recv_timeout(timeout) {
             Ok(Ok(text)) => finish(op, text),
             Ok(Err(error)) => Err(error),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
@@ -239,7 +239,17 @@ impl BrowserBackend for AppBrowserBackend {
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 Err("the browser surface went away before the page settled".to_owned())
             }
-        }
+        };
+        // However the wait ended, tell the surface the call is over — the
+        // release pairs the mark route_browser_op made on dispatch, so the
+        // activity indicator spans exactly the engine-visible call. The
+        // channel is FIFO, so a second op's mark can never be released by
+        // this one's sentinel.
+        let _ = self.ops.try_send(BrowserBridgeOp {
+            request: json!({ "op": "release_busy" }),
+            reply: std::sync::mpsc::channel().0,
+        });
+        result
     }
 }
 
@@ -285,6 +295,14 @@ impl Tide {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let args = request.get("args").cloned().unwrap_or(Value::Null);
+        // Mark the surface busy for the call's whole span — dispatch to
+        // answer, error, or timeout. An op that has to open its surface
+        // first marks nothing; its release saturates back to zero.
+        if name != "release_busy" {
+            if let Some(browser) = self.active_right_panel_browser() {
+                browser.update(cx, |view, cx| view.agent_tool_started(cx));
+            }
+        }
         match name {
             "navigate" => self.browser_navigate_op(&args, reply, cx),
             "get_state" => self.browser_eval_op(SNAPSHOT_SCRIPT.to_owned(), reply, cx),
@@ -301,6 +319,14 @@ impl Tide {
                 self.browser_act_op(name, &args, reply, cx);
             }
             "set_viewport" => self.browser_set_viewport_op(&args, reply, cx),
+            // The invoke side's end-of-call signal: clear the mark the
+            // dispatch made. A surface that vanished meanwhile is fine —
+            // its counter went with it.
+            "release_busy" => {
+                if let Some(browser) = self.active_right_panel_browser() {
+                    browser.update(cx, |view, cx| view.agent_tool_ended(cx));
+                }
+            }
             other => {
                 let _ = reply.send(Err(format!("unknown browser op: {other}")));
             }
