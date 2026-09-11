@@ -3268,6 +3268,19 @@ impl Tide {
                             ))
                         }
                     }
+                    Ok(client::ResponsePayload::TideZedSignIn { result, error }) => {
+                        match (result, error) {
+                            (Some(sign_in), None) => {
+                                super::tide_providers::TideOpsEvent::ZedSignIn(Ok(sign_in))
+                            }
+                            (_, Some(error)) => {
+                                super::tide_providers::TideOpsEvent::ZedSignIn(Err(error))
+                            }
+                            (None, None) => super::tide_providers::TideOpsEvent::ZedSignIn(Err(
+                                "the Zed sign-in failed without an error".into(),
+                            )),
+                        }
+                    }
                     Ok(_) => super::tide_providers::TideOpsEvent::Providers(Err(
                         "the backend returned an unexpected response".into(),
                     )),
@@ -3400,6 +3413,19 @@ impl Tide {
         let base_url = wizard.base_url.read(cx).content().trim().to_owned();
         let api_key = wizard.api_key.read(cx).content().trim().to_owned();
         let editing = wizard.edit_provider_id.is_some();
+        if wizard.is_zed() {
+            let editing = wizard.edit_provider_id.is_some();
+            if wizard.zed_blob(cx).is_none() && !editing {
+                self.tide_wizard_error(cx, tr!("tide.zed_error_credentials"));
+                return;
+            }
+            if let Some(wizard) = self.tide.wizard.as_mut() {
+                wizard.tested = true; // the sign-in (or stored key) IS the test
+                wizard.error = None;
+            }
+            self.tide_wizard_step(super::tide_providers::TideWizardStep::Models, cx);
+            return;
+        }
         if base_url.is_empty() {
             self.tide_wizard_error(cx, tr!("tide.error_base_url"));
             return;
@@ -3414,6 +3440,27 @@ impl Tide {
             wizard.error = None;
         }
         self.tide_dispatch(client::Command::TideDetectProtocol { base_url, api_key });
+        cx.notify();
+    }
+
+    /// Zed Connect step: read Zed desktop's credentials via the backend
+    /// (macOS keychain) and validate them against cloud.zed.dev.
+    pub(super) fn tide_zed_sign_in(&mut self, cx: &mut Context<Self>) {
+        let Some(wizard) = self.tide.wizard.as_mut() else { return };
+        let Some(zed) = wizard.zed.as_mut() else { return };
+        zed.busy = true;
+        zed.sign_in = None;
+        wizard.error = None;
+        self.tide_dispatch(client::Command::TideZedSignIn);
+        cx.notify();
+    }
+
+    /// Org radio row click.
+    pub(super) fn tide_zed_pick_org(&mut self, org_id: String, cx: &mut Context<Self>) {
+        let Some(wizard) = self.tide.wizard.as_mut() else { return };
+        if let Some(zed) = wizard.zed.as_mut() {
+            zed.organization_id = Some(org_id);
+        }
         cx.notify();
     }
 
@@ -3462,19 +3509,30 @@ impl Tide {
             && wizard.models.is_empty()
             && !wizard.fetching
         {
-            wizard.fetching = true;
-            wizard.error = None;
-            let (api_style, base_url, api_key) = (
+            let (api_style, base_url) = (
                 wizard.api_style.clone(),
                 wizard.base_url.read(cx).content().trim().to_owned(),
-                wizard.api_key.read(cx).content().trim().to_owned(),
             );
-            wizard.step = step;
-            self.tide_dispatch(client::Command::TideProbeModels {
-                api_style,
-                base_url,
-                api_key,
-            });
+            // The zed credential blob replaces the api-key input.
+            let api_key = if wizard.is_zed() {
+                wizard.zed_blob(cx).unwrap_or_default()
+            } else {
+                wizard.api_key.read(cx).content().trim().to_owned()
+            };
+            if api_key.is_empty() && wizard.is_zed() {
+                // An editing wizard without a fresh blob keeps its stored
+                // models — set the step, skip the fetch.
+                wizard.step = step;
+            } else {
+                wizard.fetching = true;
+                wizard.error = None;
+                wizard.step = step;
+                self.tide_dispatch(client::Command::TideProbeModels {
+                    api_style,
+                    base_url,
+                    api_key,
+                });
+            }
         } else {
             wizard.step = step;
         }
@@ -3486,11 +3544,25 @@ impl Tide {
         let Some(wizard) = self.tide.wizard.as_ref() else {
             return;
         };
-        let (api_style, base_url, api_key) = (
+        let (api_style, base_url) = (
             wizard.api_style.clone(),
             wizard.base_url.read(cx).content().trim().to_owned(),
-            wizard.api_key.read(cx).content().trim().to_owned(),
         );
+        // The zed credential blob replaces the api-key input.
+        let api_key = if wizard.is_zed() {
+            wizard.zed_blob(cx).unwrap_or_default()
+        } else {
+            wizard.api_key.read(cx).content().trim().to_owned()
+        };
+        if api_key.is_empty() && wizard.is_zed() {
+            // Editing without a fresh sign-in: nothing to refresh with.
+            if let Some(wizard) = self.tide.wizard.as_mut() {
+                wizard.fetching = false;
+                wizard.error = Some(tr!("tide.zed_error_credentials"));
+            }
+            cx.notify();
+            return;
+        }
         if let Some(wizard) = self.tide.wizard.as_mut() {
             wizard.fetching = true;
             wizard.error = None;
@@ -3548,7 +3620,13 @@ impl Tide {
         };
         let name = wizard.name.read(cx).content().trim().to_owned();
         let base_url = wizard.base_url.read(cx).content().trim().to_owned();
-        let api_key = wizard.api_key.read(cx).content().trim().to_owned();
+        // The zed credential blob replaces the api-key input; an editing
+        // wizard without a fresh blob sends `None`, keeping the stored key.
+        let api_key = if wizard.is_zed() {
+            wizard.zed_blob(cx).unwrap_or_default()
+        } else {
+            wizard.api_key.read(cx).content().trim().to_owned()
+        };
         let api_style = wizard.api_style.clone();
         let selected: Vec<client::tide::TideModelWire> = wizard
             .models
@@ -3740,6 +3818,19 @@ impl Tide {
                             wizard.error = Some(error);
                         }
                     }
+                }
+                super::tide_providers::TideOpsEvent::ZedSignIn(result) => {
+                    let Some(wizard) = self.tide.wizard.as_mut() else { return changed };
+                    let Some(zed) = wizard.zed.as_mut() else { return changed };
+                    zed.busy = false;
+                    match result {
+                        Ok(sign_in) => {
+                            zed.organization_id = sign_in.default_organization_id.clone();
+                            zed.sign_in = Some(sign_in);
+                        }
+                        Err(error) => wizard.error = Some(error),
+                    }
+                    cx.notify();
                 }
             }
         }
