@@ -1531,6 +1531,15 @@ tide.search_models: 搜索模型…
 tide.refresh: 刷新
 tide.select_all: 全选
 tide.deselect_all: 取消全选
+tide.zed_sign_in: "使用 Zed 桌面版登录"
+tide.zed_signing_in: "正在登录 Zed…"
+tide.zed_signed_in_as: "已登录为 %{name}（@%{username}）"
+tide.zed_org: "组织"
+tide.zed_personal: "个人"
+tide.zed_field_user_id: "用户 ID"
+tide.zed_field_access_token: "访问令牌"
+tide.zed_manual_hint: "自动登录使用本机 Zed 桌面版的钥匙串凭据；否则请粘贴 zed-openai-api 的 extract-credentials 脚本输出的两个值。"
+tide.zed_error_credentials: "请使用 Zed 桌面版登录，或粘贴两项凭据后继续。"
 models.group_cli: CLI
 models.manage_providers: 管理提供商…
 models.cli_settings: CLI 设置…

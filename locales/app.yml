@@ -2620,6 +2620,24 @@ tide.select_all:
   en: Select All
 tide.deselect_all:
   en: Deselect All
+tide.zed_sign_in:
+  en: "Use Zed desktop sign-in"
+tide.zed_signing_in:
+  en: "Signing in to Zed…"
+tide.zed_signed_in_as:
+  en: "Signed in as %{name} (@%{username})"
+tide.zed_org:
+  en: "Organization"
+tide.zed_personal:
+  en: "personal"
+tide.zed_field_user_id:
+  en: "User ID"
+tide.zed_field_access_token:
+  en: "Access token"
+tide.zed_manual_hint:
+  en: "Automatic sign-in uses Zed desktop's keychain credentials on this Mac. Otherwise paste the two values printed by zed-openai-api's extract-credentials script."
+tide.zed_error_credentials:
+  en: "Sign in with Zed desktop — or paste both credentials — to continue."
 models.group_cli:
   en: CLI
 models.manage_providers:

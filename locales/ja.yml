@@ -1583,6 +1583,15 @@ tide.search_models: モデルを検索…
 tide.refresh: 更新
 tide.select_all: すべて選択
 tide.deselect_all: 選択を解除
+tide.zed_sign_in: "Zed デスクトップでサインイン"
+tide.zed_signing_in: "Zed にサインイン中…"
+tide.zed_signed_in_as: "%{name}（@%{username}）としてサインイン済み"
+tide.zed_org: "組織"
+tide.zed_personal: "個人"
+tide.zed_field_user_id: "ユーザー ID"
+tide.zed_field_access_token: "アクセストークン"
+tide.zed_manual_hint: "自動サインインはこの Mac の Zed デスクトップのキーチェーン資格情報を使います。それ以外は zed-openai-api の extract-credentials スクリプトが出力する 2 つの値を貼り付けてください。"
+tide.zed_error_credentials: "Zed デスクトップでサインインするか、両方の資格情報を貼り付けてください。"
 models.group_cli: CLI
 models.manage_providers: プロバイダーを管理…
 models.cli_settings: CLI 設定…
