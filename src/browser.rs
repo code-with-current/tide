@@ -3385,7 +3385,7 @@ impl BrowserView {
             .child(TextField::new("browser-device-height", self.device_height.clone()).w(px(54.0)))
             .child(self.toolbar_button(
                 "browser-device-rotate",
-                "icons/rotate-cw.svg",
+                "icons/screen-rotation.svg",
                 true,
                 tr!("browser.rotate"),
                 theme,
