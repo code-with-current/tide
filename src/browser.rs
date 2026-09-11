@@ -3442,6 +3442,7 @@ impl BrowserView {
             .px(px(10.0))
             .flex()
             .items_center()
+            .justify_center()
             .gap(px(4.0))
             .border_b_1()
             .border_color(theme.border)
