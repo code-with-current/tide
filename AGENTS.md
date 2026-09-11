@@ -15,8 +15,13 @@ in Rust with GPUI. GPL-3.0-only.
 - `crates/client` — WebSocket client for the protocol: handshake, request
   correlation, subscriptions, supervision. Depends on `protocol`, never
   `backend`.
+- `crates/transport` — authenticated WebSocket server: connection handling,
+  request dispatch, subscriptions, event sequencing, and bounded replay.
+  Depends on `protocol`; runtime implementations stay behind its `Backend`
+  trait.
 - `crates/backend` — daemon-side runtime: session drivers, provider discovery,
-  persistence, Git services, computer use. No desktop transport or UI.
+  persistence, Git services, computer use. Depends on `transport` to implement
+  its request handler, but contains no socket or UI code.
 - `crates/engine` — the ONLY crate permitted to depend on `rig` (churn
   firewall, pinned rig_core). Keep provider churn inside it.
 - `crates/store` — rusqlite persistence (sessions, config, RAG index, in-place
@@ -59,9 +64,8 @@ in Rust with GPUI. GPL-3.0-only.
 ## Checks
 
 - `cargo fmt --package tide --package protocol --package client --package
-  backend -- --check`, then `cargo check` and `cargo test` before opening a
-  PR. Run the focused checks for your change first. (CONTRIBUTING.md still
-  lists `--package tide-daemon`, which no longer exists.)
+  transport --package backend -- --check`, then `cargo check` and `cargo test
+  --locked` before opening a PR. Run the focused checks for your change first.
 - `gpui`'s `test-support` feature is dev-dependency-only: it makes every
   `notify` pay a full frame, so it must never leak into a shipping build.
 

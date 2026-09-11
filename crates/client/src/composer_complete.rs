@@ -295,7 +295,13 @@ mod tests {
             ("fix this /ref", 13, TriggerKind::Command, "ref", 9..13),
             ("a @src/lib", 10, TriggerKind::File, "src/lib", 2..10),
             ("see @db/ and /goal", 8, TriggerKind::File, "db/", 4..8),
-            ("see @db/ and /goal", 18, TriggerKind::Command, "goal", 13..18),
+            (
+                "see @db/ and /goal",
+                18,
+                TriggerKind::Command,
+                "goal",
+                13..18,
+            ),
         ] {
             let trigger = detect_trigger(text, cursor).expect(text);
             assert_eq!(trigger.kind, kind, "{text}");

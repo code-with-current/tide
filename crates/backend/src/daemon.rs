@@ -282,12 +282,11 @@ impl Backend for TideBackend {
                 Ok(ResponsePayload::TideConnection { ok, error })
             }
             Command::TideZedSignIn => {
-                let (result, error) = match crate::tide_zed::zed_sign_in(
-                    crate::tide_zed::read_zed_keychain,
-                ) {
-                    Ok(result) => (Some(result), None),
-                    Err(error) => (None, Some(format!("{error:#}"))),
-                };
+                let (result, error) =
+                    match crate::tide_zed::zed_sign_in(crate::tide_zed::read_zed_keychain) {
+                        Ok(result) => (Some(result), None),
+                        Err(error) => (None, Some(format!("{error:#}"))),
+                    };
                 Ok(ResponsePayload::TideZedSignIn { result, error })
             }
             Command::GitSnapshot => Ok(ResponsePayload::GitSnapshot {

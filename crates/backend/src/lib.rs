@@ -54,17 +54,14 @@ pub mod workspace;
 pub mod worktree;
 
 mod fs_ext;
-mod server;
-mod wire;
-
-pub use server::{Backend, EventSink, ServerCore, ServerOptions, serve, serve_with_core};
 pub use settings::{DaemonSettings, DaemonSettingsStore};
-pub use wire::{
+pub use transport::{
     APP_EXECUTABLE_ENV, ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
     PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError,
     SequencedEvent, ServerMessage, WireComputerToolRequest, WireDriverEvent,
     WireDriverStartOptions, WireSessionOptions,
 };
+pub use transport::{Backend, EventSink, ServerCore, ServerOptions, serve, serve_with_core};
 pub use workspace::{WorkspaceOperation, WorkspaceResult};
 
 /// One lock for every test that redirects `TIDE_DATA_DIR`: the env var is

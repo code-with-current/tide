@@ -113,9 +113,9 @@ Run the focused checks relevant to your change, then run the full baseline
 before opening a pull request:
 
 ```sh
-cargo fmt --package tide --package protocol --package client --package backend --package tide-daemon -- --check
+cargo fmt --package tide --package protocol --package client --package transport --package backend -- --check
 cargo check
-cargo test
+cargo test --locked
 ```
 
 For user-visible changes, wait for the watcher to report a successful rebuild

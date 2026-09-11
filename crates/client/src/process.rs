@@ -315,9 +315,7 @@ struct SupervisorInner {
     /// externally bound exposure listener — local connections never drop.
     /// Set once at boot by the serving desktop.
     exposure_controller: Mutex<
-        Option<
-            std::sync::Arc<dyn Fn(DaemonExposureSettings) -> anyhow::Result<()> + Send + Sync>,
-        >,
+        Option<std::sync::Arc<dyn Fn(DaemonExposureSettings) -> anyhow::Result<()> + Send + Sync>>,
     >,
     target: Mutex<DaemonTarget>,
     exposure: Mutex<Option<DaemonExposureSettings>>,

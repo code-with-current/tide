@@ -618,7 +618,10 @@ mod tests {
         );
         // Exactly one outer pair of quotes is stripped, so a password that
         // itself starts or ends with a quote survives (trim_matches ate it).
-        assert_eq!(keychain_password("password: \"a\"b\"\n", "").unwrap(), "a\"b");
+        assert_eq!(
+            keychain_password("password: \"a\"b\"\n", "").unwrap(),
+            "a\"b"
+        );
         // An unrenderable password comes back as a hex dump followed by
         // security's quoted guess; only the hex is the password.
         assert_eq!(

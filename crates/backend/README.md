@@ -6,15 +6,12 @@ storage, workspace filesystem and Git services, Computer Use process control,
 and daemon-owned settings. It depends on the serializable contract in
 [`protocol`](../protocol), but contains no desktop transport or UI.
 
-The transport is an authenticated WebSocket (loopback by default). Requests
-have stable UUIDs for idempotency; session events carry monotonically
-increasing sequence numbers and runtime-generation IDs. The server keeps a
-bounded replay journal, and stale events or commands from a replaced runtime
-are ignored.
+The authenticated WebSocket, request idempotency, subscriptions, event
+sequencing, and bounded replay journal live in [`transport`](../transport).
+This crate implements its `Backend` trait with Tide's runtime behavior.
 
-`DaemonClient` lives in [`client`](../client), which is what Tide
-Desktop depends on. `serve` and `TideBackend` are used by the `tide-daemon`
-binary.
+`DaemonClient` lives in [`client`](../client). Tide Desktop hosts the transport
+listener in-process and composes it with `TideBackend`.
 
 Configuration ownership is explicit:
 

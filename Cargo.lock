@@ -766,13 +766,12 @@ dependencies = [
  "serde_json",
  "smol",
  "store",
- "subtle",
  "tempfile",
  "tokio",
  "toml 0.8.23",
  "tools",
+ "transport",
  "trash",
- "tungstenite 0.30.0",
  "url",
  "uuid",
 ]
@@ -8623,6 +8622,7 @@ dependencies = [
  "store",
  "tokio",
  "tools",
+ "transport",
  "tungstenite 0.30.0",
  "unicode-segmentation",
  "url",
@@ -9094,6 +9094,23 @@ dependencies = [
  "thread_local",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "transport"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "client",
+ "crossbeam-channel",
+ "libc",
+ "parking_lot",
+ "protocol",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tungstenite 0.30.0",
+ "uuid",
 ]
 
 [[package]]

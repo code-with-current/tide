@@ -16,7 +16,7 @@ Repos:
 GPUI UI (unchanged views, src/app/*)
   └─ DaemonSupervisor/DaemonClient (client, unchanged)
        ↕ WebSocket on 127.0.0.1 loopback socket
-     backend::serve(listener, token, TideBackend, …)  ← served by an app-owned thread (Phase A)
+     transport::serve(listener, token, TideBackend, …) ← served by an app-owned thread (Phase A)
        ├─ persistence (app.db), workspace/git, skills, blobs, drafts — unchanged
        └─ driver::start_local registry
             └─ ProviderKind::Tide → driver/tide.rs (Phase B)
@@ -33,7 +33,7 @@ env path (`TIDE_DAEMON_ADDRESS`/`TIDE_DAEMON_TOKEN`) keeps working for free.
 - `src/daemon.rs`: `start_process()` keeps env-var connect path; otherwise
   binds per `DaemonExposureSettings` (loopback ephemeral by default, exposed
   port when enabled), opens daemon stores, spawns thread running
-  `backend::serve`, then `DaemonSupervisor::connect`.
+  `transport::serve`, then `DaemonSupervisor::connect`.
 - Root Cargo.toml: app gains `backend` dep; workspace drops `crates/tide-daemon` (dir deleted).
 - `daemon_executable_path()` / `TIDE_DAEMON_PATH` removed.
 
@@ -82,7 +82,8 @@ env path (`TIDE_DAEMON_ADDRESS`/`TIDE_DAEMON_TOKEN`) keeps working for free.
 
 ## Status log
 - [x] Baseline clone ae14d1d; rustc 1.97.1 ok
-- [x] Phase A: `src/daemon.rs` serves `backend::serve` on an app-owned
+- [x] Phase A: `src/daemon.rs` serves `transport::serve` (temporarily also
+      re-exported by `backend`) on an app-owned
       listener (loopback ephemeral; exposure settings honored when enabled);
       `crates/tide-daemon` deleted from the workspace; `bind_address()` made
       pub in client; supervisor connects over the same socket as before.

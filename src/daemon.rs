@@ -6,8 +6,8 @@
 //! working unchanged — the process boundary is gone, not the protocol.
 
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, bail};
 use client::DaemonExposureSettings;
@@ -52,18 +52,16 @@ pub fn start_process() -> anyhow::Result<client::DaemonSupervisor> {
 }
 
 /// Bind the desktop's permanent local listener, open the daemon stores, and
-/// hand everything to [`backend::serve_with_core`] on a dedicated thread.
+/// hand everything to [`transport::serve_with_core`] on a dedicated thread.
 /// Mirrors the retired `tide-daemon` binary's main: same stores, same token,
 /// same origin rules — minus the child process and its watchdog.
 ///
-/// Two listeners share one [`backend::ServerCore`] so both see a single
+/// Two listeners share one [`transport::ServerCore`] so both see a single
 /// event lifecycle: the loopback plane this desktop talks to — its
 /// connections outlive every exposure change — and the Remote Control
 /// plane, which the exposure controller binds to 0.0.0.0 only while
 /// enabled.
-fn serve_in_process(
-    exposure: DaemonExposureSettings,
-) -> anyhow::Result<client::DaemonSupervisor> {
+fn serve_in_process(exposure: DaemonExposureSettings) -> anyhow::Result<client::DaemonSupervisor> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .context("could not bind the Tide backend to a local port")?;
     let address = listener.local_addr()?;
@@ -77,7 +75,7 @@ fn serve_in_process(
     .context("could not load daemon settings")?;
     let task_store = backend::persistence::StateStore::daemon(task_path);
     let backend = Arc::new(backend::daemon::TideBackend::new(settings, task_store)?);
-    let core = Arc::new(backend::ServerCore::new(backend));
+    let core = Arc::new(transport::ServerCore::new(backend));
 
     // Serves until the process exits; exposure changes never touch it, so
     // its handle may detach.
@@ -105,7 +103,7 @@ fn serve_in_process(
 /// the kernel level.
 fn apply_exposure(
     plane: &Mutex<Option<LocalServer>>,
-    core: &Arc<backend::ServerCore>,
+    core: &Arc<transport::ServerCore>,
     next: DaemonExposureSettings,
 ) -> anyhow::Result<()> {
     let next = next
@@ -119,12 +117,8 @@ fn apply_exposure(
     if !next.enabled {
         return Ok(());
     }
-    let listener = TcpListener::bind(next.bind_address()).with_context(|| {
-        format!(
-            "could not bind the Tide backend to {}",
-            next.bind_address()
-        )
-    })?;
+    let listener = TcpListener::bind(next.bind_address())
+        .with_context(|| format!("could not bind the Tide backend to {}", next.bind_address()))?;
     let token = next.token.clone();
     *plane.lock().unwrap() = Some(spawn_server(&listener, core, &token, &next)?);
     Ok(())
@@ -152,7 +146,7 @@ impl LocalServer {
 
 fn spawn_server(
     listener: &TcpListener,
-    core: &Arc<backend::ServerCore>,
+    core: &Arc<transport::ServerCore>,
     token: &str,
     exposure: &DaemonExposureSettings,
 ) -> anyhow::Result<LocalServer> {
@@ -170,12 +164,12 @@ fn spawn_server(
             move || {
                 // The loop exits when the flag flips (exposure reconfigure or
                 // app shutdown); the listener drops with the thread.
-                let _ = backend::serve_with_core(
+                let _ = transport::serve_with_core(
                     thread_listener,
                     token,
                     &core,
                     shutdown,
-                    backend::ServerOptions {
+                    transport::ServerOptions {
                         allowed_origins,
                         allow_shutdown: false,
                     },
@@ -224,12 +218,12 @@ mod tests {
     /// exist; no request ever reaches it.
     struct UnusedBackend;
 
-    impl backend::Backend for UnusedBackend {
+    impl transport::Backend for UnusedBackend {
         fn handle(
             &self,
-            _request: backend::Request,
-            _events: backend::EventSink,
-        ) -> anyhow::Result<backend::ResponsePayload> {
+            _request: transport::Request,
+            _events: transport::EventSink,
+        ) -> anyhow::Result<transport::ResponsePayload> {
             Err(anyhow::anyhow!("no requests are dispatched in this test"))
         }
     }
@@ -253,7 +247,7 @@ mod tests {
 
     #[test]
     fn exposure_plane_binds_while_enabled_and_frees_its_port_when_disabled() {
-        let core = Arc::new(backend::ServerCore::new(Arc::new(UnusedBackend)));
+        let core = Arc::new(transport::ServerCore::new(Arc::new(UnusedBackend)));
         let plane: Mutex<Option<LocalServer>> = Mutex::new(None);
         let port = TcpListener::bind(("127.0.0.1", 0))
             .unwrap()
@@ -270,11 +264,17 @@ mod tests {
         assert!(!port_is_listening(port), "the exposed port should close");
 
         apply_exposure(&plane, &core, exposure_on(port)).expect("re-enable exposure");
-        assert!(port_is_listening(port), "the exposed port should listen again");
+        assert!(
+            port_is_listening(port),
+            "the exposed port should listen again"
+        );
 
         let mut off = exposure_on(port);
         off.enabled = false;
         apply_exposure(&plane, &core, off).expect("final disable");
-        assert!(!port_is_listening(port), "the exposed port should close again");
+        assert!(
+            !port_is_listening(port),
+            "the exposed port should close again"
+        );
     }
 }

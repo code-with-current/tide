@@ -224,17 +224,31 @@ mod tests {
 
         // The cursor continues after the last position.
         let tail = backend
-            .read(&workspace, &current_id, Some(page.messages[1].position), 100)
+            .read(
+                &workspace,
+                &current_id,
+                Some(page.messages[1].position),
+                100,
+            )
             .expect("the seeded session reads");
         assert!(tail.messages.is_empty());
 
         // A foreign workspace resolves the same as an unknown id.
-        assert!(backend
-            .read(&_dir.path().join("other"), &current_id, None, 100)
-            .is_none());
-        assert!(backend
-            .read(&workspace, "00000000-0000-0000-0000-000000000000", None, 100)
-            .is_none());
+        assert!(
+            backend
+                .read(&_dir.path().join("other"), &current_id, None, 100)
+                .is_none()
+        );
+        assert!(
+            backend
+                .read(
+                    &workspace,
+                    "00000000-0000-0000-0000-000000000000",
+                    None,
+                    100
+                )
+                .is_none()
+        );
     }
 
     /// Projectless sessions are their own workspace: the project row and
@@ -304,9 +318,10 @@ mod tests {
             )
             .unwrap();
         assert!(read.output.contains("why does login loop?"));
-        assert!(read
-            .output
-            .contains("More messages may remain — continue with cursor: \"0\"."));
+        assert!(
+            read.output
+                .contains("More messages may remain — continue with cursor: \"0\".")
+        );
 
         set_shared_session_reader(None);
     }

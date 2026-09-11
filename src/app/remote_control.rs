@@ -53,9 +53,7 @@ impl RemoteControlState {
                 });
             }
         }
-        cache
-            .as_ref()
-            .map(|qr| (Arc::clone(&qr.dark), qr.width))
+        cache.as_ref().map(|qr| (Arc::clone(&qr.dark), qr.width))
     }
 }
 
@@ -184,19 +182,18 @@ impl Tide {
         }
 
         div()
-            .child(settings_group_head(theme, tr!("remote_control.title"), actions))
+            .child(settings_group_head(
+                theme,
+                tr!("remote_control.title"),
+                actions,
+            ))
             .child(body)
     }
 
     /// The scan row: the QR on its fixed light surface beside scanning
     /// instructions and the security notes. Carries its own divider — custom
     /// rows never land first, the toggle row always sits above them.
-    fn render_qr_row(
-        &self,
-        theme: &Theme,
-        dark: Arc<Vec<bool>>,
-        width: usize,
-    ) -> AnyElement {
+    fn render_qr_row(&self, theme: &Theme, dark: Arc<Vec<bool>>, width: usize) -> AnyElement {
         let cell = px(4.0);
         let mut qr_grid = div()
             .id("remote-qr")
