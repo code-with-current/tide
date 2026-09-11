@@ -281,6 +281,15 @@ impl Backend for TideBackend {
                     crate::tide_providers::test_connection(api_style, base_url, api_key, model_id);
                 Ok(ResponsePayload::TideConnection { ok, error })
             }
+            Command::TideZedSignIn => {
+                let (result, error) = match crate::tide_zed::zed_sign_in(
+                    crate::tide_zed::read_zed_keychain,
+                ) {
+                    Ok(result) => (Some(result), None),
+                    Err(error) => (None, Some(format!("{error:#}"))),
+                };
+                Ok(ResponsePayload::TideZedSignIn { result, error })
+            }
             Command::GitSnapshot => Ok(ResponsePayload::GitSnapshot {
                 snapshot: crate::git_identities::git_snapshot(&self.projects()),
             }),

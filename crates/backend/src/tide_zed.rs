@@ -66,6 +66,42 @@ pub(crate) fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
         .context("could not build the zed client")
 }
 
+/// Read Zed desktop's credentials from the macOS login keychain. `-g`
+/// prints the password to stdout and the item attributes (including the
+/// account = user id) to stderr in one invocation.
+#[cfg(target_os = "macos")]
+pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
+    let output = std::process::Command::new("/usr/bin/security")
+        .args(["find-internet-password", "-g", "-s", "https://zed.dev"])
+        .output()
+        .context("could not run the macOS keychain tool")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let token = stdout
+        .lines()
+        .chain(stderr.lines())
+        .find_map(|line| line.strip_prefix("password: "))
+        .map(str::trim)
+        .map(|t| t.trim_matches('"').to_owned())
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("no Zed credentials in the login keychain — is Zed desktop signed in?"))?;
+    let user_id = stderr
+        .lines()
+        .find(|line| line.contains("\"acct\""))
+        .and_then(|line| line.split('"').nth(3))
+        .map(str::to_owned)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("the keychain entry carries no Zed user id"))?;
+    let cred = ZedCredential { user_id, access_token: token, organization_id: None };
+    ensure_creds(&cred)?;
+    Ok(cred)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
+    bail!("automatic Zed sign-in needs the macOS keychain — paste the credentials manually")
+}
+
 pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire>> {
     let list = json
         .get("models")
