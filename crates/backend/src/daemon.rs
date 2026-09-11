@@ -1541,6 +1541,7 @@ fn handle_driver_command(
         | Command::TideProbeModels { .. }
         | Command::TideDetectProtocol { .. }
         | Command::TideTestConnection { .. }
+        | Command::TideZedSignIn
         | Command::ProbeComputerPermissions { .. }
         | Command::LoadUsageHistory { .. }
         | Command::LoadUsageReport { .. }

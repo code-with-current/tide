@@ -47,3 +47,26 @@ pub struct TideModelWire {
 fn default_match_state() -> String {
     "none".to_owned()
 }
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TideZedOrganization {
+    pub id: String,
+    pub name: String,
+    pub is_personal: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TideZedSignInResult {
+    pub user_id: String,
+    pub access_token: String,
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub organizations: Vec<TideZedOrganization>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_organization_id: Option<String>,
+}

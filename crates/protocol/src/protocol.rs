@@ -18,7 +18,7 @@ use crate::model::{
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::settings::DaemonSettings;
 use crate::skills::SkillsCatalog;
-use crate::tide::{TideModelWire, TideProviderWire};
+use crate::tide::{TideModelWire, TideProviderWire, TideZedSignInResult};
 use crate::usage_history::UsageHistory;
 use crate::usage_report::{UsageReport, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
@@ -182,6 +182,9 @@ pub enum Command {
         api_key: String,
         model_id: String,
     },
+    /// Read Zed desktop's credentials from the OS keychain and validate
+    /// them against cloud.zed.dev. The wizard's Zed Connect step.
+    TideZedSignIn,
     /// ── Git identities (tide git-settings port) ─────────────────────
     /// The whole Git settings screen in one payload. The daemon supplies
     /// its own project list; clients refresh after every mutation.
@@ -798,6 +801,10 @@ pub enum ResponsePayload {
     },
     TideConnection {
         ok: bool,
+        error: Option<String>,
+    },
+    TideZedSignIn {
+        result: Option<TideZedSignInResult>,
         error: Option<String>,
     },
     GitSnapshot {
