@@ -4,7 +4,9 @@
 //! verbatim as `EngineModelConfig::api_key`.
 
 use anyhow::{Context as _, bail};
+use protocol::tide::TideModelWire;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::time::Duration;
 
 const CLOUD_URL: &str = "https://cloud.zed.dev";
@@ -66,6 +68,45 @@ pub(crate) fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
         .context("could not build the zed client")
 }
 
+#[allow(dead_code)] // used from task 4
+pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire>> {
+    let list = json
+        .get("models")
+        .and_then(Value::as_array)
+        .filter(|list| !list.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("the zed model list response contained no models"))?;
+    let mut models: Vec<TideModelWire> = list
+        .iter()
+        .filter_map(|model| {
+            let id = model.get("id")?.as_str()?.to_owned();
+            Some(TideModelWire {
+                alias: model
+                    .get("display_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&id)
+                    .to_owned(),
+                context_window: model
+                    .get("max_token_count")
+                    .and_then(Value::as_u64)
+                    .filter(|v| *v > 0)
+                    .unwrap_or(crate::tide_providers::DEFAULT_CONTEXT_WINDOW),
+                reasoning: model.get("supports_thinking").and_then(Value::as_bool).unwrap_or(false),
+                vision: model.get("supports_images").and_then(Value::as_bool).unwrap_or(false),
+                match_state: "live".to_owned(),
+                price_label: None,
+                supported_efforts: Vec::new(),
+                catalog_id: None,
+                model_id: id,
+            })
+        })
+        .collect();
+    if models.is_empty() {
+        bail!("the zed model list response contained no models");
+    }
+    models.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+    Ok(models)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +136,36 @@ mod tests {
             None
         );
         assert!(ZedCredential::from_blob(r#"{"userId":"","accessToken":"t"}"#).is_err());
+    }
+
+    #[test]
+    fn parse_zed_models_maps_fields() {
+        let json = serde_json::json!({ "models": [
+            { "id": "claude-sonnet-5", "provider": "anthropic", "display_name": "Claude Sonnet 5",
+              "max_token_count": 1_000_000, "max_output_tokens": 128_000,
+              "supports_tools": true, "supports_images": true, "supports_thinking": true },
+            { "id": "bare", "max_token_count": 0 }
+        ]});
+        let models = parse_zed_models(&json).unwrap();
+        assert_eq!(models.len(), 2);
+        // sorted by model_id: "bare" < "claude-sonnet-5"
+        assert_eq!(models[0].model_id, "bare");
+        assert_eq!(models[0].alias, "bare"); // alias falls back to the id
+        assert_eq!(models[0].context_window, crate::tide_providers::DEFAULT_CONTEXT_WINDOW);
+        assert!(!models[0].reasoning && !models[0].vision);
+        let first = &models[1];
+        assert_eq!(first.model_id, "claude-sonnet-5");
+        assert_eq!(first.alias, "Claude Sonnet 5");
+        assert_eq!(first.context_window, 1_000_000);
+        assert!(first.reasoning && first.vision);
+        assert_eq!(first.match_state, "live");
+        assert!(models[0].model_id <= models[1].model_id);
+    }
+
+    #[test]
+    fn parse_zed_models_rejects_empty() {
+        assert!(parse_zed_models(&serde_json::json!({})).is_err());
+        assert!(parse_zed_models(&serde_json::json!({ "models": [] })).is_err());
     }
 
     #[test]

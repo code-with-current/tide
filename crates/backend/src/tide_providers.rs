@@ -10,7 +10,7 @@ use protocol::tide::{TideModelWire, TideProviderWire};
 use serde_json::Value;
 use uuid::Uuid;
 
-const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
+pub(crate) const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
 
 fn config_path() -> std::path::PathBuf {
     store::paths::config_path()
