@@ -165,11 +165,13 @@ fn keychain_password(stdout: &str, stderr: &str) -> anyhow::Result<String> {
 }
 
 /// Pull the account (= Zed user id) out of the attribute dump `security`
-/// prints to stderr. Pure so tests can exercise the `<NULL>` shape.
+/// prints. Which stream carries the dump varies by macOS build (stdout on
+/// current ones, stderr on older), so scan both.
 #[cfg(any(target_os = "macos", test))]
-fn keychain_account(stderr: &str) -> anyhow::Result<String> {
-    stderr
+fn keychain_account(stdout: &str, stderr: &str) -> anyhow::Result<String> {
+    stdout
         .lines()
+        .chain(stderr.lines())
         .find(|line| line.contains("\"acct\""))
         .and_then(|line| line.split('"').nth(3))
         .map(str::to_owned)
@@ -201,7 +203,7 @@ pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
             continue;
         }
         let access_token = keychain_password(&stdout, &stderr)?;
-        let user_id = keychain_account(&stderr)?;
+        let user_id = keychain_account(&stdout, &stderr)?;
         let cred = ZedCredential {
             user_id,
             access_token,
@@ -638,12 +640,15 @@ mod tests {
     fn keychain_account_rejects_null_and_missing() {
         let attributes =
             "attributes:\n    \"acct\"<blob>=\"605409\"\n    \"srvr\"<blob>=\"zed.dev\"\n";
-        assert_eq!(keychain_account(attributes).unwrap(), "605409");
+        // The dump arrives on stdout on current macOS builds, stderr on
+        // older ones — both must work.
+        assert_eq!(keychain_account("", attributes).unwrap(), "605409");
+        assert_eq!(keychain_account(attributes, "").unwrap(), "605409");
         // An unset account prints as the literal <NULL>.
         let null_acct = "attributes:\n    \"acct\"<blob>=\"<NULL>\"\n";
-        let err = keychain_account(null_acct).unwrap_err();
+        let err = keychain_account(null_acct, "").unwrap_err();
         assert!(err.to_string().contains("no Zed user id"), "{err}");
-        assert!(keychain_account("attributes:\n    \"srvr\"<blob>=\"zed.dev\"\n").is_err());
+        assert!(keychain_account("", "attributes:\n    \"srvr\"<blob>=\"zed.dev\"\n").is_err());
     }
 
     #[test]
