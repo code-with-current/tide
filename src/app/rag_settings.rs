@@ -1022,7 +1022,10 @@ impl Tide {
                             self.rag_poll_again(&id);
                         }
                     }
-                    Err(error) => self.rag_settings.status_error = Some(error),
+                    Err(error) => {
+                        self.rag_settings.pending_toggle = None;
+                        self.rag_settings.status_error = Some(error);
+                    }
                 },
                 RagOpsEvent::Sources(result) => match result {
                     Ok(sources) => {
@@ -1942,7 +1945,7 @@ impl Tide {
             );
         }
 
-        let mut rows = vec![
+        let rows = vec![
             CardRow::new(tr!("settings.rag.model"))
                 .description(tr!("settings.rag.model_hint"))
                 .control(change_button),
@@ -2960,6 +2963,7 @@ impl Tide {
             .as_ref()
             .filter(|status| status.project_id == project_id);
         let enabled = relevant.is_some_and(|status| status.enabled);
+        let model_ready = relevant.is_some_and(|status| status.model_download == "ready");
         let pending_toggle = self
             .rag_settings
             .pending_toggle
@@ -2968,7 +2972,7 @@ impl Tide {
         // Optimistic flip: while the enable command is in flight the
         // toggle paints the target state, inert until Status replies.
         let shown_enabled = pending_toggle.map(|(_, next)| *next).unwrap_or(enabled);
-        let toggle_disabled = pending_toggle.is_some();
+        let toggle_disabled = pending_toggle.is_some() || (!enabled && !model_ready);
         let busy = rag_is_busy(relevant);
         let progress = relevant
             .and_then(|status| status.init_progress.clone())
@@ -2980,6 +2984,7 @@ impl Tide {
             rag_build_label(relevant, &project_id),
         )
         .busy(busy)
+        .disabled(!model_ready)
         .render(*theme, cx, move |this, _window, cx| {
             this.rag_init(&build_id, cx);
         });

@@ -1,4 +1,4 @@
-//! The RAG service — the daemon-side wiring over the vendored `rag` crate
+//! The RAG service — the daemon-side wiring over the local `rag` crate
 //! (upstream tide's `src/commands/rag.rs` + `sources.rs`, adapted from
 //! Tauri commands to plain functions the daemon's request handlers call).
 //!
@@ -18,9 +18,9 @@ use rag::{
     ChunkRow, KnowledgeStore, RagStore, WorkspaceIngestInputs, knowledge_db_path, rag_db_path,
 };
 use rag::{
-    EmbedUse, Embedder, EmbeddingPlan, RagConfigInput, cloud_configured, default_entry,
-    download_model, entry as catalog_entry, ingest_documents, ingest_workspace, local_model_exists,
-    resolve_embedder_for_build, resolve_embedder_for_query,
+    EmbedUse, Embedder, EmbeddingPlan, RagConfigInput, cloud_configured, download_model,
+    entry as catalog_entry, ingest_documents, ingest_workspace, resolve_embedder_for_build,
+    resolve_embedder_for_query,
 };
 use store::paths::{config_path, data_dir};
 use tools::{MemoryHit, MemoryIndex, rrf_fuse, set_shared_memory_index};
@@ -609,8 +609,8 @@ fn model_downloads_running() -> &'static Mutex<HashSet<String>> {
     RUNNING.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// (state, error, percent) for one model, in the wire shape; vendored
-/// models are always "ready". The percent rides only Downloading.
+/// (state, error, percent) for one model, in the wire shape. The percent
+/// rides only Downloading.
 fn model_download_wire(model_id: &str) -> (String, Option<String>, Option<u32>) {
     // The reranker id resolves through the reranker entry, not the
     // embedder catalog — it shares the download-state machinery.
@@ -652,16 +652,29 @@ fn download_percent(received: u64, total: u64) -> Option<u32> {
 /// into the wire shape.
 pub fn status(project_id: &str) -> protocol::RagStatusWire {
     let dir = data_dir();
+    let rag_config = effective_rag_config();
     let cfg = store::config::load(&config_path()).ok();
     let enabled = cfg
         .as_ref()
         .and_then(|cfg| cfg.rag_enabled_workspaces.as_deref())
         .is_some_and(|ids| ids.iter().any(|id| id == project_id));
-    let local_available = local_model_exists(&dir);
     let cloud = cloud_configured();
     let (chunks, last_ingested, plan_id) = read_ingest_state(&dir, project_id);
-    let (download_state, download_error, download_percent) =
-        model_download_wire(default_entry().id);
+    let (local_available, download_state, download_error, download_percent) =
+        if let Some(entry) = catalog_entry(&rag_config.embedder_id) {
+            let (state, error, percent) = model_download_wire(entry.id);
+            (
+                rag::local_model_exists_for(entry, &dir),
+                state,
+                error,
+                percent,
+            )
+        } else {
+            match rag::resolve_for_build(&rag_config, &dir) {
+                Ok(_) => (true, "ready".to_owned(), None, None),
+                Err(error) => (false, "failed".to_owned(), Some(error), None),
+            }
+        };
     protocol::RagStatusWire {
         project_id: project_id.to_owned(),
         enabled,
@@ -673,7 +686,7 @@ pub fn status(project_id: &str) -> protocol::RagStatusWire {
         chunk_count: chunks.unwrap_or(0),
         last_ingested_at: last_ingested,
         init_state: init_state_of(project_id, last_ingested),
-        embedder_id: plan_id.unwrap_or_else(|| effective_rag_config().embedder_id),
+        embedder_id: plan_id.unwrap_or(rag_config.embedder_id),
         plan_stale: plan_stale(&dir, project_id),
         init_progress: init_progress_map()
             .lock()
@@ -766,10 +779,11 @@ pub fn ensure_model_downloaded(model_id: &str) {
     }
 }
 
-/// Make sure the CONFIGURED embedder's model is on its way down (the
-/// enable-path entry point; no-op for cloud/custom ids).
-fn ensure_configured_model_downloaded() {
-    ensure_model_downloaded(&effective_rag_config().embedder_id);
+/// Validate that the configured embedder can be used without causing an
+/// implicit download. Local models must be downloaded from the model picker.
+fn ensure_configured_embedder_ready() -> Result<(), String> {
+    let dir = data_dir();
+    rag::resolve_for_build(&effective_rag_config(), &dir).map(|_| ())
 }
 
 /// Delete a downloaded catalog model's files. Returns the affected
@@ -980,8 +994,8 @@ fn affected_workspaces_for(
 }
 
 /// Merge a partial settings update under the config lock, validate the
-/// embedder id resolves, kick the model download when it's a catalog id,
-/// and return which indexes the change left behind.
+/// embedder id, and return which indexes the change left behind. Downloads
+/// are explicit actions in Settings → Memory → Select model.
 pub fn update_config(
     patch: &protocol::RagConfigPatchWire,
 ) -> Result<Vec<protocol::RagAffectedWorkspaceWire>, String> {
@@ -996,10 +1010,6 @@ pub fn update_config(
     store::config::save(&config_path(), &cfg).map_err(|e| e.to_string())?;
     drop(_guard);
 
-    // A newly-selected catalog model starts downloading immediately.
-    if rag::entry(&eff.embedder_id).is_some() {
-        ensure_model_downloaded(&eff.embedder_id);
-    }
     Ok(affected_workspaces(
         &eff.embedder_id,
         eff.chunk_size,
@@ -1308,11 +1318,10 @@ pub fn prewarm() {
     }
 }
 
-/// Enable RAG for a project: persist into `rag_enabled_workspaces` (config
-/// write under the crate's config lock) and make sure the model download
-/// is on its way.
+/// Enable RAG for a project after confirming that the configured embedder
+/// is ready. This never starts a model download implicitly.
 pub fn enable_project(project_id: &str) -> Result<(), String> {
-    ensure_configured_model_downloaded();
+    ensure_configured_embedder_ready()?;
     let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     cfg.rag_enabled_workspaces
@@ -1335,6 +1344,7 @@ pub fn disable_project(project_id: &str) -> Result<(), String> {
 /// Kick workspace ingestion on a background thread (re-entry guarded per
 /// project). Returns the start time on success.
 pub fn init_project(project_id: &str, project_path: &std::path::Path) -> Result<i64, String> {
+    ensure_configured_embedder_ready()?;
     {
         let mut running = running_inits().lock().unwrap();
         if running.contains(project_id) {
@@ -1915,7 +1925,7 @@ pub fn remember_fact(project_id: &str, fact: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    // The seam wiring is exercised through the vendored crate's own tests;
+    // The seam wiring is exercised through the rag crate's own tests;
     // here we pin the config enable/disable cycle against a temp data dir.
 
     #[test]

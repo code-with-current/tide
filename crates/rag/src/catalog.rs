@@ -22,8 +22,8 @@ pub struct LocalModelEntry {
     pub files: &'static [&'static str],
     /// Aggregate download size in bytes (progress denominators).
     pub download_size: u64,
-    /// True when the model ships inside the binary (the packaged-app
-    /// fallback); non-vendored entries must download before first use.
+    /// True when the model ships inside the binary. All current entries
+    /// are download-only; the field remains part of the wire contract.
     pub vendored: bool,
     /// Instruction prefixes some model families were trained with (e5);
     /// applied at tokenize time — queries and passages differ.
@@ -31,7 +31,7 @@ pub struct LocalModelEntry {
     pub passage_prefix: Option<&'static str>,
 }
 
-/// The default entry — vendored, English, code-search fine-tune.
+/// The default entry — English, code-search fine-tune.
 pub const DEFAULT_ENTRY: LocalModelEntry = LocalModelEntry {
     id: "local-code-512",
     repo: "isuruwijesiri/all-MiniLM-L6-v2-code-search-512",
@@ -45,8 +45,9 @@ pub const DEFAULT_ENTRY: LocalModelEntry = LocalModelEntry {
         "tokenizer_config.json",
         "config.json",
     ],
-    download_size: 0, // vendored — nothing to download
-    vendored: true,
+    // 22,862,151 + 711,649 + 1,464 + 611
+    download_size: 23_575_875,
+    vendored: false,
     query_prefix: None,
     passage_prefix: None,
 };
@@ -255,13 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn exactly_one_vendored_entry_and_it_is_the_default() {
-        let vendored: Vec<&LocalModelEntry> = CATALOG.iter().filter(|e| e.vendored).collect();
-        assert_eq!(vendored.len(), 1);
-        assert_eq!(vendored[0].id, default_entry().id);
-        // Non-vendored entries need a real download size for progress bars.
+    fn catalog_entries_are_download_only_and_have_sizes() {
         for e in CATALOG {
-            assert!(e.vendored || e.download_size > 0, "{}", e.id);
+            assert!(!e.vendored, "{} must not ship in the app", e.id);
+            assert!(e.download_size > 0, "{} needs a progress size", e.id);
         }
     }
 

@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use git2::{BlameOptions, FetchPrune, ObjectType, Repository, RepositoryInitOptions};
 use regex::Regex;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::http::{self, HttpError};
 use crate::path_safety::resolve_inside_workspace;
@@ -1495,10 +1495,9 @@ mod tests {
             "{}",
             out.output
         );
-        assert!(
-            out.output
-                .contains("info, branches, files, read, log, show, blame, search")
-        );
+        assert!(out
+            .output
+            .contains("info, branches, files, read, log, show, blame, search"));
 
         // Ref charset block (flag smuggling) — kept exact from the TS.
         for bad_ref in ["-x", "a..b", "has space", "semi;colon"] {
@@ -1887,14 +1886,13 @@ mod tests {
         .unwrap();
         assert_eq!(out.output, "a.rs\nb.rs");
         assert_eq!(out.meta.as_deref(), Some("rest · 2 matches"));
-        assert!(
-            api.requests
-                .lock()
-                .unwrap()
-                .last()
-                .unwrap()
-                .starts_with("/search/code?q=todo%20repo%3Aacme%2Fwidget")
-        );
+        assert!(api
+            .requests
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .starts_with("/search/code?q=todo%20repo%3Aacme%2Fwidget"));
 
         // github blame has no REST path — the error names the fallback.
         let err =

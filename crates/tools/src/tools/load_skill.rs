@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::permission::RiskTier;
 use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
-use super::read_file::{DEFAULT_MAX_LINES, run_read_file};
+use super::read_file::{run_read_file, DEFAULT_MAX_LINES};
 
 const DESCRIPTION: &str = "Load and activate a skill by reading its SKILL.md file. Call this when the user invokes a skill via /name, or when a skill matches the task. Returns the skill's full instructions — read and follow them before proceeding with any other action.";
 

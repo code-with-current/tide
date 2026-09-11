@@ -204,10 +204,9 @@ mod tests {
         std::fs::write(tmp.path().join("x.txt"), "text").unwrap();
         let out = run_read_media_file("x.txt", tmp.path(), &[]);
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert!(
-            out.output
-                .starts_with("Unsupported file type: .txt. Supported: .png, .apng, .jpg")
-        );
+        assert!(out
+            .output
+            .starts_with("Unsupported file type: .txt. Supported: .png, .apng, .jpg"));
         assert!(out.output.contains(".pdf"));
     }
 

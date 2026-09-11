@@ -1442,8 +1442,8 @@ settings.knowledge_keywords: memory rag knowledge sources index embed メモリ 
 settings.rag.title: メモリと RAG
 settings.rag.no_project: まずプロジェクトを選択してください — メモリインデックスはプロジェクト単位です。
 settings.rag.enable: メモリを有効化
-settings.rag.enable_hint: メモリツールはこのプロジェクトのインデックスを検索します。初回有効化時に埋め込みモデルをダウンロードします。
-settings.rag.change: 変更…
+settings.rag.enable_hint: メモリを有効にする前に、「設定 → メモリ → モデルを選択」からモデルをダウンロードしてください。
+settings.rag.change: モデルを選択…
 settings.rag.model_dialog_title: 埋め込みモデル
 settings.rag.model_dialog_hint: プロジェクトとナレッジソースのインデックスに使用するモデルを選択します。
 settings.rag.select: 選択

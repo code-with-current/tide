@@ -245,7 +245,7 @@ mod tests {
                 "git_repo"
             ]
         );
-        assert_eq!(reviewer.max_steps, Some(20));
+        assert_eq!(reviewer.max_steps, Some(50));
         assert_eq!(reviewer.thinking_level.as_deref(), Some("medium"));
         assert!(reviewer.can_dispatch.is_empty() && !reviewer.can_dispatch_all);
         assert!(reviewer

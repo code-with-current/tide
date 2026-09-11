@@ -83,7 +83,7 @@ pub fn resolve_for_build(
         if !config.cloud_allowed {
             return Err(format!(
                 "Model {} is not downloaded and cloud fallback is disabled. \
-                 Download it from the Memory & RAG settings or enable \
+                 Download it from Settings → Memory → Select model or enable \
                  \"Allow cloud as build-time fallback\".",
                 entry.repo
             ));
@@ -183,18 +183,17 @@ mod tests {
     }
 
     #[test]
-    fn build_resolves_the_vendored_default_without_any_setup() {
+    fn build_requires_the_default_model_download() {
         let cfg = RagConfigInput::default();
-        let (id, embedder) = resolve_embedder_for_build(&cfg, &dir()).unwrap();
-        assert_eq!(id, "local-code-512");
-        assert_eq!(embedder.dim(), 384);
+        let err = resolve_for_build(&cfg, &dir()).err().unwrap();
+        assert!(err.contains("not downloaded"), "was {err}");
+        assert!(err.contains("Select model"), "was {err}");
     }
 
     #[test]
     fn build_falls_back_to_cloud_only_when_allowed_and_configured() {
-        // No system key in the test env → cloud stays unconfigured; the
-        // vendored default makes local always-available, so force an
-        // undownloaded entry to exercise the chain.
+        // No system key in the test env keeps cloud unconfigured. Use a
+        // non-default entry so this test remains explicit about the model.
         let mut cfg = RagConfigInput {
             embedder_id: "local-bge-m3".into(),
             ..Default::default()
@@ -249,7 +248,15 @@ mod tests {
     #[test]
     fn query_never_crosses_vector_spaces() {
         let cfg = RagConfigInput::default();
-        let (_, embedder) = resolve_embedder_for_query("local-code-512", &cfg, &dir()).unwrap();
+        let data_dir = dir();
+        let entry = catalog::default_entry();
+        let model_dir = crate::embedder::models_dir_for(&data_dir).join(entry.repo);
+        for relative in entry.files {
+            let path = model_dir.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"stub").unwrap();
+        }
+        let (_, embedder) = resolve_embedder_for_query("local-code-512", &cfg, &data_dir).unwrap();
         assert_eq!(embedder.dim(), 384);
 
         // Same dims, DIFFERENT model: the id lock must still block it —

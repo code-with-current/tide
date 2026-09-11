@@ -6,12 +6,11 @@
 //! with the HF `tokenizer.json` riding beside — mean-pool masked
 //! positions + L2 normalize, the exact numerics of `poolNormalize` (f64
 //! accumulation), so vectors written by the TS shells stay
-//! query-compatible. Model resolution follows the bun-onnx candidate
-//! chain: `TIDE_MODELS_DIR` → `<data>/models/<repo>` (the download dir
-//! `local_model_exists` checks) → the copy vendored in this crate
-//! (embedded into the binary, default entry only). Remote embedders post
-//! to OpenAI-style `/embeddings` endpoints — the system OpenRouter
-//! connection or a user-configured custom endpoint.
+//! query-compatible. Local models resolve from `TIDE_MODELS_DIR` or
+//! `<data>/models/<repo>`, populated explicitly from Settings → Memory →
+//! Select model. Remote embedders post to OpenAI-style `/embeddings`
+//! endpoints — the system OpenRouter connection or a user-configured
+//! custom endpoint.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -76,20 +75,14 @@ pub fn models_dir_for(data_dir: &Path) -> PathBuf {
     data_dir.join("models")
 }
 
-/// TS `localModelExists` for a catalog entry: the downloaded model ONNX is
-/// on disk. The vendored/embedded copy does NOT count — the user-facing
-/// download is the gate, exactly like the TS shells (which staged a copy
-/// into the bundle yet still reported unavailable until first enable
-/// downloaded it). The default entry stays usable regardless (vendored).
+/// Whether every file for a catalog entry is present in the model download
+/// directory. A partial download never counts as ready.
 pub fn local_model_exists_for(entry: &LocalModelEntry, data_dir: &Path) -> bool {
-    if entry.vendored {
-        return true;
-    }
-    models_dir_for(data_dir)
-        .join(entry.repo)
-        .join("onnx")
-        .join("model_quantized.onnx")
-        .is_file()
+    let model_dir = models_dir_for(data_dir).join(entry.repo);
+    entry
+        .files
+        .iter()
+        .all(|relative| model_dir.join(relative).is_file())
 }
 
 /// Default-model shorthand (status/reporting paths).
@@ -105,15 +98,6 @@ pub fn cloud_configured() -> bool {
 }
 
 // ── local embedder ─────────────────────────────────────────────────────────
-
-/// Vendored model bytes, embedded at compile time (the staged-copy twin —
-/// `include_bytes!`, like the bundled model-prices baseline). The default
-/// entry only: every other catalog model must be downloaded.
-static VENDORED_ONNX: &[u8] = include_bytes!(
-    "../models/isuruwijesiri/all-MiniLM-L6-v2-code-search-512/onnx/model_quantized.onnx"
-);
-static VENDORED_TOKENIZER: &[u8] =
-    include_bytes!("../models/isuruwijesiri/all-MiniLM-L6-v2-code-search-512/tokenizer.json");
 
 struct LocalSession {
     tokenizer: tokenizers::Tokenizer,
@@ -184,36 +168,17 @@ fn build_local_session(
     data_dir: &Path,
     entry: &'static LocalModelEntry,
 ) -> Result<LocalSession, String> {
-    // Candidate model roots, first match wins: the app's download dir
-    // (production — same location localModel_exists_for checks and the
-    // downloader writes), then the crate-vendored copy embedded in the
-    // binary (packaged/dev/test fallback, default entry only).
-    let onnx_path = models_dir_for(data_dir)
-        .join(entry.repo)
-        .join("onnx")
-        .join("model_quantized.onnx");
-    let (model_bytes, onnx_owned): (Vec<u8>, bool) = if onnx_path.is_file() {
-        (std::fs::read(&onnx_path).map_err(|e| e.to_string())?, true)
-    } else if entry.vendored {
-        (VENDORED_ONNX.to_vec(), false)
-    } else {
+    let model_dir = models_dir_for(data_dir).join(entry.repo);
+    if !local_model_exists_for(entry, data_dir) {
         return Err(format!(
-            "model {} is not downloaded — download it from the Memory & RAG settings",
+            "model {} is not downloaded — download it from Settings → Memory → Select model",
             entry.repo
         ));
-    };
-    let tokenizer_bytes: Vec<u8> = {
-        let tokenizer_path = models_dir_for(data_dir)
-            .join(entry.repo)
-            .join("tokenizer.json");
-        if onnx_owned && tokenizer_path.is_file() {
-            std::fs::read(&tokenizer_path).map_err(|e| e.to_string())?
-        } else if entry.vendored {
-            VENDORED_TOKENIZER.to_vec()
-        } else {
-            return Err(format!("tokenizer for {} is not downloaded", entry.repo));
-        }
-    };
+    }
+    let model_bytes = std::fs::read(model_dir.join("onnx/model_quantized.onnx"))
+        .map_err(|e| format!("model load failed for {}: {e}", entry.repo))?;
+    let tokenizer_bytes = std::fs::read(model_dir.join("tokenizer.json"))
+        .map_err(|e| format!("tokenizer load failed for {}: {e}", entry.repo))?;
 
     let mut tokenizer = tokenizers::Tokenizer::from_bytes(&tokenizer_bytes)
         .map_err(|e| format!("tokenizer load failed: {e}"))?;
@@ -643,11 +608,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let e5 = catalog::entry("local-mle5-small").unwrap();
         assert!(!local_model_exists_for(e5, dir.path()));
-        // The vendored default is usable without a download.
-        assert!(local_model_exists_for(catalog::default_entry(), dir.path()));
-        let model_dir = dir.path().join("models").join(e5.repo).join("onnx");
-        std::fs::create_dir_all(&model_dir).unwrap();
-        std::fs::write(model_dir.join("model_quantized.onnx"), b"stub").unwrap();
+        assert!(!local_model_exists_for(
+            catalog::default_entry(),
+            dir.path()
+        ));
+        let model_dir = dir.path().join("models").join(e5.repo);
+        for relative in e5.files {
+            let path = model_dir.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"stub").unwrap();
+        }
         assert!(local_model_exists_for(e5, dir.path()));
     }
 

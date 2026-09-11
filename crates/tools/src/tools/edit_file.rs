@@ -301,10 +301,9 @@ mod tests {
         std::fs::write(tmp.path().join("a.ts"), "const a = 1;\nconst b = 2;\n").unwrap();
         let out = run_edit_file("a.ts", "const a = 1;", "const a = 2;", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
-        assert!(
-            out.output
-                .starts_with("Edited a.ts: replaced 1 occurrence, +1 −1 lines.")
-        );
+        assert!(out
+            .output
+            .starts_with("Edited a.ts: replaced 1 occurrence, +1 −1 lines."));
         assert_eq!(out.meta.as_deref(), Some("+1 −1"));
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("a.ts")).unwrap(),
@@ -328,17 +327,13 @@ mod tests {
     #[test]
     fn missing_args_fail() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(
-            run_edit_file("", "a", "b", tmp.path(), &[])
-                .output
-                .contains("Missing required arg: path")
-        );
+        assert!(run_edit_file("", "a", "b", tmp.path(), &[])
+            .output
+            .contains("Missing required arg: path"));
         std::fs::write(tmp.path().join("x"), "y").unwrap();
-        assert!(
-            run_edit_file("x", "", "b", tmp.path(), &[])
-                .output
-                .contains("Missing required arg: old_string")
-        );
+        assert!(run_edit_file("x", "", "b", tmp.path(), &[])
+            .output
+            .contains("Missing required arg: old_string"));
     }
 
     #[test]

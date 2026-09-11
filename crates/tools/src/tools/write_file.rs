@@ -152,10 +152,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let out = run_write_file("src/new.ts", "a\nb", tmp.path(), &[]);
         assert_eq!(out.status, crate::OutcomeStatus::Executed);
-        assert!(
-            out.output
-                .starts_with("Created src/new.ts (2 lines, 3 bytes).")
-        );
+        assert!(out
+            .output
+            .starts_with("Created src/new.ts (2 lines, 3 bytes)."));
         assert_eq!(out.meta.as_deref(), Some("2 lines · 3 bytes"));
         assert_eq!(
             std::fs::read_to_string(tmp.path().join("src/new.ts")).unwrap(),
@@ -163,10 +162,9 @@ mod tests {
         );
 
         let out = run_write_file("src/new.ts", "z", tmp.path(), &[]);
-        assert!(
-            out.output
-                .starts_with("Overwrote src/new.ts (1 lines, 1 bytes).")
-        );
+        assert!(out
+            .output
+            .starts_with("Overwrote src/new.ts (1 lines, 1 bytes)."));
     }
 
     #[test]

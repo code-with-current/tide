@@ -24,7 +24,7 @@ use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
 use super::arg_bool;
 use super::arg_str;
-use super::proc::{StreamReader, kill_and_reap, spawn_reader, tool_env, unix_process_group};
+use super::proc::{kill_and_reap, spawn_reader, tool_env, unix_process_group, StreamReader};
 
 pub(crate) const MAX_OUTPUT: usize = 50 * 1024;
 pub(crate) const MAX_LINES: usize = 1000;
@@ -318,7 +318,11 @@ fn trim_to_lines(s: &mut String) {
 }
 
 fn shell_binary() -> &'static str {
-    if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }
+    if cfg!(windows) {
+        "cmd.exe"
+    } else {
+        "/bin/sh"
+    }
 }
 
 impl Tool for BashTool {

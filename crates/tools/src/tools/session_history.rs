@@ -562,20 +562,17 @@ mod tests {
         };
         let out = run_read_session(Path::new("/ws"), "s1", None, Some(2), Some(&reader));
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(
-            out.output
-                .starts_with("Session \"Auth refactor\" — messages 1–2 of 3 (oldest first)")
-        );
+        assert!(out
+            .output
+            .starts_with("Session \"Auth refactor\" — messages 1–2 of 3 (oldest first)"));
         assert!(out.output.contains("[1] user: why does login loop?"));
-        assert!(
-            out.output
-                .contains("[2] assistant: the retry has no backoff")
-        );
+        assert!(out
+            .output
+            .contains("[2] assistant: the retry has no backoff"));
         assert!(!out.output.contains("[3]"));
-        assert!(
-            out.output
-                .contains("More messages may remain — continue with cursor: \"2\".")
-        );
+        assert!(out
+            .output
+            .contains("More messages may remain — continue with cursor: \"2\"."));
 
         // Following the cursor lands the tail; an exhausted page says so.
         let out = run_read_session(Path::new("/ws"), "s1", Some("2"), Some(2), Some(&reader));
@@ -628,10 +625,9 @@ mod tests {
             Some(100),
             Some(&reader),
         );
-        assert!(
-            out.output
-                .contains(&format!("[{}]", cursor.parse::<i64>().unwrap() + 1))
-        );
+        assert!(out
+            .output
+            .contains(&format!("[{}]", cursor.parse::<i64>().unwrap() + 1)));
     }
 
     #[test]

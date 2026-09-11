@@ -1,6 +1,6 @@
 //! Golden-set retrieval eval — the harness every RAG quality change
 //! (reranker, fusion weights, chunking) is measured against. Builds a
-//! deterministic synthetic workspace, ingests it with the vendored
+//! deterministic synthetic workspace, ingests it with a downloaded
 //! embedder, and asserts the standard baselines: Recall@5 ≥ 0.80,
 //! MRR ≥ 0.60. The fusion here mirrors `tools::rrf_fuse` (rag does not
 //! depend on tools); the real-seam path — RagMemoryIndex, config gates,
@@ -393,6 +393,7 @@ const BASELINE_RECALL_AT_5: f64 = 0.80;
 const BASELINE_MRR: f64 = 0.60;
 
 #[test]
+#[ignore = "needs the downloaded default model (set TIDE_MODELS_DIR)"]
 fn fused_retrieval_meets_the_golden_set_baselines() {
     let index = build_index();
     let cases = golden_cases();

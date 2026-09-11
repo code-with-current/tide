@@ -10,7 +10,7 @@
 //!   normalization + the GLM mis-split JSON repair live here so both
 //!   envelopes stay drift-free.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::permission::RiskTier;
 use crate::tools::{arg_bool, arg_str};

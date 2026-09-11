@@ -404,9 +404,7 @@ mod tests {
         // del+add at 3, then equal trailing context through ctxEnd (line 6).
         assert_eq!(
             kinds,
-            vec![
-                "context", "context", "del", "add", "context", "context", "context"
-            ]
+            vec!["context", "context", "del", "add", "context", "context", "context"]
         );
     }
 

@@ -70,22 +70,36 @@ mod imp {
         /// client already holds (a reconnecting app) — the runner skips
         /// the file-tail replay for those, so a resumed ring is never
         /// duplicated.
-        Hello { known: Vec<String> },
+        Hello {
+            known: Vec<String>,
+        },
         Start {
             id: String,
             command: String,
             cwd: String,
         },
-        Kill { id: String },
+        Kill {
+            id: String,
+        },
     }
 
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
     enum RunnerMessage {
-        Welcome { jobs: Vec<LiveJob> },
-        Started { id: String },
-        StartFailed { id: String, reason: String },
-        Output { id: String, delta: String },
+        Welcome {
+            jobs: Vec<LiveJob>,
+        },
+        Started {
+            id: String,
+        },
+        StartFailed {
+            id: String,
+            reason: String,
+        },
+        Output {
+            id: String,
+            delta: String,
+        },
         Exit {
             id: String,
             code: Option<i32>,
@@ -127,7 +141,13 @@ mod imp {
     fn sanitize(component: &str) -> String {
         component
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect()
     }
 
@@ -232,7 +252,12 @@ mod imp {
             let Ok(line) = serde_json::to_string(message) else {
                 return;
             };
-            let sender = self.client.lock().unwrap().as_ref().map(|s| s.lines.clone());
+            let sender = self
+                .client
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|s| s.lines.clone());
             if let Some(sender) = sender {
                 // Backpressure lands here: a slow app blocks the pump,
                 // the pump's pipe fills, the child blocks — the file, not
@@ -256,7 +281,9 @@ mod imp {
         if args.first().map(String::as_str) != Some("--job-runner") {
             return false;
         }
-        let (Some(socket), Some(data_dir), None) = (args.get(1).cloned(), args.get(2).cloned(), args.get(3)) else {
+        let (Some(socket), Some(data_dir), None) =
+            (args.get(1).cloned(), args.get(2).cloned(), args.get(3))
+        else {
             eprintln!("usage: --job-runner <socket-path> <data-dir>");
             std::process::exit(2);
         };
@@ -340,8 +367,8 @@ mod imp {
             .name("job-runner-writer".into())
             .spawn(move || {
                 for line in line_rx {
-                    let ok =
-                        writer.write_all(line.as_bytes()).is_ok() && writer.write_all(b"\n").is_ok();
+                    let ok = writer.write_all(line.as_bytes()).is_ok()
+                        && writer.write_all(b"\n").is_ok();
                     if !ok {
                         write_state.evict_client(generation);
                         break;
@@ -383,11 +410,10 @@ mod imp {
                     }
                 }
                 Ok(Some(ClientMessage::Start { id, command, cwd })) => {
-                    let ack =
-                        match start_job(state, &id, &command, Path::new(&cwd)) {
-                            Ok(()) => RunnerMessage::Started { id },
-                            Err(reason) => RunnerMessage::StartFailed { id, reason },
-                        };
+                    let ack = match start_job(state, &id, &command, Path::new(&cwd)) {
+                        Ok(()) => RunnerMessage::Started { id },
+                        Err(reason) => RunnerMessage::StartFailed { id, reason },
+                    };
                     state.client_send(&ack);
                 }
                 Ok(Some(ClientMessage::Kill { id })) => kill_job(&state.jobs, &id),
@@ -419,7 +445,12 @@ mod imp {
         Some(String::from_utf8_lossy(&bytes[cut..]).into_owned())
     }
 
-    fn start_job(state: &Arc<ServerState>, id: &str, command: &str, cwd: &Path) -> Result<(), String> {
+    fn start_job(
+        state: &Arc<ServerState>,
+        id: &str,
+        command: &str,
+        cwd: &Path,
+    ) -> Result<(), String> {
         if state.jobs.lock().unwrap().contains_key(id) {
             return Err(format!("job {id} already exists"));
         }
@@ -452,7 +483,11 @@ mod imp {
             written: Arc::clone(&written),
             terminated: AtomicBool::new(false),
         });
-        state.jobs.lock().unwrap().insert(id.to_string(), job.clone());
+        state
+            .jobs
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), job.clone());
 
         // Two pumps (stdout, stderr) append into one file and stream the
         // same bytes as deltas. Reading never stops past the cap — the
@@ -637,7 +672,12 @@ mod imp {
         // Ascending id order so the panel's registration order matches
         // the original starts.
         for job in orphans {
-            if let Some(index) = job.id.rsplit('-').next().and_then(|n| n.parse::<u64>().ok()) {
+            if let Some(index) = job
+                .id
+                .rsplit('-')
+                .next()
+                .and_then(|n| n.parse::<u64>().ok())
+            {
                 max_index = max_index.max(index);
             }
             let runner = runner.clone();
@@ -760,7 +800,12 @@ mod imp {
             std::mem::take(&mut self.inner.orphans.lock().unwrap())
         }
 
-        fn start_job(&self, handle: &JobHandle, command: &str, cwd: &Path) -> Result<JobHooks, String> {
+        fn start_job(
+            &self,
+            handle: &JobHandle,
+            command: &str,
+            cwd: &Path,
+        ) -> Result<JobHooks, String> {
             let id = handle.key.provider_id.clone();
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
             self.inner
@@ -768,13 +813,11 @@ mod imp {
                 .lock()
                 .unwrap()
                 .insert(id.clone(), tx);
-            let sent = self
-                .inner
-                .send(&ClientMessage::Start {
-                    id: id.clone(),
-                    command: command.to_string(),
-                    cwd: cwd.display().to_string(),
-                });
+            let sent = self.inner.send(&ClientMessage::Start {
+                id: id.clone(),
+                command: command.to_string(),
+                cwd: cwd.display().to_string(),
+            });
             if let Err(error) = sent {
                 self.inner.pending_starts.lock().unwrap().remove(&id);
                 return Err(error);
@@ -825,7 +868,9 @@ mod imp {
             let kill_id = id;
             Ok(JobHooks {
                 cancel: Box::new(move |_reason| {
-                    let _ = inner.send(&ClientMessage::Kill { id: kill_id.clone() });
+                    let _ = inner.send(&ClientMessage::Kill {
+                        id: kill_id.clone(),
+                    });
                 }),
                 done: handle.done.clone(),
             })
@@ -866,8 +911,11 @@ mod imp {
             },
         )
         .map_err(|e| format!("runner handshake failed: {e}"))?;
-        let mut reader =
-            BufReader::new(stream.try_clone().map_err(|e| format!("runner stream: {e}"))?);
+        let mut reader = BufReader::new(
+            stream
+                .try_clone()
+                .map_err(|e| format!("runner stream: {e}"))?,
+        );
         match read_line(&mut reader) {
             Ok(Some(RunnerMessage::Welcome { jobs })) => {
                 inner.absorb_welcome(jobs, &known);
@@ -921,8 +969,9 @@ mod imp {
         fn send(&self, message: &ClientMessage) -> Result<(), String> {
             let mut conn = self.conn.lock().unwrap();
             let result = match conn.as_mut() {
-                Some(stream) => send_line(stream, message)
-                    .map_err(|e| format!("runner write failed: {e}")),
+                Some(stream) => {
+                    send_line(stream, message).map_err(|e| format!("runner write failed: {e}"))
+                }
                 None => Err("runner not connected".into()),
             };
             if result.is_err() {
@@ -1007,10 +1056,7 @@ mod imp {
         UnixStream::connect(socket_path).map_err(|e| format!("runner connect: {e}"))
     }
 
-    fn spawn_runner_process(
-        socket_path: &Path,
-        jobs_dir: &Path,
-    ) -> Result<UnixStream, String> {
+    fn spawn_runner_process(socket_path: &Path, jobs_dir: &Path) -> Result<UnixStream, String> {
         let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
         std::fs::create_dir_all(jobs_dir).map_err(|e| format!("jobs dir: {e}"))?;
         let mut cmd = std::process::Command::new(exe);
@@ -1044,10 +1090,7 @@ mod imp {
 
         fn unique_session(tag: &str) -> String {
             static N: AtomicU64 = AtomicU64::new(0);
-            format!(
-                "runner-test-{tag}-{}",
-                N.fetch_add(1, Ordering::SeqCst)
-            )
+            format!("runner-test-{tag}-{}", N.fetch_add(1, Ordering::SeqCst))
         }
 
         /// Run the runner server in-process: cargo test's current_exe is
@@ -1071,10 +1114,7 @@ mod imp {
             }
         }
 
-        fn start_job(
-            session_id: &str,
-            command: &str,
-        ) -> protocol::model::BackgroundWorkKey {
+        fn start_job(session_id: &str, command: &str) -> protocol::model::BackgroundWorkKey {
             let command = command.to_string();
             let session = session_id.to_string();
             let cwd = std::env::temp_dir();
@@ -1087,9 +1127,7 @@ mod imp {
                     owner_session: session_id.to_string(),
                     output_limit: None,
                     streams: true,
-                    run: Box::new(move |handle| {
-                        spawn_bash_job(&session, &command, &cwd, handle)
-                    }),
+                    run: Box::new(move |handle| spawn_bash_job(&session, &command, &cwd, handle)),
                 })
                 .unwrap()
         }
@@ -1113,11 +1151,7 @@ mod imp {
             }
         }
 
-        fn wait_output(
-            session_id: &str,
-            key: &protocol::model::BackgroundWorkKey,
-            needle: &str,
-        ) {
+        fn wait_output(session_id: &str, key: &protocol::model::BackgroundWorkKey, needle: &str) {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
                 let read = global_job_registry()
@@ -1144,11 +1178,9 @@ mod imp {
             // Only the runner writes the log file — proves the job really
             // ran out-of-process instead of silently taking the in-process
             // fallback.
-            assert!(
-                jobs_dir(&session)
-                    .join(format!("{}.log", key.provider_id))
-                    .exists()
-            );
+            assert!(jobs_dir(&session)
+                .join(format!("{}.log", key.provider_id))
+                .exists());
             super::close_session(&session);
         }
 
@@ -1159,19 +1191,16 @@ mod imp {
             enable_runner_mode();
             let key = start_job(&session, "sleep 30");
             assert_eq!(
-                global_job_registry()
-                    .kill(&session, &key, None)
-                    .unwrap(),
+                global_job_registry().kill(&session, &key, None).unwrap(),
                 crate::jobs::KillOutcome::Requested
             );
             let item = wait_settled(&session, &key);
             assert_eq!(item.status, BackgroundWorkStatus::Stopped);
-            assert!(
-                item.detail
-                    .as_deref()
-                    .unwrap_or("")
-                    .starts_with("exit code:")
-            );
+            assert!(item
+                .detail
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("exit code:"));
             super::close_session(&session);
         }
 

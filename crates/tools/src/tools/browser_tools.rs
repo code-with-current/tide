@@ -11,7 +11,7 @@
 //! one stale shape ([`STALE_REF_MESSAGE`]) whenever the page moved under
 //! the model.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::permission::RiskTier;
 use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};

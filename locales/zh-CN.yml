@@ -1390,8 +1390,8 @@ settings.knowledge_keywords: memory rag knowledge sources index embed 记忆 知
 settings.rag.title: 记忆与 RAG
 settings.rag.no_project: 请先选择一个项目 — 记忆索引按项目存储。
 settings.rag.enable: 启用记忆
-settings.rag.enable_hint: 记忆工具会搜索此项目的索引；首次启用时会下载嵌入模型。
-settings.rag.change: 更改…
+settings.rag.enable_hint: 启用记忆前，请前往“设置 → 记忆 → 选择模型”下载模型。
+settings.rag.change: 选择模型…
 settings.rag.model_dialog_title: 嵌入模型
 settings.rag.model_dialog_hint: 选择用于索引项目和知识源的模型。
 settings.rag.select: 选择

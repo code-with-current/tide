@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::path_safety::{resolve_and_follow_symlinks_roots, resolve_under_skill_root};
 use crate::permission::RiskTier;
-use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec, redact};
+use crate::{redact, Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
 use super::{arg_str, arg_u64};
 

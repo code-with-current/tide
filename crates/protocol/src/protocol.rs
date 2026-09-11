@@ -220,7 +220,7 @@ pub enum Command {
         provider_id: Option<String>,
         model_id: Option<String>,
     },
-    /// Memory & RAG (the vendored rag crate behind the memory tool).
+    /// Memory & RAG (the local rag crate behind the memory tool).
     /// Projects are the workspace identity: ids are app.db project ids.
     RagStatus {
         project_id: String,
@@ -248,8 +248,8 @@ pub enum Command {
     RagModelDownload {
         model_id: String,
     },
-    /// Returns affected indexes before/after deleting — vendored models
-    /// are refused.
+    /// Returns affected indexes before/after deleting. Models marked as
+    /// vendored by a future catalog are refused.
     RagModelDelete {
         model_id: String,
     },
@@ -567,6 +567,9 @@ pub enum ResponseOutcome {
 pub struct RagStatusWire {
     pub project_id: String,
     pub enabled: bool,
+    /// Whether the configured embedder is available. The field keeps its
+    /// legacy name for wire compatibility and is also true for ready remote
+    /// embedders.
     pub local_model_available: bool,
     pub cloud_configured: bool,
     /// "ready" | "downloading" | "not-downloaded" | "failed"

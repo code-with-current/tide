@@ -376,9 +376,9 @@ settings.rag.no_project:
 settings.rag.enable:
   en: Enable memory
 settings.rag.enable_hint:
-  en: The memory tool searches this project's index; enabling downloads the embedding model on first use.
+  en: Download a model from Settings → Memory → Select model before enabling memory.
 settings.rag.change:
-  en: Change…
+  en: Select model…
 settings.rag.model_dialog_title:
   en: Embedding Model
 settings.rag.model_dialog_hint:
