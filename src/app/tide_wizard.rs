@@ -620,6 +620,9 @@ impl Tide {
                 )
                 .child(TextField::new("tide-wizard-field", input).w(px(430.0)))
         };
+        if wizard.is_zed() {
+            return self.render_tide_wizard_connect_zed(theme, cx);
+        }
         let mut body = div()
             .p(px(20.0))
             .flex()
@@ -724,6 +727,146 @@ impl Tide {
                     .text_size(sp(11.5))
                     .text_color(theme.text_ghost)
                     .child(tr!("tide.testing_connection")),
+            );
+        }
+        if let Some(error) = &wizard.error {
+            body = body.child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.danger)
+                    .child(error.clone()),
+            );
+        }
+        body
+    }
+
+    /// The Zed preset's Connect step: sign-in button, signed-in account
+    /// line, org picker rows; manual credential paste fields as fallback.
+    fn render_tide_wizard_connect_zed(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let wizard = self.tide.wizard.as_ref().expect("wizard open");
+        let zed = wizard.zed.as_ref().expect("zed state present");
+        let field = |label: String, input: Entity<crate::input::TextInput>| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(label),
+                )
+                .child(TextField::new("tide-wizard-field", input).w(px(430.0)))
+        };
+        let mut body = div()
+            .p(px(20.0))
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .flex_1()
+            .child(field(tr!("tide.field_name"), wizard.name.clone()));
+
+        if let Some(sign_in) = &zed.sign_in {
+            body = body.child(
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(tr!(
+                        "tide.zed_signed_in_as",
+                        name = sign_in
+                            .display_name
+                            .clone()
+                            .unwrap_or_else(|| sign_in.username.clone()),
+                        username = sign_in.username.clone()
+                    )),
+            );
+            if sign_in.organizations.len() > 1 {
+                body = body.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("tide.zed_org")),
+                );
+                for org in &sign_in.organizations {
+                    let selected = match &zed.organization_id {
+                        Some(id) => id == &org.id,
+                        None => sign_in.default_organization_id.as_deref() == Some(org.id.as_str()),
+                    };
+                    let mut row = div()
+                        .id(SharedString::from(format!("tide-zed-org-{}", org.id)))
+                        .tab_index(0)
+                        .focus_visible(|el| el.border_color(theme.accent))
+                        .px(px(8.0))
+                        .h(px(30.0))
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(if selected {
+                            theme.accent
+                        } else {
+                            theme.border_strong
+                        })
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .cursor_default()
+                        .hover(|el| el.bg(theme.raised))
+                        .child(checkbox(selected, false, theme))
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.text)
+                                .child(org.name.clone()),
+                        );
+                    if org.is_personal {
+                        row = row.child(
+                            div()
+                                .text_size(sp(10.5))
+                                .text_color(theme.text_ghost)
+                                .child(tr!("tide.zed_personal")),
+                        );
+                    }
+                    if let Some(plan) = &org.plan {
+                        row = row.child(
+                            div()
+                                .text_size(sp(10.5))
+                                .text_color(theme.text_tertiary)
+                                .child(plan.clone()),
+                        );
+                    }
+                    let org_id = org.id.clone();
+                    body = body.child(row.on_click(cx.listener(move |this, _, _, cx| {
+                        this.tide_zed_pick_org(org_id.clone(), cx);
+                    })));
+                }
+            }
+            body = body.child(sign_in_button(zed.busy, theme, cx)); // "sign in again"
+        } else {
+            body = body
+                .child(sign_in_button(zed.busy, theme, cx))
+                .child(field(
+                    tr!("tide.zed_field_user_id"),
+                    zed.manual_user_id.clone(),
+                ))
+                .child(field(
+                    tr!("tide.zed_field_access_token"),
+                    zed.manual_access_token.clone(),
+                ))
+                .child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("tide.zed_manual_hint")),
+                );
+        }
+        // Same tail as the generic path: testing row + error row.
+        if wizard.testing || zed.busy {
+            body = body.child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_ghost)
+                    .child(tr!("tide.zed_signing_in")),
             );
         }
         if let Some(error) = &wizard.error {
@@ -943,6 +1086,34 @@ impl Tide {
             .filter(|(_, checked)| *checked)
             .map(|(model, _)| model.alias.clone())
             .collect::<Vec<_>>();
+        // "Signed in as @username · org name" for the zed preset; None when
+        // the credentials were pasted manually or sign-in hasn't happened.
+        let zed_account = wizard.zed.as_ref().and_then(|zed| {
+            let sign_in = zed.sign_in.as_ref()?;
+            let org_name = zed
+                .organization_id
+                .as_deref()
+                .or(sign_in.default_organization_id.as_deref())
+                .and_then(|id| {
+                    sign_in
+                        .organizations
+                        .iter()
+                        .find(|org| org.id == id)
+                        .map(|org| org.name.clone())
+                });
+            let account = tr!(
+                "tide.zed_signed_in_as",
+                name = sign_in
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| sign_in.username.clone()),
+                username = sign_in.username.clone()
+            );
+            Some(match org_name {
+                Some(name) => format!("{account} · {name}"),
+                None => account,
+            })
+        });
         let mut body = div()
             .p(px(20.0))
             .flex()
@@ -983,12 +1154,6 @@ impl Tide {
                     ),
             )
             .child(
-                div()
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_ghost)
-                    .child(tr!("tide.keychain_hint")),
-            )
-            .child(
                 div().flex().flex_wrap().gap(px(6.0)).child(
                     div()
                         .text_size(sp(11.0))
@@ -997,6 +1162,23 @@ impl Tide {
                         .child(tr!("tide.selected_models")),
                 ),
             );
+        // Zed providers show the signed-in account + org instead of the
+        // keychain hint; before sign-in there is nothing to show.
+        if let Some(account) = zed_account {
+            body = body.child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(account),
+            );
+        } else if wizard.zed.is_none() {
+            body = body.child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_ghost)
+                    .child(tr!("tide.keychain_hint")),
+            );
+        }
         for alias in selected {
             body = body.child(
                 div()
@@ -1086,6 +1268,33 @@ fn base_host(base_url: &str) -> String {
         .next()
         .unwrap_or(base_url)
         .to_owned()
+}
+
+/// The Zed Connect step's sign-in button — mirrors the "tide-auto-detect"
+/// button styling. Label only; doubles as the "sign in again" affordance.
+fn sign_in_button(busy: bool, theme: &Theme, cx: &mut Context<crate::app::Tide>) -> Stateful<Div> {
+    div()
+        .id("tide-zed-sign-in")
+        .tab_index(0)
+        .focus_visible(|el| el.border_color(theme.accent))
+        .h(px(28.0))
+        .px(px(12.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border_strong)
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .cursor_default()
+        .text_size(sp(12.0))
+        .text_color(theme.text_secondary)
+        .hover(|el| el.bg(theme.raised))
+        .child(tr!(if busy {
+            "tide.zed_signing_in"
+        } else {
+            "tide.zed_sign_in"
+        }))
+        .on_click(cx.listener(|this, _, _, cx| this.tide_zed_sign_in(cx)))
 }
 
 /// A 15px checkbox: quiet border when clear, accent fill with a white check
