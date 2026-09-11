@@ -37,6 +37,7 @@ pub fn logo_path(logo: &str) -> &'static str {
         "logo-groq" => "icons/logo-groq.svg",
         "logo-lmstudio" => "icons/logo-lmstudio.svg",
         "logo-ollama" => "icons/logo-ollama.svg",
+        "logo-zed" => "icons/logo-zed.svg",
         "logo-deepseek" => "icons/logo-deepseek.svg",
         "logo-mistral" => "icons/logo-mistral.svg",
         _ => "icons/plug.svg",

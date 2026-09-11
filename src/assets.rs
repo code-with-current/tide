@@ -213,6 +213,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "logo-opencode",
     "logo-openai",
     "logo-ollama",
+    "logo-zed",
     "logo-mistral",
     "logo-lmstudio",
     "logo-groq",
