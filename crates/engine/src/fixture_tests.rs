@@ -654,7 +654,9 @@ impl FakeZedCloud {
         std::thread::spawn(move || {
             let mut remaining = responses.into_iter();
             for stream in listener.incoming().flatten() {
-                let Some(response) = remaining.next() else { break };
+                let Some(response) = remaining.next() else {
+                    break;
+                };
                 let mut stream = stream;
                 use std::io::{BufRead, BufReader, Read, Write};
                 let mut reader = BufReader::new(stream.try_clone().unwrap());

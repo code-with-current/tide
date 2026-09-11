@@ -138,7 +138,10 @@ impl ZedBridge {
         let Ok(mut provider_request) = serde_json::from_slice::<Value>(&body) else {
             return write_plain_error(&mut stream, "400 Bad Request", "request body was not JSON");
         };
-        let Some(model) = provider_request.get("model").and_then(Value::as_str).map(str::to_owned)
+        let Some(model) = provider_request
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
         else {
             return write_plain_error(&mut stream, "400 Bad Request", "request missing model id");
         };
@@ -209,22 +212,36 @@ impl ZedBridge {
             .header("Content-Type", "application/json")
             .header("x-zed-version", ZED_VERSION)
             .header("x-zed-client-supports-status-messages", "true")
-            .header("x-zed-client-supports-stream-ended-request-completion-status", "true")
+            .header(
+                "x-zed-client-supports-stream-ended-request-completion-status",
+                "true",
+            )
             .json(envelope)
             .send()
             .map_err(|e| format!("cloud.zed.dev unreachable: {e}"))
     }
 
     fn read_ndjson(&self, response: reqwest::blocking::Response) -> Result<Vec<Value>, String> {
-        let text = response.text().map_err(|e| format!("cloud stream read: {e}"))?;
+        let text = response
+            .text()
+            .map_err(|e| format!("cloud stream read: {e}"))?;
         let mut events = Vec::new();
         let mut first_line: Option<&str> = None;
         for line in text.lines() {
-            if line.trim().is_empty() { continue; }
-            if first_line.is_none() { first_line = Some(line); }
+            if line.trim().is_empty() {
+                continue;
+            }
+            if first_line.is_none() {
+                first_line = Some(line);
+            }
             if let Ok(wrapped) = serde_json::from_str::<Value>(line) {
                 if let Some(event) = wrapped.get("event") {
                     events.push(event.clone());
+                } else if wrapped.get("type").is_some() {
+                    // Live cloud.zed.dev streams have been observed both
+                    // wrapped in {"event": …} and as bare Anthropic events;
+                    // accept either framing.
+                    events.push(wrapped);
                 }
             }
         }
@@ -239,7 +256,9 @@ impl ZedBridge {
                 if excerpt.len() < line.len() {
                     excerpt.push('…');
                 }
-                return Err(format!("zed cloud response had no events; first line: {excerpt}"));
+                return Err(format!(
+                    "zed cloud response had no events; first line: {excerpt}"
+                ));
             }
         }
         Ok(events)
@@ -260,7 +279,13 @@ impl ZedBridge {
         }
         let response = client
             .post(format!("{}/client/llm_tokens", cloud_url()))
-            .header("Authorization", format!("{} {}", self.credential.user_id, self.credential.access_token))
+            .header(
+                "Authorization",
+                format!(
+                    "{} {}",
+                    self.credential.user_id, self.credential.access_token
+                ),
+            )
             .json(&body)
             .send()
             .map_err(|e| format!("cloud.zed.dev unreachable: {e}"))?;
@@ -314,8 +339,13 @@ fn coerce_block_arrays(body: &mut Value) {
         return;
     };
     for message in messages.iter_mut() {
-        let Some(text) = message.get("content").and_then(Value::as_str).map(str::to_owned)
-        else { continue };
+        let Some(text) = message
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
         message["content"] = serde_json::json!([{ "type": "text", "text": text }]);
     }
 }
@@ -378,7 +408,9 @@ mod tests {
             std::thread::spawn(move || {
                 let mut remaining = responses.into_iter();
                 for stream in listener.incoming().flatten() {
-                    let Some(response) = remaining.next() else { break };
+                    let Some(response) = remaining.next() else {
+                        break;
+                    };
                     let mut stream = stream;
                     use std::io::{BufRead, BufReader, Read, Write};
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -397,7 +429,10 @@ mod tests {
                                 length = v.trim().parse().unwrap_or(0);
                             }
                         }
-                        if !trimmed_end.to_ascii_lowercase().starts_with("content-length") {
+                        if !trimmed_end
+                            .to_ascii_lowercase()
+                            .starts_with("content-length")
+                        {
                             captured.push_str(trimmed_end);
                             captured.push('\n');
                         }
@@ -425,7 +460,24 @@ mod tests {
             .map(|e| serde_json::json!({ "event": e }).to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        format!("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body.len(), body)
+        format!(
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        )
+    }
+
+    fn ndjson_bare_ok(events: &[Value]) -> String {
+        let body = events
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        )
     }
 
     fn post_to_bridge(bridge: &ZedBridge, body: &Value) -> String {
@@ -458,20 +510,41 @@ mod tests {
     }
 
     #[test]
+    fn bridge_accepts_bare_anthropic_ndjson_lines() {
+        let cloud = FakeCloud::spawn(vec![
+            http_ok_json(r#"{"token":"llm-tok"}"#),
+            ndjson_bare_ok(&[
+                serde_json::json!({"type": "message_start"}),
+                serde_json::json!({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}),
+            ]),
+        ]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let bridge = shared_bridge(r#"{"userId":"17","accessToken":"t"}"#).unwrap();
+        let response = post_to_bridge(
+            &bridge,
+            &serde_json::json!({"model":"claude-haiku-4-5","messages":[]}),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains("event: message_start"), "{response}");
+        assert!(response.contains("text_delta"), "{response}");
+    }
+
+    #[test]
     fn bridge_wraps_envelope_and_coerces_content() {
         // request 1: /client/llm_tokens, request 2: /completions
         let cloud = FakeCloud::spawn(vec![
             http_ok_json(r#"{"token":"llm-tok"}"#),
-            ndjson_ok(&[
-                serde_json::json!({"type":"message_stop"}),
-            ]),
+            ndjson_ok(&[serde_json::json!({"type":"message_stop"})]),
         ]);
         let _cloud = cloud_guard(cloud.base_url.clone());
         let bridge = shared_bridge(r#"{"userId":"9","accessToken":"acc"}"#).unwrap();
-        let response = post_to_bridge(&bridge, &serde_json::json!({
-            "model": "claude-haiku-4-5", "max_tokens": 32, "stream": true,
-            "messages": [{ "role": "user", "content": "Say OK" }]
-        }));
+        let response = post_to_bridge(
+            &bridge,
+            &serde_json::json!({
+                "model": "claude-haiku-4-5", "max_tokens": 32, "stream": true,
+                "messages": [{ "role": "user", "content": "Say OK" }]
+            }),
+        );
         assert!(response.contains("event:"), "{response}");
         let (line, cloud_body) = cloud.requests.lock().unwrap()[1].clone();
         assert!(line.starts_with("POST /completions"), "{line}");
@@ -491,9 +564,12 @@ mod tests {
         let cloud = FakeCloud::spawn(vec![]);
         let _cloud = cloud_guard(cloud.base_url.clone());
         let bridge = shared_bridge(r#"{"userId":"9","accessToken":"acc2"}"#).unwrap();
-        let response = post_to_bridge(&bridge, &serde_json::json!({
-            "model": "gpt-5.6-sol", "messages": []
-        }));
+        let response = post_to_bridge(
+            &bridge,
+            &serde_json::json!({
+                "model": "gpt-5.6-sol", "messages": []
+            }),
+        );
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
         assert!(response.contains("claude"));
     }
@@ -511,9 +587,12 @@ mod tests {
         // Distinct blob: bridges are cached per-credential process-wide, so
         // reusing another test's blob would inherit its cached llm_token.
         let bridge = shared_bridge(r#"{"userId":"9","accessToken":"acc-refresh"}"#).unwrap();
-        let response = post_to_bridge(&bridge, &serde_json::json!({
-            "model": "claude-haiku-4-5", "messages": [{ "role": "user", "content": "hi" }]
-        }));
+        let response = post_to_bridge(
+            &bridge,
+            &serde_json::json!({
+                "model": "claude-haiku-4-5", "messages": [{ "role": "user", "content": "hi" }]
+            }),
+        );
         assert!(response.contains("event:"), "{response}");
         let token_mints = cloud
             .requests
@@ -527,13 +606,17 @@ mod tests {
 
     #[test]
     fn dead_access_token_surfaces_sign_in_expired() {
-        let denied = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let denied =
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
         let cloud = FakeCloud::spawn(vec![denied]);
         let _cloud = cloud_guard(cloud.base_url.clone());
         let bridge = shared_bridge(r#"{"userId":"9","accessToken":"dead"}"#).unwrap();
-        let response = post_to_bridge(&bridge, &serde_json::json!({
-            "model": "claude-haiku-4-5", "messages": []
-        }));
+        let response = post_to_bridge(
+            &bridge,
+            &serde_json::json!({
+                "model": "claude-haiku-4-5", "messages": []
+            }),
+        );
         assert!(response.starts_with("HTTP/1.1 502"), "{response}");
         assert!(response.contains("sign-in expired"), "{response}");
     }
