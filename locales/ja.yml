@@ -981,6 +981,8 @@ browser.forward: 進む（%{shortcut}）
 browser.stop_loading: 読み込みを停止（Esc）
 browser.reload: 再読み込み（%{shortcut}）
 browser.device_mode: デバイスモード
+browser.zoom_fit: ウィンドウに合わせる
+browser.rotate: 回転
 browser.preset.laptop: ノートパソコン
 browser.preset.desktop: デスクトップ
 browser.preset.custom: カスタム

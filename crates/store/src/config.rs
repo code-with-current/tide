@@ -259,6 +259,11 @@ pub struct BrowserDevicePrefs {
     /// absent for custom sizes, so it serializes away.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
+    /// Zoom percentage for the device toolbar (`50`, `75`, `100`, `125`,
+    /// `150`); absent means Fit to Window, which is also what a legacy
+    /// config without the key restores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_percent: Option<u32>,
 }
 
 /// GeneralSettings with the TS DEFAULT_GENERAL_SETTINGS layered over absent
@@ -809,32 +814,54 @@ mod tests {
         let legacy: GeneralSettings = serde_json::from_str(r#"{"startAtLogin": true}"#).unwrap();
         assert_eq!(legacy.browser_device, None);
 
-        // Present prefs round-trip through camelCase, preset included.
+        // A legacy device block without a zoom key restores as fit — the
+        // absent percentage decodes to `None`.
+        let legacy_device: GeneralSettings = serde_json::from_str(
+            r#"{"browserDevice": {"enabled": true, "width": 390, "height": 844}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy_device.browser_device,
+            Some(BrowserDevicePrefs {
+                enabled: true,
+                width: 390,
+                height: 844,
+                preset: None,
+                zoom_percent: None,
+            })
+        );
+
+        // Present prefs round-trip through camelCase, preset and zoom
+        // included.
         general.browser_device = Some(BrowserDevicePrefs {
             enabled: true,
             width: 390,
             height: 844,
             preset: Some("iphone".to_owned()),
+            zoom_percent: Some(100),
         });
         let value = serde_json::to_value(&general).unwrap();
         assert_eq!(value["browserDevice"]["enabled"], true);
         assert_eq!(value["browserDevice"]["width"], 390);
         assert_eq!(value["browserDevice"]["height"], 844);
         assert_eq!(value["browserDevice"]["preset"], "iphone");
+        assert_eq!(value["browserDevice"]["zoomPercent"], 100);
         let back: GeneralSettings = serde_json::from_value(value).unwrap();
         assert_eq!(back.browser_device, general.browser_device);
 
-        // A custom size has no preset, and the absent preset serializes
-        // away rather than writing `"preset": null`.
+        // A custom size has no preset and fit has no percentage, and the
+        // absent keys serialize away rather than writing `null`.
         general.browser_device = Some(BrowserDevicePrefs {
             enabled: false,
             width: 500,
             height: 700,
             preset: None,
+            zoom_percent: None,
         });
         let value = serde_json::to_value(&general).unwrap();
         assert_eq!(value["browserDevice"]["enabled"], false);
         assert!(value["browserDevice"].get("preset").is_none());
+        assert!(value["browserDevice"].get("zoomPercent").is_none());
     }
 
     #[test]

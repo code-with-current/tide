@@ -24,6 +24,7 @@
 //!
 //! [`Tide`]: crate::app::Tide
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
@@ -45,6 +46,9 @@ use crate::{
 };
 
 const TOOLBAR_HEIGHT: f32 = 42.0;
+/// The device toolbar: a slimmer second row under the main one while
+/// device mode is on, like Chrome's device-mode strip.
+const DEVICE_TOOLBAR_HEIGHT: f32 = 32.0;
 /// Mirror Safari's UA so sites serve the webview their real desktop build.
 #[cfg(target_os = "macos")]
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
@@ -380,6 +384,15 @@ mod host {
         pub fn set_custom_user_agent(&self, user_agent: Option<&str>) {
             let agent = user_agent.unwrap_or(super::USER_AGENT);
             unsafe { self.wk.setCustomUserAgent(Some(&NSString::from_str(agent))) };
+        }
+
+        /// Page zoom for device mode: wry's cross-platform `zoom` —
+        /// `setPageZoom` here. The webview's frame carries the scale, so the
+        /// page keeps laying out at the device's CSS size while rendering
+        /// at the zoomed size; callers deduplicate, so this only runs when
+        /// the factor actually changes.
+        pub fn set_zoom(&self, factor: f64) {
+            let _ = self.webview.zoom(factor);
         }
 
         /// Evaluate `script` and hand the outcome to `done`: `Ok` carrying
@@ -899,6 +912,15 @@ mod host {
             {
                 let _ = unsafe { settings.SetUserAgent(&value) };
             }
+        }
+
+        /// Page zoom for device mode: the controller's zoom factor. The
+        /// composition slot's bounds carry the scale, so the page keeps
+        /// laying out at the device's CSS size while rendering at the
+        /// zoomed size; callers deduplicate, so this only runs when the
+        /// factor actually changes.
+        pub fn set_zoom(&self, factor: f64) {
+            let _ = unsafe { self.controller.SetZoomFactor(factor) };
         }
 
         /// Build a composition-hosted WebView2 and hand it back once it
@@ -1465,6 +1487,7 @@ mod host {
             false
         }
         pub fn set_custom_user_agent(&self, _user_agent: Option<&str>) {}
+        pub fn set_zoom(&self, _factor: f64) {}
     }
 }
 
@@ -1641,9 +1664,18 @@ fn preset_menu_label(preset: &DevicePreset) -> SharedString {
     }
 }
 
+/// The zoom chip's label: the localized fit label, or the percentage —
+/// numbers need no keys.
+fn zoom_label(zoom: ZoomMode) -> SharedString {
+    match zoom {
+        ZoomMode::Fit => tr!("browser.zoom_fit").into(),
+        ZoomMode::Fixed(percent) => format!("{percent}%").into(),
+    }
+}
+
 /// The device-mode state a fresh surface starts from, as a pure mapping
 /// from persisted prefs: the mode, the last size (remembered even while
-/// off), the active preset key and its user agent.
+/// off), the active preset key with its user agent, and the zoom.
 fn restored_device_state(
     prefs: Option<store::config::BrowserDevicePrefs>,
 ) -> (
@@ -1651,20 +1683,27 @@ fn restored_device_state(
     DeviceViewport,
     Option<&'static str>,
     Option<&'static str>,
+    ZoomMode,
 ) {
     let Some(prefs) = prefs else {
-        return (None, DEFAULT_DEVICE_VIEWPORT, None, None);
+        return (None, DEFAULT_DEVICE_VIEWPORT, None, None, ZoomMode::Fit);
     };
     let size = DeviceViewport::new(prefs.width, prefs.height);
     // Only a preset the table still knows restores a user agent — a stale
     // key (renamed preset, hand-edited config) falls back to the default
     // rather than guessing at a mobile shape.
     let entry = prefs.preset.as_deref().and_then(preset_entry);
+    // No zoom key is the legacy shape: Fit, which is also Chrome's default.
+    let zoom = prefs
+        .zoom_percent
+        .map(ZoomMode::Fixed)
+        .unwrap_or(ZoomMode::Fit);
     (
         prefs.enabled.then_some(size),
         size,
         entry.and_then(|preset| preset.user_agent),
         entry.map(|preset| preset.key),
+        zoom,
     )
 }
 
@@ -1684,27 +1723,73 @@ impl DeviceViewport {
             height: height.clamp(MIN_DEVICE_DIMENSION, MAX_DEVICE_DIMENSION),
         }
     }
+
+    /// The same shape turned sideways. Dimensions pass through `new` again
+    /// so the path stays uniform with every other size change — a swap of
+    /// already-clamped values is in bounds, but re-clamping costs nothing.
+    fn rotated(self) -> Self {
+        Self::new(self.height, self.width)
+    }
 }
 
-/// Where a device frame lands inside the panel: centered, and never larger
-/// than the panel — an oversized device clamps to the panel rather than
-/// pushing the native view outside it. The result is panel-local, so callers
-/// offset it by the panel's own origin.
+/// The device toolbar's zoom selection: fit the frame to the panel, or a
+/// fixed percentage. Zoom scales the *rendering* only — the webview's
+/// native frame carries the factor while page zoom keeps the page laying
+/// out at the device's CSS size — so the emulated viewport never changes
+/// with the zoom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ZoomMode {
+    /// `min(panel_w / device_w, panel_h / device_h)`, clamped to
+    /// [0.25, 2.0] so no shape scales absurdly either way.
+    Fit,
+    /// One of the menu's percentage steps.
+    Fixed(u32),
+}
+
+impl ZoomMode {
+    /// The effective scale factor for a device in a panel of this size.
+    fn factor(self, panel: gpui::Size<gpui::Pixels>, device: DeviceViewport) -> f64 {
+        match self {
+            Self::Fixed(percent) => f64::from(percent) / 100.0,
+            Self::Fit => {
+                let panel_width = f64::from(f32::from(panel.width).max(0.0));
+                let panel_height = f64::from(f32::from(panel.height).max(0.0));
+                (panel_width / f64::from(device.width))
+                    .min(panel_height / f64::from(device.height))
+                    .clamp(0.25, 2.0)
+            }
+        }
+    }
+}
+
+/// Where a device frame lands inside the panel at a zoom: centered, and
+/// never larger than the panel — an oversized device (or zoom past what
+/// fits) clamps to the panel rather than pushing the native view outside
+/// it. The result is panel-local, so callers offset it by the panel's own
+/// origin. The applied factor rides along for the paint path, which pushes
+/// it to the webview without recomputing: the frame rect is the device
+/// size scaled by the factor, while the page inside keeps the device's
+/// CSS size.
 fn pinned_bounds(
     panel: gpui::Size<gpui::Pixels>,
     device: DeviceViewport,
-) -> gpui::Bounds<gpui::Pixels> {
+    zoom: ZoomMode,
+) -> (gpui::Bounds<gpui::Pixels>, f64) {
     let panel_width = f32::from(panel.width).max(0.0);
     let panel_height = f32::from(panel.height).max(0.0);
-    let width = (device.width as f32).min(panel_width);
-    let height = (device.height as f32).min(panel_height);
-    gpui::Bounds {
-        origin: gpui::point(
-            px((panel_width - width) / 2.0),
-            px((panel_height - height) / 2.0),
-        ),
-        size: gpui::size(px(width), px(height)),
-    }
+    let factor = zoom.factor(panel, device);
+    let width = ((device.width as f64 * factor) as f32).min(panel_width);
+    let height = ((device.height as f64 * factor) as f32).min(panel_height);
+    (
+        gpui::Bounds {
+            origin: gpui::point(
+                px((panel_width - width) / 2.0),
+                px((panel_height - height) / 2.0),
+            ),
+            size: gpui::size(px(width), px(height)),
+        },
+        factor,
+    )
 }
 
 /// Toggle semantics for the toolbar button: off comes back on at the last
@@ -1841,6 +1926,20 @@ pub struct BrowserView {
     /// into editable text.
     device_width: Entity<TextInput>,
     device_height: Entity<TextInput>,
+    /// The device toolbar's zoom selection; the paint path applies its
+    /// factor to the webview.
+    device_zoom: ZoomMode,
+    /// The device toolbar's zoom dropdown.
+    device_zoom_menu: ContextMenuHandle,
+    /// The last zoom factor pushed to the webview — `None` until one is —
+    /// so the per-frame paint path only calls the platform setter when the
+    /// factor actually changes.
+    device_applied_zoom: Rc<Cell<Option<f64>>>,
+    /// The page area's last painted size, where the Fit factor and the
+    /// frame outline's clamping come from. The outline is laid out before
+    /// the canvas paints, so a frame behind a resize reads the previous
+    /// size until its own paint lands.
+    device_panel: Rc<Cell<Option<gpui::Size<gpui::Pixels>>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1877,6 +1976,7 @@ impl BrowserView {
         let device_width = cx.new(|cx| TextInput::new(window, cx).select_all_on_focus_click());
         let device_height = cx.new(|cx| TextInput::new(window, cx).select_all_on_focus_click());
         let device_preset_menu = ContextMenuHandle::new(cx);
+        let device_zoom_menu = ContextMenuHandle::new(cx);
         let device_width_submit = cx.subscribe(
             &device_width,
             |this: &mut Self, _, event: &InputEvent, cx| {
@@ -1956,18 +2056,19 @@ impl BrowserView {
         });
 
         // Device-mode persistence: a full surface starts from the last state
-        // the user persisted — mode, last size, preset and its user agent
+        // the user persisted — mode, last size, preset with its user agent
         // (which the macOS builder applies below, before the webview loads
-        // anything). The chromeless twins never enter device mode.
-        let (device_mode, device_last, device_user_agent, device_preset) = if chromeless {
-            (None, DEFAULT_DEVICE_VIEWPORT, None, None)
-        } else {
-            let prefs = store::config::load(&store::paths::config_path())
-                .ok()
-                .and_then(|config| config.general_settings)
-                .and_then(|general| general.browser_device);
-            restored_device_state(prefs)
-        };
+        // anything) and zoom. The chromeless twins never enter device mode.
+        let (device_mode, device_last, device_user_agent, device_preset, device_zoom) =
+            if chromeless {
+                (None, DEFAULT_DEVICE_VIEWPORT, None, None, ZoomMode::Fit)
+            } else {
+                let prefs = store::config::load(&store::paths::config_path())
+                    .ok()
+                    .and_then(|config| config.general_settings)
+                    .and_then(|general| general.browser_device);
+                restored_device_state(prefs)
+            };
 
         let mut this = Self {
             focus_handle,
@@ -2000,6 +2101,10 @@ impl BrowserView {
             device_drag_origin: None,
             device_width,
             device_height,
+            device_zoom,
+            device_zoom_menu,
+            device_applied_zoom: Rc::new(Cell::new(None)),
+            device_panel: Rc::new(Cell::new(None)),
             _subscriptions: vec![
                 submit_subscription,
                 focus_in_address,
@@ -2048,14 +2153,17 @@ impl BrowserView {
         }
     }
 
-    /// Leave device mode: unpin the frame and restore the default user
-    /// agent. The user's toggle and the agent's `enabled: false` both land
-    /// here; only the user's path persists.
+    /// Leave device mode: unpin the frame, restore the default user agent
+    /// and reset the zoom — the factor belongs to the pinned frame, and
+    /// normal browsing must not stay stuck at the device's scale. The
+    /// user's toggle and the agent's `enabled: false` both land here; only
+    /// the user's path persists.
     pub fn clear_device_mode(&mut self, cx: &mut Context<Self>) {
         if self.device_mode.take().is_some() {
             self.device_preset = None;
             self.device_user_agent = None;
             self.apply_device_user_agent();
+            self.apply_device_zoom(1.0);
             cx.notify();
         }
     }
@@ -2093,6 +2201,56 @@ impl BrowserView {
         }
     }
 
+    /// Rotate the pinned frame: the dimensions swap while the preset and
+    /// its user agent stay — Chrome keeps the preset across rotation, so a
+    /// turned iPhone is still an iPhone. Deliberately not
+    /// [`Self::set_device_viewport`], whose preset-drift rule would end
+    /// the preset on the swapped numbers. The swap mirrors into the w/h
+    /// fields and persists like any user size.
+    fn rotate_device(&mut self, cx: &mut Context<Self>) {
+        let device = self.device_mode.unwrap_or(self.device_last).rotated();
+        self.device_last = device;
+        if self.device_mode.is_some() {
+            self.device_mode = Some(device);
+            self.refresh_device_fields(cx);
+            cx.notify();
+        }
+        self.save_device_prefs();
+    }
+
+    /// The zoom dropdown's commit: remember the mode, redraw (the paint
+    /// path applies the new factor the frame it lands in) and persist —
+    /// zoom is a user preference like the size it scales.
+    fn set_device_zoom(&mut self, zoom: ZoomMode, cx: &mut Context<Self>) {
+        if self.device_zoom == zoom {
+            return;
+        }
+        self.device_zoom = zoom;
+        cx.notify();
+        self.save_device_prefs();
+    }
+
+    /// Push a zoom factor to the host only when it changed — the paint
+    /// path recomputes the factor every frame, so the cache keeps the
+    /// platform setter a per-change call rather than a per-frame one.
+    /// `None` means "nothing applied yet", which also covers the window
+    /// before the host exists: the first paint with a host then applies.
+    fn push_device_zoom(host: &WebviewHost, applied: &Rc<Cell<Option<f64>>>, factor: f64) {
+        if applied.get() == Some(factor) {
+            return;
+        }
+        applied.set(Some(factor));
+        host.set_zoom(factor);
+    }
+
+    /// Apply a zoom factor outside the paint path (device mode turning
+    /// off), through the same deduplication the paint callback uses.
+    fn apply_device_zoom(&self, factor: f64) {
+        if let Some(host) = self.host.as_ref() {
+            Self::push_device_zoom(host, &self.device_applied_zoom, factor);
+        }
+    }
+
     /// Persist the device-mode state for the next launch. User actions only
     /// — the agent's set_viewport deliberately leaves the saved prefs alone
     /// (settings record the user's choice, not the agent's).
@@ -2111,6 +2269,10 @@ impl BrowserView {
             width: self.device_last.width,
             height: self.device_last.height,
             preset: self.device_preset.map(str::to_owned),
+            zoom_percent: match self.device_zoom {
+                ZoomMode::Fit => None,
+                ZoomMode::Fixed(percent) => Some(percent),
+            },
         });
         let _ = store::config::save(&path, &config);
     }
@@ -3122,11 +3284,6 @@ impl BrowserView {
                     cx,
                 )
             })
-            .child(self.device_toggle_button(theme, cx))
-            .when_some(self.device_mode, |element, _| {
-                let view = cx.entity().downgrade();
-                element.child(self.render_device_fields(theme, view))
-            })
             .child(
                 TextField::new("browser-address", self.address.clone())
                     .icon(
@@ -3158,6 +3315,10 @@ impl BrowserView {
                         )
                     }),
             )
+            // Chrome's device-mode toggle sits right of the omnibox, not
+            // among the navigation buttons; the row it opens lives under
+            // this toolbar.
+            .child(self.device_toggle_button(theme, cx))
             .child(self.toolbar_button(
                 "browser-open-external",
                 "icons/external-link.svg",
@@ -3194,18 +3355,25 @@ impl BrowserView {
             .on_click(cx.listener(|this, _, _, cx| this.toggle_device_mode(cx)))
     }
 
-    /// Free-entry width and height for the pinned frame, joined by a `×` the
-    /// same way the readout spells the size — preceded by the preset
-    /// dropdown, the fast path onto the design's five shapes. Enter applies;
-    /// anything that is not a bare integer restores the current dimension.
-    fn render_device_fields(&self, theme: Theme, view: WeakEntity<BrowserView>) -> Div {
+    /// Chrome-style device toolbar: the slim second row under the main
+    /// toolbar while device mode is on. The preset dropdown and the
+    /// free-entry dimensions (Enter applies; anything that is not a bare
+    /// integer restores the current dimension) live here, joined by the
+    /// rotation toggle and the zoom dropdown — the dimensions are in the
+    /// row, so the frame itself carries no readout chip. The main toolbar
+    /// keeps only the toggle.
+    fn render_device_toolbar(&self, theme: Theme, cx: &mut Context<Self>) -> Div {
+        let view = cx.entity().downgrade();
         div()
+            .h(px(DEVICE_TOOLBAR_HEIGHT))
             .flex_none()
+            .px(px(10.0))
             .flex()
             .items_center()
-            .gap(px(2.0))
-            .mx(px(4.0))
-            .child(self.render_device_preset_menu(theme, view))
+            .gap(px(4.0))
+            .border_b_1()
+            .border_color(theme.border)
+            .child(self.render_device_preset_menu(theme, view.clone()))
             .child(TextField::new("browser-device-width", self.device_width.clone()).w(px(54.0)))
             .child(
                 div()
@@ -3215,6 +3383,16 @@ impl BrowserView {
                     .child("×"),
             )
             .child(TextField::new("browser-device-height", self.device_height.clone()).w(px(54.0)))
+            .child(self.toolbar_button(
+                "browser-device-rotate",
+                "icons/rotate-cw.svg",
+                true,
+                tr!("browser.rotate"),
+                theme,
+                |this, _, cx| this.rotate_device(cx),
+                cx,
+            ))
+            .child(self.render_zoom_menu(theme, view))
     }
 
     /// What the preset chip shows: the active preset's name, or "Custom"
@@ -3276,12 +3454,69 @@ impl BrowserView {
         )
     }
 
-    /// The pinned frame's chrome: an outline the webview fills exactly, the
-    /// live `w × h` readout above it and the corner resize handle — all in
-    /// backdrop space, because on macOS the native webview paints over
-    /// GPUI's base layer and would cover anything inside the frame. The
-    /// frame centers like [`pinned_bounds`] and clamps to the panel through
-    /// percentage max sizes, so outline and webview always coincide.
+    /// The zoom dropdown: fit to the window or a fixed percentage, the
+    /// active one checked. Picking one redraws the frame at the new scale;
+    /// the paint path pushes the factor to the webview the frame it lands
+    /// in — the emulated CSS viewport never changes with it.
+    fn render_zoom_menu(&self, theme: Theme, view: WeakEntity<BrowserView>) -> gpui::AnyElement {
+        let selected = self.device_zoom;
+        dropdown_menu(
+            div()
+                .id("browser-device-zoom")
+                .flex_none()
+                .h(px(24.0))
+                .px(px(5.0))
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(3.0))
+                .border_1()
+                .border_color(theme.border)
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay))
+                .child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_secondary)
+                        .child(zoom_label(selected)),
+                )
+                .child(icon("icons/chevron-down.svg", 9.0, theme.text_tertiary)),
+            "browser-device-zoom-menu",
+            &self.device_zoom_menu,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = Vec::with_capacity(6);
+                let fit_view = view.clone();
+                items.push(
+                    MenuItem::new(tr!("browser.zoom_fit"), move |_, cx| {
+                        let _ =
+                            fit_view.update(cx, |view, cx| view.set_device_zoom(ZoomMode::Fit, cx));
+                    })
+                    .selected(selected == ZoomMode::Fit),
+                );
+                for percent in [50, 75, 100, 125, 150] {
+                    let view = view.clone();
+                    items.push(
+                        MenuItem::new(format!("{percent}%"), move |_, cx| {
+                            let _ = view.update(cx, |view, cx| {
+                                view.set_device_zoom(ZoomMode::Fixed(percent), cx)
+                            });
+                        })
+                        .selected(selected == ZoomMode::Fixed(percent)),
+                    );
+                }
+                items
+            },
+        )
+    }
+
+    /// The pinned frame's chrome: an outline the webview fills exactly, and
+    /// the corner resize handle — all in backdrop space, because on macOS
+    /// the native webview paints over GPUI's base layer and would cover
+    /// anything inside the frame. The frame centers and clamps like
+    /// [`pinned_bounds`] and sizes at the zoom — device CSS pixels times
+    /// the factor — so outline and webview always coincide. The dimensions
+    /// themselves live in the device toolbar row, not in a chip here.
     fn render_device_frame(
         &self,
         device: DeviceViewport,
@@ -3289,11 +3524,21 @@ impl BrowserView {
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Div {
+        // The outline matches the painted frame. Fit needs the panel's
+        // size, which the canvas paints in — one frame behind this layout —
+        // so until one lands, Fit falls back to the unzoomed size.
+        let (width, height) = match self.device_panel.get() {
+            Some(panel) => {
+                let (bounds, _) = pinned_bounds(panel, device, self.device_zoom);
+                (f32::from(bounds.size.width), f32::from(bounds.size.height))
+            }
+            None => (device.width as f32, device.height as f32),
+        };
         div()
             .relative()
             .flex_none()
-            .w(px(device.width as f32))
-            .h(px(device.height as f32))
+            .w(px(width))
+            .h(px(height))
             .max_w(gpui::relative(1.0))
             .max_h(gpui::relative(1.0))
             .border_1()
@@ -3306,27 +3551,6 @@ impl BrowserView {
                         .object_fit(ObjectFit::Fill),
                 )
             })
-            .child(
-                div()
-                    .absolute()
-                    .top(px(-24.0))
-                    .left_0()
-                    .right_0()
-                    .flex()
-                    .justify_center()
-                    .child(
-                        div()
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .rounded(px(4.0))
-                            .bg(theme.raised)
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_secondary)
-                            .child(format!("{} × {}", device.width, device.height)),
-                    ),
-            )
             .child(
                 div()
                     .id("browser-device-handle")
@@ -3536,16 +3760,29 @@ impl BrowserView {
         #[cfg(target_os = "windows")]
         let focus = self.focus_handle.clone();
         let device = self.device_mode;
+        let zoom = self.device_zoom;
+        let applied_zoom = self.device_applied_zoom.clone();
+        let panel_size = self.device_panel.clone();
         let snapshot = self.occluded.then(|| self.snapshot.clone()).flatten();
         let mut page = div().flex_1().min_h_0().relative().bg(theme.surface).child(
             canvas(
                 move |bounds, window, _| {
+                    // The panel's size lands here first — the frame outline
+                    // laid out moments earlier reads it next frame.
+                    panel_size.set(Some(bounds.size));
                     // In device mode the webview lands at the pinned frame
-                    // — centered, clamped to the panel — and the hitbox
-                    // follows the same rect so input and occlusion track
-                    // the page, never the backdrop around it.
+                    // — centered, clamped to the panel, scaled by the zoom
+                    // — and the hitbox follows the same rect so input and
+                    // occlusion track the page, never the backdrop around
+                    // it. The zoom rides page zoom, so the page keeps the
+                    // device's CSS viewport while rendering at the scaled
+                    // size; it applies only when the factor changed, never
+                    // per frame.
                     let content = device.map_or(bounds, |device| {
-                        let pinned = pinned_bounds(bounds.size, device);
+                        let (pinned, factor) = pinned_bounds(bounds.size, device, zoom);
+                        if let Some(host) = &host {
+                            Self::push_device_zoom(host, &applied_zoom, factor);
+                        }
                         gpui::Bounds {
                             origin: bounds.origin + pinned.origin,
                             size: pinned.size,
@@ -3833,6 +4070,12 @@ impl Render for BrowserView {
             .flex()
             .flex_col()
             .child(self.render_toolbar(cx))
+            // Chrome's device mode: the main toolbar keeps the toggle,
+            // and while the mode is on a slim second row carries the
+            // presets, dimensions, rotation and zoom.
+            .when(self.device_mode.is_some(), |element| {
+                element.child(self.render_device_toolbar(theme, cx))
+            })
             .child(body)
             .into_any_element()
     }
@@ -4144,26 +4387,29 @@ mod tests {
 
     #[test]
     fn pinned_bounds_center_in_panel() {
-        // 1280×800 in a 1500×900 panel: exact device size, 110px side
-        // margins, 50px vertical.
-        let bounds = pinned_bounds(
+        // 1280×800 at 100% in a 1500×900 panel: exact device size, 110px
+        // side margins, 50px vertical.
+        let (bounds, factor) = pinned_bounds(
             gpui::size(px(1500.0), px(900.0)),
             DeviceViewport {
                 width: 1280,
                 height: 800,
             },
+            ZoomMode::Fixed(100),
         );
+        assert_eq!(factor, 1.0);
         assert_eq!(bounds.origin, gpui::point(px(110.0), px(50.0)));
         assert_eq!(bounds.size, gpui::size(px(1280.0), px(800.0)));
 
         // A device larger than the panel clamps to the panel — the origin
         // can never go negative.
-        let clamped = pinned_bounds(
+        let (clamped, _) = pinned_bounds(
             gpui::size(px(1500.0), px(900.0)),
             DeviceViewport {
                 width: 2000,
                 height: 1000,
             },
+            ZoomMode::Fixed(100),
         );
         assert_eq!(
             clamped,
@@ -4174,15 +4420,152 @@ mod tests {
         );
 
         // Odd leftover pixels split as evenly as centering allows.
-        let odd = pinned_bounds(
+        let (odd, _) = pinned_bounds(
             gpui::size(px(999.0), px(501.0)),
             DeviceViewport {
                 width: 500,
                 height: 500,
             },
+            ZoomMode::Fixed(100),
         );
         assert_eq!(odd.origin, gpui::point(px(249.5), px(0.5)));
         assert_eq!(odd.size, gpui::size(px(500.0), px(500.0)));
+    }
+
+    #[test]
+    fn device_zoom_fixed_scales_the_frame() {
+        // A fixed percentage scales the frame literally: 50% of 1280×800
+        // centered in a 1500×900 panel.
+        let (bounds, factor) = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 1280,
+                height: 800,
+            },
+            ZoomMode::Fixed(50),
+        );
+        assert_eq!(factor, 0.5);
+        assert_eq!(bounds.origin, gpui::point(px(430.0), px(250.0)));
+        assert_eq!(bounds.size, gpui::size(px(640.0), px(400.0)));
+
+        // A zoom past what fits clamps to the panel exactly like an
+        // oversized device at 100%: 150% of 1280×800 is 1920×1200.
+        let (clamped, factor) = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 1280,
+                height: 800,
+            },
+            ZoomMode::Fixed(150),
+        );
+        assert_eq!(factor, 1.5);
+        assert_eq!(
+            clamped,
+            gpui::Bounds {
+                origin: gpui::point(px(0.0), px(0.0)),
+                size: gpui::size(px(1500.0), px(900.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn device_zoom_fit_takes_the_smaller_ratio() {
+        // 390×844 in 1500×900: height is the binding ratio, so the frame
+        // fills the panel's height at ~106.6% and centers horizontally.
+        let (bounds, factor) = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 390,
+                height: 844,
+            },
+            ZoomMode::Fit,
+        );
+        assert!((factor - 900.0 / 844.0).abs() < 1e-9);
+        assert!((f32::from(bounds.size.height) - 900.0).abs() < 1e-4);
+        let scaled_width = 390.0 * 900.0 / 844.0;
+        assert!((f32::from(bounds.size.width) as f64 - scaled_width).abs() < 1e-4);
+        assert!((f32::from(bounds.origin.x) as f64 - (1500.0 - scaled_width) / 2.0).abs() < 1e-4);
+        assert_eq!(bounds.origin.y, px(0.0));
+
+        // A wide device in a narrower panel binds on width instead:
+        // 2000×500 fits at 75%, filling the width exactly.
+        let (bounds, factor) = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 2000,
+                height: 500,
+            },
+            ZoomMode::Fit,
+        );
+        assert!((factor - 1500.0 / 2000.0).abs() < 1e-9);
+        assert!((f32::from(bounds.size.width) - 1500.0).abs() < 1e-4);
+        assert!((f32::from(bounds.size.height) - 375.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn device_zoom_fit_clamps_both_ways() {
+        // A tiny device would scale up absurdly: the factor tops out at
+        // 2×, so 100×100 renders at 200×200.
+        let (bounds, factor) = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 100,
+                height: 100,
+            },
+            ZoomMode::Fit,
+        );
+        assert_eq!(factor, 2.0);
+        assert_eq!(bounds.size, gpui::size(px(200.0), px(200.0)));
+
+        // An oversized device bottoms out at 25% — 7680×4320 would want
+        // ~19.5% — and the panel clamp still keeps the frame inside.
+        let (bounds, factor) = pinned_bounds(
+            gpui::size(px(1500.0), px(900.0)),
+            DeviceViewport {
+                width: 7680,
+                height: 4320,
+            },
+            ZoomMode::Fit,
+        );
+        assert_eq!(factor, 0.25);
+        assert_eq!(
+            bounds,
+            gpui::Bounds {
+                origin: gpui::point(px(0.0), px(0.0)),
+                size: gpui::size(px(1500.0), px(900.0)),
+            }
+        );
+    }
+
+    #[test]
+    fn device_rotation_swaps_dimensions() {
+        // Rotation trades the dimensions and stays in bounds; a double
+        // rotation is the identity.
+        let portrait = DeviceViewport {
+            width: 390,
+            height: 844,
+        };
+        assert_eq!(
+            portrait.rotated(),
+            DeviceViewport {
+                width: 844,
+                height: 390,
+            }
+        );
+        assert_eq!(portrait.rotated().rotated(), portrait);
+
+        // Extremes swap cleanly — both dimensions were already clamped.
+        let extremes = DeviceViewport {
+            width: MIN_DEVICE_DIMENSION,
+            height: MAX_DEVICE_DIMENSION,
+        };
+        assert_eq!(
+            extremes.rotated(),
+            DeviceViewport {
+                width: MAX_DEVICE_DIMENSION,
+                height: MIN_DEVICE_DIMENSION,
+            }
+        );
     }
 
     #[test]
@@ -4264,12 +4647,15 @@ mod tests {
 
     #[test]
     fn restored_device_state_maps_prefs() {
-        // Nothing persisted: off, at the default size, no preset, no agent.
-        let (mode, last, agent, key) = restored_device_state(None);
+        // Nothing persisted: off, at the default size, no preset, no agent,
+        // fit to window — also what a legacy config without a zoom key
+        // restores.
+        let (mode, last, agent, key, zoom) = restored_device_state(None);
         assert_eq!(mode, None);
         assert_eq!(last, DEFAULT_DEVICE_VIEWPORT);
         assert_eq!(agent, None);
         assert_eq!(key, None);
+        assert_eq!(zoom, ZoomMode::Fit);
 
         // A mobile preset comes back with its agent, even while disabled —
         // the size is remembered for the next toggle-on.
@@ -4278,21 +4664,25 @@ mod tests {
             width: 390,
             height: 844,
             preset: Some("iphone".to_owned()),
+            zoom_percent: None,
         };
-        let (mode, last, agent, key) = restored_device_state(Some(prefs));
+        let (mode, last, agent, key, zoom) = restored_device_state(Some(prefs));
         assert_eq!(mode, None);
         assert_eq!(last, DeviceViewport::new(390, 844));
         assert_eq!(agent, Some(IPHONE_UA));
         assert_eq!(key, Some("iphone"));
+        assert_eq!(zoom, ZoomMode::Fit);
 
-        // Enabled pins; sizes clamp on the way in like every other path.
+        // Enabled pins; sizes clamp on the way in like every other path;
+        // a persisted percentage comes back as the fixed mode.
         let prefs = store::config::BrowserDevicePrefs {
             enabled: true,
             width: 5,
             height: 99_999,
             preset: None,
+            zoom_percent: Some(125),
         };
-        let (mode, last, agent, key) = restored_device_state(Some(prefs));
+        let (mode, last, agent, key, zoom) = restored_device_state(Some(prefs));
         assert_eq!(
             mode,
             Some(DeviceViewport::new(
@@ -4306,18 +4696,22 @@ mod tests {
         );
         assert_eq!(agent, None);
         assert_eq!(key, None);
+        assert_eq!(zoom, ZoomMode::Fixed(125));
 
         // A preset the table no longer knows restores no agent — the
-        // desktop default beats guessing at a mobile shape.
+        // desktop default beats guessing at a mobile shape — while the
+        // zoom restores regardless.
         let prefs = store::config::BrowserDevicePrefs {
             enabled: true,
             width: 412,
             height: 915,
             preset: Some("nexus".to_owned()),
+            zoom_percent: Some(50),
         };
-        let (_, _, agent, key) = restored_device_state(Some(prefs));
+        let (_, _, agent, key, zoom) = restored_device_state(Some(prefs));
         assert_eq!(agent, None);
         assert_eq!(key, None);
+        assert_eq!(zoom, ZoomMode::Fixed(50));
     }
 
     #[test]

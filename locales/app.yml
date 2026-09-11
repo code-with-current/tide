@@ -2074,6 +2074,10 @@ browser.reload:
   en: Reload (%{shortcut})
 browser.device_mode:
   en: Device mode
+browser.zoom_fit:
+  en: Fit to Window
+browser.rotate:
+  en: Rotate
 browser.preset.laptop:
   en: Laptop
 browser.preset.desktop:
