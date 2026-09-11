@@ -113,7 +113,7 @@ Run the focused checks relevant to your change, then run the full baseline
 before opening a pull request:
 
 ```sh
-cargo fmt --package tide --package protocol --package client --package transport --package backend -- --check
+cargo fmt --package tide --package protocol --package client --package transport --package host --package backend -- --check
 cargo check
 cargo test --locked
 ```

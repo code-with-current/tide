@@ -15,7 +15,7 @@ use std::sync::Arc;
 use gpui::{PathBuilder, point};
 
 use super::*;
-use backend::git_panel::assign_lanes;
+use host::git_panel::assign_lanes;
 use protocol::git_panel::PanelCommit;
 
 /// Width of the graph gutter every History row reserves. Keep in sync with
@@ -113,7 +113,7 @@ impl HistoryGraph {
 pub(crate) fn build_history_graph(commits: &[PanelCommit]) -> Arc<HistoryGraph> {
     let lane_commits: Vec<_> = commits
         .iter()
-        .map(backend::git_panel::LaneCommit::from_panel)
+        .map(host::git_panel::LaneCommit::from_panel)
         .collect();
     let laid = assign_lanes(&lane_commits);
     let height = (commits.len() as f32 * HISTORY_ROW_H).max(1.0);

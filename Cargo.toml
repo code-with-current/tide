@@ -15,6 +15,7 @@ members = [
     "crates/protocol",
     "crates/rag",
     "crates/transport",
+    "crates/host",
 ]
 default-members = [
     ".",
@@ -26,6 +27,7 @@ default-members = [
     "crates/protocol",
     "crates/rag",
     "crates/transport",
+    "crates/host",
 ]
 resolver = "2"
 
@@ -55,6 +57,7 @@ url = "2"
 uuid = { version = "1.18", features = ["v4", "v5", "serde"] }
 client = { path = "crates/client" }
 backend = { path = "crates/backend" }
+host = { path = "crates/host" }
 transport = { path = "crates/transport" }
 protocol = { path = "crates/protocol" }
 # The commit bar's trailer preview mirrors the daemon's attribution decision

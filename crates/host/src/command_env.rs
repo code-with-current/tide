@@ -432,6 +432,12 @@ pub(crate) fn shell_environment() -> ShellEnvironment {
         .unwrap_or_default()
 }
 
+/// Cached login-shell variables for host services that construct their own
+/// child process, such as the daemon terminal.
+pub fn terminal_environment() -> Vec<(OsString, OsString)> {
+    shell_environment()
+}
+
 fn cached_login_shell_variable(name: &OsStr) -> Option<OsString> {
     login_shell_environment()
         .read()

@@ -28,6 +28,7 @@ url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 protocol = { path = "../protocol" }
 transport = { path = "../transport" }
+host = { path = "../host" }
 # Tide provider system (engine + tools + config/keychain), linked in-process.
 # The three vendored crates live in crates/{engine,tools,store} (moved 2026-08-31,
 # renamed from tide-* on 2026-09-03); tide remains the upstream — re-vendor deliberately.

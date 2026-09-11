@@ -63,7 +63,7 @@ mod platform {
                 drain_on_exit: false,
                 ..Default::default()
             };
-            for (name, value) in crate::command_env::shell_environment() {
+            for (name, value) in crate::command_env::terminal_environment() {
                 options.env.insert(
                     name.to_string_lossy().into_owned(),
                     value.to_string_lossy().into_owned(),

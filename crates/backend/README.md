@@ -1,10 +1,11 @@
 # backend
 
 `backend` is Tide's daemon-only runtime. It contains the native session
-drivers, provider discovery and model metadata, workspace filesystem and Git
-services, and Computer Use process control. Persistence lives in
-[`store`](../store), and the serializable contract lives in
-[`protocol`](../protocol). This crate contains no desktop transport or UI.
+drivers, provider discovery and model metadata, orchestration, and Computer
+Use process control. Machine-level Git, worktree, checkpoint, and process
+services live in [`host`](../host), persistence lives in [`store`](../store),
+and the serializable contract lives in [`protocol`](../protocol). This crate
+contains no desktop transport or UI.
 
 The authenticated WebSocket, request idempotency, subscriptions, event
 sequencing, and bounded replay journal live in [`transport`](../transport).

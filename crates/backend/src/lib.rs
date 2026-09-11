@@ -18,24 +18,19 @@ macro_rules! tr {
 }
 
 pub mod action_jobs;
-pub mod checkpoint;
-pub mod command_env;
 pub mod composer_complete;
 pub mod computer_use;
 pub mod daemon;
 pub mod driver;
 mod frontmatter;
-pub mod git_branch;
 pub mod git_commit;
 pub mod git_identities;
-pub mod git_panel;
 pub mod i18n;
 pub mod identity;
 pub mod kb_commands;
 pub mod model;
 pub mod model_metadata;
 pub mod or_catalog;
-pub mod projectless;
 pub mod rag;
 pub mod session_history;
 pub mod skills;
@@ -47,9 +42,9 @@ pub mod usage;
 pub mod usage_history;
 pub mod usage_report;
 pub mod workspace;
-pub mod worktree;
 
 mod fs_ext;
+pub use host::{checkpoint, command_env, git_branch, git_panel, projectless, worktree};
 pub use settings::{DaemonSettings, DaemonSettingsStore};
 pub use store::{attachments, blob_store, persistence, settings};
 pub use transport::{

@@ -20,9 +20,12 @@ in Rust with GPUI. GPL-3.0-only.
   Depends on `protocol`; runtime implementations stay behind its `Backend`
   trait.
 - `crates/backend` — daemon-side runtime: session drivers, provider discovery,
-  Git services, and computer use. Depends on `transport` to implement its
+  orchestration, and computer use. Depends on `transport` to implement its
   request handler, but contains no socket, persistence implementation, or UI
   code.
+- `crates/host` — process environment, Git and worktree operations,
+  checkpoint refs, and projectless workspace services. No provider runtime,
+  socket, or UI code.
 - `crates/engine` — the ONLY crate permitted to depend on `rig` (churn
   firewall, pinned rig_core). Keep provider churn inside it.
 - `crates/store` — all daemon and desktop persistence: task/session SQLite,
@@ -66,8 +69,9 @@ in Rust with GPUI. GPL-3.0-only.
 ## Checks
 
 - `cargo fmt --package tide --package protocol --package client --package
-  transport --package backend -- --check`, then `cargo check` and `cargo test
-  --locked` before opening a PR. Run the focused checks for your change first.
+  transport --package host --package backend -- --check`, then `cargo check`
+  and `cargo test --locked` before opening a PR. Run the focused checks for
+  your change first.
 - `gpui`'s `test-support` feature is dev-dependency-only: it makes every
   `notify` pay a full frame, so it must never leak into a shipping build.
 
