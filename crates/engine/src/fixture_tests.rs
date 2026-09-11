@@ -58,7 +58,7 @@ fn fixture_tools(fixture: &Value, api_style: ProviderApiStyle) -> Vec<ToolSpec> 
     wire_tools
         .into_iter()
         .map(|t| match api_style {
-            ProviderApiStyle::Anthropic => ToolSpec {
+            ProviderApiStyle::Anthropic | ProviderApiStyle::Zed => ToolSpec {
                 name: t["name"].as_str().unwrap().to_owned(),
                 description: t["description"].as_str().unwrap_or_default().to_owned(),
                 parameters: t["input_schema"].clone(),
@@ -627,11 +627,180 @@ fn history_to_rig_maps_parts() {
     assert!(rendered.contains("ponder"), "thinking survives");
     assert!(rendered.contains("toolu_1"), "tool call id survives");
     assert!(
-        rendered.contains("truncated at 16384 chars"),
+        rendered.contains(&"truncated at 16384 chars"),
         "output floor applied"
     );
     assert!(
         !rendered.contains(&"x".repeat(17000)),
         "oversized output clamped"
     );
+}
+
+/// A minimal fake cloud.zed.dev: serves one canned raw HTTP response per
+/// connection, in order, capturing each request's start line. Same shape
+/// as the zed_bridge tests' fake, kept local because that one is private
+/// to its module.
+struct FakeZedCloud {
+    base_url: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl FakeZedCloud {
+    fn spawn(responses: Vec<String>) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        std::thread::spawn(move || {
+            let mut remaining = responses.into_iter();
+            for stream in listener.incoming().flatten() {
+                let Some(response) = remaining.next() else { break };
+                let mut stream = stream;
+                use std::io::{BufRead, BufReader, Read, Write};
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut start_line = String::new();
+                reader.read_line(&mut start_line).unwrap();
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = trimmed.split_once(':') {
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                let mut body = vec![0u8; length];
+                reader.read_exact(&mut body).unwrap();
+                captured.lock().unwrap().push(start_line.trim().to_owned());
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        Self { base_url, requests }
+    }
+}
+
+fn zed_http_ok_json(json: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+        json.len(),
+        json
+    )
+}
+
+fn zed_ndjson_ok(events: &[Value]) -> String {
+    let body = events
+        .iter()
+        .map(|e| serde_json::json!({ "event": e }).to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    )
+}
+
+/// `api_style: "zed"` builds an Anthropic-protocol model whose transport is
+/// the shared zed bridge: the logical base URL stays cloud.zed.dev, rig's
+/// request lands on the localhost bridge, and the bridge's llm-token dance
+/// + envelope + NDJSON→SSE translation deliver the assistant turn back
+/// through `stream_step` unchanged.
+#[test]
+fn zed_style_streams_through_the_bridge() {
+    use crate::quirk::ThinkingLevel;
+
+    // The bridge's cloud override is process-wide, and the zed_bridge unit
+    // tests (same binary) point it at their own fakes under their own lock
+    // during the first seconds of a run. Let that burst drain before
+    // claiming the override, then retry the flow if a straggler still
+    // clobbers it mid-stream. A fresh fake cloud AND a fresh credential
+    // blob per attempt: bridges (and their cached llm tokens) are cached
+    // per-credential process-wide, so a reused blob would skip the token
+    // request the fresh fake expects to serve first.
+    for attempt in 0..3u32 {
+        std::thread::sleep(std::time::Duration::from_millis(if attempt == 0 {
+            3000
+        } else {
+            500
+        }));
+        // Event payloads copied from the anthropic-plain-text SSE fixture.
+        let cloud_events = vec![
+            serde_json::json!({"type":"message_start","message":{"id":"msg_zed_bridge","type":"message","role":"assistant","model":"claude-haiku-4-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":42,"output_tokens":1}}}),
+            serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The file has 42 lines and one TODO on line 17."}}),
+            serde_json::json!({"type":"content_block_stop","index":0}),
+            serde_json::json!({"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":18}}),
+            serde_json::json!({"type":"message_stop"}),
+        ];
+        let cloud = FakeZedCloud::spawn(vec![
+            zed_http_ok_json(r#"{"token":"T"}"#),
+            zed_ndjson_ok(&cloud_events),
+        ]);
+        crate::zed_bridge::set_cloud_url_for_tests(Some(cloud.base_url.clone()));
+
+        let config = EngineModelConfig {
+            api_style: ProviderApiStyle::Zed,
+            base_url: String::new(), // → zed default
+            api_key: format!(r#"{{"userId":"11","accessToken":"fixture-t{attempt}"}}"#),
+            model_id: "claude-haiku-4-5".to_owned(),
+            provider_id: "p_zed".to_owned(),
+            max_output_tokens: None,
+        };
+        let model = EngineModel::from_config(&config).unwrap();
+        assert_eq!(model.api_style(), ProviderApiStyle::Zed);
+        assert_eq!(model.provider_base_url(), "https://cloud.zed.dev");
+
+        let request = TurnRequest {
+            messages: vec![HistoryMessage::user_text("How many lines?")],
+            tools: vec![],
+            params: TurnParams {
+                system: None,
+                thinking_level: ThinkingLevel::Off,
+                reasoning_contracts: Vec::new(),
+                model_max_output_tokens: None,
+            },
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let streamed = rt.block_on(stream_step(model, request).collect::<Vec<_>>());
+
+        // A straggler override clobber shows up as a short request log or
+        // an error item — treat the attempt as clean only when the full
+        // token dance + completion round trip and the usage numbers landed.
+        let clean = cloud.requests.lock().unwrap().len() >= 2
+            && streamed.iter().any(|item| {
+                matches!(item, Ok(EngineEvent::Usage { tokens })
+                    if tokens.input_tokens == 42 && tokens.output_tokens == 18)
+            });
+        crate::zed_bridge::set_cloud_url_for_tests(None);
+        if !clean {
+            continue;
+        }
+
+        let text: String = streamed
+            .iter()
+            .filter_map(|item| match item {
+                Ok(EngineEvent::Delta { text }) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "The file has 42 lines and one TODO on line 17.");
+        assert!(
+            streamed.iter().all(|item| !matches!(item, Err(_))),
+            "unexpected error items: {streamed:?}"
+        );
+        let requests = cloud.requests.lock().unwrap();
+        assert!(
+            requests[0].starts_with("POST /client/llm_tokens"),
+            "{:?}",
+            requests
+        );
+        assert!(requests[1].starts_with("POST /completions"), "{requests:?}");
+        return;
+    }
+    panic!("zed bridge flow never completed cleanly against the fake cloud");
 }

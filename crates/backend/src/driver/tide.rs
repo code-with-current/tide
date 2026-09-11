@@ -773,6 +773,7 @@ fn parse_api_style(style: &str) -> Option<ProviderApiStyle> {
     match style.trim().to_ascii_lowercase().as_str() {
         "anthropic" => Some(ProviderApiStyle::Anthropic),
         "openai" => Some(ProviderApiStyle::OpenAi),
+        "zed" => Some(ProviderApiStyle::Zed),
         _ => None,
     }
 }

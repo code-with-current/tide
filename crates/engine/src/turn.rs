@@ -98,7 +98,9 @@ pub fn stream_step(
             model_max_output_tokens.unwrap_or(crate::quirk::DEFAULT_MAX_TOKENS),
         );
         let options = match model.api_style() {
-            ProviderApiStyle::Anthropic => anthropic_call_options(reasoning.as_ref(), &ctx),
+            ProviderApiStyle::Anthropic | ProviderApiStyle::Zed => {
+                anthropic_call_options(reasoning.as_ref(), &ctx)
+            }
             ProviderApiStyle::OpenAi => openai_call_options(reasoning.as_ref(), &ctx),
         };
 
@@ -132,6 +134,7 @@ pub fn stream_step(
         let response = match model.inner_model() {
             crate::model::EngineModelRef::Anthropic(m) => m.stream(completion_request).await,
             crate::model::EngineModelRef::OpenAiCompatible(m) => m.stream(completion_request).await,
+            crate::model::EngineModelRef::Zed(m) => m.stream(completion_request).await,
         };
         let mut response = match response {
             Ok(r) => r,

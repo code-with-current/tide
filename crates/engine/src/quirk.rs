@@ -45,7 +45,7 @@ pub const SSE_READ_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Hosts that accept the native Anthropic `thinking` block. Aggregators
 /// (OpenRouter-style) reject `thinking` + `cache_control` with 400.
-const THINKING_CAPABLE_HOSTS: [&str; 2] = ["api.anthropic.com", "api.z.ai"];
+const THINKING_CAPABLE_HOSTS: [&str; 3] = ["api.anthropic.com", "api.z.ai", "cloud.zed.dev"];
 
 /// Tool-result content clamp before it reaches the model (chars, with a
 /// truncation marker). Tools cap their own output (e.g. bash 50KB); this is
@@ -726,6 +726,7 @@ mod tests {
             let input = &fixture["input"];
             let style = match input["provider"]["apiStyle"].as_str().unwrap() {
                 "anthropic" => ProviderApiStyle::Anthropic,
+                "zed" => ProviderApiStyle::Zed,
                 _ => ProviderApiStyle::OpenAi,
             };
             let contracts: Vec<ReasoningOption> = input["reasoningContracts"]

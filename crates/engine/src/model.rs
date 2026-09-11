@@ -42,10 +42,12 @@ static SHARED_HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
 pub enum ProviderApiStyle {
     Anthropic,
     OpenAi,
+    Zed,
 }
 
 const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 const OPENAI_DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+const ZED_DEFAULT_BASE_URL: &str = "https://cloud.zed.dev";
 
 /// The provider-factory input — the wire-relevant slice of the stored
 /// Provider config plus the resolved model id and decrypted API key.
@@ -88,6 +90,7 @@ pub struct EngineModel {
 enum EngineModelInner {
     Anthropic(rig_core::providers::anthropic::completion::CompletionModel),
     OpenAiCompatible(rig_core::providers::openai::CompletionModel),
+    Zed(rig_core::providers::anthropic::completion::CompletionModel),
 }
 
 /// Borrowed view of the concrete rig model — both arms implement rig's
@@ -95,6 +98,7 @@ enum EngineModelInner {
 pub(crate) enum EngineModelRef<'a> {
     Anthropic(&'a rig_core::providers::anthropic::completion::CompletionModel),
     OpenAiCompatible(&'a rig_core::providers::openai::CompletionModel),
+    Zed(&'a rig_core::providers::anthropic::completion::CompletionModel),
 }
 
 impl EngineModel {
@@ -164,6 +168,31 @@ impl EngineModel {
                     ),
                 })
             }
+            ProviderApiStyle::Zed => {
+                let base = normalize_base(&config.base_url, ZED_DEFAULT_BASE_URL);
+                // The transport_base_url seam is meaningless for zed: the
+                // bridge IS the transport, and tests reroute the cloud side
+                // via zed_bridge::set_cloud_url_for_tests instead.
+                let bridge = crate::zed_bridge::shared_bridge(&config.api_key)
+                    .map_err(EngineError::Config)?;
+                let client = rig_core::providers::anthropic::Client::builder()
+                    .api_key("zed-bridge".to_owned()) // bridge ignores it
+                    .base_url(bridge.base_url().to_owned())
+                    .http_client(http)
+                    .build()
+                    .map_err(|e| EngineError::Config(e.to_string()))?;
+                let mut completion_model = client.completion_model(config.model_id.clone());
+                if is_native_anthropic_host(Some(base)) {
+                    completion_model = completion_model.with_automatic_caching();
+                }
+                Ok(Self {
+                    provider_base_url: base.to_owned(),
+                    provider_id: config.provider_id.clone(),
+                    model_id: config.model_id.clone(),
+                    max_output_tokens: config.max_output_tokens,
+                    inner: EngineModelInner::Zed(completion_model),
+                })
+            }
         }
     }
 
@@ -171,6 +200,7 @@ impl EngineModel {
         match &self.inner {
             EngineModelInner::Anthropic(_) => ProviderApiStyle::Anthropic,
             EngineModelInner::OpenAiCompatible(_) => ProviderApiStyle::OpenAi,
+            EngineModelInner::Zed(_) => ProviderApiStyle::Zed,
         }
     }
 
@@ -178,6 +208,7 @@ impl EngineModel {
         match &self.inner {
             EngineModelInner::Anthropic(m) => EngineModelRef::Anthropic(m),
             EngineModelInner::OpenAiCompatible(m) => EngineModelRef::OpenAiCompatible(m),
+            EngineModelInner::Zed(m) => EngineModelRef::Zed(m),
         }
     }
 
