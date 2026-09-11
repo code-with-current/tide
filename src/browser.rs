@@ -1583,12 +1583,17 @@ const DEFAULT_DEVICE_VIEWPORT: DeviceViewport = DeviceViewport {
 /// The user agents the mobile presets swap in. Real browser strings, so
 /// responsive sites serve the mobile layout the frame is sized for instead
 /// of sniffing an unknown client.
-const IPHONE_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) \
-     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
-const PIXEL_UA: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) \
-     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
-const IPAD_UA: &str = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) \
-     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+const IPHONE_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) \
+     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
+/// Chrome's frozen Android UA (the "K" device token is what real devices
+/// now send); the major tracks current Chrome.
+const PIXEL_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36";
+/// The mobile-class iPad UA — real iPads default to a desktop-class
+/// string since iPadOS 13, but sites key their tablet layout off the
+/// `iPad` token, so emulation wants this one (DevTools ships it too).
+const IPAD_UA: &str = "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) \
+     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
 
 /// One of the design's five device presets. `user_agent` is `Some` only for
 /// the mobile shapes — that override, not the numbers alone, is what makes
@@ -1605,26 +1610,75 @@ pub(crate) struct DevicePreset {
 }
 
 /// The design's preset list, in menu order.
-pub(crate) const DEVICE_PRESETS: [DevicePreset; 5] = [
+pub(crate) const DEVICE_PRESETS: [DevicePreset; 14] = [
+    DevicePreset {
+        key: "galaxy-s25",
+        label: "Galaxy S25",
+        width: 360,
+        height: 780,
+        user_agent: Some(PIXEL_UA),
+    },
     DevicePreset {
         key: "iphone",
-        label: "iPhone",
+        label: "iPhone 16e",
         width: 390,
         height: 844,
         user_agent: Some(IPHONE_UA),
     },
     DevicePreset {
+        key: "iphone-17",
+        label: "iPhone 17",
+        width: 402,
+        height: 874,
+        user_agent: Some(IPHONE_UA),
+    },
+    DevicePreset {
         key: "pixel",
-        label: "Pixel",
+        label: "Pixel 10",
         width: 412,
         height: 915,
         user_agent: Some(PIXEL_UA),
     },
     DevicePreset {
+        key: "iphone-17-air",
+        label: "iPhone 17 Air",
+        width: 420,
+        height: 912,
+        user_agent: Some(IPHONE_UA),
+    },
+    DevicePreset {
+        key: "pixel-10-pro-xl",
+        label: "Pixel 10 Pro XL",
+        width: 432,
+        height: 960,
+        user_agent: Some(PIXEL_UA),
+    },
+    DevicePreset {
+        key: "iphone-17-pro-max",
+        label: "iPhone 17 Pro Max",
+        width: 440,
+        height: 956,
+        user_agent: Some(IPHONE_UA),
+    },
+    DevicePreset {
+        key: "ipad-mini",
+        label: "iPad Mini",
+        width: 744,
+        height: 1133,
+        user_agent: Some(IPAD_UA),
+    },
+    DevicePreset {
         key: "ipad",
-        label: "iPad",
+        label: "iPad Air",
         width: 820,
         height: 1180,
+        user_agent: Some(IPAD_UA),
+    },
+    DevicePreset {
+        key: "ipad-pro-13",
+        label: "iPad Pro 13",
+        width: 1024,
+        height: 1366,
         user_agent: Some(IPAD_UA),
     },
     DevicePreset {
@@ -1635,10 +1689,24 @@ pub(crate) const DEVICE_PRESETS: [DevicePreset; 5] = [
         user_agent: None,
     },
     DevicePreset {
+        key: "laptop-l",
+        label: "Laptop L",
+        width: 1440,
+        height: 900,
+        user_agent: None,
+    },
+    DevicePreset {
         key: "desktop",
         label: "Desktop",
         width: 1920,
         height: 1080,
+        user_agent: None,
+    },
+    DevicePreset {
+        key: "4k",
+        label: "4K",
+        width: 3840,
+        height: 2160,
         user_agent: None,
     },
 ];
@@ -1754,9 +1822,13 @@ impl ZoomMode {
             Self::Fit => {
                 let panel_width = f64::from(f32::from(panel.width).max(0.0));
                 let panel_height = f64::from(f32::from(panel.height).max(0.0));
+                // Fit only shrinks — Chrome's device mode shows a small
+                // viewport at 100%, centered, scaling down only when the
+                // panel cannot hold it.
                 (panel_width / f64::from(device.width))
                     .min(panel_height / f64::from(device.height))
-                    .clamp(0.25, 2.0)
+                    .min(1.0)
+                    .clamp(0.25, 1.0)
             }
         }
     }
@@ -4470,8 +4542,8 @@ mod tests {
 
     #[test]
     fn device_zoom_fit_takes_the_smaller_ratio() {
-        // 390×844 in 1500×900: height is the binding ratio, so the frame
-        // fills the panel's height at ~106.6% and centers horizontally.
+        // 390×844 fits a 1500×900 panel at 100% — fit never upscales, so
+        // the frame sits centered at its configured size.
         let (bounds, factor) = pinned_bounds(
             gpui::size(px(1500.0), px(900.0)),
             DeviceViewport {
@@ -4480,12 +4552,12 @@ mod tests {
             },
             ZoomMode::Fit,
         );
-        assert!((factor - 900.0 / 844.0).abs() < 1e-9);
-        assert!((f32::from(bounds.size.height) - 900.0).abs() < 1e-4);
-        let scaled_width = 390.0 * 900.0 / 844.0;
-        assert!((f32::from(bounds.size.width) as f64 - scaled_width).abs() < 1e-4);
-        assert!((f32::from(bounds.origin.x) as f64 - (1500.0 - scaled_width) / 2.0).abs() < 1e-4);
-        assert_eq!(bounds.origin.y, px(0.0));
+        assert_eq!(factor, 1.0);
+        assert_eq!(bounds.size, gpui::size(px(390.0), px(844.0)));
+        assert_eq!(
+            bounds.origin,
+            gpui::point(px((1500.0 - 390.0) / 2.0), px((900.0 - 844.0) / 2.0))
+        );
 
         // A wide device in a narrower panel binds on width instead:
         // 2000×500 fits at 75%, filling the width exactly.
@@ -4504,8 +4576,8 @@ mod tests {
 
     #[test]
     fn device_zoom_fit_clamps_both_ways() {
-        // A tiny device would scale up absurdly: the factor tops out at
-        // 2×, so 100×100 renders at 200×200.
+        // A tiny device stays at 100% — fit never upscales, so 100×100
+        // renders at 100×100, centered.
         let (bounds, factor) = pinned_bounds(
             gpui::size(px(1500.0), px(900.0)),
             DeviceViewport {
@@ -4514,8 +4586,9 @@ mod tests {
             },
             ZoomMode::Fit,
         );
-        assert_eq!(factor, 2.0);
-        assert_eq!(bounds.size, gpui::size(px(200.0), px(200.0)));
+        assert_eq!(factor, 1.0);
+        assert_eq!(bounds.size, gpui::size(px(100.0), px(100.0)));
+        assert_eq!(bounds.origin, gpui::point(px(700.0), px(400.0)));
 
         // An oversized device bottoms out at 25% — 7680×4320 would want
         // ~19.5% — and the panel clamp still keeps the frame inside.
@@ -4628,13 +4701,25 @@ mod tests {
 
     #[test]
     fn preset_table_matches_the_design() {
-        // The five design presets; the mobile shapes carry a user agent,
-        // the desktop ones do not.
+        // The curated, research-verified set (Sept 2026); the mobile
+        // shapes carry a user agent, the desktop ones do not.
+        assert_eq!(preset("galaxy-s25"), Some((360, 780, Some(PIXEL_UA))));
         assert_eq!(preset("iphone"), Some((390, 844, Some(IPHONE_UA))));
+        assert_eq!(preset("iphone-17"), Some((402, 874, Some(IPHONE_UA))));
         assert_eq!(preset("pixel"), Some((412, 915, Some(PIXEL_UA))));
+        assert_eq!(preset("iphone-17-air"), Some((420, 912, Some(IPHONE_UA))));
+        assert_eq!(preset("pixel-10-pro-xl"), Some((432, 960, Some(PIXEL_UA))));
+        assert_eq!(
+            preset("iphone-17-pro-max"),
+            Some((440, 956, Some(IPHONE_UA)))
+        );
+        assert_eq!(preset("ipad-mini"), Some((744, 1133, Some(IPAD_UA))));
         assert_eq!(preset("ipad"), Some((820, 1180, Some(IPAD_UA))));
+        assert_eq!(preset("ipad-pro-13"), Some((1024, 1366, Some(IPAD_UA))));
         assert_eq!(preset("laptop"), Some((1280, 800, None)));
+        assert_eq!(preset("laptop-l"), Some((1440, 900, None)));
         assert_eq!(preset("desktop"), Some((1920, 1080, None)));
+        assert_eq!(preset("4k"), Some((3840, 2160, None)));
         assert_eq!(preset("nope"), None);
         // Sizes respect the dimension bounds — every preset is in range.
         for entry in DEVICE_PRESETS {
