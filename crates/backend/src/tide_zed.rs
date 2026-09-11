@@ -32,6 +32,7 @@ pub struct ZedCredential {
 
 impl ZedCredential {
     pub fn to_blob(&self) -> anyhow::Result<String> {
+        ensure_creds(self)?;
         Ok(serde_json::to_string(self).context("could not serialize the zed credential")?)
     }
 
@@ -46,6 +47,13 @@ impl ZedCredential {
 fn ensure_creds(cred: &ZedCredential) -> anyhow::Result<()> {
     if cred.user_id.trim().is_empty() || cred.access_token.trim().is_empty() {
         bail!("zed credential is missing the user id or access token");
+    }
+    if cred
+        .organization_id
+        .as_deref()
+        .is_some_and(|org| org.trim().is_empty())
+    {
+        bail!("zed credential has an empty organization id");
     }
     Ok(())
 }
@@ -79,6 +87,25 @@ mod tests {
         let blob = ZedCredential { user_id: "1".into(), access_token: "t".into(), organization_id: None }
             .to_blob().unwrap();
         assert!(!blob.contains("organizationId"));
+        // A blob without the organizationId key deserializes to `None`.
+        assert_eq!(
+            ZedCredential::from_blob(r#"{"userId":"1","accessToken":"t"}"#)
+                .unwrap()
+                .organization_id,
+            None
+        );
         assert!(ZedCredential::from_blob(r#"{"userId":"","accessToken":"t"}"#).is_err());
+    }
+
+    #[test]
+    fn blob_rejects_invalid_credentials_in_both_directions() {
+        let empty_user =
+            ZedCredential { user_id: "".into(), access_token: "t".into(), organization_id: None };
+        assert!(empty_user.to_blob().is_err());
+        assert!(ZedCredential::from_blob(r#"{"userId":"   ","accessToken":"t"}"#).is_err());
+        assert!(
+            ZedCredential::from_blob(r#"{"userId":"1","accessToken":"t","organizationId":""}"#)
+                .is_err()
+        );
     }
 }
