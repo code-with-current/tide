@@ -145,25 +145,45 @@ impl ZedBridge {
         else {
             return write_plain_error(&mut stream, "400 Bad Request", "request missing model id");
         };
-        // v1 scope: only Claude models speak Anthropic format natively on
-        // Zed's cloud (the preset's routing needles filter the wizard list
-        // to match).
-        if !model.contains("claude") {
+        // Claude models speak Anthropic format natively; GPT models speak
+        // the OpenAI Responses API — the bridge translates so the engine
+        // always deals in Anthropic events either way.
+        let Some(family) = model_family(&model) else {
             return write_plain_error(
                 &mut stream,
                 "400 Bad Request",
-                "the zed provider currently supports claude models only",
+                "the zed provider supports claude and gpt models only",
             );
-        }
-        coerce_block_arrays(&mut provider_request);
-
-        let envelope = serde_json::json!({
-            "intent": "user_prompt",
-            "provider": "anthropic",
-            "model": model,
-            "provider_request": provider_request,
-        });
-        match self.cloud_completion(&envelope) {
+        };
+        let events = match family {
+            ModelFamily::Anthropic => {
+                coerce_block_arrays(&mut provider_request);
+                let envelope = serde_json::json!({
+                    "intent": "user_prompt",
+                    "provider": "anthropic",
+                    "model": model,
+                    "provider_request": provider_request,
+                });
+                self.cloud_completion(&envelope)
+            }
+            ModelFamily::OpenAi => {
+                let provider_request = match anthropic_to_responses(&provider_request) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        return write_plain_error(&mut stream, "400 Bad Request", &error);
+                    }
+                };
+                let envelope = serde_json::json!({
+                    "intent": "user_prompt",
+                    "provider": "open_ai",
+                    "model": model,
+                    "provider_request": provider_request,
+                });
+                self.cloud_completion(&envelope)
+                    .and_then(|events| responses_to_anthropic(&events, &model))
+            }
+        };
+        match events {
             Ok(events) => {
                 write_sse_head(&mut stream)?;
                 for event in events {
@@ -305,9 +325,11 @@ impl ZedBridge {
     }
 }
 
-fn read_request(
-    stream: &mut TcpStream,
-) -> std::io::Result<(String, Vec<(String, String)>, Vec<u8>)> {
+/// One parsed HTTP request off the bridge listener: start line, headers,
+/// body bytes.
+type RawRequest = (String, Vec<(String, String)>, Vec<u8>);
+
+fn read_request(stream: &mut TcpStream) -> std::io::Result<RawRequest> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut start = String::new();
     reader.read_line(&mut start)?;
@@ -348,6 +370,318 @@ fn coerce_block_arrays(body: &mut Value) {
         };
         message["content"] = serde_json::json!([{ "type": "text", "text": text }]);
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ModelFamily {
+    Anthropic,
+    OpenAi,
+}
+
+fn model_family(model: &str) -> Option<ModelFamily> {
+    let lowered = model.to_ascii_lowercase();
+    if lowered.contains("claude") {
+        Some(ModelFamily::Anthropic)
+    } else if lowered.starts_with("gpt")
+        || ["o1", "o3", "o4"]
+            .iter()
+            .any(|prefix| lowered.starts_with(prefix))
+    {
+        Some(ModelFamily::OpenAi)
+    } else {
+        None
+    }
+}
+
+/// Convert the engine's Anthropic request body into an OpenAI Responses
+/// API body — what cloud.zed.dev expects as `provider_request` for
+/// `open_ai` models. Verified live: input items need an explicit `type`
+/// (`"message"`), and the turn must set `stream`/`store`.
+fn anthropic_to_responses(body: &Value) -> Result<Value, String> {
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "request missing model".to_owned())?
+        .to_owned();
+
+    let mut instructions = String::new();
+    match body.get("system") {
+        Some(Value::String(text)) => instructions.push_str(text),
+        Some(Value::Array(blocks)) => {
+            for block in blocks {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    instructions.push_str(text);
+                    instructions.push('\n');
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let mut input = Vec::new();
+    let messages = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "request missing messages".to_owned())?;
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "message missing role".to_owned())?;
+        let (role_out, part_ty) = if role == "assistant" {
+            ("assistant", "output_text")
+        } else {
+            ("user", "input_text")
+        };
+        let blocks = match message.get("content") {
+            Some(Value::String(text)) => vec![serde_json::json!({ "type": "text", "text": text })],
+            Some(Value::Array(blocks)) => blocks.clone(),
+            _ => vec![],
+        };
+        for block in blocks {
+            match block.get("type").and_then(Value::as_str).unwrap_or("text") {
+                "text" => {
+                    input.push(serde_json::json!({
+                        "type": "message",
+                        "role": role_out,
+                        "content": [{
+                            "type": part_ty,
+                            "text": block.get("text").and_then(Value::as_str).unwrap_or(""),
+                        }],
+                    }));
+                }
+                "image" => {
+                    let source = block.get("source");
+                    let media_type = source
+                        .and_then(|s| s.get("media_type"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("image/png");
+                    let data = source
+                        .and_then(|s| s.get("data"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    input.push(serde_json::json!({
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_image",
+                            "image_url": format!("data:{media_type};base64,{data}"),
+                        }],
+                    }));
+                }
+                "tool_use" => {
+                    let call_input = block
+                        .get("input")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    input.push(serde_json::json!({
+                        "type": "function_call",
+                        "call_id": block.get("id"),
+                        "name": block.get("name"),
+                        "arguments": call_input.to_string(),
+                    }));
+                }
+                "tool_result" => {
+                    let output = match block.get("content") {
+                        Some(Value::String(text)) => text.clone(),
+                        Some(Value::Array(blocks)) => blocks
+                            .iter()
+                            .filter_map(|b| b.get("text").and_then(Value::as_str))
+                            .collect::<Vec<_>>()
+                            .join(""),
+                        _ => String::new(),
+                    };
+                    input.push(serde_json::json!({
+                        "type": "function_call_output",
+                        "call_id": block.get("tool_use_id"),
+                        "output": output,
+                    }));
+                }
+                // thinking/redacted_thinking are Anthropic-only; GPT models
+                // re-reason server-side and cannot replay them.
+                _ => {}
+            }
+        }
+    }
+
+    let mut request = serde_json::json!({
+        "model": model,
+        "input": input,
+        "stream": true,
+        "store": false,
+    });
+    if !instructions.is_empty() {
+        request["instructions"] = Value::String(instructions);
+    }
+    if let Some(max_tokens) = body.get("max_tokens") {
+        request["max_output_tokens"] = max_tokens.clone();
+    }
+    for key in ["temperature", "top_p"] {
+        if let Some(value) = body.get(key) {
+            request[key] = value.clone();
+        }
+    }
+    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+        let functions: Vec<Value> = tools
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "type": "function",
+                    "name": tool.get("name"),
+                    "description": tool.get("description"),
+                    "parameters": tool
+                        .get("input_schema")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({ "type": "object" })),
+                    "strict": false,
+                })
+            })
+            .collect();
+        if !functions.is_empty() {
+            request["tools"] = Value::Array(functions);
+        }
+    }
+    if let Some(choice) = body.get("tool_choice") {
+        let mapped = match choice.get("type").and_then(Value::as_str) {
+            Some("auto") => Value::String("auto".into()),
+            Some("any") => Value::String("required".into()),
+            Some("tool") => serde_json::json!({ "type": "function", "name": choice.get("name") }),
+            _ => Value::Null,
+        };
+        if !mapped.is_null() {
+            request["tool_choice"] = mapped;
+        }
+    }
+    Ok(request)
+}
+
+/// Convert the Responses API event stream (bare `response.*` NDJSON lines,
+/// verified live) into the Anthropic SSE events the engine already
+/// consumes. `cloud_completion` buffers the whole body, so the usage from
+/// `response.completed` can go straight into `message_start`.
+fn responses_to_anthropic(events: &[Value], model: &str) -> Result<Vec<Value>, String> {
+    let mut blocks: Vec<Value> = Vec::new();
+    let mut message_id = "msg_zed".to_owned();
+    let mut input_tokens = 0u64;
+    let mut output_tokens = 0u64;
+    // -1 = no open block; indexes are assigned on content_block_start and
+    // closed by the matching output_item.done.
+    let mut open_block: i64 = -1;
+    let mut tool_used = false;
+
+    for event in events {
+        match event.get("type").and_then(Value::as_str).unwrap_or("") {
+            "response.created" => {
+                if let Some(id) = event.pointer("/response/id").and_then(Value::as_str) {
+                    message_id = id.to_owned();
+                }
+            }
+            "response.output_item.added" => {
+                match event
+                    .pointer("/item/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                {
+                    // reasoning items carry no translatable content
+                    "message" => {
+                        open_block = blocks.len() as i64;
+                        blocks.push(serde_json::json!({
+                            "type": "content_block_start",
+                            "index": open_block,
+                            "content_block": { "type": "text", "text": "" },
+                        }));
+                    }
+                    "function_call" => {
+                        tool_used = true;
+                        open_block = blocks.len() as i64;
+                        blocks.push(serde_json::json!({
+                            "type": "content_block_start",
+                            "index": open_block,
+                            "content_block": {
+                                "type": "tool_use",
+                                "id": event.pointer("/item/call_id"),
+                                "name": event.pointer("/item/name"),
+                                "input": {},
+                            },
+                        }));
+                    }
+                    _ => {}
+                }
+            }
+            "response.output_text.delta" => {
+                let delta = event.get("delta").and_then(Value::as_str).unwrap_or("");
+                blocks.push(serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": open_block,
+                    "delta": { "type": "text_delta", "text": delta },
+                }));
+            }
+            "response.function_call_arguments.delta" => {
+                let delta = event.get("delta").and_then(Value::as_str).unwrap_or("");
+                blocks.push(serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": open_block,
+                    "delta": { "type": "input_json_delta", "partial_json": delta },
+                }));
+            }
+            "response.output_item.done" => {
+                let item_type = event
+                    .pointer("/item/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if (item_type == "message" || item_type == "function_call") && open_block >= 0 {
+                    blocks.push(
+                        serde_json::json!({ "type": "content_block_stop", "index": open_block }),
+                    );
+                    open_block = -1;
+                }
+            }
+            "response.completed" => {
+                let usage = event.pointer("/response/usage");
+                input_tokens = usage
+                    .and_then(|u| u.get("input_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                output_tokens = usage
+                    .and_then(|u| u.get("output_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+            }
+            "response.failed" | "response.incomplete" => {
+                let details = event
+                    .pointer("/response/status_details")
+                    .map(Value::to_string)
+                    .unwrap_or_else(|| "no details".to_owned());
+                return Err(format!("zed cloud turn failed: {details}"));
+            }
+            // created/in_progress, content_part.*, output_text.done and the
+            // reasoning lifecycle carry nothing the engine needs.
+            _ => {}
+        }
+    }
+
+    let stop_reason = if tool_used { "tool_use" } else { "end_turn" };
+    let mut stream_events = vec![serde_json::json!({
+        "type": "message_start",
+        "message": {
+            "id": message_id,
+            "type": "message",
+            "role": "assistant",
+            "model": model,
+            "content": [],
+            "stop_reason": Value::Null,
+            "stop_sequence": Value::Null,
+            "usage": { "input_tokens": input_tokens, "output_tokens": 0 },
+        },
+    })];
+    stream_events.extend(blocks);
+    stream_events.push(serde_json::json!({
+        "type": "message_delta",
+        "delta": { "stop_reason": stop_reason, "stop_sequence": Value::Null },
+        "usage": { "output_tokens": output_tokens },
+    }));
+    stream_events.push(serde_json::json!({ "type": "message_stop" }));
+    Ok(stream_events)
 }
 
 fn should_refresh(status: u16, headers: &reqwest::header::HeaderMap) -> bool {
@@ -560,18 +894,149 @@ mod tests {
     }
 
     #[test]
-    fn bridge_refuses_non_claude_models() {
+    fn bridge_refuses_unsupported_model_families() {
         let cloud = FakeCloud::spawn(vec![]);
         let _cloud = cloud_guard(cloud.base_url.clone());
         let bridge = shared_bridge(r#"{"userId":"9","accessToken":"acc2"}"#).unwrap();
         let response = post_to_bridge(
             &bridge,
             &serde_json::json!({
-                "model": "gpt-5.6-sol", "messages": []
+                "model": "gemini-3-pro", "messages": []
             }),
         );
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
-        assert!(response.contains("claude"));
+        assert!(response.contains("claude and gpt"));
+    }
+
+    #[test]
+    fn bridge_translates_gpt_models_to_responses_api() {
+        let completed = serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "usage": {"input_tokens": 11, "output_tokens": 42},
+                "output": []
+            }
+        });
+        // request 1: /client/llm_tokens, request 2: /completions
+        let cloud = FakeCloud::spawn(vec![
+            http_ok_json(r#"{"token":"llm-tok"}"#),
+            ndjson_bare_ok(&[
+                serde_json::json!({"type": "response.created", "response": {"id": "resp_1"}}),
+                serde_json::json!({"type": "response.in_progress"}),
+                serde_json::json!({"type": "response.output_item.added", "item": {"type": "reasoning"}}),
+                serde_json::json!({"type": "response.output_item.done", "item": {"type": "reasoning"}}),
+                serde_json::json!({"type": "response.output_item.added", "item": {"type": "message", "role": "assistant"}}),
+                serde_json::json!({"type": "response.output_text.delta", "delta": "OK"}),
+                serde_json::json!({"type": "response.output_text.done"}),
+                serde_json::json!({"type": "response.output_item.done", "item": {"type": "message"}}),
+                completed,
+            ]),
+        ]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let bridge = shared_bridge(r#"{"userId":"21","accessToken":"acc"}"#).unwrap();
+        let response = post_to_bridge(
+            &bridge,
+            &serde_json::json!({
+                "model": "gpt-5-nano", "max_tokens": 32, "stream": true,
+                "system": "Be terse.",
+                "messages": [{ "role": "user", "content": "Say OK" }]
+            }),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains("event: message_start"), "{response}");
+        assert!(response.contains("text_delta"), "{response}");
+        assert!(response.contains("\"input_tokens\":11"), "{response}");
+        assert!(response.contains("\"output_tokens\":42"), "{response}");
+        assert!(response.contains("event: message_stop"), "{response}");
+
+        let (line, cloud_body) = cloud.requests.lock().unwrap()[1].clone();
+        assert!(line.starts_with("POST /completions"), "{line}");
+        let sent: Value = serde_json::from_str(&cloud_body).unwrap();
+        assert_eq!(sent["provider"], "open_ai");
+        assert_eq!(sent["model"], "gpt-5-nano");
+        assert_eq!(sent["provider_request"]["model"], "gpt-5-nano");
+        assert_eq!(sent["provider_request"]["instructions"], "Be terse.");
+        assert_eq!(sent["provider_request"]["max_output_tokens"], 32);
+        assert_eq!(sent["provider_request"]["store"], false);
+        let first = &sent["provider_request"]["input"][0];
+        assert_eq!(first["type"], "message");
+        assert_eq!(first["role"], "user");
+        assert_eq!(
+            first["content"][0],
+            serde_json::json!({ "type": "input_text", "text": "Say OK" })
+        );
+    }
+
+    #[test]
+    fn anthropic_tools_map_to_responses_functions() {
+        let request = anthropic_to_responses(&serde_json::json!({
+            "model": "gpt-5-nano",
+            "max_tokens": 64,
+            "tools": [{
+                "name": "read_file",
+                "description": "Read a file",
+                "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}
+            }],
+            "tool_choice": {"type": "auto"},
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "list src"}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {"path": "src/lib.rs"}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": "fn main() {}"}]}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            request["tools"][0],
+            serde_json::json!({
+                "type": "function",
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
+                "strict": false,
+            })
+        );
+        assert_eq!(request["tool_choice"], "auto");
+        let input = request["input"].as_array().unwrap();
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "tu_1");
+        assert_eq!(input[1]["name"], "read_file");
+        assert_eq!(input[2]["type"], "function_call_output");
+        assert_eq!(input[2]["call_id"], "tu_1");
+        assert_eq!(input[2]["output"], "fn main() {}");
+    }
+
+    #[test]
+    fn responses_tool_call_becomes_anthropic_tool_use() {
+        let events = vec![
+            serde_json::json!({"type": "response.created", "response": {"id": "resp_2"}}),
+            serde_json::json!({"type": "response.output_item.added", "item": {"type": "function_call", "call_id": "tu_9", "name": "read_file"}}),
+            serde_json::json!({"type": "response.function_call_arguments.delta", "delta": "{\"path\":"}),
+            serde_json::json!({"type": "response.function_call_arguments.delta", "delta": "\"src/lib.rs\"}"}),
+            serde_json::json!({"type": "response.output_item.done", "item": {"type": "function_call"}}),
+            serde_json::json!({"type": "response.completed", "response": {"usage": {"input_tokens": 5, "output_tokens": 7}}}),
+        ];
+        let out = responses_to_anthropic(&events, "gpt-5-nano").unwrap();
+        let kinds: Vec<&str> = out.iter().map(|e| e["type"].as_str().unwrap()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "message_start",
+                "content_block_start",
+                "content_block_delta",
+                "content_block_delta",
+                "content_block_stop",
+                "message_delta",
+                "message_stop",
+            ]
+        );
+        assert_eq!(out[1]["content_block"]["type"], "tool_use");
+        assert_eq!(out[1]["content_block"]["id"], "tu_9");
+        assert_eq!(out[2]["delta"]["type"], "input_json_delta");
+        assert_eq!(out[4]["index"], 0);
+        assert_eq!(out[5]["delta"]["stop_reason"], "tool_use");
+        assert_eq!(out[5]["usage"]["output_tokens"], 7);
     }
 
     #[test]

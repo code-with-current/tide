@@ -255,9 +255,9 @@ pub(crate) const TIDE_PRESETS: &[TidePreset] = &[
         recommended: &["claude-sonnet-5", "claude-sonnet-4-6"],
         alt_url_openai: None,
         alt_url_anthropic: None,
-        // v1: only Claude models speak Anthropic format natively on Zed's
-        // cloud — the Models step dims everything else.
-        routing: Some(("zed", &["claude"])),
+        // Claude speaks Anthropic natively on the cloud; GPT models get
+        // Responses API translation in the bridge. Everything else dims.
+        routing: Some(("zed", &["claude", "gpt"])),
     },
 ];
 

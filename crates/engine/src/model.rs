@@ -177,7 +177,7 @@ impl EngineModel {
                     .map_err(EngineError::Config)?;
                 let client = rig_core::providers::anthropic::Client::builder()
                     .api_key("zed-bridge".to_owned()) // bridge ignores it
-                    .base_url(bridge.base_url().to_owned())
+                    .base_url(bridge.base_url())
                     .http_client(http)
                     .build()
                     .map_err(|e| EngineError::Config(e.to_string()))?;
