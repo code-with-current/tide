@@ -2476,9 +2476,9 @@ tide.add_provider:
 tide.model_count:
   en: "%{count} models"
 tide.key_stored:
-  en: key stored
+  en: Key stored
 tide.no_key:
-  en: no key
+  en: No key
 tide.enable:
   en: Enable
 tide.disable:
@@ -2588,6 +2588,8 @@ tide.selected_models:
   en: Selected models
 tide.edit:
   en: Edit
+tide.delete:
+  en: Delete
 tide.empty_title:
   en: Add your first provider
 tide.empty_description:

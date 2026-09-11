@@ -264,6 +264,17 @@ pub(crate) const TIDE_PRESETS: &[TidePreset] = &[
 /// Resolve a provider's brand mark by its base URL — alt URLs included, so a
 /// provider added via its other-protocol endpoint keeps its brand — falling
 /// back to the wire-protocol mark exactly like tide's ProviderLogo.
+/// Short display label for a stored `api_style` value — pills read better
+/// as proper nouns than the raw wire strings.
+pub(crate) fn api_style_label(api_style: &str) -> String {
+    match api_style {
+        "openai" => "OpenAI".to_owned(),
+        "anthropic" => "Anthropic".to_owned(),
+        "zed" => "Zed".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 pub(crate) fn brand_for(base_url: &str, api_style: &str) -> (&'static str, &'static str) {
     if let Some(preset) = TIDE_PRESETS.iter().find(|preset| {
         preset.base_url == base_url

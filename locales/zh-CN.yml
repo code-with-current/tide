@@ -1515,6 +1515,7 @@ tide.section_other_endpoint: 其他端点
 tide.no_models: 未找到模型
 tide.selected_models: 已选模型
 tide.edit: 编辑
+tide.delete: 删除
 tide.empty_title: 添加你的第一个提供商
 tide.empty_description: 连接 OpenAI 或 Anthropic 兼容的端点，并从其模型中选择。
 tide.style_anthropic_or_openai: "%{style} 协议"

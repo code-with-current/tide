@@ -5,6 +5,7 @@ use crate::ui::card::{
     CardButton, CardRow, card_body, card_body_flush, card_pill, card_rows, settings_group_head,
     settings_page_header,
 };
+use crate::ui::menu::{MenuItem, context_menu};
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 /// The Memory page lays its cards out in two side-by-side sections — it
@@ -2424,19 +2425,19 @@ impl Tide {
             let provider_id_toggle = provider.id.clone();
             let enabled = provider.enabled;
             let has_key = provider.has_key;
-            let summary = format!(
-                "{} · {} · {}",
-                provider.base_url,
-                provider.api_style,
-                tr!("tide.model_count", count = provider.models.len()),
+            let brand =
+                crate::app::tide_providers::brand_for(&provider.base_url, &provider.api_style);
+            let menu = self.menu_handle(
+                SharedString::from(format!("tide-provider-menu-{}", provider.id)),
+                cx,
             );
             body = body.child(
                 div()
                     .id(SharedString::from(format!("tide-provider-{}", provider.id)))
                     .pl(px(12.0))
-                    .pr(px(10.0))
+                    .pr(px(8.0))
                     .py(px(8.0))
-                    .rounded(px(9.0))
+                    .rounded(px(10.0))
                     .border_1()
                     .border_color(theme.border)
                     .flex()
@@ -2444,19 +2445,7 @@ impl Tide {
                     .gap(px(10.0))
                     .when(!enabled, |element| element.opacity(0.55))
                     .child(crate::ui::brand::brand_tile(
-                        crate::app::tide_providers::brand_for(
-                            &provider.base_url,
-                            &provider.api_style,
-                        )
-                        .0,
-                        crate::app::tide_providers::brand_for(
-                            &provider.base_url,
-                            &provider.api_style,
-                        )
-                        .1,
-                        28.0,
-                        14.0,
-                        &theme,
+                        brand.0, brand.1, 28.0, 14.0, &theme,
                     ))
                     .child(
                         div()
@@ -2464,111 +2453,121 @@ impl Tide {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .gap(px(2.0))
+                            .gap(px(5.0))
                             .child(
                                 div()
                                     .flex()
-                                    .items_baseline()
+                                    .items_center()
                                     .gap(px(8.0))
                                     .child(
                                         div()
                                             .text_size(sp(13.0))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme.text)
+                                            .truncate()
                                             .child(provider.name.clone()),
                                     )
-                                    .child(
-                                        div()
-                                            .text_size(sp(11.0))
-                                            .text_color(if has_key {
-                                                theme.text_tertiary
-                                            } else {
-                                                theme.danger
-                                            })
-                                            .child(tr!(if has_key {
-                                                "tide.key_stored"
-                                            } else {
-                                                "tide.no_key"
-                                            })),
-                                    ),
+                                    .child(card_pill(
+                                        &theme,
+                                        tr!(if has_key {
+                                            "tide.key_stored"
+                                        } else {
+                                            "tide.no_key"
+                                        }),
+                                        if has_key { theme.success } else { theme.danger },
+                                    )),
                             )
                             .child(
                                 div()
-                                    .text_size(sp(11.5))
-                                    .text_color(theme.text_tertiary)
-                                    .truncate()
-                                    .child(summary),
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(card_pill(
+                                        &theme,
+                                        crate::app::tide_providers::api_style_label(
+                                            &provider.api_style,
+                                        ),
+                                        theme.text_secondary,
+                                    ))
+                                    .child(card_pill(
+                                        &theme,
+                                        tr!("tide.model_count", count = provider.models.len()),
+                                        theme.text_tertiary,
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(sp(11.0))
+                                            .text_color(theme.text_tertiary)
+                                            .truncate()
+                                            .child(provider.base_url.clone()),
+                                    ),
                             ),
                     )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "tide-provider-edit-{}",
-                                provider.id
-                            )))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .px(px(10.0))
-                            .h(px(26.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .flex()
-                            .items_center()
-                            .cursor_default()
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_secondary)
-                            .hover(|element| element.bg(theme.overlay))
-                            .child(tr!("tide.edit"))
-                            .on_click(cx.listener({
-                                let provider_id = provider_id.clone();
-                                move |this, _, window, cx| {
-                                    this.tide_open_edit_wizard(provider_id.clone(), window, cx);
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "tide-provider-toggle-{}",
-                                provider.id
-                            )))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .px(px(10.0))
-                            .h(px(26.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .flex()
-                            .items_center()
-                            .cursor_default()
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_secondary)
-                            .hover(|element| element.bg(theme.overlay))
-                            .child(tr!(if enabled {
-                                "tide.disable"
-                            } else {
-                                "tide.enable"
-                            }))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.tide_toggle_enabled(provider_id_toggle.clone(), !enabled);
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        icon_button(
-                            SharedString::from(format!("tide-provider-delete-{}", provider.id)),
-                            "icons/trash.svg",
+                    .child({
+                        let trigger = icon_button(
+                            SharedString::from(format!("tide-provider-menu-{}", provider.id)),
+                            "icons/ellipsis.svg",
                             theme,
                         )
                         .tab_index(0)
                         .focus_visible(|style| style.border_color(theme.accent))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.tide_delete_provider(provider_id.clone());
-                            cx.notify();
-                        })),
-                    ),
+                        .on_click({
+                            let menu = menu.clone();
+                            move |_, window, cx| menu.open_context_menu(window, cx)
+                        });
+                        let tide = cx.entity();
+                        let id_edit = provider_id.clone();
+                        let id_toggle = provider_id_toggle.clone();
+                        let id_delete = provider.id.clone();
+                        context_menu(
+                            trigger,
+                            SharedString::from(format!("tide-provider-menu-card-{}", provider.id)),
+                            &menu,
+                            move |_| {
+                                vec![
+                                    MenuItem::new(tr!("tide.edit"), {
+                                        let tide = tide.clone();
+                                        let id = id_edit.clone();
+                                        move |window, cx| {
+                                            tide.update(cx, |this, cx| {
+                                                this.tide_open_edit_wizard(id.clone(), window, cx);
+                                            });
+                                        }
+                                    }),
+                                    MenuItem::new(
+                                        tr!(if enabled {
+                                            "tide.disable"
+                                        } else {
+                                            "tide.enable"
+                                        }),
+                                        {
+                                            let tide = tide.clone();
+                                            let id = id_toggle.clone();
+                                            move |_, cx| {
+                                                tide.update(cx, |this, cx| {
+                                                    this.tide_toggle_enabled(id.clone(), !enabled);
+                                                    cx.notify();
+                                                });
+                                            }
+                                        },
+                                    ),
+                                    MenuItem::Separator,
+                                    MenuItem::new(tr!("tide.delete"), {
+                                        let tide = tide.clone();
+                                        let id = id_delete.clone();
+                                        move |_, cx| {
+                                            tide.update(cx, |this, cx| {
+                                                this.tide_delete_provider(id.clone());
+                                                cx.notify();
+                                            });
+                                        }
+                                    }),
+                                ]
+                            },
+                        )
+                    }),
             );
         }
         if let Some(error) = &self.tide.error {

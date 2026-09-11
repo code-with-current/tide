@@ -1567,6 +1567,7 @@ tide.section_other_endpoint: その他のエンドポイント
 tide.no_models: モデルが見つかりません
 tide.selected_models: 選択したモデル
 tide.edit: 編集
+tide.delete: 削除
 tide.empty_title: 最初のプロバイダーを追加
 tide.empty_description: OpenAI または Anthropic 互換のエンドポイントに接続し、そのモデルから選択します。
 tide.style_anthropic_or_openai: "%{style} プロトコル"
