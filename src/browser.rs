@@ -3403,15 +3403,18 @@ impl BrowserView {
     }
 
     /// The device-mode toggle: a toolbar button like the others, but with an
-    /// on state — the icon lights up while the viewport is pinned.
+    /// on state — the icon lights up while the viewport is pinned. Like
+    /// reload, it needs a page: there is nothing to pin a viewport around on
+    /// the start page.
     fn device_toggle_button(&self, theme: Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let enabled = self.navigation_requested;
         let tint = if self.device_mode.is_some() {
             theme.accent
         } else {
             theme.text_secondary
         };
         let tooltip = tr!("browser.device_mode");
-        div()
+        let base = div()
             .id("browser-device-toggle")
             .size(px(26.0))
             .rounded(px(6.0))
@@ -3419,8 +3422,11 @@ impl BrowserView {
             .flex()
             .items_center()
             .justify_center()
-            .cursor_default()
-            .hover(|element| element.bg(theme.overlay))
+            .cursor_default();
+        if !enabled {
+            return base.child(icon("icons/laptop.svg", 14.0, theme.text_ghost));
+        }
+        base.hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(icon("icons/laptop.svg", 14.0, tint))
             .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
