@@ -985,7 +985,7 @@ fn affected_workspaces_for(
 pub fn update_config(
     patch: &protocol::RagConfigPatchWire,
 ) -> Result<Vec<protocol::RagAffectedWorkspaceWire>, String> {
-    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     let rag = cfg
         .rag
@@ -1171,7 +1171,7 @@ pub fn endpoint_add(
     }
 
     let encrypted = store::secrets::encrypt_stored(api_key).map_err(|e| e.to_string())?;
-    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     let rag = cfg
         .rag
@@ -1202,7 +1202,7 @@ pub fn endpoint_add(
 /// Replace an endpoint's key, re-probing so a dead key can't silently
 /// become the plan's embedder.
 pub fn endpoint_set_key(endpoint_id: &str, api_key: &str) -> Result<(), String> {
-    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     let rag = cfg
         .rag
@@ -1231,7 +1231,7 @@ pub fn endpoint_set_key(endpoint_id: &str, api_key: &str) -> Result<(), String> 
 pub fn endpoint_remove(
     endpoint_id: &str,
 ) -> Result<Vec<protocol::RagAffectedWorkspaceWire>, String> {
-    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     let affected = affected_workspaces_by_id(endpoint_id);
     if let Some(rag) = cfg.rag.as_mut() {
@@ -1313,7 +1313,7 @@ pub fn prewarm() {
 /// is on its way.
 pub fn enable_project(project_id: &str) -> Result<(), String> {
     ensure_configured_model_downloaded();
-    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     cfg.rag_enabled_workspaces
         .get_or_insert_with(Vec::new)
@@ -1324,7 +1324,7 @@ pub fn enable_project(project_id: &str) -> Result<(), String> {
 
 /// Disable RAG for a project (config write only; the index stays).
 pub fn disable_project(project_id: &str) -> Result<(), String> {
-    let _guard = crate::TIDE_CONFIG_LOCK.lock().unwrap();
+    let _guard = store::CONFIG_WRITE_LOCK.lock().unwrap();
     let mut cfg = store::config::load(&config_path()).map_err(|e| e.to_string())?;
     if let Some(ids) = cfg.rag_enabled_workspaces.as_mut() {
         ids.retain(|id| id != project_id);

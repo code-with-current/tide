@@ -7,50 +7,22 @@ license = "GPL-3.0-only"
 readme = "README.md"
 
 [dependencies]
-agent-client-protocol = "2.0.0"
 anyhow = "1.0"
-base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-crossbeam-channel = "0.5"
 dirs = "6.0"
-nucleo-matcher = "0.3"
 parking_lot = "0.12"
 rust-i18n = "4"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
-serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
 serde_json = "1.0"
 smol = "2"
-toml = "0.8"
-trash = "5.2.6"
-url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 protocol = { path = "../protocol" }
 transport = { path = "../transport" }
 host = { path = "../host" }
-# Tide provider system (engine + tools + config/keychain), linked in-process.
-# The three vendored crates live in crates/{engine,tools,store} (moved 2026-08-31,
-# renamed from tide-* on 2026-09-03); tide remains the upstream — re-vendor deliberately.
-futures = "0.3"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
-engine = { path = "../engine" }
-tools = { path = "../tools" }
+runtime = { path = "../runtime" }
 store = { path = "../store" }
-rag = { path = "../rag" }
-git2 = "0.21"
-reqwest = { version = "0.13", features = ["json", "form", "blocking"] }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-foundation = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSArray",
-    "NSLocale",
-    "NSString",
-] }
 
 [dev-dependencies]
+base64 = "0.22"
 client = { path = "../client" }
 tempfile = "3"

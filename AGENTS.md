@@ -19,10 +19,14 @@ in Rust with GPUI. GPL-3.0-only.
   request dispatch, subscriptions, event sequencing, and bounded replay.
   Depends on `protocol`; runtime implementations stay behind its `Backend`
   trait.
-- `crates/backend` — daemon-side runtime: session drivers, provider discovery,
-  and request orchestration. Depends on `transport` to implement its
-  request handler, but contains no socket, persistence implementation, or UI
-  code.
+- `crates/backend` — request orchestration: implements the transport
+  `Backend` trait and composes runtime, host, store, usage, and workspace
+  services. Contains no socket, persistence implementation, provider engine,
+  or UI code.
+- `crates/runtime` — provider session drivers, provider/model discovery,
+  skills, session-owned action jobs, model-assisted Git operations,
+  session-history adapters, and the bridge to local RAG. No WebSocket server,
+  request dispatcher, or UI code.
 - `crates/host` — process environment, Git and worktree operations,
   checkpoint refs, terminal sessions, computer-use helpers, built-in command
   installation, and projectless workspace services. No provider runtime,
@@ -70,9 +74,9 @@ in Rust with GPUI. GPL-3.0-only.
 ## Checks
 
 - `cargo fmt --package tide --package protocol --package client --package
-  transport --package host --package backend -- --check`, then `cargo check`
-  and `cargo test --locked` before opening a PR. Run the focused checks for
-  your change first.
+  transport --package host --package runtime --package backend --package
+  store -- --check`, then `cargo check` and `cargo test --locked` before
+  opening a PR. Run the focused checks for your change first.
 - `gpui`'s `test-support` feature is dev-dependency-only: it makes every
   `notify` pay a full frame, so it must never leak into a shipping build.
 

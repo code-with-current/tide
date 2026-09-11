@@ -17,24 +17,11 @@ macro_rules! tr {
     };
 }
 
-pub mod action_jobs;
-pub mod composer_complete;
 pub mod daemon;
-pub mod driver;
-mod frontmatter;
-pub mod git_commit;
-pub mod git_identities;
 pub mod i18n;
 pub mod identity;
 pub mod model;
-pub mod model_metadata;
-pub mod or_catalog;
-pub mod rag;
-pub mod session_history;
-pub mod skills;
 pub mod theme;
-pub mod tide_providers;
-pub mod tide_zed;
 pub mod usage;
 pub mod usage_history;
 pub mod usage_report;
@@ -44,6 +31,10 @@ mod terminal_adapter;
 pub use host::{
     checkpoint, command_env, computer_use, git_branch, git_panel, kb_commands, projectless,
     terminal, worktree,
+};
+pub use runtime::{
+    action_jobs, composer_complete, driver, frontmatter, git_commit, git_identities,
+    model_metadata, or_catalog, rag, session_history, skills, tide_providers, tide_zed,
 };
 pub use settings::{DaemonSettings, DaemonSettingsStore};
 pub use store::{attachments, blob_store, persistence, settings};
@@ -55,16 +46,3 @@ pub use transport::{
 };
 pub use transport::{Backend, EventSink, ServerCore, ServerOptions, serve, serve_with_core};
 pub use workspace::{WorkspaceOperation, WorkspaceResult};
-
-/// One lock for every test that redirects `TIDE_DATA_DIR`: the env var is
-/// process-global, so two modules' tests setting it under separate locks
-/// race each other and a config read lands against the wrong data dir.
-#[cfg(test)]
-pub(crate) static TIDE_DIR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Serializes read-modify-write cycles on tide's shared `config.json`
-/// (provider management, git attribution, background models, and the
-/// post-refresh model-enrichment pass) — the pass runs on its own thread,
-/// and an interleaved load/save pair would write the other's change back
-/// out of existence.
-pub(crate) static TIDE_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

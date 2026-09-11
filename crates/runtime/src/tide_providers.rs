@@ -18,12 +18,12 @@ fn config_path() -> std::path::PathBuf {
 
 /// One locked load → edit → save cycle on tide's config. The wizard's
 /// mutating commands and the background enrichment pass share
-/// [`crate::TIDE_CONFIG_LOCK`] with the other config writers so neither can
+/// [`store::CONFIG_WRITE_LOCK`] with the other config writers so neither can
 /// drop the other's write.
 fn edit_config(
     edit: impl FnOnce(&mut store::config::Config) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
-    let _guard = crate::TIDE_CONFIG_LOCK
+    let _guard = store::CONFIG_WRITE_LOCK
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let mut config = store::config::load(&config_path())
@@ -261,7 +261,7 @@ fn ensure_catalogs() {
                 // only the stale baseline was loaded (a model newer than the
                 // bundled snapshot probes as "none", then heals here).
                 {
-                    let _guard = crate::TIDE_CONFIG_LOCK
+                    let _guard = store::CONFIG_WRITE_LOCK
                         .lock()
                         .unwrap_or_else(|poison| poison.into_inner());
                     crate::model_metadata::enrich_existing_models();

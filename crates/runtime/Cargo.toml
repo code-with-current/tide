@@ -1,0 +1,38 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Provider sessions, model discovery, skills, and RAG integration for Tide"
+license = "GPL-3.0-only"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+crossbeam-channel = "0.5"
+dirs = "6.0"
+engine = { path = "../engine" }
+futures = "0.3"
+git2 = "0.21"
+host = { path = "../host" }
+nucleo-matcher = "0.3"
+protocol = { path = "../protocol" }
+rag = { path = "../rag" }
+reqwest = { version = "0.13", features = ["json", "form", "blocking"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
+serde_json = "1.0"
+smol = "2"
+store = { path = "../store" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+tools = { path = "../tools" }
+trash = "5.2.6"
+uuid = { version = "1.18", features = ["v4", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

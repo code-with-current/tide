@@ -1,11 +1,11 @@
 # backend
 
-`backend` is Tide's daemon-only runtime. It contains the native session
-drivers, provider discovery and model metadata, and request orchestration.
-Machine-level Git, worktree, checkpoint, process, terminal, and Computer Use
-services live in [`host`](../host), persistence lives in [`store`](../store),
-and the serializable contract lives in [`protocol`](../protocol). This crate
-contains no desktop transport or UI.
+`backend` is Tide's request-orchestration crate. It implements the transport
+request handler and composes provider sessions from [`runtime`](../runtime),
+machine-level services from [`host`](../host), persistence from
+[`store`](../store), and the serializable contract from
+[`protocol`](../protocol). It contains no socket server, persistence
+implementation, provider engine, or UI.
 
 The authenticated WebSocket, request idempotency, subscriptions, event
 sequencing, and bounded replay journal live in [`transport`](../transport).

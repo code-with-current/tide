@@ -16,6 +16,7 @@ members = [
     "crates/rag",
     "crates/transport",
     "crates/host",
+    "crates/runtime",
 ]
 default-members = [
     ".",
@@ -28,6 +29,7 @@ default-members = [
     "crates/rag",
     "crates/transport",
     "crates/host",
+    "crates/runtime",
 ]
 resolver = "2"
 

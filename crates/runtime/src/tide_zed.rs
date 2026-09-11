@@ -185,7 +185,7 @@ fn keychain_account(stdout: &str, stderr: &str) -> anyhow::Result<String> {
 /// file the item under the bare `zed.dev` host instead of the URL-scheme
 /// name, so both are tried and the best diagnosis is kept for the error.
 #[cfg(target_os = "macos")]
-pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
+pub fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
     let mut diagnosis = "security produced no diagnostic".to_owned();
     for server in ["https://zed.dev", "zed.dev"] {
         let output = std::process::Command::new("/usr/bin/security")
@@ -216,7 +216,7 @@ pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
+pub fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
     bail!("automatic Zed sign-in needs the macOS keychain — paste the credentials manually")
 }
 

@@ -14,6 +14,10 @@ pub mod usage;
 
 pub use settings::DaemonSettings;
 
+/// Serializes read-modify-write cycles on Tide's shared `config.json` across
+/// runtime and host-facing configuration services.
+pub static CONFIG_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // The task store predates this crate extraction and refers to shared domain
 // modules through its crate root. Keep those aliases private: callers should
 // use `protocol` for domain types and `store` only for persistence APIs.

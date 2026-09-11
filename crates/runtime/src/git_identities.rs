@@ -466,7 +466,7 @@ impl GitIdentities {
     ) -> Result<(), String> {
         // The lock spans load → mutate → save: this file is shared with
         // provider management and the background enrichment pass.
-        let _guard = crate::TIDE_CONFIG_LOCK
+        let _guard = store::CONFIG_WRITE_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let mut cfg = self.load_config()?;
@@ -938,7 +938,7 @@ pub fn update_attribution(
     git_co_authored: Option<bool>,
     git_attribution_mode: Option<String>,
 ) -> Result<(), String> {
-    let _guard = crate::TIDE_CONFIG_LOCK
+    let _guard = store::CONFIG_WRITE_LOCK
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let path = store::paths::config_path();
@@ -964,7 +964,7 @@ pub fn set_background_model(
     task: &str,
     model: Option<store::config::ModelRef>,
 ) -> Result<(), String> {
-    let _guard = crate::TIDE_CONFIG_LOCK
+    let _guard = store::CONFIG_WRITE_LOCK
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let path = store::paths::config_path();

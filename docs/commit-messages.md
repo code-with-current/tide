@@ -3,7 +3,7 @@
 When the commit dialog's message box is left empty, Tide generates the subject
 line itself: a one-shot completion through the tide engine — no session, no
 tools, low thinking — summarizing the diff. The daemon owns this in
-[`git_commit.rs`](../crates/backend/src/git_commit.rs) (`generate_message_tide`
+[`git_commit.rs`](../crates/runtime/src/git_commit.rs) (`generate_message_tide`
 via `tide_one_shot`); the same one-shot shape powers session-title generation
 ([titles.md](titles.md)).
 
@@ -38,7 +38,7 @@ Use imperative mood and at most 72 characters. Do not call tools; all context is
 ## Normalizing the output
 
 Models disagree about what "one line and nothing else" means — preamble lines,
-code fences, ANSI. [`normalize_message`](../crates/backend/src/git_commit.rs)
+code fences, ANSI. [`normalize_message`](../crates/runtime/src/git_commit.rs)
 strips ANSI, drops empty lines, bare ``` fences and `[tool]` / `[thinking]`
 lines, takes the **last** surviving line, then strips backticks, a
 `Commit message:` / `Commit subject:` prefix, wrapping quotes and a trailing
@@ -48,4 +48,4 @@ period, and caps at 200 characters. Empty means failure, reported as
 Taking the last line makes the result a subject only: a model that returns a
 subject, blank line, and body has the body discarded.
 
-[commit_prompt]: ../crates/backend/src/git_commit.rs
+[commit_prompt]: ../crates/runtime/src/git_commit.rs

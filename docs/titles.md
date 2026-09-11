@@ -35,7 +35,7 @@ The tide driver generates titles in-process. A cheap one-shot completion
 through [`crates/engine`](../crates/engine) summarizes the session's first
 exchange; General Settings' **title model** override
 (`titleModel`, resolved by `background_model_override("title")` in
-[driver/tide.rs](../crates/backend/src/driver/tide.rs)) picks the model, and a
+[driver/tide.rs](../crates/runtime/src/driver/tide.rs)) picks the model, and a
 stale override falls through to the session's own selection instead of failing
 generation. The result reaches the UI as
 `DriverEvent::AutoTitleUpdated(Option<String>)`, consumed once in

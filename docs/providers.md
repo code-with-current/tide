@@ -11,7 +11,7 @@ key, models).
 
 The agent loop runs in the daemon process — there is no child CLI to launch
 or supervise. `driver::start_local` constructs `TideDriver`
-([driver/tide.rs](../crates/backend/src/driver/tide.rs)), which drives
+([driver/tide.rs](../crates/runtime/src/driver/tide.rs)), which drives
 [`crates/engine`](../crates/engine) (rig-backed streaming with the provider
 quirk layer) over a toolset from [`crates/tools`](../crates/tools)
 (permissions, hooks, computer use, background shells, dispatched sub-agents).
@@ -24,7 +24,7 @@ Steering injects into the running turn's next step boundary
 (`TurnInbox::push_step`); a prompt while idle queues a follow-up turn
 (`push_turn`). Every tool event normalizes into one `ActivityItem`
 (`Reasoning | Command | FileChange | Search | Plan | Tool`) via
-[driver/activity.rs](../crates/backend/src/driver/activity.rs).
+[driver/activity.rs](../crates/runtime/src/driver/activity.rs).
 
 ## Resume and identity
 
