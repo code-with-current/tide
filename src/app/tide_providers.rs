@@ -242,6 +242,23 @@ pub(crate) const TIDE_PRESETS: &[TidePreset] = &[
         alt_url_anthropic: None,
         routing: None,
     },
+    TidePreset {
+        id: "zed",
+        accent: "#0f0f0f",
+        logo: "logo-zed",
+        name: "Zed",
+        group: "aggregator",
+        api_style: "zed",
+        base_url: "https://cloud.zed.dev",
+        requires_key: false,
+        key_placeholder: "",
+        recommended: &["claude-sonnet-5", "claude-sonnet-4-6"],
+        alt_url_openai: None,
+        alt_url_anthropic: None,
+        // v1: only Claude models speak Anthropic format natively on Zed's
+        // cloud — the Models step dims everything else.
+        routing: Some(("zed", &["claude"])),
+    },
 ];
 
 /// Resolve a provider's brand mark by its base URL — alt URLs included, so a
@@ -263,6 +280,9 @@ pub(crate) fn brand_for(base_url: &str, api_style: &str) -> (&'static str, &'sta
 }
 
 pub(crate) fn preset_added(providers: &[TideProviderWire], preset: &TidePreset) -> bool {
+    if preset.id == "zed" {
+        return false; // org-scoped duplicates are legitimate
+    }
     providers
         .iter()
         .any(|provider| provider.base_url == preset.base_url)
@@ -274,6 +294,7 @@ pub(crate) enum TideOpsEvent {
     Models(Result<Vec<TideModelWire>, String>),
     Protocol(Result<String, String>),
     Connection(Result<(), String>),
+    ZedSignIn(Result<client::tide::TideZedSignInResult, String>),
 }
 
 pub(crate) struct TideProviderPanel {
@@ -307,6 +328,41 @@ pub(crate) enum TideWizardStep {
     Review,
 }
 
+/// Connect-step state for the zed preset: sign-in result + org choice,
+/// or manual paste fields. The credential blob is assembled on demand.
+pub(crate) struct WizardZedState {
+    pub sign_in: Option<client::tide::TideZedSignInResult>,
+    /// `None` before sign-in; after sign-in, defaults to the account's
+    /// default_organization_id (rendered as the selected radio).
+    pub organization_id: Option<String>,
+    pub manual_user_id: Entity<TextInput>,
+    pub manual_access_token: Entity<TextInput>,
+    pub busy: bool,
+}
+
+impl WizardZedState {
+    pub fn credential_blob(&self, cx: &App) -> Option<String> {
+        if let Some(sign_in) = &self.sign_in {
+            let blob = serde_json::json!({
+                "userId": sign_in.user_id,
+                "accessToken": sign_in.access_token,
+                "organizationId": self.organization_id,
+            });
+            return serde_json::to_string(&blob).ok();
+        }
+        let user_id = self.manual_user_id.read(cx).content().trim().to_owned();
+        let access_token = self.manual_access_token.read(cx).content().trim().to_owned();
+        if user_id.is_empty() || access_token.is_empty() {
+            return None;
+        }
+        serde_json::to_string(&serde_json::json!({
+            "userId": user_id,
+            "accessToken": access_token,
+        }))
+        .ok()
+    }
+}
+
 /// The wizard, mirroring tide's wizard-reducer: one step enum, preset-derived
 /// prefill, and the connection test gating Connect → Models.
 pub(crate) struct TideWizard {
@@ -314,6 +370,8 @@ pub(crate) struct TideWizard {
     /// `Some` when the wizard edits an existing provider instead of adding.
     pub edit_provider_id: Option<String>,
     pub preset: Option<&'static TidePreset>,
+    /// Connect-step state when the preset is `zed`.
+    pub zed: Option<WizardZedState>,
     pub name: Entity<TextInput>,
     pub api_key: Entity<TextInput>,
     pub base_url: Entity<TextInput>,
@@ -364,6 +422,13 @@ impl TideWizard {
             step: TideWizardStep::Choose,
             edit_provider_id: None,
             preset,
+            zed: preset.filter(|preset| preset.id == "zed").map(|_| WizardZedState {
+                sign_in: None,
+                organization_id: None,
+                manual_user_id: cx.new(|cx| TextInput::new(window, cx).clear_on_escape().placeholder("605409")),
+                manual_access_token: cx.new(|cx| TextInput::new(window, cx).clear_on_escape()),
+                busy: false,
+            }),
             name,
             api_key,
             base_url,
@@ -405,5 +470,13 @@ impl TideWizard {
         self.preset
             .and_then(|preset| preset.routing)
             .and_then(|(style, needles)| (style == self.api_style).then_some(needles))
+    }
+
+    pub fn is_zed(&self) -> bool {
+        self.zed.is_some()
+    }
+
+    pub fn zed_blob(&self, cx: &App) -> Option<String> {
+        self.zed.as_ref()?.credential_blob(cx)
     }
 }
