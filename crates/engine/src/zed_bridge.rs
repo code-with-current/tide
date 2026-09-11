@@ -135,6 +135,16 @@ impl ZedBridge {
 
     fn handle(&self, mut stream: TcpStream) -> std::io::Result<()> {
         let (_start, _headers, body) = read_request(&mut stream)?;
+        if std::env::var("TIDE_ZED_DEBUG").is_ok() {
+            if let Ok(mut dump) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(std::env::temp_dir().join("zed-bridge-dump.log"))
+            {
+                use std::io::Write as _;
+                let _ = writeln!(dump, "=== request ===\n{}", String::from_utf8_lossy(&body));
+            }
+        }
         let Ok(mut provider_request) = serde_json::from_slice::<Value>(&body) else {
             return write_plain_error(&mut stream, "400 Bad Request", "request body was not JSON");
         };
@@ -718,6 +728,20 @@ fn write_plain_error(stream: &mut TcpStream, status: &str, message: &str) -> std
     )
 }
 
+/// One POST through the bridge listener; shared by the fake-cloud tests and
+/// the live smoke.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn post_to_bridge(bridge: &ZedBridge, body: &Value) -> String {
+    let mut stream =
+        std::net::TcpStream::connect(bridge.base_url().trim_start_matches("http://")).unwrap();
+    let body = body.to_string();
+    use std::io::{Read, Write as _};
+    write!(stream, "POST /v1/messages HTTP/1.1\r\nHost: zb\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -812,17 +836,6 @@ mod tests {
             body.len(),
             body
         )
-    }
-
-    fn post_to_bridge(bridge: &ZedBridge, body: &Value) -> String {
-        let mut stream =
-            std::net::TcpStream::connect(bridge.base_url().trim_start_matches("http://")).unwrap();
-        let body = body.to_string();
-        use std::io::{Read, Write as _};
-        write!(stream, "POST /v1/messages HTTP/1.1\r\nHost: zb\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        response
     }
 
     #[test]
@@ -1084,5 +1097,91 @@ mod tests {
         );
         assert!(response.starts_with("HTTP/1.1 502"), "{response}");
         assert!(response.contains("sign-in expired"), "{response}");
+    }
+}
+
+#[cfg(test)]
+mod live_smoke {
+    use super::*;
+    use crate::HistoryMessage;
+
+    /// Live round trip against the real cloud. Ignored by default:
+    /// `cargo test -p engine zed_live_smoke -- --ignored --nocapture`
+    /// Reads the signed-in Zed desktop credentials from the login keychain.
+    #[test]
+    #[ignore]
+    fn zed_live_smoke() {
+        let output = std::process::Command::new("/usr/bin/security")
+            .args(["find-internet-password", "-g", "-s", "https://zed.dev"])
+            .output()
+            .expect("keychain");
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        // Same shapes the backend's reader parses: "acct" attribute line and
+        // a `password: "…"` line (stdout vs stderr varies by macOS build).
+        let mut attribute = stdout.lines().chain(stderr.lines());
+        let user_id = attribute
+            .clone()
+            .find(|line| line.contains("\"acct\""))
+            .and_then(|line| line.split('"').nth(3))
+            .unwrap_or_default()
+            .to_owned();
+        let token = attribute
+            .find_map(|line| line.strip_prefix("password: "))
+            .map(|line| line.trim().trim_matches('"').to_owned())
+            .unwrap_or_default();
+        set_cloud_url_for_tests(None);
+        let blob = serde_json::json!({
+            "userId": user_id,
+            "accessToken": token,
+            "organizationId": std::env::var("ZED_ORG").ok(),
+        })
+        .to_string();
+        let bridge = shared_bridge(&blob).expect("bridge");
+        let _ = &bridge;
+        let model_id = std::env::var("ZED_MODEL").unwrap_or_else(|_| "claude-sonnet-5".into());
+        let config = crate::EngineModelConfig {
+            api_style: crate::ProviderApiStyle::Zed,
+            base_url: "https://cloud.zed.dev".into(),
+            api_key: blob,
+            model_id,
+            provider_id: "p_live".into(),
+            max_output_tokens: None,
+        };
+        let model = crate::EngineModel::from_config(&config).expect("model");
+        let request = crate::TurnRequest {
+            messages: vec![HistoryMessage::user_text("Reply with exactly: OK")],
+            tools: vec![],
+            params: crate::TurnParams {
+                system: Some("Be terse.".into()),
+                thinking_level: std::env::var("ZED_THINK")
+                    .map(|level| match level.as_str() {
+                        "min" => crate::quirk::ThinkingLevel::Minimal,
+                        "low" => crate::quirk::ThinkingLevel::Low,
+                        "med" => crate::quirk::ThinkingLevel::Medium,
+                        "high" => crate::quirk::ThinkingLevel::High,
+                        _ => crate::quirk::ThinkingLevel::High,
+                    })
+                    .unwrap_or(crate::quirk::ThinkingLevel::Off),
+                reasoning_contracts: Vec::new(),
+                model_max_output_tokens: None,
+            },
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let events = rt.block_on(async {
+            use futures::StreamExt;
+            crate::stream_step(model, request).collect::<Vec<_>>().await
+        });
+        for event in &events {
+            match event {
+                Ok(crate::events::EngineEvent::Delta { text }) => println!("text: {text:?}"),
+                Ok(other) => println!("event: {other:?}"),
+                Err(error) => println!("ERROR: {error}"),
+            }
+        }
+        let has_text = events.iter().any(|event| {
+            matches!(event, Ok(crate::events::EngineEvent::Delta { text }) if !text.is_empty())
+        });
+        assert!(has_text, "no text deltas in {} events", events.len());
     }
 }
