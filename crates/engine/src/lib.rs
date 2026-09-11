@@ -26,6 +26,7 @@ pub mod history;
 pub mod model;
 pub mod quirk;
 pub mod turn;
+pub(crate) mod zed_bridge;
 
 #[cfg(test)]
 pub(crate) mod fixture_tests;
