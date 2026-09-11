@@ -855,7 +855,7 @@ impl Backend for TideBackend {
             }),
             Command::OpenTerminal { cwd, cols, rows } => {
                 ensure_shell_environment();
-                let terminal = crate::terminal::DaemonTerminal::open(&cwd, cols, rows, events)?;
+                let terminal = crate::terminal_adapter::open(&cwd, cols, rows, events)?;
                 let previous = self
                     .terminals
                     .lock()

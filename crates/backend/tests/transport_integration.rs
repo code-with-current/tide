@@ -1,16 +1,14 @@
 #![cfg(unix)]
 
 use std::net::TcpListener;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use backend::daemon::TideBackend;
-use backend::terminal::DaemonTerminal;
-use backend::{Backend, Command, EventSink, Request, ResponsePayload, ServerOptions, serve};
+use backend::{Backend, Command, ResponsePayload, ServerOptions, serve};
 use base64::Engine as _;
 use client::DaemonClient;
-use crossbeam_channel::{Sender, bounded};
 use protocol::model::{AgentSession, Project, ProviderKind};
 use store::persistence::StateStore;
 use store::settings::DaemonSettingsStore;
@@ -91,48 +89,6 @@ fn stale_projection_cannot_resurrect_a_removed_session() {
 
     stale_client.shutdown();
     server.join().unwrap();
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-struct SinkCaptureBackend {
-    sink: Mutex<Option<Sender<EventSink>>>,
-}
-
-impl Backend for SinkCaptureBackend {
-    fn handle(&self, _request: Request, events: EventSink) -> anyhow::Result<ResponsePayload> {
-        if let Some(sink) = self.sink.lock().unwrap().take() {
-            let _ = sink.send(events);
-        }
-        Ok(ResponsePayload::Ack)
-    }
-}
-
-#[test]
-fn dropping_an_idle_terminal_does_not_wait_for_output() {
-    let root = std::env::temp_dir().join(format!("tide-terminal-{}", Uuid::new_v4()));
-    std::fs::create_dir_all(&root).unwrap();
-    let (sink_tx, sink_rx) = bounded(1);
-    let (address, server) = start_server(Arc::new(SinkCaptureBackend {
-        sink: Mutex::new(Some(sink_tx)),
-    }));
-    let client = DaemonClient::connect(&address, "secret".into()).unwrap();
-    client
-        .request(Uuid::new_v4(), Uuid::new_v4(), Command::GetSettings)
-        .unwrap();
-    let events = sink_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    client.shutdown();
-    server.join().unwrap();
-
-    let terminal = DaemonTerminal::open(&root, 80, 24, events).unwrap();
-    let (dropped, finished) = bounded(1);
-    std::thread::spawn(move || {
-        drop(terminal);
-        let _ = dropped.send(());
-    });
-    assert!(
-        finished.recv_timeout(Duration::from_secs(3)).is_ok(),
-        "dropping an idle daemon terminal blocked on its output reader"
-    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

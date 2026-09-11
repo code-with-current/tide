@@ -33,12 +33,11 @@ bun run dev
 ```
 
 On macOS the watcher builds and signs `target/debug/Tide Debug.app`; on Linux
-and Windows it builds `target/debug/tide`. In both cases the provider daemon remains an
-external `target/debug/tide-debug-daemon`: provider-only edits rebuild and
-hot-swap that process without relaunching the app, while desktop edits rebuild
-and relaunch the app normally. Keep that watcher running while you work. Do
-not start a second watcher or manually relaunch the debug app. Press `Ctrl-C`,
-or quit the app, to stop it.
+and Windows it builds `target/debug/tide`. The backend and its WebSocket
+listener run in-process, so changes under `src/` or `crates/` rebuild and
+relaunch that debug app. Keep the watcher running while you work. Do not start
+a second watcher or manually relaunch the debug app. Press `Ctrl-C`, or quit
+the app, to stop it.
 
 The embedded browser and experimental computer-use integration are currently
 macOS-only. On Linux and Windows the browser reports that it is unavailable,

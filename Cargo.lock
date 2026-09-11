@@ -742,7 +742,6 @@ name = "backend"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
- "alacritty_terminal",
  "anyhow",
  "base64 0.22.1",
  "chrono",
@@ -3781,15 +3780,19 @@ dependencies = [
 name = "host"
 version = "0.1.0"
 dependencies = [
+ "alacritty_terminal",
  "anyhow",
+ "base64 0.22.1",
  "dirs",
  "git2",
  "libc",
+ "parking_lot",
  "protocol",
  "serde",
  "serde_json",
  "store",
  "tempfile",
+ "tools",
  "uuid",
 ]
 

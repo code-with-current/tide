@@ -10,8 +10,16 @@ use std::path::Path;
 #[cfg(not(unix))]
 use anyhow::bail;
 
-#[cfg(not(unix))]
-use crate::EventSink;
+use protocol::WireDriverEvent;
+
+/// Transport-neutral destination for terminal lifecycle and output events.
+///
+/// The backend supplies an adapter around its WebSocket event sink; keeping
+/// that adapter out of this crate lets terminal ownership remain a host
+/// concern without coupling it to a particular transport.
+pub trait TerminalEventSink: Send + 'static {
+    fn send_ephemeral(&self, event: WireDriverEvent) -> anyhow::Result<()>;
+}
 
 #[cfg(unix)]
 mod platform {
@@ -28,7 +36,9 @@ mod platform {
     use parking_lot::Mutex;
     use serde_json::json;
 
-    use crate::{EventSink, WireDriverEvent};
+    use protocol::WireDriverEvent;
+
+    use super::TerminalEventSink;
 
     const CELL_WIDTH: u16 = 8;
     const CELL_HEIGHT: u16 = 16;
@@ -46,7 +56,7 @@ mod platform {
             cwd: &std::path::Path,
             cols: u16,
             rows: u16,
-            events: EventSink,
+            events: Box<dyn TerminalEventSink>,
         ) -> anyhow::Result<Self> {
             if !cwd.is_dir() {
                 bail!(
@@ -210,7 +220,12 @@ pub struct DaemonTerminal;
 
 #[cfg(not(unix))]
 impl DaemonTerminal {
-    pub fn open(_cwd: &Path, _cols: u16, _rows: u16, _events: EventSink) -> anyhow::Result<Self> {
+    pub fn open(
+        _cwd: &Path,
+        _cols: u16,
+        _rows: u16,
+        _events: Box<dyn TerminalEventSink>,
+    ) -> anyhow::Result<Self> {
         bail!("daemon terminals are not supported on this platform")
     }
 
@@ -219,4 +234,35 @@ impl DaemonTerminal {
     }
 
     pub fn resize(&self, _cols: u16, _rows: u16) {}
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::{DaemonTerminal, TerminalEventSink};
+
+    struct NoopSink;
+
+    impl TerminalEventSink for NoopSink {
+        fn send_ephemeral(&self, _event: protocol::WireDriverEvent) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn dropping_an_idle_terminal_does_not_wait_for_output() {
+        let root = tempfile::tempdir().unwrap();
+        let terminal = DaemonTerminal::open(root.path(), 80, 24, Box::new(NoopSink)).unwrap();
+        let (dropped, finished) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            drop(terminal);
+            let _ = dropped.send(());
+        });
+        assert!(
+            finished.recv_timeout(Duration::from_secs(3)).is_ok(),
+            "dropping an idle daemon terminal blocked on its output reader"
+        );
+    }
 }

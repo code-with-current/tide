@@ -106,9 +106,9 @@ pub fn probe_permissions(prompt: bool) -> anyhow::Result<ComputerPermissions> {
     if !response.success {
         bail!(
             "{}",
-            response
-                .error
-                .unwrap_or_else(|| tr!("computer_use.permission_check_failed"))
+            response.error.unwrap_or_else(|| protocol::i18n::translate(
+                "computer_use.permission_check_failed"
+            ))
         );
     }
     Ok(response.permissions.unwrap_or_default())
@@ -458,7 +458,7 @@ pub fn skill_root_path() -> anyhow::Result<PathBuf> {
 }
 
 fn host_executable_path() -> anyhow::Result<PathBuf> {
-    std::env::var_os(crate::APP_EXECUTABLE_ENV)
+    std::env::var_os(protocol::APP_EXECUTABLE_ENV)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
         .map(Ok)

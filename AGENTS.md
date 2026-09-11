@@ -20,11 +20,12 @@ in Rust with GPUI. GPL-3.0-only.
   Depends on `protocol`; runtime implementations stay behind its `Backend`
   trait.
 - `crates/backend` — daemon-side runtime: session drivers, provider discovery,
-  orchestration, and computer use. Depends on `transport` to implement its
+  and request orchestration. Depends on `transport` to implement its
   request handler, but contains no socket, persistence implementation, or UI
   code.
 - `crates/host` — process environment, Git and worktree operations,
-  checkpoint refs, and projectless workspace services. No provider runtime,
+  checkpoint refs, terminal sessions, computer-use helpers, built-in command
+  installation, and projectless workspace services. No provider runtime,
   socket, or UI code.
 - `crates/engine` — the ONLY crate permitted to depend on `rig` (churn
   firewall, pinned rig_core). Keep provider churn inside it.
