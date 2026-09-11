@@ -171,9 +171,12 @@ pub(crate) fn zed_users_me(
         .send()
         .context("could not reach cloud.zed.dev/client/users/me")?;
     let status = response.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        bail!("Zed rejected the credentials (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry");
+    }
     let text = response.text().context("could not read the users/me response")?;
     if !status.is_success() {
-        bail!("Zed rejected the credentials (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry");
+        bail!("users/me endpoint HTTP {status}");
     }
     serde_json::from_str(&text).context("the users/me response was not JSON")
 }
@@ -191,27 +194,44 @@ mod tests {
         *TEST_CLOUD_URL.lock().unwrap_or_else(|p| p.into_inner()) = url;
     }
 
+    /// Points the global cloud URL override at `url` until the guard drops.
+    /// The held lock serializes FakeCloud tests, and Drop clears the
+    /// override even when a failing assertion unwinds, so a later test
+    /// can't inherit a URL pointing at a dead listener.
+    struct CloudGuard(std::sync::MutexGuard<'static, ()>);
+
+    fn cloud_guard(url: String) -> CloudGuard {
+        let guard = CloudGuard(CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner()));
+        set_cloud(Some(url));
+        guard
+    }
+
+    impl Drop for CloudGuard {
+        fn drop(&mut self) {
+            set_cloud(None);
+        }
+    }
+
     /// A fake cloud.zed.dev: serves one canned raw HTTP response per
     /// connection (in order) and captures each request's start line,
-    /// headers (minus content-length), and body.
+    /// headers (minus content-length), and body. When the canned responses
+    /// run out the accept thread exits and closes the listener, so an
+    /// overrun request fails immediately instead of stalling until the
+    /// client timeout.
     struct FakeCloud {
         base_url: String,
         requests: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>, // (start line + headers, body)
-        _keep: std::sync::Arc<std::net::TcpListener>,
     }
 
     impl FakeCloud {
         fn spawn(responses: Vec<String>) -> Self {
-            let listener = std::sync::Arc::new(
-                std::net::TcpListener::bind("127.0.0.1:0").unwrap(),
-            );
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
             let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let srv_requests = requests.clone();
-            let srv_listener = listener.clone();
             std::thread::spawn(move || {
                 let mut remaining = responses.into_iter();
-                for stream in srv_listener.incoming().flatten() {
+                for stream in listener.incoming().flatten() {
                     let Some(response) = remaining.next() else { break };
                     let mut stream = stream;
                     use std::io::{BufRead, BufReader, Read, Write};
@@ -245,7 +265,7 @@ mod tests {
                     stream.write_all(response.as_bytes()).unwrap();
                 }
             });
-            Self { base_url, requests, _keep: listener }
+            Self { base_url, requests }
         }
     }
 
@@ -347,9 +367,8 @@ mod tests {
 
     #[test]
     fn llm_token_sends_custom_auth_and_org_body() {
-        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"llm-tok"}"#)]);
-        set_cloud(Some(cloud.base_url.clone()));
+        let _cloud = cloud_guard(cloud.base_url.clone());
         let cred = ZedCredential {
             user_id: "605409".into(),
             access_token: "acc".into(),
@@ -364,16 +383,14 @@ mod tests {
             "custom auth scheme, got: {captured}"
         );
         assert!(body.contains(r#""organization_id":"org_9""#), "{body}");
-        set_cloud(None);
     }
 
     #[test]
     fn llm_token_rejects_dead_credentials() {
-        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let denied =
             "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
         let cloud = FakeCloud::spawn(vec![denied]);
-        set_cloud(Some(cloud.base_url.clone()));
+        let _cloud = cloud_guard(cloud.base_url.clone());
         let err = zed_llm_token(&http_client().unwrap(), &ZedCredential {
             user_id: "1".into(),
             access_token: "dead".into(),
@@ -382,19 +399,17 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.to_lowercase().contains("sign"), "{err}");
-        set_cloud(None);
     }
 
     #[test]
     fn models_uses_bearer_llm_token() {
-        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let cloud = FakeCloud::spawn(vec![
             http_ok_json(r#"{"token":"llm-tok"}"#),
             http_ok_json(
                 r#"{"models":[{"id":"claude-sonnet-5","max_token_count":1000,"supports_thinking":true}]}"#,
             ),
         ]);
-        set_cloud(Some(cloud.base_url.clone()));
+        let _cloud = cloud_guard(cloud.base_url.clone());
         let models = zed_models(&http_client().unwrap(), &ZedCredential {
             user_id: "1".into(),
             access_token: "a".into(),
@@ -410,16 +425,14 @@ mod tests {
         assert!(captured[1].contains("GET /models"), "{captured:?}");
         assert!(captured[1].contains("authorization: Bearer llm-tok"), "{captured:?}");
         assert!(captured[1].contains("x-zed-client-supports-x-ai: true"), "{captured:?}");
-        set_cloud(None);
     }
 
     #[test]
     fn models_surfaces_http_error_body() {
-        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let denied =
             "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
         let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"T"}"#), denied]);
-        set_cloud(Some(cloud.base_url.clone()));
+        let _cloud = cloud_guard(cloud.base_url.clone());
         let err = zed_models(&http_client().unwrap(), &ZedCredential {
             user_id: "1".into(),
             access_token: "a".into(),
@@ -428,14 +441,12 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("401"), "{err}");
-        set_cloud(None);
     }
 
     #[test]
     fn users_me_uses_custom_auth() {
-        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"id":"605409"}"#)]);
-        set_cloud(Some(cloud.base_url.clone()));
+        let _cloud = cloud_guard(cloud.base_url.clone());
         let cred = ZedCredential {
             user_id: "605409".into(),
             access_token: "acc".into(),
@@ -449,6 +460,43 @@ mod tests {
             captured.contains("authorization: 605409 acc"),
             "custom auth scheme, got: {captured}"
         );
-        set_cloud(None);
+    }
+
+    #[test]
+    fn users_me_splits_auth_failures_from_outages() {
+        let cloud = FakeCloud::spawn(vec![
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_owned(),
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_owned(),
+        ]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let cred =
+            ZedCredential { user_id: "1".into(), access_token: "a".into(), organization_id: None };
+        let auth_err = zed_users_me(&http_client().unwrap(), &cred).unwrap_err().to_string();
+        assert!(auth_err.to_lowercase().contains("sign in to zed"), "{auth_err}");
+        // A 5xx outage is a plain HTTP error, not a sign-in prompt.
+        let outage_err = zed_users_me(&http_client().unwrap(), &cred).unwrap_err().to_string();
+        assert!(outage_err.contains("500"), "{outage_err}");
+        assert!(!outage_err.to_lowercase().contains("sign"), "{outage_err}");
+    }
+
+    #[test]
+    fn fake_cloud_overrun_fails_fast() {
+        let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"one"}"#)]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let cred =
+            ZedCredential { user_id: "1".into(), access_token: "a".into(), organization_id: None };
+        let client = http_client().unwrap();
+        assert_eq!(zed_llm_token(&client, &cred).unwrap(), "one");
+        // A request beyond the canned responses must fail immediately (the
+        // listener closes when they run out), not stall for the 20s timeout.
+        let start = std::time::Instant::now();
+        assert!(zed_llm_token(&client, &cred).is_err());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "overrun stalled for {:?}",
+            start.elapsed()
+        );
     }
 }
