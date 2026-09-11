@@ -237,7 +237,8 @@ impl Tide {
                 &scrollbar_handle,
                 &self.transcript_scrollbar,
             ))
-            .child(self.transcript_selection_input())
+            .child(self.transcript_selection_input(cx))
+            .child(self.selection_menu_card(cx))
             .children(search_bar)
             .into_any_element()
     }
@@ -311,22 +312,56 @@ impl Tide {
     /// A zero-size canvas that installs the frame's selection mouse listeners.
     /// One set for the whole transcript: the registry already knows every
     /// painted element's geometry, so per-element listeners would be redundant.
-    fn transcript_selection_input(&self) -> impl IntoElement {
+    fn transcript_selection_input(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let selection = self.transcript_selection.clone();
+        let selection_menu = self.selection_menu_handler(cx);
         canvas(
             |_, _, _| (),
-            move |_, _, window, _| md::render::install_selection_input(window, &selection),
+            move |_, _, window, _| {
+                md::render::install_selection_input(
+                    window,
+                    &selection,
+                    Some(selection_menu.clone()),
+                )
+            },
         )
         .absolute()
         .w(px(0.0))
         .h(px(0.0))
     }
 
+    /// Fired when a transcript drag selection completes: opens the selection
+    /// menu at the mouse-up position. The handle lives in the shared `menus`
+    /// map so the pane root can mount its card, and opening preserves the
+    /// composer's visual focus like every other menu.
+    pub(super) fn selection_menu_handler(&self, cx: &mut App) -> md::render::SelectionMenuHandler {
+        let handle = self.menu_handle("transcript-selection", cx);
+        Rc::new(move |_text, position, window, cx| {
+            handle.open_at_position(position, window, cx);
+        })
+    }
+
+    /// The selection menu card the pane roots mount above the rows. Items
+    /// read the live selection when the card opens, so Copy always matches
+    /// the wash.
+    pub(super) fn selection_menu_card(&self, cx: &mut App) -> AnyElement {
+        let handle = self.menu_handle("transcript-selection", cx);
+        let selection = self.transcript_selection.clone();
+        floating_menu(&handle, "transcript-selection-menu", move |_| {
+            let Some(text) = selection.selection.borrow().selected_text() else {
+                return Vec::new();
+            };
+            vec![MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+            })]
+        })
+    }
+
     pub(super) fn toast_selection_input(&self) -> impl IntoElement {
         let selection = self.toast_selection.clone();
         canvas(
             |_, _, _| (),
-            move |_, _, window, _| md::render::install_selection_input(window, &selection),
+            move |_, _, window, _| md::render::install_selection_input(window, &selection, None),
         )
         .absolute()
         .w(px(0.0))

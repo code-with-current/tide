@@ -114,6 +114,14 @@ const MAX_TOKEN_LIMIT_CONTINUES: u32 = 8;
 /// without letting a wide tool batch saturate the blocking pool.
 const MAX_PARALLEL_TOOL_CALLS: usize = 4;
 
+/// Tool steps a live todo list may go untouched before the loop reminds
+/// the model to refresh it (see [`todo_stale_prompt`]). Counted per turn;
+/// a step containing a `todo_write` call resets the count.
+const TODO_NUDGE_AFTER_STEPS: usize = 6;
+/// Todo reminders one turn may inject. A model that ignores every nudge
+/// must not stuff its history with repeats for the rest of its budget.
+const MAX_TODO_NUDGES: usize = 3;
+
 /// How many dispatched children stay resumable per session. Oldest
 /// non-running children are evicted when the cap is exceeded.
 const MAX_CHILDREN: usize = 8;
@@ -524,6 +532,9 @@ impl Drop for TideDriver {
         self.inner
             .jobs
             .close_session(&self.inner.session_id, JOB_CLOSE_GRACE);
+        // Release the session's job-runner connection (its jobs were just
+        // cancelled through the hooks above); the runner idle-exits.
+        tools::job_runner::close_session(&self.inner.session_id);
     }
 }
 
@@ -569,6 +580,16 @@ fn wire_background_jobs(inner: &Arc<Inner>) {
         );
     }
     spawn_output_pusher(inner);
+
+    // Adopt any jobs a previous app process left running under this
+    // session (the runner survives the app; the file-backed output makes
+    // the tail replayable). A first-ever session with no runner out there
+    // adopts nothing and spawns nothing.
+    match tools::job_runner::reattach_session(&inner.session_id) {
+        Ok(0) => {}
+        Ok(count) => eprintln!("job runner: adopted {count} orphaned job(s)"),
+        Err(error) => eprintln!("job runner reattach failed: {error}"),
+    }
 }
 
 /// The session-lifetime `OutputDelta` pusher: polls each live stream job's
@@ -1862,6 +1883,16 @@ fn output_limit_prompt() -> String {
         .to_owned()
 }
 
+/// The nudge that refreshes a stale todo list: the turn has run several
+/// tool steps without a `todo_write` while a list exists, so the planning
+/// instruction deep in the system prompt has fallen out of the model's
+/// attention. Model-facing, and delivered as a user message like the
+/// other nudges above.
+fn todo_stale_prompt() -> String {
+    "Your todo list is stale — it has not been updated for several steps. Call todo_write now with the complete current list, marking finished items completed and keeping exactly one in_progress, then continue."
+        .to_owned()
+}
+
 /// Emit one step's usage breakdown with its timing attached. Called once
 /// per step, after the step's tool phase has run (tool_ms measured) or
 /// immediately when the step ended without tool calls (tool_ms zero), so
@@ -1958,6 +1989,16 @@ async fn drive_engine(
     // [`MAX_TOKEN_LIMIT_CONTINUES`]); once exhausted, the cut lands as the
     // turn error instead of another nudge.
     let mut token_continues = 0u32;
+    // Todo-staleness tracking: tool steps since the last `todo_write` call
+    // and reminders spent this turn. The key mirrors ToolContext's — a
+    // dispatched child keys its own list apart from the parent's (see
+    // spawn_gated_call).
+    let todo_key = dispatch
+        .child_id
+        .clone()
+        .unwrap_or_else(|| inner.session_id.clone());
+    let mut steps_since_todo_write = 0usize;
+    let mut todo_nudges = 0usize;
     'steps: for step in 0..max_steps {
         steps_run = step + 1;
         if abort.is_aborted() {
@@ -2385,6 +2426,30 @@ async fn drive_engine(
                             Some(tools_started.elapsed().as_millis() as u64),
                         );
                     }
+                }
+                // Todo staleness rides after the results message: a step
+                // that wrote the todo resets the count, any other tool step
+                // ages it, and a list left stale long enough earns one
+                // reminder before the next model step (the same
+                // user-message channel as the wrap-up and token-limit
+                // nudges). Capped so an ignoring model cannot fill its
+                // history with repeats.
+                if pending_calls
+                    .iter()
+                    .any(|(_, tool_name, _)| tool_name == "todo_write")
+                {
+                    steps_since_todo_write = 0;
+                } else {
+                    steps_since_todo_write += 1;
+                }
+                if !abort.is_aborted()
+                    && steps_since_todo_write >= TODO_NUDGE_AFTER_STEPS
+                    && todo_nudges < MAX_TODO_NUDGES
+                    && !inner.todo_state.todos(&todo_key).is_empty()
+                {
+                    steps_since_todo_write = 0;
+                    todo_nudges += 1;
+                    push_user_message(history, HistoryMessage::user_text(todo_stale_prompt()));
                 }
                 continue 'steps;
             }
@@ -2848,9 +2913,11 @@ impl PreparedDispatch {
 
     /// The background work item's enrichment, emitted once after the
     /// registry's own `Starting`/`Running` upserts: the fields the registry
-    /// snapshot cannot carry (agent, origin call, the task header). Title
-    /// stays with the registry's label (the task); `background: true`,
-    /// `can_stop`, and `control_id = child_id` already ride those upserts.
+    /// snapshot cannot carry (agent, origin call, the task header). The
+    /// title stays with the registry's label — the dispatch's short title,
+    /// so the jobs list and panel headline the label instead of the
+    /// multi-line task; `background: true`, `can_stop`, and
+    /// `control_id = child_id` already ride those upserts.
     fn emit_background_item(&self, inner: &Arc<Inner>, tool_call_id: &str, model: &str) {
         let mut item = BackgroundWorkItem::new(
             BackgroundWorkKind::Subagent,
@@ -3016,7 +3083,10 @@ fn spawn_dispatch_background(
         kind: BackgroundWorkKind::Subagent,
         prefix: "sub",
         id: Some(child_id.clone()),
-        label: prepared.task.clone(),
+        // The label is the work item's title everywhere the job surfaces
+        // (jobs popup, panel headers, job_list) — the short dispatch title,
+        // not the multi-line task, which rides `item.task` instead.
+        label: prepared.item_title.clone(),
         owner_session: session,
         output_limit: None,
         streams: false,
@@ -3057,6 +3127,19 @@ fn spawn_dispatch_background(
                 "started background job {child_id}. The sub-agent keeps running in its own context and streams into the Agents panel; you are notified in-session when it completes — read its report then with job_output(job_id: \"{child_id}\"), and stop it early with job_kill(job_id: \"{child_id}\"). Do not poll or sleep on it.\n\ndispatchId: {child_id}"
             ))
             .with_meta("backgrounded")
+            // The structured payload renders the timeline's agent card
+            // (agent chip · title · task · dispatch id) on the ack too —
+            // without it the card falls back to raw output text with no
+            // agent or title. The report stays empty until the child
+            // settles; the panel carries the live stream instead.
+            .with_display(ToolDisplay::Agent {
+                agent_name: prepared.agent_name.clone(),
+                title: Some(prepared.item_title.clone()),
+                task: prepared.task.clone(),
+                report: String::new(),
+                reasoning: None,
+                dispatch_id: Some(prepared.child_id.clone()),
+            })
         }
         // Admission or identity rejection: nothing runs, and the child's
         // warm state reverts to a settled, resumable record with the task
@@ -6201,6 +6284,158 @@ mod background_fixtures {
         }
     }
 
+    // ── the todo staleness nudge ────────────────────────────────────────
+
+    /// Put one live todo item in the driver's store under the session key.
+    fn seed_todo(fixture: &FixtureDriver) {
+        fixture.driver.inner.todo_state.set(
+            &fixture.driver.inner.session_id,
+            vec![tools::TodoItem {
+                content: "multi-step work".to_owned(),
+                status: tools::TodoStatus::InProgress,
+                priority: None,
+            }],
+        );
+    }
+
+    /// Reminder texts across every captured request, in arrival order.
+    fn todo_nudge_texts(requests: &[serde_json::Value]) -> Vec<String> {
+        requests
+            .iter()
+            .flat_map(|request| user_messages(request))
+            .filter(|text| text.contains("todo list is stale"))
+            .collect()
+    }
+
+    /// Reminder pushes: the requests whose NEWEST user message is a nudge.
+    /// A nudge stays in history, so every later request replays it in its
+    /// full message list — only the newest message identifies a fresh
+    /// push.
+    fn todo_nudge_pushes(requests: &[serde_json::Value]) -> Vec<String> {
+        requests
+            .iter()
+            .filter_map(|request| user_messages(request).pop())
+            .filter(|text| text.contains("todo list is stale"))
+            .collect()
+    }
+
+    fn stale_bash_step(i: usize) -> String {
+        sse_tool_use(
+            "t1",
+            "bash",
+            &serde_json::json!({ "command": format!("echo step-{i}") }),
+        )
+    }
+
+    /// Stale tool steps earn a reminder every [`TODO_NUDGE_AFTER_STEPS`]
+    /// steps, each riding after that step's results as its own user
+    /// message — and the per-turn cap silences the nudge once spent, so a
+    /// model that ignores every reminder does not stuff its history with
+    /// repeats.
+    #[test]
+    fn stale_todo_list_earns_nudges_then_the_cap_silences_them() {
+        let _guard = TIDE_DIR_TEST_LOCK.lock().unwrap();
+        // One stale step past the last earnable nudge: the cap binds before
+        // the script ends, proving it stops the reminders.
+        let stale_steps = TODO_NUDGE_AFTER_STEPS * (MAX_TODO_NUDGES + 1);
+        let mut responses = Vec::new();
+        for i in 0..stale_steps {
+            responses.push(stale_bash_step(i));
+        }
+        responses.push(sse_text("All done."));
+
+        let fixture = FixtureDriver::start(responses);
+        seed_todo(&fixture);
+        fixture.driver.prompt("work through it".to_owned());
+        let total_requests = stale_steps + 1;
+        wait_for_requests(&fixture, total_requests, Duration::from_secs(20));
+        wait_for_idle(&fixture);
+
+        let requests = fixture.mock.captured();
+        let pushes = todo_nudge_pushes(&requests);
+        assert_eq!(
+            pushes.len(),
+            MAX_TODO_NUDGES,
+            "nudge cadence and cap: {pushes:?}"
+        );
+        // The first reminder lands on the request after the threshold-th
+        // stale step, as the newest user message (following that step's
+        // tool results).
+        let first_nudged = user_messages(&requests[TODO_NUDGE_AFTER_STEPS]);
+        let newest = first_nudged.last().expect("the nudged request has input");
+        assert!(newest.contains("todo list is stale"), "nudge: {newest}");
+        // The final stale stretch — past the cap — carries no fourth nudge.
+        let tail = user_messages(&requests[total_requests - 1]);
+        assert!(
+            !tail.last().unwrap().contains("todo list is stale"),
+            "cap exceeded: {tail:?}"
+        );
+
+        let events = drain_all(&fixture.events);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. })),
+            "the turn completes cleanly: {events:?}"
+        );
+        teardown(fixture);
+    }
+
+    /// A step that calls `todo_write` resets the staleness count: five
+    /// stale steps, a write, five more stale steps — never over the
+    /// threshold, so no reminder ever lands.
+    #[test]
+    fn a_todo_write_resets_the_staleness_count() {
+        let _guard = TIDE_DIR_TEST_LOCK.lock().unwrap();
+        let half = TODO_NUDGE_AFTER_STEPS - 1;
+        let mut responses = Vec::new();
+        for i in 0..half {
+            responses.push(stale_bash_step(i));
+        }
+        responses.push(sse_tool_use(
+            "t1",
+            "todo_write",
+            &serde_json::json!({"todos": [{"content": "only", "status": "in_progress"}]}),
+        ));
+        for i in 0..half {
+            responses.push(stale_bash_step(i));
+        }
+        responses.push(sse_text("All done."));
+
+        let fixture = FixtureDriver::start(responses);
+        seed_todo(&fixture);
+        fixture.driver.prompt("work through it".to_owned());
+        wait_for_requests(&fixture, 2 * half + 1, Duration::from_secs(20));
+        wait_for_idle(&fixture);
+
+        let nudges = todo_nudge_texts(&fixture.mock.captured());
+        assert!(nudges.is_empty(), "unexpected nudges: {nudges:?}");
+        teardown(fixture);
+    }
+
+    /// The nudge refreshes an existing list; a session that never wrote
+    /// one has nothing to refresh and the loop stays silent through the
+    /// same all-stale script.
+    #[test]
+    fn an_empty_todo_list_never_nudges() {
+        let _guard = TIDE_DIR_TEST_LOCK.lock().unwrap();
+        let stale_steps = TODO_NUDGE_AFTER_STEPS * (MAX_TODO_NUDGES + 1);
+        let mut responses = Vec::new();
+        for i in 0..stale_steps {
+            responses.push(stale_bash_step(i));
+        }
+        responses.push(sse_text("All done."));
+
+        let fixture = FixtureDriver::start(responses);
+        fixture.driver.prompt("work through it".to_owned());
+        wait_for_requests(&fixture, stale_steps + 1, Duration::from_secs(20));
+        wait_for_idle(&fixture);
+
+        let nudges = todo_nudge_texts(&fixture.mock.captured());
+        assert!(nudges.is_empty(), "unexpected nudges: {nudges:?}");
+        teardown(fixture);
+    }
+
     // ── Stage 4: the wake ───────────────────────────────────────────────
 
     /// A background bash started, the turn ends, the job settles → a NEW
@@ -6788,7 +7023,9 @@ mod background_fixtures {
             background.control_id.as_deref(),
             Some(background_id.as_str())
         );
-        assert_eq!(background.title, "background exploration");
+        // The registry label is the short dispatch title — the jobs list
+        // headlines it, not the multi-line task (which rides `task`).
+        assert_eq!(background.title, "Bg explore");
         // The background child settles on its own — its report lands in the
         // job's output (the notice path itself is covered by the dedicated
         // test above).

@@ -492,7 +492,11 @@ mod tests {
         let reader = FakeReader::default();
         let out = run_read_session(Path::new("/ws"), "nope", None, None, Some(&reader));
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert!(out.output.starts_with("Unknown session id: nope."), "{}", out.output);
+        assert!(
+            out.output.starts_with("Unknown session id: nope."),
+            "{}",
+            out.output
+        );
         assert!(out.output.contains("list_sessions"));
     }
 
@@ -511,7 +515,9 @@ mod tests {
         };
         let out = run_list_sessions("s1", Path::new("/ws"), None, Some(&reader));
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(out.output.contains("- s1 · 5m ago · 12 messages · \"Fix the login loop\" · glm-5.3 · (this session)"));
+        assert!(out.output.contains(
+            "- s1 · 5m ago · 12 messages · \"Fix the login loop\" · glm-5.3 · (this session)"
+        ));
         assert!(out.output.contains("(this session)"));
         assert!(out.output.contains("…"));
         assert_eq!(out.meta.unwrap(), "2 session(s)");
@@ -556,15 +562,20 @@ mod tests {
         };
         let out = run_read_session(Path::new("/ws"), "s1", None, Some(2), Some(&reader));
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(out
-            .output
-            .starts_with("Session \"Auth refactor\" — messages 1–2 of 3 (oldest first)"));
+        assert!(
+            out.output
+                .starts_with("Session \"Auth refactor\" — messages 1–2 of 3 (oldest first)")
+        );
         assert!(out.output.contains("[1] user: why does login loop?"));
-        assert!(out.output.contains("[2] assistant: the retry has no backoff"));
+        assert!(
+            out.output
+                .contains("[2] assistant: the retry has no backoff")
+        );
         assert!(!out.output.contains("[3]"));
-        assert!(out
-            .output
-            .contains("More messages may remain — continue with cursor: \"2\"."));
+        assert!(
+            out.output
+                .contains("More messages may remain — continue with cursor: \"2\".")
+        );
 
         // Following the cursor lands the tail; an exhausted page says so.
         let out = run_read_session(Path::new("/ws"), "s1", Some("2"), Some(2), Some(&reader));
@@ -617,7 +628,10 @@ mod tests {
             Some(100),
             Some(&reader),
         );
-        assert!(out.output.contains(&format!("[{}]", cursor.parse::<i64>().unwrap() + 1)));
+        assert!(
+            out.output
+                .contains(&format!("[{}]", cursor.parse::<i64>().unwrap() + 1))
+        );
     }
 
     #[test]

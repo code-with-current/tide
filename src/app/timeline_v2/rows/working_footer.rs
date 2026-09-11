@@ -58,6 +58,7 @@ pub(crate) fn wave_dots(color: Hsla) -> AnyElement {
 pub(crate) fn render_working_footer(started_at: Option<u64>, now_unix: u64, theme: &Theme) -> Div {
     div()
         .h(px(24.0))
+        .my(px(6.0))
         .flex()
         .items_center()
         .gap(px(8.0))
@@ -68,14 +69,14 @@ pub(crate) fn render_working_footer(started_at: Option<u64>, now_unix: u64, them
         )
         .child(
             div()
-                .text_size(sp(11.0))
+                .text_size(sp(12.5))
                 .text_color(theme.text_ghost)
-                .child(SharedString::from("working")),
+                .child(SharedString::from("Working")),
         )
         .when_some(started_at, |row, started_at| {
             row.child(
                 div()
-                    .text_size(sp(11.0))
+                    .text_size(sp(12.5))
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(format_duration(elapsed_since(
                         started_at, now_unix,

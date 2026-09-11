@@ -732,18 +732,37 @@ pub(crate) fn looks_like_json(output: &str) -> Option<serde_json::Value> {
 }
 
 /// The agent name derivable from a dispatch activity's arguments JSON: an
-/// `agent`/`subagent_type` string field, when the provider sent one.
+/// `agent`/`subagent_type`/`subagent`/`name` string field, when the
+/// provider sent one. `name` is this driver's own `dispatch_agent` shape;
+/// the others are the foreign (Claude-style) spellings.
 pub(crate) fn agent_name(activity: &ActivityItem) -> Option<String> {
     let arguments = activity.arguments.as_deref()?.trim();
     if !(arguments.starts_with('{') || arguments.starts_with('[')) {
         return None;
     }
     let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
-    ["agent", "subagent_type", "subagent"]
+    ["agent", "subagent_type", "subagent", "name"]
         .iter()
         .find_map(|key| value.get(key).and_then(|field| field.as_str()))
         .map(str::trim)
         .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+}
+
+/// The short dispatch title derivable from a dispatch activity's arguments
+/// JSON — the fallback card's `agent · title` badge for activities that
+/// predate the structured agent payload.
+pub(crate) fn agent_title(activity: &ActivityItem) -> Option<String> {
+    let arguments = activity.arguments.as_deref()?.trim();
+    if !arguments.starts_with('{') {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
+    value
+        .get("title")
+        .and_then(|field| field.as_str())
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
         .map(str::to_owned)
 }
 
@@ -1355,8 +1374,8 @@ fn dispatch_section(
         }
         return section;
     }
-    // Pre-structure fallback: the badge the arguments can name plus the
-    // report text.
+    // Pre-structure fallback: the badge the arguments can name (agent and
+    // title) plus the report text.
     let mut badge = div().flex().items_center().gap(px(4.0));
     badge = badge.child(icon("icons/bot.svg", 12.0, tools_dim(theme)));
     if let Some(name) = agent_name(activity) {
@@ -1365,6 +1384,16 @@ fn dispatch_section(
                 .text_size(sp(11.0))
                 .text_color(tools_dim(theme))
                 .child(SharedString::from(name)),
+        );
+    }
+    if let Some(title) = agent_title(activity) {
+        badge = badge.child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(11.0))
+                .text_color(tools_description(theme))
+                .child(SharedString::from(format!("· {title}"))),
         );
     }
     div()

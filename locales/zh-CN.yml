@@ -166,7 +166,6 @@ daemon.phase_connected: 已连接
 daemon.phase_error: 错误
 daemon.invalid_port: 请输入 1 到 65535 之间的端口
 daemon.invalid_settings: 守护进程设置无效：%{error}
-daemon.stop_active_tasks: 更改守护进程访问设置前请先停止进行中的任务
 daemon.settings_applied: 守护进程访问设置已更新
 daemon.restart_failed: 无法重启守护进程：%{error}
 daemon.url_copied: 已复制 WebSocket 地址
@@ -1571,9 +1570,12 @@ transcript.view_file: 查看文件
 transcript.view_diff: 查看差异
 remote_control.title: 远程控制
 remote_control.enable_toggle: 启用远程控制
-remote_control.hint: 用手机扫描二维码，打开已连接到这台电脑的 Tide Web。
+remote_control.enable_hint_off: 用手机扫码即可打开已连接到这台电脑的 Tide Web。每次启动 Tide 时，远程控制都会保持关闭。
+remote_control.enable_hint_live: 已开启 — 扫描下方二维码，或在任意浏览器中打开下方链接。
+remote_control.enable_hint_restarting: 正在应用设置…
 remote_control.web_link: Tide Web 链接
-remote_control.show_qr: 显示二维码
+remote_control.copy: 复制
+remote_control.copied: 链接已复制
 remote_control.disable: 关闭远程控制
 settings.general_description: 隐私、更新和后台任务。
 settings.knowledge_description: メモリツールで検索できるドキュメント、ページ、リポジトリ。
@@ -1586,6 +1588,8 @@ settings.skills_description: 项目中的智能体技能。
 settings.usage_description: 令牌消耗与成本。
 settings.computer_use_description: 允许智能体控制此电脑上的应用。
 remote_control.scan: 扫码连接
+remote_control.scan_description: 将手机相机对准二维码，即可打开已连接到这台电脑的 Tide Web。
+remote_control.security_hint: 访问令牌仅保存在链接的片段中，绝不会发送到服务器。每次启用都会生成全新链接，退出 Tide 即结束会话。
 remote_control.open: 打开 Tide Web
 web.stale_link_title: 此链接已失效
 web.stale_link_description: 远程控制链接在每次启用时都会重新生成 — 请重新扫描桌面上的二维码获取当前链接。

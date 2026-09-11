@@ -75,6 +75,11 @@ pub type MermaidHandler = Rc<dyn Fn(&str, &mut Window, &mut gpui::App)>;
 /// to the labeled card rather than a hole.
 pub type MermaidHost = Rc<dyn Fn(&str, &mut Window, &mut gpui::App) -> Option<AnyElement>>;
 
+/// An optional app-owned handler for a completed text selection. Fired on
+/// mouse-up over a non-empty drag selection with the selected text and the
+/// mouse-up position, so a caller can anchor a menu there.
+pub type SelectionMenuHandler = Rc<dyn Fn(&str, Point<Pixels>, &mut Window, &mut gpui::App)>;
+
 // ── Layout metrics ─────────────────────────────────────────────────────────
 //
 // Everything in this block participates in measurement, so these are the only
@@ -846,15 +851,16 @@ fn text_element_with_selection(
         // Mention pills ride this branch too: their spans are links, and
         // their hover labels attach to the same interactive element so a
         // pill can be both clickable and explained.
-        let interactive = InteractiveText::new(id, styled).on_click(ranges, move |clicked, window, cx| {
-            if let Some(url) = urls.get(clicked) {
-                if let Some(handler) = &link_handler {
-                    handler(url, window, cx);
-                } else {
-                    cx.open_url(url);
+        let interactive =
+            InteractiveText::new(id, styled).on_click(ranges, move |clicked, window, cx| {
+                if let Some(url) = urls.get(clicked) {
+                    if let Some(handler) = &link_handler {
+                        handler(url, window, cx);
+                    } else {
+                        cx.open_url(url);
+                    }
                 }
-            }
-        });
+            });
         match mentions {
             Some((tooltip_ranges, labels)) => interactive
                 .tooltip(move |index, window, cx| {
@@ -1223,7 +1229,11 @@ fn registry_point(
 /// painted text element: the registry already holds every element's geometry,
 /// so three closures replace three-per-element and a mouse move costs one
 /// registry scan instead of one dispatch per visible paragraph.
-pub fn install_selection_input(window: &mut Window, state: &TranscriptSelection) {
+pub fn install_selection_input(
+    window: &mut Window,
+    state: &TranscriptSelection,
+    selection_menu: Option<SelectionMenuHandler>,
+) {
     window.on_mouse_event({
         let state = state.clone();
         move |event: &MouseDownEvent, phase, window, _| {
@@ -1304,13 +1314,17 @@ pub fn install_selection_input(window: &mut Window, state: &TranscriptSelection)
 
     window.on_mouse_event({
         let state = state.clone();
-        move |_: &MouseUpEvent, phase, _, _| {
+        move |event: &MouseUpEvent, phase, window, cx| {
             if phase != DispatchPhase::Bubble {
                 return;
             }
             let key = state.selection.borrow().anchor().cloned();
-            if let Some(key) = key {
-                state.selection.borrow_mut().end_drag(&key);
+            let Some(key) = key else { return };
+            let Some(text) = state.selection.borrow_mut().end_drag(&key) else {
+                return;
+            };
+            if let Some(selection_menu) = &selection_menu {
+                selection_menu(&text, event.position, window, cx);
             }
         }
     });

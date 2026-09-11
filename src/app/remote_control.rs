@@ -1,8 +1,10 @@
 //! Remote Control — Settings → Remote. Enabling exposes the daemon through
 //! the relay with a fresh link every time it is turned on, and the QR code,
 //! the clickable link, and the token render directly on the page — there is
-//! no separate dialog. The native menu action simply opens this page (and
-//! enables Remote Control first when it is off).
+//! no separate dialog. Remote Control is session-scoped: it is always off
+//! when Tide starts, and each enable invalidates every previous link by
+//! design. The native menu action simply opens this page (and enables
+//! Remote Control first when it is off).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -11,6 +13,11 @@ use qrcode::{Color, QrCode};
 
 use super::*;
 use crate::ui::card::{CardButton, CardRow, card_body, card_pill, card_rows, settings_group_head};
+
+/// Phone cameras expect dark modules on light ground; theme colors would
+/// render an inverted code in dark mode, which many scanners reject.
+const QR_SURFACE: u32 = 0xFFFFFF;
+const QR_MODULE: u32 = 0x1A1A1A;
 
 #[derive(Default)]
 pub(crate) struct RemoteControlState {
@@ -25,6 +32,31 @@ struct QrData {
     /// Row-major modules (quiet zone included), `true` = dark.
     dark: Arc<Vec<bool>>,
     width: usize,
+}
+
+impl RemoteControlState {
+    /// The module matrix for `link`, computing and caching it on a cache
+    /// miss so repeated frames never re-encode.
+    fn matrix(&self, link: &str) -> Option<(Arc<Vec<bool>>, usize)> {
+        let mut cache = self.qr.borrow_mut();
+        if cache.as_ref().is_none_or(|qr| qr.link != link) {
+            if let Ok(code) = QrCode::new(link.as_bytes()) {
+                *cache = Some(QrData {
+                    link: link.to_string(),
+                    dark: Arc::new(
+                        code.to_colors()
+                            .into_iter()
+                            .map(|color| color == Color::Dark)
+                            .collect(),
+                    ),
+                    width: code.width(),
+                });
+            }
+        }
+        cache
+            .as_ref()
+            .map(|qr| (Arc::clone(&qr.dark), qr.width))
+    }
 }
 
 impl Tide {
@@ -89,25 +121,27 @@ impl Tide {
         )))
     }
 
-    /// The Remote page body: one group whose card carries the enable toggle
-    /// and — once live — the QR code, the clickable link, and the token.
+    /// The Remote page body: one card whose rows follow the session state —
+    /// the enable toggle always, and once live the scan-safe QR code and
+    /// the link with copy/open actions.
     pub(super) fn render_remote_section(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let enabled = self.state.daemon_exposure.enabled;
         let pending = self.remote_control.pending;
 
-        let status_label = if pending {
-            tr!("daemon.status_restarting")
+        let (status_label, status_color) = if pending {
+            (tr!("daemon.status_restarting"), theme.warning)
         } else if enabled {
-            tr!("daemon.status_exposed")
+            (tr!("daemon.status_exposed"), theme.success)
         } else {
-            tr!("daemon.status_local")
+            (tr!("daemon.status_local"), theme.text_tertiary)
         };
-        let status_color = if pending {
-            theme.warning
+
+        let status_description = if pending {
+            tr!("remote_control.enable_hint_restarting")
         } else if enabled {
-            theme.success
+            tr!("remote_control.enable_hint_live")
         } else {
-            theme.text_tertiary
+            tr!("remote_control.enable_hint_off")
         };
 
         let toggle = toggle_switch(
@@ -119,93 +153,25 @@ impl Tide {
             move |this, _, cx| this.set_daemon_exposure_enabled(!enabled, cx),
         );
 
-        let mut rows = vec![
-            CardRow::new(tr!("remote_control.enable_toggle"))
-                .description(tr!("remote_control.hint"))
-                .control(toggle),
-        ];
+        let mut body = card_body(&theme).child(card_rows(
+            theme,
+            vec![
+                CardRow::new(tr!("remote_control.enable_toggle"))
+                    .description(status_description)
+                    .control(toggle),
+            ],
+        ));
 
         if enabled && !pending {
             if let Some(link) = self.remote_link() {
-                // QR matrix: cached by link so a fresh enable recomputes it
-                // once instead of every frame.
-                let (dark, width) = {
-                    let mut cache = self.remote_control.qr.borrow_mut();
-                    if cache.as_ref().is_none_or(|qr| qr.link != link.as_ref()) {
-                        if let Ok(code) = QrCode::new(link.as_bytes()) {
-                            *cache = Some(QrData {
-                                link: link.to_string(),
-                                dark: Arc::new(
-                                    code.to_colors()
-                                        .into_iter()
-                                        .map(|color| color == Color::Dark)
-                                        .collect(),
-                                ),
-                                width: code.width(),
-                            });
-                        }
-                    }
-                    cache
-                        .as_ref()
-                        .map(|qr| (Arc::clone(&qr.dark), qr.width))
-                        .unwrap_or_default()
-                };
-                if width > 0 {
-                    let cell = px(4.0);
-                    let mut qr_grid = div()
-                        .id("remote-qr")
-                        .w(cell * width as f32)
-                        .flex()
-                        .flex_wrap()
-                        .overflow_hidden();
-                    for module in dark.iter() {
-                        let mut module_div = div().size(cell);
-                        if *module {
-                            module_div = module_div.bg(theme.text);
-                        }
-                        qr_grid = qr_grid.child(module_div);
-                    }
-                    rows.push(
-                        CardRow::new(tr!("remote_control.scan"))
-                            .description(tr!("remote_control.hint"))
-                            .control(
-                                div()
-                                    .p(px(8.0))
-                                    .rounded(px(10.0))
-                                    .bg(theme.canvas)
-                                    .child(qr_grid),
-                            ),
-                    );
+                if let Some((dark, width)) = self.remote_control.matrix(&link) {
+                    body = body.child(self.render_qr_row(theme, dark, width));
                 }
-
-                // The clickable link: opens Tide Web in the default browser.
-                let open_link = link.to_string();
-                let link_control = div()
-                    .id("remote-link-open")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .rounded(px(6.0))
-                    .px(px(7.0))
-                    .py(px(4.0))
-                    .text_size(sp(12.5))
-                    .text_color(theme.accent)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|style| style.bg(theme.overlay).underline())
-                    .child(icon("icons/arrow-up-right.svg", 11.0, theme.accent))
-                    .child(tr!("remote_control.open"))
-                    .on_click(move |_, _, cx| cx.open_url(&open_link));
-                rows.push(
-                    CardRow::new(tr!("remote_control.web_link"))
-                        .hint(link.to_string())
-                        .control(link_control),
-                );
+                body = body.child(self.render_link_row(theme, &link, cx));
             }
         }
 
-        let mut actions = vec![card_pill(&theme, status_label, status_color).into_any_element()];
+        let mut actions = vec![card_pill(theme, status_label, status_color).into_any_element()];
         if enabled && !pending {
             actions.push(
                 CardButton::new("remote-disable", tr!("remote_control.disable"))
@@ -218,12 +184,154 @@ impl Tide {
         }
 
         div()
-            .child(settings_group_head(
-                &theme,
-                tr!("remote_control.title"),
-                actions,
-            ))
-            .child(card_body(&theme).child(card_rows(&theme, rows)))
+            .child(settings_group_head(theme, tr!("remote_control.title"), actions))
+            .child(body)
+    }
+
+    /// The scan row: the QR on its fixed light surface beside scanning
+    /// instructions and the security notes. Carries its own divider — custom
+    /// rows never land first, the toggle row always sits above them.
+    fn render_qr_row(
+        &self,
+        theme: &Theme,
+        dark: Arc<Vec<bool>>,
+        width: usize,
+    ) -> AnyElement {
+        let cell = px(4.0);
+        let mut qr_grid = div()
+            .id("remote-qr")
+            .w(cell * width as f32)
+            .flex()
+            .flex_wrap()
+            .overflow_hidden();
+        for module in dark.iter() {
+            let mut module_div = div().size(cell);
+            if *module {
+                module_div = module_div.bg(rgb(QR_MODULE));
+            }
+            qr_grid = qr_grid.child(module_div);
+        }
+
+        div()
+            .border_t_1()
+            .border_color(theme.border)
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .py(px(14.0))
+            .child(
+                div()
+                    .flex_none()
+                    .p(px(10.0))
+                    .rounded(px(10.0))
+                    .bg(rgb(QR_SURFACE))
+                    .child(qr_grid),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(5.0))
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("remote_control.scan")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .whitespace_normal()
+                            .text_color(theme.text_secondary)
+                            .child(tr!("remote_control.scan_description")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(5.0))
+                            .mt(px(3.0))
+                            .text_size(sp(11.0))
+                            .line_height(sp(16.0))
+                            .text_color(theme.text_tertiary)
+                            .child(icon("icons/shield.svg", 11.0, theme.text_tertiary))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .child(tr!("remote_control.security_hint")),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The link row: the full URL as a one-line hint on the left, copy and
+    /// open actions on the right.
+    fn render_link_row(
+        &self,
+        theme: &Theme,
+        link: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let copy_link = link.to_string();
+        let copy = CardButton::new("remote-copy-link", tr!("remote_control.copy"))
+            .icon("icons/copy.svg")
+            .ghost()
+            .render(*theme, cx, move |this, _window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_link.clone()));
+                this.show_success_toast(tr!("remote_control.copied"));
+            });
+        let open_link = link.to_string();
+        let open = CardButton::new("remote-open-link", tr!("remote_control.open"))
+            .icon("icons/arrow-up-right.svg")
+            .render(*theme, cx, move |_this, _window, cx| {
+                cx.open_url(&open_link);
+            });
+
+        div()
+            .border_t_1()
+            .border_color(theme.border)
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .py(px(12.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("remote_control.web_link")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(3.0))
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(link.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(copy)
+                    .child(open),
+            )
+            .into_any_element()
     }
 }
 

@@ -300,6 +300,12 @@ impl ContextMenuHandle {
         open_menu(self, position, SurfaceFocus::Card, false, window, cx);
     }
 
+    /// Opens at an explicit window position — where a text selection ended,
+    /// for example — rather than at the trigger or the pointer.
+    pub fn open_at_position(&self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        open_menu(self, position, SurfaceFocus::Card, false, window, cx);
+    }
+
     pub fn close(&self, window: &mut Window, cx: &mut App) {
         let was_open = {
             let mut state = self.state.borrow_mut();
@@ -931,6 +937,32 @@ where
             .with_priority(1),
         )
         .into_any_element()
+}
+
+/// Renders the open menu card for a programmatically driven handle — no
+/// trigger element, no right-click binding. The transcript's selection menu
+/// mounts this at its pane root and opens the handle from the selection's
+/// own mouse-up handler. While closed it contributes nothing.
+pub fn floating_menu(
+    handle: &ContextMenuHandle,
+    id: impl Into<ElementId>,
+    items: impl Fn(&mut App) -> Vec<MenuItem> + 'static,
+) -> AnyElement {
+    let Some(position) = handle.state.borrow().open else {
+        return div().into_any_element();
+    };
+    deferred(
+        anchored()
+            .position(position)
+            .snap_to_window_with_margin(px(8.0))
+            .child(MenuCard {
+                id: id.into(),
+                handle: handle.clone(),
+                items: Rc::new(items),
+            }),
+    )
+    .with_priority(1)
+    .into_any_element()
 }
 
 #[derive(IntoElement)]

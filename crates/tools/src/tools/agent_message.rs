@@ -11,8 +11,7 @@ use crate::{Tool, ToolContext, ToolOutcome, ToolSpec};
 
 pub const SEND_MESSAGE_DESCRIPTION: &str = "Send a short text message to another agent in this session — a running sub-agent receives it at its next step (like steering), a finished one receives it the next time it is resumed, and `main` is this conversation's lead agent. Use it to hand off a finding, ask a sibling for a fact it owns, or report upward mid-task. Fire-and-forget: delivery is confirmed, but a reply only comes if the other agent chooses to send one back. Discover ids with list_agents; dispatch results also carry a dispatchId usable here.";
 
-pub const LIST_AGENTS_DESCRIPTION: &str =
-    "List the agents in this session: the lead agent (`main`) and every dispatched sub-agent with its dispatchId, name, status (running / completed / failed), and title. Use before send_message or dispatch_agent's resumeFrom to discover ids.";
+pub const LIST_AGENTS_DESCRIPTION: &str = "List the agents in this session: the lead agent (`main`) and every dispatched sub-agent with its dispatchId, name, status (running / completed / failed), and title. Use before send_message or dispatch_agent's resumeFrom to discover ids.";
 
 pub struct SendMessageTool;
 

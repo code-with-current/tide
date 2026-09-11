@@ -337,9 +337,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("x.md"), "Body").unwrap();
         let out = run_slash_command("/x", "", &dir, tmp.path());
-        assert!(out
-            .output
-            .starts_with("/x loaded. Apply its instructions to the task at hand.\n\n---\nBody"));
+        assert!(
+            out.output
+                .starts_with("/x loaded. Apply its instructions to the task at hand.\n\n---\nBody")
+        );
         assert!(!out.output.contains("Arguments:"));
     }
 
@@ -354,13 +355,15 @@ mod tests {
 
         let out = run_slash_command("nope", "", &dir, tmp.path());
         assert_eq!(out.status, OutcomeStatus::Failed);
-        assert!(out
-            .output
-            .starts_with("Unknown command: /nope. Available: alpha, beta,"));
+        assert!(
+            out.output
+                .starts_with("Unknown command: /nope. Available: alpha, beta,")
+        );
         assert!(out.output.contains("kb-iterate (built-in)"));
-        assert!(out
-            .output
-            .contains("not enabled in this workspace's catalog"));
+        assert!(
+            out.output
+                .contains("not enabled in this workspace's catalog")
+        );
     }
 
     #[test]
@@ -540,9 +543,10 @@ mod tests {
             tmp.path(),
         );
         assert_eq!(out.status, OutcomeStatus::Executed, "{}", out.output);
-        assert!(out
-            .output
-            .starts_with("Skill \"AgentDB Advanced Features\" loaded."));
+        assert!(
+            out.output
+                .starts_with("Skill \"AgentDB Advanced Features\" loaded.")
+        );
         assert!(out.output.contains("# AgentDB"));
         assert!(out.output.ends_with("Arguments: deploy the db"));
     }

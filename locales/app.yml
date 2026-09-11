@@ -236,8 +236,6 @@ daemon.invalid_port:
   en: Enter a port from 1 to 65535
 daemon.invalid_settings:
   en: "Invalid daemon settings: %{error}"
-daemon.stop_active_tasks:
-  en: Stop active tasks before changing daemon access
 daemon.settings_applied:
   en: Daemon access updated
 daemon.restart_failed:
@@ -3142,12 +3140,18 @@ remote_control.title:
   en: Remote Control
 remote_control.enable_toggle:
   en: Enable Remote Control
-remote_control.hint:
-  en: Scan with your phone — it opens Tide Web connected to this machine.
+remote_control.enable_hint_off:
+  en: Scan with your phone — it opens Tide Web connected to this machine. Remote Control stays off every time Tide starts.
+remote_control.enable_hint_live:
+  en: Live — scan the QR code or open the link below from any browser.
+remote_control.enable_hint_restarting:
+  en: Applying the new setting…
 remote_control.web_link:
   en: Tide Web link
-remote_control.show_qr:
-  en: Show QR
+remote_control.copy:
+  en: Copy
+remote_control.copied:
+  en: Link copied
 remote_control.disable:
   en: Disable Remote Control
 settings.appearance_description:
@@ -3168,6 +3172,10 @@ settings.computer_use_description:
   en: Let the agent control apps on this machine.
 remote_control.scan:
   en: Scan to connect
+remote_control.scan_description:
+  en: Point your phone's camera at the code — it opens Tide Web connected to this machine.
+remote_control.security_hint:
+  en: The access token lives in the link's fragment and is never sent to a server. Every enable creates a fresh link, and quitting Tide ends the session.
 remote_control.open:
   en: Open Tide Web
 web.stale_link_title:

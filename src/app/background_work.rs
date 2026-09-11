@@ -1831,7 +1831,7 @@ impl Tide {
 fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |_, _, window, _| md::render::install_selection_input(window, &selection),
+        move |_, _, window, _| md::render::install_selection_input(window, &selection, None),
     )
     .absolute()
     .w(px(0.0))
@@ -3666,31 +3666,11 @@ impl Tide {
                     .gap(px(1.0))
                     .child(
                         div()
-                            .flex()
-                            .items_baseline()
-                            .gap(px(6.0))
                             .min_w_0()
-                            .child(
-                                div()
-                                    .font_family(md::render::MONO_FAMILY)
-                                    .text_size(px(11.0))
-                                    .text_color(theme.text_secondary)
-                                    .flex_none()
-                                    // Only sub-agent rows carry a meaningful
-                                    // dispatch id; process rows would show
-                                    // an opaque job id next to the title.
-                                    .when(item.key.kind == BackgroundWorkKind::Subagent, |id| {
-                                        id.child(item.key.provider_id.clone())
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(px(12.5))
-                                    .text_color(theme.text)
-                                    .child(single_line_label(&item.title)),
-                            ),
+                            .truncate()
+                            .text_size(px(12.5))
+                            .text_color(theme.text)
+                            .child(single_line_label(&item.title)),
                     )
                     .child(
                         div()

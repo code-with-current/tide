@@ -9,9 +9,9 @@ use crate::ui::scrollbar::{self, ScrollbarState};
 use gpui::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, DispatchPhase, Element,
     ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
-    Point, ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
+    Focusable, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement, KeyBinding, LayoutId,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    ScrollHandle, SharedString, StyledText, Subscription, Task, TextLayout, TextRun,
     UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -1040,11 +1040,7 @@ impl TextInput {
     /// Replace the painted embedded-token decorations. Ranges must be
     /// sorted and non-overlapping. Purely visual — the content is
     /// untouched, so no [`InputEvent::Edited`] is emitted.
-    pub fn set_decorated_ranges(
-        &mut self,
-        ranges: Vec<Range<usize>>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_decorated_ranges(&mut self, ranges: Vec<Range<usize>>, cx: &mut Context<Self>) {
         if self.decorated_ranges == ranges {
             return;
         }
@@ -2712,11 +2708,11 @@ mod tests {
 
     use super::TokenClass;
     use super::{
-        DecorationPaint, EditHistory, FieldMode, PASTE_ATTACHMENT_MIN_LINES, SearchPaint, TextInput,
-        UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, cursor_should_be_visible, input_text_runs,
-        media_paste_entries, next_word_boundary, paste_becomes_attachment, pasted_text_for_mode,
-        previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
-        word_range_at,
+        DecorationPaint, EditHistory, FieldMode, PASTE_ATTACHMENT_MIN_LINES, SearchPaint,
+        TextInput, UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, cursor_should_be_visible,
+        input_text_runs, media_paste_entries, next_word_boundary, paste_becomes_attachment,
+        pasted_text_for_mode, previous_word_boundary, single_line_scroll, trimmed_splice,
+        visual_row_count, word_range_at,
     };
 
     struct InputHarness {

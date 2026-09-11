@@ -6,7 +6,7 @@
 //! working unchanged — the process boundary is gone, not the protocol.
 
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 
 use anyhow::{Context as _, bail};
@@ -39,50 +39,34 @@ pub fn start_process() -> anyhow::Result<client::DaemonSupervisor> {
     let app_settings = client::persistence::load_or_create_app_settings()
         .context("could not load desktop daemon settings")?;
     let mut exposure = app_settings.daemon_exposure.clone();
-    // Exposure persisted on: register with the relay so saved Remote Control
-    // links keep working across desktop relaunches. A first-boot path is
-    // generated once and written back so it stays stable.
+    // Remote Control is session-scoped: every launch starts disabled, even
+    // if the previous run quit (or crashed) while it was live. The reset is
+    // persisted before the UI loads its state, so desktop and daemon agree.
     if exposure.enabled {
-        if exposure.relay_path.is_none() {
-            exposure.relay_path = Some(crate::remote_relay::generate_path());
-            let mut persisted = app_settings.clone();
-            persisted.daemon_exposure = exposure.clone();
-            let _ = client::persistence::save_app_settings(&persisted);
-        }
-        crate::remote_relay::start(
-            crate::remote_relay::RelayConfig {
-                path: exposure.relay_path.clone().unwrap_or_default(),
-                secret: exposure.token.clone(),
-                local_port: exposure.port,
-            },
-            None,
-        );
+        exposure.enabled = false;
+        let mut persisted = app_settings.clone();
+        persisted.daemon_exposure = exposure.clone();
+        let _ = client::persistence::save_app_settings(&persisted);
     }
     serve_in_process(exposure)
 }
 
-/// Bind the backend listener, open the daemon stores, and hand the socket to
-/// `backend::serve` on a dedicated thread. Mirrors the retired
-/// `tide-daemon` binary's main: same stores, same token, same origin rules —
-/// minus the child process and its watchdog.
+/// Bind the desktop's permanent local listener, open the daemon stores, and
+/// hand everything to [`backend::serve_with_core`] on a dedicated thread.
+/// Mirrors the retired `tide-daemon` binary's main: same stores, same token,
+/// same origin rules — minus the child process and its watchdog.
+///
+/// Two listeners share one [`backend::ServerCore`] so both see a single
+/// event lifecycle: the loopback plane this desktop talks to — its
+/// connections outlive every exposure change — and the Remote Control
+/// plane, which the exposure controller binds to 0.0.0.0 only while
+/// enabled.
 fn serve_in_process(
-    mut exposure: DaemonExposureSettings,
+    exposure: DaemonExposureSettings,
 ) -> anyhow::Result<client::DaemonSupervisor> {
-    if exposure.enabled {
-        exposure = exposure
-            .validate()
-            .context("daemon exposure settings are invalid")?;
-    }
-    let listener = TcpListener::bind(exposure.bind_address()).with_context(|| {
-        format!(
-            "could not bind the Tide backend to {}",
-            exposure.bind_address()
-        )
-    })?;
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .context("could not bind the Tide backend to a local port")?;
     let address = listener.local_addr()?;
-    if !address.ip().is_loopback() && !exposure.enabled {
-        bail!("refusing non-loopback backend bind {address}; enable daemon exposure to open it up");
-    }
     let token = exposure.token.clone();
 
     let task_path = backend::persistence::StateStore::default_path();
@@ -93,61 +77,82 @@ fn serve_in_process(
     .context("could not load daemon settings")?;
     let task_store = backend::persistence::StateStore::daemon(task_path);
     let backend = Arc::new(backend::daemon::TideBackend::new(settings, task_store)?);
-    let server = Arc::new(std::sync::Mutex::new(spawn_local_server(
-        &listener, &backend, &token, &exposure,
-    )?));
+    let core = Arc::new(backend::ServerCore::new(backend));
+
+    // Serves until the process exits; exposure changes never touch it, so
+    // its handle may detach.
+    spawn_server(&listener, &core, &token, &exposure)?;
 
     let supervisor = client::DaemonSupervisor::connect_local(&address.to_string(), token)
         .context("could not connect to the in-process Tide daemon")?;
 
-    // Settings → Daemon exposure: the restarter turns a policy change into a
-    // serve-loop restart on the freshly bound listener, and the supervisor
-    // reconnects to the (possibly different) address.
-    let restarter_state = Arc::clone(&server);
-    let restarter_backend = Arc::clone(&backend);
-    supervisor.set_local_restarter(Arc::new(move |next: DaemonExposureSettings| {
-        let next = next
-            .validate()
-            .context("daemon exposure settings are invalid")?;
-        // Stop the previous loop first: it owns the old listener, and a fixed
-        // port cannot rebind until that socket is gone.
-        let previous = {
-            let mut guard = restarter_state.lock().unwrap();
-            guard
-                .shutdown
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            guard.thread.take()
-        };
-        if let Some(handle) = previous {
-            let _ = handle.join();
-        }
-        let listener = TcpListener::bind(next.bind_address()).with_context(|| {
-            format!("could not bind the Tide backend to {}", next.bind_address())
-        })?;
-        let address = listener.local_addr()?;
-        if !address.ip().is_loopback() && !next.enabled {
-            bail!(
-                "refusing non-loopback backend bind {address}; enable daemon exposure to open it up"
-            );
-        }
-        let address = address.to_string();
-        let spawned = spawn_local_server(&listener, &restarter_backend, &next.token, &next)?;
-        *restarter_state.lock().unwrap() = spawned;
-        Ok(address)
+    // Settings → Remote Control: the controller starts and stops only the
+    // exposure plane; the local plane above never moves, so desktop turns
+    // are unaffected by exposure changes.
+    let exposure_plane: Arc<Mutex<Option<LocalServer>>> = Arc::new(Mutex::new(None));
+    let controller_plane = Arc::clone(&exposure_plane);
+    let controller_core = Arc::clone(&core);
+    supervisor.set_exposure_controller(Arc::new(move |next| {
+        apply_exposure(&controller_plane, &controller_core, next)
     }));
     Ok(supervisor)
 }
 
-/// The live handles for the in-process backend server: the flag that stops
-/// its serve loop and the thread running that loop.
+/// Start or stop only the exposure plane: validate the policy, tear down
+/// any previous exposure listener, and — while enabled — bind the exposed
+/// address and serve the shared core on it. The local plane is never
+/// touched, and when exposure is off no externally bound socket exists at
+/// the kernel level.
+fn apply_exposure(
+    plane: &Mutex<Option<LocalServer>>,
+    core: &Arc<backend::ServerCore>,
+    next: DaemonExposureSettings,
+) -> anyhow::Result<()> {
+    let next = next
+        .validate()
+        .context("daemon exposure settings are invalid")?;
+    // Stop the previous plane first: a fixed port cannot rebind while the
+    // old listener still holds it.
+    if let Some(server) = plane.lock().unwrap().take() {
+        server.stop();
+    }
+    if !next.enabled {
+        return Ok(());
+    }
+    let listener = TcpListener::bind(next.bind_address()).with_context(|| {
+        format!(
+            "could not bind the Tide backend to {}",
+            next.bind_address()
+        )
+    })?;
+    let token = next.token.clone();
+    *plane.lock().unwrap() = Some(spawn_server(&listener, core, &token, &next)?);
+    Ok(())
+}
+
+/// The live handles for one backend listener: the flag that stops its serve
+/// loop and the thread running that loop. Established connection threads
+/// are owned separately and finish on their own.
 struct LocalServer {
     shutdown: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-fn spawn_local_server(
+impl LocalServer {
+    /// Stop the accept loop and wait for its thread to exit so a fixed port
+    /// can be rebound immediately afterwards.
+    fn stop(self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(handle) = self.thread {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn spawn_server(
     listener: &TcpListener,
-    backend: &Arc<backend::daemon::TideBackend>,
+    core: &Arc<backend::ServerCore>,
     token: &str,
     exposure: &DaemonExposureSettings,
 ) -> anyhow::Result<LocalServer> {
@@ -160,15 +165,15 @@ fn spawn_local_server(
         .name("tide-backend".into())
         .spawn({
             let shutdown = Arc::clone(&shutdown);
-            let backend = Arc::clone(backend);
+            let core = Arc::clone(core);
             let token = token.to_owned();
             move || {
                 // The loop exits when the flag flips (exposure reconfigure or
                 // app shutdown); the listener drops with the thread.
-                let _ = backend::serve(
+                let _ = backend::serve_with_core(
                     thread_listener,
                     token,
-                    backend,
+                    &core,
                     shutdown,
                     backend::ServerOptions {
                         allowed_origins,
@@ -209,4 +214,67 @@ pub fn local_hostname() -> Option<String> {
         .filter_map(|name| std::env::var(name).ok())
         .map(|hostname| hostname.trim().to_owned())
         .find(|hostname| !hostname.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exposure-plane lifecycle only needs the `Backend` trait object to
+    /// exist; no request ever reaches it.
+    struct UnusedBackend;
+
+    impl backend::Backend for UnusedBackend {
+        fn handle(
+            &self,
+            _request: backend::Request,
+            _events: backend::EventSink,
+        ) -> anyhow::Result<backend::ResponsePayload> {
+            Err(anyhow::anyhow!("no requests are dispatched in this test"))
+        }
+    }
+
+    fn exposure_on(port: u16) -> DaemonExposureSettings {
+        DaemonExposureSettings {
+            enabled: true,
+            port,
+            allowed_origins: vec!["http://localhost:3001".into()],
+            token: DaemonExposureSettings::new_token(),
+            relay_path: None,
+        }
+    }
+
+    fn port_is_listening(port: u16) -> bool {
+        // Probe actively rather than by re-binding: duplicate-bind semantics
+        // differ per platform, but a live listener always accepts and a dead
+        // port always refuses.
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    }
+
+    #[test]
+    fn exposure_plane_binds_while_enabled_and_frees_its_port_when_disabled() {
+        let core = Arc::new(backend::ServerCore::new(Arc::new(UnusedBackend)));
+        let plane: Mutex<Option<LocalServer>> = Mutex::new(None);
+        let port = TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+
+        apply_exposure(&plane, &core, exposure_on(port)).expect("enable exposure");
+        assert!(port_is_listening(port), "the exposed port should listen");
+
+        let mut off = exposure_on(port);
+        off.enabled = false;
+        apply_exposure(&plane, &core, off).expect("disable exposure");
+        assert!(!port_is_listening(port), "the exposed port should close");
+
+        apply_exposure(&plane, &core, exposure_on(port)).expect("re-enable exposure");
+        assert!(port_is_listening(port), "the exposed port should listen again");
+
+        let mut off = exposure_on(port);
+        off.enabled = false;
+        apply_exposure(&plane, &core, off).expect("final disable");
+        assert!(!port_is_listening(port), "the exposed port should close again");
+    }
 }

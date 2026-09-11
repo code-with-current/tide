@@ -13,7 +13,7 @@ use std::time::Duration;
 use protocol::model::{BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkStatus};
 use serde_json::json;
 
-use crate::jobs::{global_job_registry, KillOutcome, Reader};
+use crate::jobs::{KillOutcome, Reader, global_job_registry};
 use crate::permission::RiskTier;
 use crate::{AbortFlag, Tool, ToolContext, ToolError, ToolOutcome, ToolSpec};
 

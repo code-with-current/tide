@@ -543,9 +543,10 @@ mod tests {
     fn no_index_reports_not_enabled_hint() {
         let out = run_memory("anything", Some(5), None, "ws1", None);
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(out
-            .output
-            .starts_with("RAG is not enabled for this workspace."));
+        assert!(
+            out.output
+                .starts_with("RAG is not enabled for this workspace.")
+        );
         assert!(out.output.contains("Settings → Memory & RAG"));
     }
 
@@ -559,9 +560,10 @@ mod tests {
         };
         let out = run_memory("anything", Some(5), None, "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(out
-            .output
-            .starts_with("RAG index for this workspace is empty."));
+        assert!(
+            out.output
+                .starts_with("RAG index for this workspace is empty.")
+        );
     }
 
     #[test]
@@ -590,12 +592,14 @@ mod tests {
         };
         let out = run_memory("how does login work", Some(5), None, "ws1", Some(&index));
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(out
-            .output
-            .starts_with("Found 1 relevant chunk for \"how does login work\" (out of 7):"));
-        assert!(out
-            .output
-            .contains("[1] /repo/src/auth.ts:10 (login) · 87%\ncontent of c1"));
+        assert!(
+            out.output
+                .starts_with("Found 1 relevant chunk for \"how does login work\" (out of 7):")
+        );
+        assert!(
+            out.output
+                .contains("[1] /repo/src/auth.ts:10 (login) · 87%\ncontent of c1")
+        );
         assert!(matches!(out.display, Some(ToolDisplay::Text { .. })));
     }
 
@@ -649,9 +653,10 @@ mod tests {
         let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
         // Heading goes after the symbol suffix; a None heading leaves the
         // point-hit location exactly as before.
-        assert!(out
-            .output
-            .contains("/repo/src/auth.ts:10-24 (login) · Setup > Auth · 87%"));
+        assert!(
+            out.output
+                .contains("/repo/src/auth.ts:10-24 (login) · Setup > Auth · 87%")
+        );
         assert!(out.output.contains("/repo/src/util.ts:10\n"));
 
         // Knowledge-shaped hits cite it after the origin label.
@@ -668,9 +673,10 @@ mod tests {
             ..FakeIndex::default()
         };
         let out = run_memory("install", Some(5), None, "ws1", Some(&index));
-        assert!(out
-            .output
-            .contains("[1] [React Docs] react.dev/learn · Installation"));
+        assert!(
+            out.output
+                .contains("[1] [React Docs] react.dev/learn · Installation")
+        );
 
         // Empty-string headings render nothing (defensive — some fetchers
         // may emit bare "#").
@@ -705,9 +711,10 @@ mod tests {
             ..FakeIndex::default()
         };
         let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
-        assert!(out
-            .output
-            .contains("[1] [Knowledge Library] proj/d.md · Setup > Auth · doc 3f2a1c9e\n"));
+        assert!(
+            out.output
+                .contains("[1] [Knowledge Library] proj/d.md · Setup > Auth · doc 3f2a1c9e\n")
+        );
 
         // No docId → the location renders exactly as before.
         let plain = MemoryHit {
@@ -723,9 +730,10 @@ mod tests {
             ..FakeIndex::default()
         };
         let out = run_memory("auth", Some(5), None, "ws1", Some(&index));
-        assert!(out
-            .output
-            .contains("[1] [Knowledge Library] proj/d.md · Setup > Auth\n"));
+        assert!(
+            out.output
+                .contains("[1] [Knowledge Library] proj/d.md · Setup > Auth\n")
+        );
 
         // Payloads serialized before the field existed still deserialize
         // (serde default) and skip serialization when None.
@@ -734,10 +742,12 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.doc_id, None);
-        assert!(!serde_json::to_value(&legacy)
-            .unwrap()
-            .to_string()
-            .contains("docId"));
+        assert!(
+            !serde_json::to_value(&legacy)
+                .unwrap()
+                .to_string()
+                .contains("docId")
+        );
     }
 
     #[test]

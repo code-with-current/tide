@@ -807,18 +807,11 @@ impl Tide {
             self.show_toast(tr!("daemon.external_description"));
             return;
         }
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| !matches!(session.status, SessionStatus::Idle | SessionStatus::Failed))
-        {
-            self.show_toast(tr!("daemon.stop_active_tasks"));
-            return;
-        }
-
-        let needs_restart = self.state.daemon_exposure.enabled || settings.enabled;
-        if !needs_restart {
+        // Exposure changes only start/stop the externally bound listener; the
+        // desktop's own connection is untouched, so active sessions are
+        // never a reason to refuse. Disabled→disabled touches no listener at
+        // all and is a pure settings save.
+        if !settings.enabled && !self.state.daemon_exposure.enabled {
             self.state.daemon_exposure = settings;
             self.save();
             cx.notify();
@@ -859,7 +852,6 @@ impl Tide {
                         } else {
                             crate::remote_relay::stop();
                         }
-                        this.runtimes.clear();
                         this.save();
                         this.show_success_toast(tr!("daemon.settings_applied"));
                     }

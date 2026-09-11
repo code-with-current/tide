@@ -24,7 +24,7 @@ use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
 
 use super::arg_bool;
 use super::arg_str;
-use super::proc::{kill_and_reap, spawn_reader, tool_env, unix_process_group, StreamReader};
+use super::proc::{StreamReader, kill_and_reap, spawn_reader, tool_env, unix_process_group};
 
 pub(crate) const MAX_OUTPUT: usize = 50 * 1024;
 pub(crate) const MAX_LINES: usize = 1000;
@@ -115,20 +115,30 @@ pub(crate) fn run_bash(
         // return immediately (TS `spawnBackground`). The job is fenced to
         // the owning session and is NEVER tied to the spawning turn's
         // abort flag — it dies only by job_kill, session close, or daemon
-        // teardown. The process half (pipes → output sink, terminate,
-        // exit watch) lives in [`crate::shell_registry::spawn_bash_job`].
+        // teardown. The process half runs out-of-process in the session's
+        // job runner when one is available (file-backed output, nice'd
+        // children, app-crash survival), falling back to the in-process
+        // guard ([`crate::shell_registry::spawn_bash_job`]) otherwise.
         let command = trimmed.to_string();
         let root = workspace_root.to_path_buf();
+        let session = session.to_string();
         match crate::jobs::global_job_registry().start(crate::jobs::JobStart {
             kind: protocol::model::BackgroundWorkKind::Process,
             prefix: "bash",
             id: None,
             label: command.clone(),
-            owner_session: session.to_string(),
+            owner_session: session.clone(),
             output_limit: None,
             streams: true,
             run: Box::new(move |handle| {
-                crate::shell_registry::spawn_bash_job(&command, &root, handle)
+                crate::job_runner::spawn_bash_job(&session, &command, &root, handle).or_else(
+                    |runner_error| {
+                        crate::shell_registry::spawn_bash_job(&command, &root, handle)
+                            .map_err(|fallback_error| {
+                                format!("job runner: {runner_error}; in-process fallback: {fallback_error}")
+                            })
+                    },
+                )
             }),
         }) {
             Ok(key) => {
@@ -308,11 +318,7 @@ fn trim_to_lines(s: &mut String) {
 }
 
 fn shell_binary() -> &'static str {
-    if cfg!(windows) {
-        "cmd.exe"
-    } else {
-        "/bin/sh"
-    }
+    if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }
 }
 
 impl Tool for BashTool {

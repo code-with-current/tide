@@ -1101,7 +1101,9 @@ impl Tide {
             let selection = self.skills_selection.clone();
             canvas(
                 |_, _, _| (),
-                move |_, _, window, _| md::render::install_selection_input(window, &selection),
+                move |_, _, window, _| {
+                    md::render::install_selection_input(window, &selection, None)
+                },
             )
             .absolute()
             .w(px(0.0))

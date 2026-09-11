@@ -267,7 +267,11 @@ impl crate::app::Tide {
             .flex_col()
             .relative()
             .child(crate::md::render::frame_reset(selection.clone()))
-            .child(selection_input(selection))
+            .child(selection_input(
+                selection,
+                Some(self.selection_menu_handler(cx)),
+            ))
+            .child(self.selection_menu_card(cx))
             .child(list::render_list(self, actions, window, cx))
             .children(list::render_pending_permission(self, cx))
             .children(list::render_pending_question(self, cx))
@@ -296,10 +300,15 @@ impl crate::app::Tide {
 /// A zero-size canvas that installs the frame's selection mouse listeners,
 /// the legacy transcript's pattern: one set for the whole pane, because the
 /// registry already knows every painted element's geometry.
-fn selection_input(selection: crate::md::render::TranscriptSelection) -> AnyElement {
+fn selection_input(
+    selection: crate::md::render::TranscriptSelection,
+    selection_menu: Option<crate::md::render::SelectionMenuHandler>,
+) -> AnyElement {
     canvas(
         |_, _, _| (),
-        move |_, _, window, _| crate::md::render::install_selection_input(window, &selection),
+        move |_, _, window, _| {
+            crate::md::render::install_selection_input(window, &selection, selection_menu.clone())
+        },
     )
     .absolute()
     .w(px(0.0))

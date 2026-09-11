@@ -17,8 +17,8 @@ use super::parts::reasoning_part::{
 use super::parts::static_tool_row::{ActivityPresentation, presentation_for};
 use super::parts::text_part::{FinalizeKind, finalize_kind};
 use super::parts::tool_part::{
-    TodoState, agent_name, captured_output, content_body_source, description_for, diff_stat,
-    disclosure_id, edit_path, failure_text, first_path_token, followup_parts, has_body,
+    TodoState, agent_name, agent_title, captured_output, content_body_source, description_for,
+    diff_stat, disclosure_id, edit_path, failure_text, first_path_token, followup_parts, has_body,
     header_status_icon, is_content_tool, is_dispatch, is_followup_question, is_listing_tool,
     is_todo_write, label_for_activity, listing_path, looks_like_json, one_line, parse_todo_line,
     parse_todo_output, render_activity_body, todo_item, trailing_failure_icon,
@@ -32,12 +32,9 @@ use super::permission::{
     PermissionRespond, permission_deadline, permission_layout, render_permission_card, seconds_left,
 };
 use super::rows::activity_group::{GroupToggle, group_id, render_activities};
-use super::rows::{
-    NarrationRow, is_narration_block, is_narration_message, narration_head, narration_tail,
-};
 use super::rows::changed_files::{
-    ChangesSummary, MAX_VISIBLE_FILES, files_card_id, header_title, render_changed_files,
-    summarize_changes, visible_files,
+    ChangesSummary, MAX_VISIBLE_FILES, files_card_id, header_title, pill_path_text,
+    render_changed_files, summarize_changes, visible_files,
 };
 use super::rows::error_block::{
     TURN_FAILED_FALLBACK, error_block_id, error_text_for_turn, render_error_block,
@@ -48,6 +45,9 @@ use super::rows::turn_item::{
     render_turn_footer, spacing_before, turn_duration, turn_top_spacing,
 };
 use super::rows::working_footer::{elapsed_since, render_working_footer};
+use super::rows::{
+    NarrationRow, is_narration_block, is_narration_message, narration_head, narration_tail,
+};
 use super::search::find_matches;
 use super::*;
 use crate::app::navigation_rail::NavigationTurnOpening;
@@ -415,7 +415,10 @@ fn narration_folds_intermediate_text_and_blocks() {
 
     // Blocks anchored between prompt and answer fold; the trailing block
     // does not.
-    assert!(is_narration_block(&session, 0), "prompt-anchored block folds");
+    assert!(
+        is_narration_block(&session, 0),
+        "prompt-anchored block folds"
+    );
     assert!(is_narration_block(&session, 1), "mid-turn block folds");
     assert!(!is_narration_block(&session, 2), "trailing work stays");
 
@@ -1428,6 +1431,31 @@ fn relative_display_truncates_long_dirs_from_the_left() {
 }
 
 #[test]
+fn pill_path_text_caps_the_path_at_twenty_trailing_chars() {
+    // Short paths pass through untouched.
+    assert_eq!(pill_path_text("src/lib.rs"), "src/lib.rs");
+    // Exactly at budget: no ellipsis.
+    assert_eq!(
+        pill_path_text("01234567890123456789"),
+        "01234567890123456789"
+    );
+    // Over budget: leading ellipsis + the last 20 characters, so the
+    // extension survives and the width is bounded no matter the filename.
+    let long = "dummy-test/this-is-a-deliberately-very-long-file-name-used-to-check-how-the-app-renders.txt";
+    let shown = pill_path_text(long);
+    assert!(
+        shown.starts_with('…'),
+        "over-budget paths ellipsize: {shown}"
+    );
+    assert_eq!(shown.chars().count(), 21);
+    assert!(long.ends_with(shown.trim_start_matches('…')));
+    // Char-boundary safe on multibyte text.
+    let unicode = "директория/очень-длинное-имя-файла.txt";
+    let shown = pill_path_text(unicode);
+    assert_eq!(shown.chars().count(), 21);
+}
+
+#[test]
 fn bash_first_line_takes_the_first_command_line() {
     assert_eq!(bash_first_line("cd foo\nbar"), "cd foo");
     assert_eq!(bash_first_line("cd foo\r\nbar"), "cd foo");
@@ -1800,9 +1828,16 @@ fn agent_name_reads_dispatch_arguments() {
     dispatch.arguments = Some(r#"{"subagent_type": "general-purpose"}"#.to_owned());
     assert_eq!(agent_name(&dispatch).as_deref(), Some("general-purpose"));
 
+    // This driver's own dispatch_agent spells the field `name`.
+    dispatch.arguments =
+        Some(r#"{"name": "code-reviewer", "task": "look", "title": "Auth pass"}"#.to_owned());
+    assert_eq!(agent_name(&dispatch).as_deref(), Some("code-reviewer"));
+    assert_eq!(agent_title(&dispatch).as_deref(), Some("Auth pass"));
+
     // Arguments without an agent field, non-JSON arguments, and none at all.
     dispatch.arguments = Some(r#"{"prompt": "look"}"#.to_owned());
     assert_eq!(agent_name(&dispatch), None);
+    assert_eq!(agent_title(&dispatch), None);
     dispatch.arguments = Some("not json".to_owned());
     assert_eq!(agent_name(&dispatch), None);
     dispatch.arguments = None;
@@ -3465,7 +3500,10 @@ fn parse_mentions_extracts_files_and_skills() {
     assert_eq!(tokens("/usr/bin runs first"), vec![]);
     assert_eq!(tokens("call /usr/bin/env please"), vec![]);
     // Fractions and URLs keep their slashes plain.
-    assert_eq!(tokens("split 50/50 and see https://tide.dev/download"), vec![]);
+    assert_eq!(
+        tokens("split 50/50 and see https://tide.dev/download"),
+        vec![]
+    );
     // Indented after a newline pills like any other token start.
     assert_eq!(
         tokens("run:\n    /deploy"),
@@ -3479,10 +3517,7 @@ fn parse_mentions_extracts_files_and_skills() {
 /// catalog names spanning spaces, with sentence punctuation excluded.
 #[test]
 fn parse_mentions_pills_multi_word_skills_anywhere() {
-    let catalog = [
-        "AgentDB Advanced Features".to_owned(),
-        "deploy".to_owned(),
-    ];
+    let catalog = ["AgentDB Advanced Features".to_owned(), "deploy".to_owned()];
     let pills = |content: &str| {
         parse_mentions_with_skills(content, &catalog)
             .into_iter()

@@ -218,7 +218,10 @@ fn walk(session: &AgentSession, streaming: bool) -> impl Iterator<Item = RowFact
         // Facts arrive in order, so the last insert per turn wins.
         last_row_by_turn.insert(
             turn,
-            (fact_index, session.turns[turn].status != TurnStatus::Running),
+            (
+                fact_index,
+                session.turns[turn].status != TurnStatus::Running,
+            ),
         );
     }
     let closing_after: HashMap<usize, (usize, bool)> = last_row_by_turn
@@ -299,7 +302,11 @@ fn narration_span(session: &AgentSession, turn: usize) -> Option<(usize, usize)>
 /// never fold; a mid-turn user message stays visible too (it is not the
 /// model's voice).
 pub(crate) fn is_narration_message(session: &AgentSession, index: usize) -> bool {
-    let Some(turn_id) = session.messages.get(index).and_then(|message| message.turn_id) else {
+    let Some(turn_id) = session
+        .messages
+        .get(index)
+        .and_then(|message| message.turn_id)
+    else {
         return false;
     };
     let Some(turn) = session.turns.iter().position(|turn| turn.id == turn_id) else {
@@ -324,8 +331,9 @@ pub(crate) fn is_narration_block(session: &AgentSession, block: usize) -> bool {
     let Some(turn) = session.turns.iter().position(|turn| turn.id == turn_id) else {
         return false;
     };
-    narration_span(session, turn)
-        .is_some_and(|(first, last)| block_data.after_message > first && block_data.after_message <= last)
+    narration_span(session, turn).is_some_and(|(first, last)| {
+        block_data.after_message > first && block_data.after_message <= last
+    })
 }
 
 /// The fold's header host: the first narration row in walk order. A block
@@ -360,7 +368,11 @@ fn narration_edge(session: &AgentSession, turn: usize, first: bool) -> Option<Na
         if session.messages[index].turn_id == Some(turn_id)
             && session.messages[index].role == MessageRole::Assistant
         {
-            consider(index as u64 * 2 + 1, NarrationRow::Message { index }, &mut edge);
+            consider(
+                index as u64 * 2 + 1,
+                NarrationRow::Message { index },
+                &mut edge,
+            );
         }
     }
     for (block, block_data) in session.transcript_blocks.iter().enumerate() {

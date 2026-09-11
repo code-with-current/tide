@@ -58,7 +58,7 @@ pub(crate) fn run_glob(
                 } else {
                     rel_path
                 }
-            ))
+            ));
         }
     };
     if !meta.is_dir() {

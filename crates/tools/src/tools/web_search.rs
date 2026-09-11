@@ -70,7 +70,7 @@ fn run_web_search_at(query: &str, worker_url: &str) -> ToolOutcome {
     let reply = match http::get(&url, &[("Accept", "application/json")], SEARCH_TIMEOUT) {
         Ok(r) => r,
         Err(HttpError::Timeout) => {
-            return ToolOutcome::failed("Search failed: timed out after 12s")
+            return ToolOutcome::failed("Search failed: timed out after 12s");
         }
         Err(HttpError::Network(m)) => return ToolOutcome::failed(format!("Search failed: {m}")),
     };

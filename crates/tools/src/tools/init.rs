@@ -115,13 +115,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let out = run_init(tmp.path());
         assert_eq!(out.status, OutcomeStatus::Executed);
-        assert!(out
-            .output
-            .starts_with("No AGENTS.md found — create one.\n\n"));
+        assert!(
+            out.output
+                .starts_with("No AGENTS.md found — create one.\n\n")
+        );
         assert!(out.output.contains("Set up a minimal AGENTS.md file"));
-        assert!(out
-            .output
-            .contains("Would removing this cause the agent to make mistakes?"));
+        assert!(
+            out.output
+                .contains("Would removing this cause the agent to make mistakes?")
+        );
         assert_eq!(out.meta.as_deref(), Some("new"));
         let ToolDisplay::Text { text } = out.display.unwrap() else {
             panic!("text display");

@@ -10,7 +10,7 @@
 //! observe (`readOnlyHint`), everything else acts on the user's session —
 //! reads pass Plan mode, actions need Build, like the old `computer` split.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::permission::RiskTier;
 use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
@@ -328,8 +328,8 @@ mod tests {
         assert_eq!(data_url, "data:image/png;base64,aGVsbG8=");
         assert_eq!(mime_type, "image/png");
         assert_eq!(
-            serde_json::from_str::<Value>(outcome.meta.as_deref().unwrap()).unwrap()
-                ["computerTarget"]["windowId"],
+            serde_json::from_str::<Value>(outcome.meta.as_deref().unwrap()).unwrap()["computerTarget"]
+                ["windowId"],
             json!(42)
         );
     }

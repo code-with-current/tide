@@ -43,7 +43,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-
     #[derive(Debug)]
     struct StubBackend(bool);
 

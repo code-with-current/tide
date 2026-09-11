@@ -37,8 +37,10 @@ pub struct DaemonExposureSettings {
     pub port: u16,
     pub allowed_origins: Vec<String>,
     pub token: String,
-    /// Stable Remote Control relay path (`/xxxx/xxxx/xxxxxxxx`): generated
-    /// once and persisted so saved QR links survive desktop relaunches.
+    /// Relay path of the most recent Remote Control session
+    /// (`/xxxx/xxxx/xxxxxxxx`). Every enable generates a fresh path and
+    /// token, and the app never starts the relay on launch — the persisted
+    /// value describes the last session, not a resumable one.
     #[serde(default)]
     pub relay_path: Option<String>,
 }
@@ -308,12 +310,13 @@ struct SupervisorInner {
     /// machine, same filesystem — local for every picker/reveal decision
     /// even though no daemon executable is managed.
     in_process: std::sync::atomic::AtomicBool,
-    /// Hands a new exposure policy to the app-owned in-process server, which
-    /// stops the old serve loop, rebinds its listener, and returns the
-    /// address it bound. Set once at boot by the serving desktop.
-    local_restarter: Mutex<
+    /// Hands a new exposure policy to the app-owned in-process server. The
+    /// desktop's own listener is permanent, so this only starts/stops the
+    /// externally bound exposure listener — local connections never drop.
+    /// Set once at boot by the serving desktop.
+    exposure_controller: Mutex<
         Option<
-            std::sync::Arc<dyn Fn(DaemonExposureSettings) -> anyhow::Result<String> + Send + Sync>,
+            std::sync::Arc<dyn Fn(DaemonExposureSettings) -> anyhow::Result<()> + Send + Sync>,
         >,
     >,
     target: Mutex<DaemonTarget>,
@@ -430,7 +433,7 @@ impl DaemonSupervisor {
         let inner = Arc::new(SupervisorInner {
             executable,
             in_process: std::sync::atomic::AtomicBool::new(false),
-            local_restarter: Mutex::new(None),
+            exposure_controller: Mutex::new(None),
             target: Mutex::new(target),
             exposure: Mutex::new(exposure),
             restart: Mutex::new(()),
@@ -520,66 +523,34 @@ impl DaemonSupervisor {
         }
     }
 
-    /// Reconfigure the backend this process serves itself. There is no child
-    /// binary to relaunch: the app-registered restarter shuts the old serve
-    /// loop down, rebinds a listener under the new policy, and returns the
-    /// address it bound — the supervisor then reconnects to it, resuming
-    /// event streams from the last sequence numbers.
+    /// Apply a new exposure policy to the backend this process serves
+    /// itself. The desktop's listener is permanent: the registered
+    /// controller only starts/stops the externally bound exposure listener,
+    /// so the supervisor's client — and every in-flight turn riding it —
+    /// stays connected throughout.
     fn reconfigure_in_process(&self, exposure: DaemonExposureSettings) -> anyhow::Result<()> {
-        let restarter = self
+        let controller = self
             .inner
-            .local_restarter
+            .exposure_controller
             .lock()
             .clone()
             .context("the in-process Tide daemon server is not initialized")?;
         let _restart = self.inner.restart.lock();
-        let (resume_from, previous_client) = {
-            let target = self.inner.target.lock();
-            let client = target.client();
-            (client.last_sequences(), client)
-        };
-        let address = restarter(exposure.clone())?;
-        let token = exposure.token.clone();
-        let replacement =
-            match DaemonClient::connect_with_resume(&address, token.clone(), resume_from) {
-                Ok(client) => client,
-                Err(error) => {
-                    // The new server is already live, so point the supervisor at
-                    // its address and let the reconnect loop land the client.
-                    *self.inner.target.lock() = DaemonTarget::Remote {
-                        client: previous_client,
-                        address,
-                        token,
-                    };
-                    *self.inner.exposure.lock() = Some(exposure);
-                    return Err(
-                        error.context("could not reconnect to the reconfigured Tide daemon")
-                    );
-                }
-            };
-        *self.inner.target.lock() = DaemonTarget::Remote {
-            client: replacement.clone(),
-            address,
-            token,
-        };
-        self.inner
-            .client_updates
-            .lock()
-            .retain(|subscriber| subscriber.send(replacement.clone()).is_ok());
+        controller(exposure.clone())?;
         *self.inner.exposure.lock() = Some(exposure);
         queue_settings_refresh(&self.inner);
         Ok(())
     }
 
-    /// Register the in-process server restarter. Called once at boot by the
-    /// desktop that serves its own backend.
-    pub fn set_local_restarter(
+    /// Register the in-process exposure controller. Called once at boot by
+    /// the desktop that serves its own backend.
+    pub fn set_exposure_controller(
         &self,
-        restarter: std::sync::Arc<
-            dyn Fn(DaemonExposureSettings) -> anyhow::Result<String> + Send + Sync,
+        controller: std::sync::Arc<
+            dyn Fn(DaemonExposureSettings) -> anyhow::Result<()> + Send + Sync,
         >,
     ) {
-        *self.inner.local_restarter.lock() = Some(restarter);
+        *self.inner.exposure_controller.lock() = Some(controller);
     }
 
     /// Queue a daemon settings update without blocking the desktop UI thread.

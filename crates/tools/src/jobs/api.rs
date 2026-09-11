@@ -70,7 +70,9 @@ pub struct JobStart {
     /// Adopt a producer-native id (a dispatched child's `child_id`) instead
     /// of minting one.
     pub id: Option<String>,
-    /// One-line model-facing label (the command; the dispatch task).
+    /// One-line model-facing label (the command; the dispatch's short
+    /// title) — it surfaces as the work item's title in the jobs list and
+    /// panels, so it must stay one line.
     pub label: String,
     /// Owning session; jobs are fenced to it.
     pub owner_session: String,
@@ -274,6 +276,20 @@ impl JobRegistry {
     /// Runtime handle accessor for stages that must spawn bounded reapers.
     pub fn runtime(&self) -> Option<tokio::runtime::Handle> {
         runtime_lock().clone()
+    }
+
+    /// Raise the minted-id counter for `prefix` so future starts never
+    /// mint an id at or below `past` — reattached jobs reuse the old
+    /// numbering, and a fresh start after a reattach must not collide
+    /// with a still-running reattached id.
+    pub(crate) fn advance_counter(&self, session: &str, prefix: &'static str, past: u64) {
+        let mut state = state_lock();
+        if let Some(session_registry) = state.sessions.get_mut(session) {
+            let counter = session_registry.counters.entry(prefix).or_insert(0);
+            if *counter < past {
+                *counter = past;
+            }
+        }
     }
 
     fn emit(session_registry: &super::SessionRegistry, event: BackgroundWorkEvent) {

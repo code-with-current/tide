@@ -9,7 +9,9 @@ use super::super::parts;
 use super::super::parts::reasoning_part::{
     ReasoningMarkdown, reasoning_content, reasoning_streaming,
 };
-use super::super::parts::tool_part::{HEADER_GAP, HEADER_H, HEADER_ICON, HEADER_LINE_HEIGHT, HEADER_TEXT};
+use super::super::parts::tool_part::{
+    HEADER_GAP, HEADER_H, HEADER_ICON, HEADER_LINE_HEIGHT, HEADER_TEXT,
+};
 use super::super::tools_dim;
 use crate::md::render::TranscriptSelection;
 use crate::model::ActivityItem;

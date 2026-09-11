@@ -105,8 +105,7 @@ pub(crate) fn parse_mentions_with_skills(content: &str, skill_names: &[String]) 
             // rule as the composer. skill_mention_end's shape guards reject
             // the path-like and prose cases (embedded `/`, non-alnum lead).
             b'/' => {
-                skill_mention_end(content, index, skill_names)
-                    .map(|end| (MentionKind::Skill, end))
+                skill_mention_end(content, index, skill_names).map(|end| (MentionKind::Skill, end))
             }
             _ => None,
         };

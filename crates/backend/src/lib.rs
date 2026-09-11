@@ -57,7 +57,7 @@ mod fs_ext;
 mod server;
 mod wire;
 
-pub use server::{Backend, EventSink, ServerOptions, serve};
+pub use server::{Backend, EventSink, ServerCore, ServerOptions, serve, serve_with_core};
 pub use settings::{DaemonSettings, DaemonSettingsStore};
 pub use wire::{
     APP_EXECUTABLE_ENV, ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,

@@ -17,9 +17,6 @@ use super::permission::{
 use super::rows::activity_group::{
     GroupToggle, group_id, render_activities, render_group_footer, render_group_header,
 };
-use super::rows::{
-    NarrationRow, is_narration_block, is_narration_message, narration_head, narration_tail,
-};
 use super::rows::changed_files::{files_card_id, render_changed_files, summarize_changes};
 use super::rows::error_block::{
     RetryAction, error_block_id, error_text_for_turn, render_error_block, retry_text_for_turn,
@@ -29,15 +26,18 @@ use super::rows::turn_item::{
     turn_duration,
 };
 use super::rows::working_footer::render_working_footer;
+use super::rows::{
+    NarrationRow, is_narration_block, is_narration_message, narration_head, narration_tail,
+};
 use super::{
     EditingMessage, TimelineV2Row, TranscriptActions, TranscriptV2, derive_rows, rows_fingerprint,
 };
+use crate::app::Tide;
 use crate::app::navigation_rail::{
     ConversationNavigationRailSnapshot, NavigationTurnOpening, active_navigation_turn_index,
     navigation_turns, should_show_navigation_rail,
 };
 use crate::app::transcript::message_opens_turn;
-use crate::app::Tide;
 use crate::input::TextInput;
 use crate::model::{
     ActivityFileChange, ActivityItem, ActivityKind, AgentSession, Message, MessageRole, TurnStatus,
@@ -461,11 +461,16 @@ fn narration_fold_for(
 /// The list-row position a narration descriptor names, if the cached rows
 /// still know it — the footer's remeasure start.
 fn row_cache_position(state: &TranscriptV2, row: NarrationRow) -> Option<usize> {
-    state.row_cache.iter().position(|cached| match (cached, row) {
-        (TimelineV2Row::Message { index: a }, NarrationRow::Message { index: b }) => *a == b,
-        (TimelineV2Row::ActivityGroup { block: a }, NarrationRow::Block { index: b }) => *a == b,
-        _ => false,
-    })
+    state
+        .row_cache
+        .iter()
+        .position(|cached| match (cached, row) {
+            (TimelineV2Row::Message { index: a }, NarrationRow::Message { index: b }) => *a == b,
+            (TimelineV2Row::ActivityGroup { block: a }, NarrationRow::Block { index: b }) => {
+                *a == b
+            }
+            _ => false,
+        })
 }
 
 /// The fold's summary header for a turn, carrying its own toggle wiring
@@ -504,7 +509,11 @@ fn group_footer_for_turn(
     theme: &Theme,
 ) -> gpui::Stateful<gpui::Div> {
     let remeasure_from = row_cache_position(state, fold.head_row).unwrap_or_default();
-    render_group_footer(theme, &group_id(fold.turn_id), group_toggle(cx, remeasure_from))
+    render_group_footer(
+        theme,
+        &group_id(fold.turn_id),
+        group_toggle(cx, remeasure_from),
+    )
 }
 
 /// A fold affordance's click wiring (the changed-files card's synthetic-id
@@ -522,8 +531,7 @@ fn group_toggle(cx: &Context<Tide>, remeasure_from: usize) -> GroupToggle {
             entity.update(cx, |this, cx| {
                 this.toggle_disclosure(id, cx);
                 let count = this.timeline_v2_state.row_cache.len();
-                active_rows(&this.timeline_v2_state)
-                    .remeasure_items(remeasure_from..count);
+                active_rows(&this.timeline_v2_state).remeasure_items(remeasure_from..count);
             });
         },
     )
@@ -1702,9 +1710,7 @@ fn timeline_v2_row(
                             ))
                         })
                         .when(fold.expanded, |column| {
-                            column.child(render_assistant_message(
-                                tide, message, index, &theme, cx,
-                            ))
+                            column.child(render_assistant_message(tide, message, index, &theme, cx))
                         })
                         .when(fold.expanded && fold.tail, |column| {
                             column.child(group_footer_for_turn(
@@ -1800,13 +1806,7 @@ fn timeline_v2_row(
                     .flex_col()
                     .gap(px(2.0))
                     .when(fold.head, |group| {
-                        group.child(group_header_for_turn(
-                            cx,
-                            session,
-                            fold.turn_id,
-                            ix,
-                            &theme,
-                        ))
+                        group.child(group_header_for_turn(cx, session, fold.turn_id, ix, &theme))
                     })
                     .when(fold.expanded, |group| {
                         group.child(render_activities(
@@ -2000,12 +2000,7 @@ fn timeline_v2_row(
             // through the app's menu registry — the same seam the turn
             // footer's popovers use.
             let menus: Vec<crate::ui::menu::ContextMenuHandle> = (0..summary.files.len())
-                .map(|ix| {
-                    tide.menu_handle(
-                        SharedString::from(format!("files-menu-{id}-{ix}")),
-                        cx,
-                    )
-                })
+                .map(|ix| tide.menu_handle(SharedString::from(format!("files-menu-{id}-{ix}")), cx))
                 .collect();
             render_changed_files(
                 &summary,

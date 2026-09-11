@@ -14,11 +14,11 @@ use serde_json::json;
 
 use crate::path_safety::resolve_inside_roots;
 use crate::permission::RiskTier;
-use crate::{redact, Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
+use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec, redact};
 
 use super::arg_str;
 use super::arg_u64;
-use super::proc::{run_with_deadline, RunError};
+use super::proc::{RunError, run_with_deadline};
 
 pub(crate) const MAX_RESULTS: usize = 100;
 const TIMEOUT_MS: u64 = 10_000;

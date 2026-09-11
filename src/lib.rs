@@ -258,6 +258,13 @@ fn activate_other_instance(pid: i32) {
 fn activate_other_instance(_pid: i32) {}
 
 pub fn run() {
+    // The job runner is the same binary re-invoked with `--job-runner`;
+    // it must never reach the GUI (or the single-instance guard).
+    if tools::job_runner::main_if_requested() {
+        return;
+    }
+    // Background jobs run out-of-process in the runner when possible.
+    tools::job_runner::enable_runner_mode();
     crate::analytics::note_process_start();
     ensure_single_instance();
     let daemon = crate::daemon::start_process()

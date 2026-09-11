@@ -212,8 +212,7 @@ impl ChatComposer {
     /// pruning staged tokens whose occurrences are all gone — deleting the
     /// token text retires its decoration with no extra plumbing.
     pub fn refresh_token_decorations(&mut self, cx: &mut Context<Self>) {
-        let (ranges, survivors) =
-            token_ranges(self.field.read(cx).content(), &self.staged_tokens);
+        let (ranges, survivors) = token_ranges(self.field.read(cx).content(), &self.staged_tokens);
         self.staged_tokens = survivors;
         self.field.update(cx, |field, cx| {
             field.set_decorated_ranges(ranges, cx);
@@ -810,8 +809,7 @@ mod tests {
     fn token_ranges_match_word_boundary_occurrences_only() {
         use super::token_ranges;
         let tokens = vec!["/refactor".to_owned(), "@src/a.rs".to_owned()];
-        let (ranges, survivors) =
-            token_ranges("fix @src/a.rs and /refactor @src/a.rs", &tokens);
+        let (ranges, survivors) = token_ranges("fix @src/a.rs and /refactor @src/a.rs", &tokens);
         // begin / middle / end all match; duplicates all decorate.
         assert_eq!(ranges, vec![4..13, 18..27, 28..37]);
         assert_eq!(survivors, tokens);

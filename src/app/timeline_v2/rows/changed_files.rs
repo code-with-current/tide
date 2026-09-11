@@ -1,6 +1,7 @@
-//! The turn's file changes, container-free: a count reading over a
-//! horizontally wrapping list of fixed-width file pills — name plus the
-//! file's "+n/−m" — budgeted with an expander when the turn touched more
+//! The turn's file changes: a count reading over a card holding a
+//! horizontally wrapping list of content-sized file pills — path plus the
+//! file's "+n/−m", the path capped at 20 trailing characters behind a
+//! leading ellipsis — budgeted with an expander when the turn touched more
 //! files than the collapsed list shows. A pill's click opens the diff
 //! viewer; its right click opens a context menu (Open, Open Diff) on a
 //! handle `list.rs` builds through the app's menu registry.
@@ -14,13 +15,13 @@
 //! toggle with a direct remeasure (the synthetic-id pattern).
 
 use super::super::{
-    TranscriptActions, relative_display, split_path_display, tools_description, tools_dim,
-    tools_title,
+    TranscriptActions, relative_display, tools_description, tools_dim, tools_title,
 };
 use super::activity_group::GroupToggle;
 use crate::model::{ActivityFileChange, ActivityFileChangeStatus};
 use crate::theme::{Theme, sp};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
+use crate::ui::tooltip::Tooltip;
 use gpui::prelude::*;
 use gpui::{AnyElement, Div, FontWeight, SharedString, div, px};
 use std::path::Path;
@@ -135,6 +136,23 @@ pub(crate) fn visible_files(total: usize, expanded: bool) -> (usize, Option<usiz
     }
 }
 
+/// The most path text a pill shows, in characters — a string-level budget,
+/// so a pill's width is bounded no matter how long the filename is and no
+/// layout machinery is trusted to truncate in time.
+pub(crate) const PILL_PATH_MAX_CHARS: usize = 20;
+
+/// The pill's path reading: the display path as-is when it fits the
+/// [`PILL_PATH_MAX_CHARS`] budget, otherwise only its trailing 20 characters
+/// behind a leading "…" (char-boundary safe, so the extension survives).
+pub(crate) fn pill_path_text(display: &str) -> String {
+    let count = display.chars().count();
+    if count <= PILL_PATH_MAX_CHARS {
+        return display.to_owned();
+    }
+    let tail: String = display.chars().skip(count - PILL_PATH_MAX_CHARS).collect();
+    format!("…{tail}")
+}
+
 /// The card's disclosure id. The turn's uuid anchors it — the same stability
 /// rule as [`super::activity_group::group_id`]: ids must survive re-anchoring
 /// folds, and a turn id never moves once the turn settles.
@@ -144,12 +162,11 @@ pub(crate) fn files_card_id(turn_id: Uuid) -> String {
 
 // ── Renderer ────────────────────────────────────────────────────────────────
 
-/// The pill's width cap: pills size to their filename (which never
-/// truncates) with the parent directory absorbing the squeeze — past this
-/// width the directory truncates, keeping long paths readable as
-/// "…dir/file.rs +9 −2".
+/// The pill's width cap: pills size to their content, and the path text's
+/// 20-character budget ([`pill_path_text`]) already bounds them — this only
+/// guards a pathological stat run.
 const PILL_MAX_WIDTH: f32 = 300.0;
-const PILL_HEIGHT: f32 = 20.0;
+const PILL_HEIGHT: f32 = 26.0;
 
 /// The turn's file changes, container-free: the count reading over a
 /// horizontally wrapping list of fixed-width file pills, with the budget
@@ -175,13 +192,19 @@ pub(crate) fn render_changed_files(
         .mt(px(4.0))
         .flex()
         .flex_col()
-        .gap(px(4.0))
+        .gap(px(6.0))
+        .border_1()
+        .border_color(theme.border)
+        .rounded(px(8.0))
+        .bg(theme.raised)
+        .px(px(12.0))
+        .py(px(8.0))
         .child(
             div()
                 .h(px(PILL_HEIGHT))
                 .flex()
                 .items_center()
-                .text_size(sp(12.5))
+                .text_size(sp(13.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(tools_title(theme))
                 .child(SharedString::from(format!(
@@ -191,14 +214,11 @@ pub(crate) fn render_changed_files(
         );
 
     if !summary.files.is_empty() {
-        let mut pills = div()
-            .w_full()
-            .flex()
-            .flex_wrap()
-            .gap(px(4.0))
-            .children(summary.files[..shown].iter().enumerate().map(
-                |(ix, file)| render_file_pill(file, workspace, actions, theme, id, ix, menus.get(ix)),
-            ));
+        let mut pills = div().w_full().flex().flex_wrap().gap(px(4.0)).children(
+            summary.files[..shown].iter().enumerate().map(|(ix, file)| {
+                render_file_pill(file, workspace, actions, theme, id, ix, menus.get(ix))
+            }),
+        );
         // The affordance rides inline at the end of the list — the last
         // pill in the wrapping row, never a line of its own: collapsed it
         // is "See More" naming what the budget cut; expanded it stays as
@@ -215,12 +235,13 @@ pub(crate) fn render_changed_files(
     section
 }
 
-/// One file pill: width from its content, one uniform path style — the
-/// FILENAME never truncates; its parent directory absorbs the squeeze,
-/// truncating past the pill's cap — with the "+n/−m" halves beside it
-/// (zero halves omitted, absent when the change carried no stats). Left click opens the diff
-/// viewer; right click opens the context menu — Open, Open Diff — on the
-/// handle `menu` carries.
+/// One file pill: width from its content — the path text is capped at 20
+/// trailing characters behind a leading "…" ([`pill_path_text`]), with the
+/// full display path on the hover tooltip, so the text can never overflow
+/// the pill or the "+n/−m" halves beside it (zero halves omitted, absent
+/// when the change carried no stats). Left click opens the diff viewer;
+/// right click opens the context menu — Open, Open Diff — on the handle
+/// `menu` carries.
 fn render_file_pill(
     file: &ChangedFileSummary,
     workspace: &Path,
@@ -230,7 +251,8 @@ fn render_file_pill(
     ix: usize,
     menu: Option<&ContextMenuHandle>,
 ) -> AnyElement {
-    let (dir, name) = split_path_display(&relative_display(workspace, &file.path));
+    let display = relative_display(workspace, &file.path);
+    let path = pill_path_text(&display);
     let mut pill = div()
         .id(SharedString::from(format!("files-pill-{id}-{ix}")))
         .max_w(px(PILL_MAX_WIDTH))
@@ -243,39 +265,20 @@ fn render_file_pill(
         .bg(theme.overlay)
         .cursor_pointer()
         .hover(|style| style.bg(theme.border.opacity(0.6)))
+        .tooltip(Tooltip::text(display.clone()))
         .child(
-            // One unbroken path run: directory and filename sit flush (the
-            // row's own gap must not open a space mid-path), the directory
-            // still the only side that truncates.
             div()
-                .flex_auto()
-                .min_w_0()
-                .flex()
-                .when(!dir.is_empty(), |path| {
-                    path.child(
-                        div()
-                            .flex_auto()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(11.0))
-                            .text_color(tools_description(theme))
-                            .child(SharedString::from(format!("{dir}/"))),
-                    )
-                })
-                .child(
-                    div()
-                        .flex_none()
-                        .truncate()
-                        .text_size(sp(11.0))
-                        .text_color(tools_description(theme))
-                        .child(SharedString::from(name)),
-                ),
+                .flex_none()
+                .whitespace_nowrap()
+                .text_size(sp(12.5))
+                .text_color(tools_description(theme))
+                .child(SharedString::from(path)),
         );
     if file.additions > 0 {
         pill = pill.child(
             div()
                 .flex_none()
-                .text_size(sp(10.5))
+                .text_size(sp(11.5))
                 .text_color(super::super::diff_added())
                 .child(SharedString::from(format!("+{}", file.additions))),
         );
@@ -284,7 +287,7 @@ fn render_file_pill(
         pill = pill.child(
             div()
                 .flex_none()
-                .text_size(sp(10.5))
+                .text_size(sp(11.5))
                 .text_color(super::super::diff_removed(theme))
                 .child(SharedString::from(format!("\u{2212}{}", file.deletions))),
         );
@@ -343,7 +346,7 @@ fn render_expander(
         .hover(|style| style.bg(theme.overlay))
         .child(
             div()
-                .text_size(sp(11.0))
+                .text_size(sp(12.5))
                 .text_color(tools_dim(theme))
                 .hover(|style| style.text_color(tools_title(theme)))
                 .child(SharedString::from(label)),

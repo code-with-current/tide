@@ -17,6 +17,7 @@
 
 pub mod agents;
 pub mod http;
+pub mod job_runner;
 pub mod jobs;
 pub mod path_safety;
 pub mod permission;

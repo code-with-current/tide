@@ -233,11 +233,7 @@ fn captured_shell_env() -> &'static HashMap<String, String> {
                         }
                     }
                 }
-                if map.is_empty() {
-                    None
-                } else {
-                    Some(map)
-                }
+                if map.is_empty() { None } else { Some(map) }
             })
             .unwrap_or_default();
         if env.is_empty() {

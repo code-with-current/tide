@@ -67,7 +67,7 @@ pub(crate) fn run_git(argv: &[String], workspace_root: &Path) -> ToolOutcome {
             return ToolOutcome::failed(format!(
                 "fatal: not a git repository (discovered from {}): {e}",
                 workspace_root.display()
-            ))
+            ));
         }
     };
 
@@ -416,7 +416,9 @@ fn cmd_diff(repo: &Repository, args: &[String], ws: &Path) -> ToolOutcome {
             "--name-only" => name_only = true,
             "--no-color" | "--no-ext-diff" | "--no-rename" | "--textconv" | "-M" => {}
             f if f.starts_with('-') => {
-                return ToolOutcome::failed(format!("diff: unsupported flag {f} (supported: --cached/--staged, --stat, --name-only, paths)"))
+                return ToolOutcome::failed(format!(
+                    "diff: unsupported flag {f} (supported: --cached/--staged, --stat, --name-only, paths)"
+                ));
             }
             p => match rel_path(repo, ws, p) {
                 Ok(rel) => paths.push(rel),
@@ -630,7 +632,7 @@ fn cmd_show(repo: &Repository, args: &[String]) -> ToolOutcome {
         Err(_) => {
             return ToolOutcome::failed(format!(
                 "show: '{target}' is not a commit (trees/blobs unsupported)"
-            ))
+            ));
         }
     };
     match show_commit_patch(repo, &commit, MAX_OUTPUT) {
@@ -805,9 +807,15 @@ fn cmd_commit(repo: &Repository, args: &[String]) -> ToolOutcome {
                 }
             }
             f if f.starts_with('-') => {
-                return ToolOutcome::failed(format!("commit: unsupported flag {f} (supported: -m, repeatable)"))
+                return ToolOutcome::failed(format!(
+                    "commit: unsupported flag {f} (supported: -m, repeatable)"
+                ));
             }
-            p => return ToolOutcome::failed(format!("commit: unexpected argument '{p}' (amend/pathspec commits unsupported; create a NEW commit)")),
+            p => {
+                return ToolOutcome::failed(format!(
+                    "commit: unexpected argument '{p}' (amend/pathspec commits unsupported; create a NEW commit)"
+                ));
+            }
         }
         i += 1;
     }
@@ -882,13 +890,25 @@ fn cmd_unstage(repo: &Repository, cmd: &str, args: &[String], ws: &Path) -> Tool
     let rest: &[String] = if cmd == "restore" {
         match args.first().map(|s| s.as_str()) {
             Some("--staged") | Some("-S") => &args[1..],
-            _ => return ToolOutcome::failed("restore: only `--staged <paths>` (unstage) is supported; discarding worktree changes is destructive — use bash with approval"),
+            _ => {
+                return ToolOutcome::failed(
+                    "restore: only `--staged <paths>` (unstage) is supported; discarding worktree changes is destructive — use bash with approval",
+                );
+            }
         }
     } else {
         match args.iter().position(|a| a == "--") {
             Some(pos) if pos == 0 || args[..pos].iter().all(|a| a.is_empty()) => &args[pos + 1..],
-            Some(_) => return ToolOutcome::failed("reset: only `reset -- <paths>` (unstage) is supported; hard/soft/mode resets are destructive — use bash with approval"),
-            None => return ToolOutcome::failed("reset: only `reset -- <paths>` (unstage) is supported; hard/soft/mode resets are destructive — use bash with approval"),
+            Some(_) => {
+                return ToolOutcome::failed(
+                    "reset: only `reset -- <paths>` (unstage) is supported; hard/soft/mode resets are destructive — use bash with approval",
+                );
+            }
+            None => {
+                return ToolOutcome::failed(
+                    "reset: only `reset -- <paths>` (unstage) is supported; hard/soft/mode resets are destructive — use bash with approval",
+                );
+            }
         }
     };
     if rest.is_empty() {

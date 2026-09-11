@@ -458,6 +458,28 @@ impl RequestDispatcher {
     }
 }
 
+/// Shared request/event core for every listener serving one backend: the
+/// event hub (journal, sequences, subscriptions) and the per-session runtime
+/// mailboxes must be common so desktop and web clients observe a single
+/// lifecycle. Build once, pass the same core to each [`serve_with_core`]
+/// listener.
+pub struct ServerCore {
+    backend: Arc<dyn Backend>,
+    hub: Arc<Hub>,
+    dispatcher: Arc<RequestDispatcher>,
+}
+
+impl ServerCore {
+    pub fn new(backend: Arc<dyn Backend>) -> Self {
+        let hub = Arc::new(Hub::default());
+        Self {
+            backend: backend.clone(),
+            dispatcher: Arc::new(RequestDispatcher::new(backend, hub.clone())),
+            hub,
+        }
+    }
+}
+
 pub fn serve(
     listener: TcpListener,
     token: String,
@@ -465,11 +487,19 @@ pub fn serve(
     shutdown: Arc<AtomicBool>,
     options: ServerOptions,
 ) -> anyhow::Result<()> {
+    serve_with_core(listener, token, &ServerCore::new(backend), shutdown, options)
+}
+
+pub fn serve_with_core(
+    listener: TcpListener,
+    token: String,
+    core: &ServerCore,
+    shutdown: Arc<AtomicBool>,
+    options: ServerOptions,
+) -> anyhow::Result<()> {
     listener
         .set_nonblocking(true)
         .context("could not configure Tide daemon listener")?;
-    let hub = Arc::new(Hub::default());
-    let dispatcher = Arc::new(RequestDispatcher::new(backend.clone(), hub.clone()));
     let options = Arc::new(options);
     let active_connections = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Acquire) {
@@ -485,8 +515,8 @@ pub fn serve(
                 }
                 let connection_permit = ConnectionPermit(active_connections.clone());
                 let token = token.clone();
-                let dispatcher = dispatcher.clone();
-                let hub = hub.clone();
+                let dispatcher = core.dispatcher.clone();
+                let hub = core.hub.clone();
                 let shutdown = shutdown.clone();
                 let options = options.clone();
                 std::thread::Builder::new()
@@ -508,7 +538,7 @@ pub fn serve(
             Err(error) => return Err(error).context("Tide daemon listener failed"),
         }
     }
-    backend.shutdown();
+    core.backend.shutdown();
     Ok(())
 }
 

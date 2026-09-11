@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::path_safety::{resolve_and_follow_symlinks_roots, resolve_under_skill_root};
 use crate::permission::RiskTier;
-use crate::{redact, Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec};
+use crate::{Tool, ToolContext, ToolDisplay, ToolError, ToolOutcome, ToolSpec, redact};
 
 use super::{arg_str, arg_u64};
 
@@ -46,7 +46,7 @@ pub(crate) fn run_read_file(
                 "File not found: {rel_path} (resolved: {}; workspace root: {}). Use list_dir to see what's actually in the workspace.",
                 abs.display(),
                 workspace_root.display()
-            ))
+            ));
         }
     };
     if !meta.is_file() {

@@ -170,7 +170,6 @@ daemon.phase_connected: 接続済み
 daemon.phase_error: エラー
 daemon.invalid_port: 1 から 65535 のポートを入力してください
 daemon.invalid_settings: デーモン設定が無効です：%{error}
-daemon.stop_active_tasks: デーモンのアクセス設定を変更する前に実行中のタスクを停止してください
 daemon.settings_applied: デーモンのアクセス設定を更新しました
 daemon.restart_failed: デーモンを再起動できませんでした：%{error}
 daemon.url_copied: WebSocket URL をコピーしました
@@ -1623,9 +1622,12 @@ transcript.view_file: ファイルを表示
 transcript.view_diff: 差分を表示
 remote_control.title: リモートコントロール
 remote_control.enable_toggle: リモートコントロールを有効化
-remote_control.hint: スマートフォンでスキャンすると、このマシンに接続した Tide Web が開きます。
+remote_control.enable_hint_off: スマートフォンでスキャンすると、このマシンに接続した Tide Web が開きます。リモートコントロールは Tide の起動時には常にオフです。
+remote_control.enable_hint_live: 有効 — 下のQRコードをスキャンするか、リンクを任意のブラウザで開いてください。
+remote_control.enable_hint_restarting: 設定を適用しています…
 remote_control.web_link: Tide Web リンク
-remote_control.show_qr: QRを表示
+remote_control.copy: コピー
+remote_control.copied: リンクをコピーしました
 remote_control.disable: リモートコントロールを無効化
 settings.general_description: プライバシー、アップデート、バックグラウンドタスク。
 settings.knowledge_description: ドキュメント、ページ、リポジトリをメモリツールで検索。
@@ -1638,6 +1640,8 @@ settings.skills_description: プロジェクトのエージェントスキル。
 settings.usage_description: トークンの使用量とコスト。
 settings.computer_use_description: エージェントにこのマシンのアプリ操作を許可。
 remote_control.scan: スキャンして接続
+remote_control.scan_description: スマートフォンのカメラをQRコードに向けると、このマシンに接続した Tide Web が開きます。
+remote_control.security_hint: アクセストークンはリンクのフラグメントにのみ含まれ、サーバーに送信されることはありません。有効化のたびに新しいリンクが生成され、Tide を終了するとセッションも終了します。
 remote_control.open: Tide Web を開く
 web.stale_link_title: このリンクは無効です
 web.stale_link_description: リモートコントロールのリンクは有効化のたびに新しくなります — デスクトップのQRコードを再スキャンしてください。
