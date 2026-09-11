@@ -14,7 +14,6 @@ const CLOUD_URL: &str = "https://cloud.zed.dev";
 #[cfg(test)]
 static TEST_CLOUD_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-#[allow(dead_code)] // used from task 4
 fn cloud_url() -> String {
     #[cfg(test)]
     if let Some(url) = TEST_CLOUD_URL.lock().unwrap_or_else(|p| p.into_inner()).clone() {
@@ -60,7 +59,7 @@ fn ensure_creds(cred: &ZedCredential) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)] // used from task 4
+#[allow(dead_code)] // used from task 5
 pub(crate) fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -68,7 +67,6 @@ pub(crate) fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
         .context("could not build the zed client")
 }
 
-#[allow(dead_code)] // used from task 4
 pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire>> {
     let list = json
         .get("models")
@@ -110,9 +108,154 @@ pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire
     Ok(models)
 }
 
+#[allow(dead_code)] // used from task 5
+pub(crate) fn zed_llm_token(
+    client: &reqwest::blocking::Client,
+    cred: &ZedCredential,
+) -> anyhow::Result<String> {
+    let mut body = serde_json::Map::new();
+    if let Some(org) = &cred.organization_id {
+        body.insert("organization_id".into(), Value::String(org.clone()));
+    }
+    let response = client
+        .post(format!("{}/client/llm_tokens", cloud_url()))
+        .header("Authorization", format!("{} {}", cred.user_id, cred.access_token))
+        .json(&body)
+        .send()
+        .context("could not reach cloud.zed.dev")?;
+    let status = response.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        bail!("Zed rejected the sign-in (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry");
+    }
+    if !status.is_success() {
+        bail!("llm-token endpoint HTTP {status}");
+    }
+    response
+        .json::<Value>()
+        .context("the llm-token response was not JSON")?
+        .get("token")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("the llm-token response had no token"))
+}
+
+#[allow(dead_code)] // used from task 5
+pub(crate) fn zed_models(
+    client: &reqwest::blocking::Client,
+    cred: &ZedCredential,
+) -> anyhow::Result<Vec<TideModelWire>> {
+    let token = zed_llm_token(client, cred)?;
+    let response = client
+        .get(format!("{}/models", cloud_url()))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("x-zed-client-supports-x-ai", "true")
+        .send()
+        .context("could not reach cloud.zed.dev/models")?;
+    let status = response.status();
+    let text = response.text().context("could not read the models response")?;
+    if !status.is_success() {
+        bail!("HTTP {status}: {}", text.chars().take(200).collect::<String>());
+    }
+    let json: Value = serde_json::from_str(&text).context("the models response was not JSON")?;
+    parse_zed_models(&json)
+}
+
+#[allow(dead_code)] // used from task 5
+pub(crate) fn zed_users_me(
+    client: &reqwest::blocking::Client,
+    cred: &ZedCredential,
+) -> anyhow::Result<Value> {
+    let response = client
+        .get(format!("{}/client/users/me", cloud_url()))
+        .header("Authorization", format!("{} {}", cred.user_id, cred.access_token))
+        .send()
+        .context("could not reach cloud.zed.dev/client/users/me")?;
+    let status = response.status();
+    let text = response.text().context("could not read the users/me response")?;
+    if !status.is_success() {
+        bail!("Zed rejected the credentials (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry");
+    }
+    serde_json::from_str(&text).context("the users/me response was not JSON")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cloud URL override is process-global and tests run in parallel,
+    /// so every test that points the client at a FakeCloud holds this lock
+    /// for its whole body.
+    static CLOUD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn set_cloud(url: Option<String>) {
+        *TEST_CLOUD_URL.lock().unwrap_or_else(|p| p.into_inner()) = url;
+    }
+
+    /// A fake cloud.zed.dev: serves one canned raw HTTP response per
+    /// connection (in order) and captures each request's start line,
+    /// headers (minus content-length), and body.
+    struct FakeCloud {
+        base_url: String,
+        requests: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>, // (start line + headers, body)
+        _keep: std::sync::Arc<std::net::TcpListener>,
+    }
+
+    impl FakeCloud {
+        fn spawn(responses: Vec<String>) -> Self {
+            let listener = std::sync::Arc::new(
+                std::net::TcpListener::bind("127.0.0.1:0").unwrap(),
+            );
+            let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let srv_requests = requests.clone();
+            let srv_listener = listener.clone();
+            std::thread::spawn(move || {
+                let mut remaining = responses.into_iter();
+                for stream in srv_listener.incoming().flatten() {
+                    let Some(response) = remaining.next() else { break };
+                    let mut stream = stream;
+                    use std::io::{BufRead, BufReader, Read, Write};
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut captured = String::new();
+                    let mut length = 0usize;
+                    // read start line + headers, capture them, then the body
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        let trimmed_end = line.trim_end();
+                        if trimmed_end.is_empty() {
+                            break;
+                        }
+                        if let Some((n, v)) = trimmed_end.split_once(':') {
+                            if n.trim().eq_ignore_ascii_case("content-length") {
+                                length = v.trim().parse().unwrap_or(0);
+                            }
+                        }
+                        if !trimmed_end.to_ascii_lowercase().starts_with("content-length") {
+                            captured.push_str(trimmed_end);
+                            captured.push('\n');
+                        }
+                    }
+                    let mut body = vec![0u8; length];
+                    reader.read_exact(&mut body).unwrap();
+                    srv_requests.lock().unwrap().push((
+                        captured.trim().to_owned(),
+                        String::from_utf8_lossy(&body).into_owned(),
+                    ));
+                    stream.write_all(response.as_bytes()).unwrap();
+                }
+            });
+            Self { base_url, requests, _keep: listener }
+        }
+    }
+
+    fn http_ok_json(json: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            json.len(),
+            json
+        )
+    }
 
     #[test]
     fn blob_round_trip() {
@@ -200,5 +343,112 @@ mod tests {
             ZedCredential::from_blob(r#"{"userId":"1","accessToken":"t","organizationId":""}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn llm_token_sends_custom_auth_and_org_body() {
+        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"llm-tok"}"#)]);
+        set_cloud(Some(cloud.base_url.clone()));
+        let cred = ZedCredential {
+            user_id: "605409".into(),
+            access_token: "acc".into(),
+            organization_id: Some("org_9".into()),
+        };
+        let token = zed_llm_token(&http_client().unwrap(), &cred).unwrap();
+        assert_eq!(token, "llm-tok");
+        let (captured, body) = cloud.requests.lock().unwrap()[0].clone();
+        assert!(captured.contains("POST /client/llm_tokens"), "{captured}");
+        assert!(
+            captured.contains("authorization: 605409 acc"),
+            "custom auth scheme, got: {captured}"
+        );
+        assert!(body.contains(r#""organization_id":"org_9""#), "{body}");
+        set_cloud(None);
+    }
+
+    #[test]
+    fn llm_token_rejects_dead_credentials() {
+        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let denied =
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let cloud = FakeCloud::spawn(vec![denied]);
+        set_cloud(Some(cloud.base_url.clone()));
+        let err = zed_llm_token(&http_client().unwrap(), &ZedCredential {
+            user_id: "1".into(),
+            access_token: "dead".into(),
+            organization_id: None,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.to_lowercase().contains("sign"), "{err}");
+        set_cloud(None);
+    }
+
+    #[test]
+    fn models_uses_bearer_llm_token() {
+        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let cloud = FakeCloud::spawn(vec![
+            http_ok_json(r#"{"token":"llm-tok"}"#),
+            http_ok_json(
+                r#"{"models":[{"id":"claude-sonnet-5","max_token_count":1000,"supports_thinking":true}]}"#,
+            ),
+        ]);
+        set_cloud(Some(cloud.base_url.clone()));
+        let models = zed_models(&http_client().unwrap(), &ZedCredential {
+            user_id: "1".into(),
+            access_token: "a".into(),
+            organization_id: None,
+        })
+        .unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model_id, "claude-sonnet-5");
+        assert_eq!(models[0].context_window, 1000);
+        assert!(models[0].reasoning);
+        let captured: Vec<String> =
+            cloud.requests.lock().unwrap().iter().map(|(c, _)| c.clone()).collect();
+        assert!(captured[1].contains("GET /models"), "{captured:?}");
+        assert!(captured[1].contains("authorization: Bearer llm-tok"), "{captured:?}");
+        assert!(captured[1].contains("x-zed-client-supports-x-ai: true"), "{captured:?}");
+        set_cloud(None);
+    }
+
+    #[test]
+    fn models_surfaces_http_error_body() {
+        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let denied =
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"T"}"#), denied]);
+        set_cloud(Some(cloud.base_url.clone()));
+        let err = zed_models(&http_client().unwrap(), &ZedCredential {
+            user_id: "1".into(),
+            access_token: "a".into(),
+            organization_id: None,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("401"), "{err}");
+        set_cloud(None);
+    }
+
+    #[test]
+    fn users_me_uses_custom_auth() {
+        let _cloud = CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"id":"605409"}"#)]);
+        set_cloud(Some(cloud.base_url.clone()));
+        let cred = ZedCredential {
+            user_id: "605409".into(),
+            access_token: "acc".into(),
+            organization_id: None,
+        };
+        let me = zed_users_me(&http_client().unwrap(), &cred).unwrap();
+        assert_eq!(me["id"], "605409");
+        let (captured, _) = cloud.requests.lock().unwrap()[0].clone();
+        assert!(captured.contains("GET /client/users/me"), "{captured}");
+        assert!(
+            captured.contains("authorization: 605409 acc"),
+            "custom auth scheme, got: {captured}"
+        );
+        set_cloud(None);
     }
 }
