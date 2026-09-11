@@ -15,18 +15,54 @@ const CLOUD_URL: &str = "https://cloud.zed.dev";
 /// when the live API rejects requests (undocumented API; see design doc).
 const ZED_VERSION: &str = "1.19.2";
 
+/// Test-only seam: the override exists so FakeCloud tests can reroute the
+/// bridge's cloud side. `cloud_url()` consults it before the pinned default.
+#[cfg(test)]
 static CLOUD_OVERRIDE: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
+/// The cloud URL override is process-global and tests run in parallel, so
+/// every test that points the bridge at a FakeCloud holds this lock for its
+/// whole body. Shared with fixture_tests' zed test — same pattern as the
+/// backend's tide_zed tests.
+#[cfg(test)]
+pub(crate) static CLOUD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 pub(crate) fn set_cloud_url_for_tests(url: Option<String>) {
     *CLOUD_OVERRIDE.lock().unwrap_or_else(|p| p.into_inner()) = url;
 }
 
 fn cloud_url() -> String {
-    CLOUD_OVERRIDE
+    #[cfg(test)]
+    if let Some(url) = CLOUD_OVERRIDE
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .clone()
-        .unwrap_or_else(|| CLOUD_URL.to_owned())
+    {
+        return url;
+    }
+    CLOUD_URL.to_owned()
+}
+
+/// Points the global cloud URL override at `url` until the guard drops.
+/// The held lock serializes FakeCloud tests, and Drop clears the override
+/// even when a failing assertion unwinds, so a later test can't inherit a
+/// URL pointing at a dead listener.
+#[cfg(test)]
+pub(crate) struct CloudGuard(std::sync::MutexGuard<'static, ()>);
+
+#[cfg(test)]
+pub(crate) fn cloud_guard(url: String) -> CloudGuard {
+    let guard = CloudGuard(CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner()));
+    set_cloud_url_for_tests(Some(url));
+    guard
+}
+
+#[cfg(test)]
+impl Drop for CloudGuard {
+    fn drop(&mut self) {
+        set_cloud_url_for_tests(None);
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -145,14 +181,18 @@ impl ZedBridge {
     fn cloud_completion(&self, envelope: &Value) -> Result<Vec<Value>, String> {
         let token = self.llm_token(false)?;
         let response = self.post_completions(&token, envelope)?;
-        let status = response.status();
-        if should_refresh(status.as_u16(), response.headers()) {
+        // A refresh advisory only invalidates the OLD token; the retried
+        // response is checked exactly like the first one — a failed retry
+        // (revoked, rate-limited, 5xx) must surface as a 502, never as an
+        // empty 200 turn.
+        let response = if should_refresh(response.status().as_u16(), response.headers()) {
             let token = self.llm_token(true)?;
-            let response = self.post_completions(&token, envelope)?;
-            return self.read_ndjson(response);
-        }
-        if !status.is_success() {
-            return Err(format!("zed cloud HTTP {status}"));
+            self.post_completions(&token, envelope)?
+        } else {
+            response
+        };
+        if !response.status().is_success() {
+            return Err(format!("zed cloud HTTP {}", response.status()));
         }
         self.read_ndjson(response)
     }
@@ -178,12 +218,28 @@ impl ZedBridge {
     fn read_ndjson(&self, response: reqwest::blocking::Response) -> Result<Vec<Value>, String> {
         let text = response.text().map_err(|e| format!("cloud stream read: {e}"))?;
         let mut events = Vec::new();
+        let mut first_line: Option<&str> = None;
         for line in text.lines() {
             if line.trim().is_empty() { continue; }
+            if first_line.is_none() { first_line = Some(line); }
             if let Ok(wrapped) = serde_json::from_str::<Value>(line) {
                 if let Some(event) = wrapped.get("event") {
                     events.push(event.clone());
                 }
+            }
+        }
+        // The bridge advertises status-message support, so a success
+        // response carries at least one event line: a non-empty body with
+        // zero events is a wrapped/foreign payload, not a legitimate empty
+        // turn — surface it instead of writing a silent empty stream. A
+        // truly empty body keeps the empty-stream behavior.
+        if events.is_empty() {
+            if let Some(line) = first_line {
+                let mut excerpt: String = line.chars().take(200).collect();
+                if excerpt.len() < line.len() {
+                    excerpt.push('…');
+                }
+                return Err(format!("zed cloud response had no events; first line: {excerpt}"));
             }
         }
         Ok(events)
@@ -287,7 +343,9 @@ fn end_chunks(stream: &mut TcpStream) -> std::io::Result<()> {
 }
 
 fn write_plain_error(stream: &mut TcpStream, status: &str, message: &str) -> std::io::Result<()> {
-    let body = format!("{{\"error\":{{\"message\":\"{message}\"}}}}");
+    // serde_json builds the body so quotes/backslashes in the message are
+    // escaped correctly.
+    let body = serde_json::json!({ "error": { "message": message } }).to_string();
     write!(
         stream,
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -299,28 +357,6 @@ fn write_plain_error(stream: &mut TcpStream, status: &str, message: &str) -> std
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Serializes tests that point the process-wide cloud URL override at a
-    /// FakeCloud — same shape as the backend's tide_zed tests.
-    static CLOUD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Points the global cloud URL override at `url` until the guard drops.
-    /// The held lock serializes FakeCloud tests, and Drop clears the
-    /// override even when a failing assertion unwinds, so a later test
-    /// can't inherit a URL pointing at a dead listener.
-    struct CloudGuard(std::sync::MutexGuard<'static, ()>);
-
-    fn cloud_guard(url: String) -> CloudGuard {
-        let guard = CloudGuard(CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner()));
-        set_cloud_url_for_tests(Some(url));
-        guard
-    }
-
-    impl Drop for CloudGuard {
-        fn drop(&mut self) {
-            set_cloud_url_for_tests(None);
-        }
-    }
 
     /// A fake cloud.zed.dev: serves one canned raw HTTP response per
     /// connection (in order) and captures each request's start line,
