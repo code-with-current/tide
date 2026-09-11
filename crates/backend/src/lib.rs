@@ -46,6 +46,7 @@ pub mod skills;
 pub mod terminal;
 pub mod theme;
 pub mod tide_providers;
+pub mod tide_zed;
 pub mod usage;
 pub mod usage_history;
 pub mod usage_report;
