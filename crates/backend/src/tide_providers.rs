@@ -82,8 +82,10 @@ pub fn providers() -> anyhow::Result<Vec<TideProviderWire>> {
 
 fn validate_api_style(style: &str) -> anyhow::Result<()> {
     match style {
-        "openai" | "anthropic" => Ok(()),
-        other => bail!("unknown api style {other:?}; expected \"openai\" or \"anthropic\""),
+        "openai" | "anthropic" | "zed" => Ok(()),
+        other => bail!(
+            "unknown api style {other:?}; expected \"openai\", \"anthropic\", or \"zed\""
+        ),
     }
 }
 
@@ -422,6 +424,10 @@ pub fn probe_models(
     validate_api_style(&api_style)?;
     ensure_catalogs();
     let client = http_client()?;
+    if api_style == "zed" {
+        let cred = crate::tide_zed::ZedCredential::from_blob(&api_key)?;
+        return crate::tide_zed::zed_models(&client, &cred);
+    }
     let raw = fetch_models_raw(&client, &api_style, &base_url, &api_key)?;
     let metas =
         crate::or_catalog::enrich_bare_models(crate::or_catalog::normalize_probe_list(&raw));
@@ -591,6 +597,20 @@ pub fn test_connection(
     }
     if model_id.trim().is_empty() {
         return (false, Some("Model ID is empty.".to_owned()));
+    }
+    if api_style == "zed" {
+        let client = match crate::tide_zed::http_client() {
+            Ok(client) => client,
+            Err(error) => return (false, Some(error.to_string())),
+        };
+        let cred = match crate::tide_zed::ZedCredential::from_blob(&api_key) {
+            Ok(cred) => cred,
+            Err(error) => return (false, Some(error.to_string())),
+        };
+        return match crate::tide_zed::zed_llm_token(&client, &cred) {
+            Ok(_) => (true, None),
+            Err(error) => (false, Some(error.to_string())),
+        };
     }
     let clean_base = base_url.trim().trim_end_matches('/');
     let url = if api_style == "openai" {
@@ -843,5 +863,28 @@ mod probe_tests {
         let (style, error) = detect_protocol(anthropic_wins, "key".into());
         assert_eq!(style.as_deref(), Some("anthropic"));
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn zed_style_passes_validation() {
+        assert!(validate_api_style("zed").is_ok());
+        assert!(validate_api_style("nope").is_err());
+    }
+
+    /// A zed blob against an unreachable cloud must fail with the zed
+    /// error, not the openai/anthropic /models path.
+    #[test]
+    fn probe_models_dispatches_zed_branch() {
+        let error = probe_models(
+            "zed".into(),
+            "https://cloud.zed.dev".into(),
+            r#"{"userId":"1","accessToken":"t"}"#.into(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("cloud.zed.dev") || error.contains("Zed") || error.contains("HTTP"),
+            "unexpected error: {error}"
+        );
     }
 }

@@ -143,7 +143,6 @@ pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire
     Ok(models)
 }
 
-#[allow(dead_code)] // used from task 5
 pub(crate) fn zed_llm_token(
     client: &reqwest::blocking::Client,
     cred: &ZedCredential,
@@ -174,7 +173,6 @@ pub(crate) fn zed_llm_token(
         .ok_or_else(|| anyhow::anyhow!("the llm-token response had no token"))
 }
 
-#[allow(dead_code)] // used from task 5
 pub(crate) fn zed_models(
     client: &reqwest::blocking::Client,
     cred: &ZedCredential,
