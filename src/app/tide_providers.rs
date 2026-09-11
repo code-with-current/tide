@@ -351,7 +351,12 @@ impl WizardZedState {
             return serde_json::to_string(&blob).ok();
         }
         let user_id = self.manual_user_id.read(cx).content().trim().to_owned();
-        let access_token = self.manual_access_token.read(cx).content().trim().to_owned();
+        let access_token = self
+            .manual_access_token
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
         if user_id.is_empty() || access_token.is_empty() {
             return None;
         }
@@ -393,6 +398,29 @@ pub(crate) struct TideWizard {
 }
 
 impl TideWizard {
+    /// Zed Connect-step state (sign-in, org picker, manual fallback).
+    /// `Some` only for the zed preset — also re-run on Choose-step tile
+    /// clicks so the Connect step renders the sign-in flow.
+    pub(crate) fn zed_state(
+        preset: Option<&'static TidePreset>,
+        window: &mut Window,
+        cx: &mut Context<crate::app::Tide>,
+    ) -> Option<WizardZedState> {
+        preset
+            .filter(|preset| preset.id == "zed")
+            .map(|_| WizardZedState {
+                sign_in: None,
+                organization_id: None,
+                manual_user_id: cx.new(|cx| {
+                    TextInput::new(window, cx)
+                        .clear_on_escape()
+                        .placeholder("605409")
+                }),
+                manual_access_token: cx.new(|cx| TextInput::new(window, cx).clear_on_escape()),
+                busy: false,
+            })
+    }
+
     pub fn new(
         preset: Option<&'static TidePreset>,
         window: &mut Window,
@@ -422,13 +450,7 @@ impl TideWizard {
             step: TideWizardStep::Choose,
             edit_provider_id: None,
             preset,
-            zed: preset.filter(|preset| preset.id == "zed").map(|_| WizardZedState {
-                sign_in: None,
-                organization_id: None,
-                manual_user_id: cx.new(|cx| TextInput::new(window, cx).clear_on_escape().placeholder("605409")),
-                manual_access_token: cx.new(|cx| TextInput::new(window, cx).clear_on_escape()),
-                busy: false,
-            }),
+            zed: Self::zed_state(preset, window, cx),
             name,
             api_key,
             base_url,

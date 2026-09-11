@@ -3372,6 +3372,7 @@ impl Tide {
     pub(super) fn tide_choose_preset(
         &mut self,
         preset: &'static super::tide_providers::TidePreset,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(wizard) = self.tide.wizard.as_mut() else {
@@ -3379,6 +3380,7 @@ impl Tide {
         };
         wizard.preset = Some(preset);
         wizard.api_style = preset.api_style.to_owned();
+        wizard.zed = super::tide_providers::TideWizard::zed_state(Some(preset), window, cx);
         wizard.step = super::tide_providers::TideWizardStep::Connect;
         wizard.error = None;
         // tide's `uniqueName`: "Name", then "Name 2", "Name 3", …
@@ -3446,8 +3448,12 @@ impl Tide {
     /// Zed Connect step: read Zed desktop's credentials via the backend
     /// (macOS keychain) and validate them against cloud.zed.dev.
     pub(super) fn tide_zed_sign_in(&mut self, cx: &mut Context<Self>) {
-        let Some(wizard) = self.tide.wizard.as_mut() else { return };
-        let Some(zed) = wizard.zed.as_mut() else { return };
+        let Some(wizard) = self.tide.wizard.as_mut() else {
+            return;
+        };
+        let Some(zed) = wizard.zed.as_mut() else {
+            return;
+        };
         zed.busy = true;
         zed.sign_in = None;
         wizard.error = None;
@@ -3457,7 +3463,9 @@ impl Tide {
 
     /// Org radio row click.
     pub(super) fn tide_zed_pick_org(&mut self, org_id: String, cx: &mut Context<Self>) {
-        let Some(wizard) = self.tide.wizard.as_mut() else { return };
+        let Some(wizard) = self.tide.wizard.as_mut() else {
+            return;
+        };
         if let Some(zed) = wizard.zed.as_mut() {
             zed.organization_id = Some(org_id);
         }
@@ -3820,8 +3828,12 @@ impl Tide {
                     }
                 }
                 super::tide_providers::TideOpsEvent::ZedSignIn(result) => {
-                    let Some(wizard) = self.tide.wizard.as_mut() else { return changed };
-                    let Some(zed) = wizard.zed.as_mut() else { return changed };
+                    let Some(wizard) = self.tide.wizard.as_mut() else {
+                        return changed;
+                    };
+                    let Some(zed) = wizard.zed.as_mut() else {
+                        return changed;
+                    };
                     zed.busy = false;
                     match result {
                         Ok(sign_in) => {

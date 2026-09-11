@@ -517,8 +517,8 @@ impl Tide {
                                         .child(tr!("tide.preset_added")),
                                 )
                             })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.tide_choose_preset(preset, cx);
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.tide_choose_preset(preset, window, cx);
                             })),
                     );
                 }
