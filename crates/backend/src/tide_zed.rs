@@ -16,10 +16,46 @@ static TEST_CLOUD_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(
 
 fn cloud_url() -> String {
     #[cfg(test)]
-    if let Some(url) = TEST_CLOUD_URL.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+    if let Some(url) = TEST_CLOUD_URL
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+    {
         return url;
     }
     CLOUD_URL.to_owned()
+}
+
+/// The cloud URL override is process-global and tests run in parallel, so
+/// every test that points the client at a FakeCloud holds this lock for
+/// its whole body. Shared with sibling test modules (tide_providers).
+#[cfg(test)]
+pub(crate) static CLOUD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn set_cloud_url_for_tests(url: Option<String>) {
+    *TEST_CLOUD_URL.lock().unwrap_or_else(|p| p.into_inner()) = url;
+}
+
+/// Points the global cloud URL override at `url` until the guard drops.
+/// The held lock serializes FakeCloud tests, and Drop clears the override
+/// even when a failing assertion unwinds, so a later test can't inherit a
+/// URL pointing at a dead listener.
+#[cfg(test)]
+pub(crate) struct CloudGuard(std::sync::MutexGuard<'static, ()>);
+
+#[cfg(test)]
+pub(crate) fn cloud_guard(url: String) -> CloudGuard {
+    let guard = CloudGuard(CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner()));
+    set_cloud_url_for_tests(Some(url));
+    guard
+}
+
+#[cfg(test)]
+impl Drop for CloudGuard {
+    fn drop(&mut self) {
+        set_cloud_url_for_tests(None);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,6 +85,12 @@ fn ensure_creds(cred: &ZedCredential) -> anyhow::Result<()> {
     if cred.user_id.trim().is_empty() || cred.access_token.trim().is_empty() {
         bail!("zed credential is missing the user id or access token");
     }
+    // A control character in either field would make `HeaderValue::from_str`
+    // fail when the request is sent, surfacing as a misleading network error.
+    if cred.user_id.chars().any(char::is_control) || cred.access_token.chars().any(char::is_control)
+    {
+        bail!("zed credential contains control characters");
+    }
     if cred
         .organization_id
         .as_deref()
@@ -66,35 +108,109 @@ pub(crate) fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
         .context("could not build the zed client")
 }
 
-/// Read Zed desktop's credentials from the macOS login keychain. `-g`
-/// prints the password to stdout and the item attributes (including the
-/// account = user id) to stderr in one invocation.
-#[cfg(target_os = "macos")]
-pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
-    let output = std::process::Command::new("/usr/bin/security")
-        .args(["find-internet-password", "-g", "-s", "https://zed.dev"])
-        .output()
-        .context("could not run the macOS keychain tool")?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let token = stdout
+/// Decode the hex body of `security`'s hex-dumped password line.
+#[cfg(any(target_os = "macos", test))]
+fn decode_hex(hex: &str) -> anyhow::Result<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        bail!("the hex dump has an odd length");
+    }
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let hi = (pair[0] as char)
+                .to_digit(16)
+                .ok_or_else(|| anyhow::anyhow!("the hex dump has a bad digit"))?;
+            let lo = (pair[1] as char)
+                .to_digit(16)
+                .ok_or_else(|| anyhow::anyhow!("the hex dump has a bad digit"))?;
+            u8::try_from(hi * 16 + lo).context("the hex dump has an out-of-range byte")
+        })
+        .collect()
+}
+
+/// Pull the password out of `security find-internet-password -g`'s output.
+/// The line reads `password: "literal"` for printable passwords and
+/// `password: 0x…` (a hex dump, followed by a best-effort quoted rendering)
+/// when the stored bytes aren't clean text. Pure so tests can exercise both
+/// shapes without touching the keychain.
+#[cfg(any(target_os = "macos", test))]
+fn keychain_password(stdout: &str, stderr: &str) -> anyhow::Result<String> {
+    let line = stdout
         .lines()
         .chain(stderr.lines())
         .find_map(|line| line.strip_prefix("password: "))
-        .map(str::trim)
-        .map(|t| t.trim_matches('"').to_owned())
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("no Zed credentials in the login keychain — is Zed desktop signed in?"))?;
-    let user_id = stderr
+        .ok_or_else(|| {
+            anyhow::anyhow!("no Zed credentials in the login keychain — is Zed desktop signed in?")
+        })?;
+    let trimmed = line.trim();
+    let password = if let Some(hex) = trimmed.strip_prefix("0x") {
+        // Only the first whitespace-delimited token is hex; the rest is
+        // security's quoted guess at the bytes.
+        let hex = hex.split_whitespace().next().unwrap_or_default();
+        String::from_utf8(decode_hex(hex)?)
+            .context("the keychain Zed password is not valid UTF-8")?
+    } else {
+        // Strip exactly one outer pair of quotes: `trim_matches` would eat
+        // the real quotes of a password that itself starts or ends with `"`.
+        trimmed
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap_or(trimmed)
+            .to_owned()
+    };
+    if password.is_empty() {
+        bail!("the keychain Zed entry has an empty password");
+    }
+    Ok(password)
+}
+
+/// Pull the account (= Zed user id) out of the attribute dump `security`
+/// prints to stderr. Pure so tests can exercise the `<NULL>` shape.
+#[cfg(any(target_os = "macos", test))]
+fn keychain_account(stderr: &str) -> anyhow::Result<String> {
+    stderr
         .lines()
         .find(|line| line.contains("\"acct\""))
         .and_then(|line| line.split('"').nth(3))
         .map(str::to_owned)
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("the keychain entry carries no Zed user id"))?;
-    let cred = ZedCredential { user_id, access_token: token, organization_id: None };
-    ensure_creds(&cred)?;
-    Ok(cred)
+        .filter(|id| !id.is_empty() && id != "<NULL>")
+        .ok_or_else(|| anyhow::anyhow!("the keychain entry carries no Zed user id"))
+}
+
+/// Read Zed desktop's credentials from the macOS login keychain. `-g`
+/// prints the password to stdout and the item attributes (including the
+/// account = user id) to stderr in one invocation. Older/some Zed builds
+/// file the item under the bare `zed.dev` host instead of the URL-scheme
+/// name, so both are tried and the best diagnosis is kept for the error.
+#[cfg(target_os = "macos")]
+pub(crate) fn read_zed_keychain() -> anyhow::Result<ZedCredential> {
+    let mut diagnosis = "security produced no diagnostic".to_owned();
+    for server in ["https://zed.dev", "zed.dev"] {
+        let output = std::process::Command::new("/usr/bin/security")
+            .args(["find-internet-password", "-g", "-s", server])
+            .output()
+            .context("could not run the macOS keychain tool")?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() {
+            // Deny, not-found, and interaction errors all exit non-zero;
+            // security's last stderr line names which one this was.
+            if let Some(line) = stderr.lines().rev().find(|line| !line.trim().is_empty()) {
+                diagnosis = line.trim().to_owned();
+            }
+            continue;
+        }
+        let access_token = keychain_password(&stdout, &stderr)?;
+        let user_id = keychain_account(&stderr)?;
+        let cred = ZedCredential {
+            user_id,
+            access_token,
+            organization_id: None,
+        };
+        ensure_creds(&cred)?;
+        return Ok(cred);
+    }
+    bail!("the macOS keychain has no usable Zed entry: {diagnosis}")
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -126,8 +242,14 @@ pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire
                     .and_then(Value::as_u64)
                     .filter(|v| *v > 0)
                     .unwrap_or(crate::tide_providers::DEFAULT_CONTEXT_WINDOW),
-                reasoning: model.get("supports_thinking").and_then(Value::as_bool).unwrap_or(false),
-                vision: model.get("supports_images").and_then(Value::as_bool).unwrap_or(false),
+                reasoning: model
+                    .get("supports_thinking")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                vision: model
+                    .get("supports_images")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 match_state: "live".to_owned(),
                 price_label: None,
                 supported_efforts: Vec::new(),
@@ -153,13 +275,18 @@ pub(crate) fn zed_llm_token(
     }
     let response = client
         .post(format!("{}/client/llm_tokens", cloud_url()))
-        .header("Authorization", format!("{} {}", cred.user_id, cred.access_token))
+        .header(
+            "Authorization",
+            format!("{} {}", cred.user_id, cred.access_token),
+        )
         .json(&body)
         .send()
         .context("could not reach cloud.zed.dev")?;
     let status = response.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        bail!("Zed rejected the sign-in (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry");
+        bail!(
+            "Zed rejected the sign-in (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry"
+        );
     }
     if !status.is_success() {
         bail!("llm-token endpoint HTTP {status}");
@@ -185,9 +312,14 @@ pub(crate) fn zed_models(
         .send()
         .context("could not reach cloud.zed.dev/models")?;
     let status = response.status();
-    let text = response.text().context("could not read the models response")?;
+    let text = response
+        .text()
+        .context("could not read the models response")?;
     if !status.is_success() {
-        bail!("HTTP {status}: {}", text.chars().take(200).collect::<String>());
+        bail!(
+            "HTTP {status}: {}",
+            text.chars().take(200).collect::<String>()
+        );
     }
     let json: Value = serde_json::from_str(&text).context("the models response was not JSON")?;
     parse_zed_models(&json)
@@ -199,14 +331,21 @@ pub(crate) fn zed_users_me(
 ) -> anyhow::Result<Value> {
     let response = client
         .get(format!("{}/client/users/me", cloud_url()))
-        .header("Authorization", format!("{} {}", cred.user_id, cred.access_token))
+        .header(
+            "Authorization",
+            format!("{} {}", cred.user_id, cred.access_token),
+        )
         .send()
         .context("could not reach cloud.zed.dev/client/users/me")?;
     let status = response.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        bail!("Zed rejected the credentials (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry");
+        bail!(
+            "Zed rejected the credentials (HTTP {status}) \u{2014} sign in to Zed desktop again, then retry"
+        );
     }
-    let text = response.text().context("could not read the users/me response")?;
+    let text = response
+        .text()
+        .context("could not read the users/me response")?;
     if !status.is_success() {
         bail!("users/me endpoint HTTP {status}");
     }
@@ -220,7 +359,10 @@ pub fn zed_sign_in(
     let client = http_client()?;
     let me = zed_users_me(&client, &cred)?;
     let user = me.get("user").cloned().unwrap_or(Value::Null);
-    let plans = me.get("plans_by_organization").cloned().unwrap_or(Value::Null);
+    let plans = me
+        .get("plans_by_organization")
+        .cloned()
+        .unwrap_or(Value::Null);
     let mut organizations = Vec::new();
     if let Some(list) = me.get("organizations").and_then(Value::as_array) {
         for org in list {
@@ -232,15 +374,26 @@ pub fn zed_sign_in(
             organizations.push(TideZedOrganization {
                 plan: plans.get(&id).and_then(Value::as_str).map(str::to_owned),
                 id,
-                name: org.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
-                is_personal: org.get("is_personal").and_then(Value::as_bool).unwrap_or(false),
+                name: org
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                is_personal: org
+                    .get("is_personal")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             });
         }
     }
     Ok(TideZedSignInResult {
         user_id: cred.user_id,
         access_token: cred.access_token,
-        username: user.get("username").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        username: user
+            .get("username")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
         display_name: user.get("name").and_then(Value::as_str).map(str::to_owned),
         organizations,
         default_organization_id: me
@@ -250,101 +403,82 @@ pub fn zed_sign_in(
     })
 }
 
+/// A fake cloud.zed.dev: serves one canned raw HTTP response per
+/// connection (in order) and captures each request's start line,
+/// headers (minus content-length), and body. When the canned responses
+/// run out the accept thread exits and closes the listener, so an
+/// overrun request fails immediately instead of stalling until the
+/// client timeout.
+#[cfg(test)]
+pub(crate) struct FakeCloud {
+    pub(crate) base_url: String,
+    pub(crate) requests: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>, // (start line + headers, body)
+}
+
+#[cfg(test)]
+impl FakeCloud {
+    pub(crate) fn spawn(responses: Vec<String>) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let srv_requests = requests.clone();
+        std::thread::spawn(move || {
+            let mut remaining = responses.into_iter();
+            for stream in listener.incoming().flatten() {
+                let Some(response) = remaining.next() else {
+                    break;
+                };
+                let mut stream = stream;
+                use std::io::{BufRead, BufReader, Read, Write};
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut captured = String::new();
+                let mut length = 0usize;
+                // read start line + headers, capture them, then the body
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    let trimmed_end = line.trim_end();
+                    if trimmed_end.is_empty() {
+                        break;
+                    }
+                    if let Some((n, v)) = trimmed_end.split_once(':') {
+                        if n.trim().eq_ignore_ascii_case("content-length") {
+                            length = v.trim().parse().unwrap_or(0);
+                        }
+                    }
+                    if !trimmed_end
+                        .to_ascii_lowercase()
+                        .starts_with("content-length")
+                    {
+                        captured.push_str(trimmed_end);
+                        captured.push('\n');
+                    }
+                }
+                let mut body = vec![0u8; length];
+                reader.read_exact(&mut body).unwrap();
+                srv_requests.lock().unwrap().push((
+                    captured.trim().to_owned(),
+                    String::from_utf8_lossy(&body).into_owned(),
+                ));
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        Self { base_url, requests }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn http_ok_json(json: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+        json.len(),
+        json
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The cloud URL override is process-global and tests run in parallel,
-    /// so every test that points the client at a FakeCloud holds this lock
-    /// for its whole body.
-    static CLOUD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn set_cloud(url: Option<String>) {
-        *TEST_CLOUD_URL.lock().unwrap_or_else(|p| p.into_inner()) = url;
-    }
-
-    /// Points the global cloud URL override at `url` until the guard drops.
-    /// The held lock serializes FakeCloud tests, and Drop clears the
-    /// override even when a failing assertion unwinds, so a later test
-    /// can't inherit a URL pointing at a dead listener.
-    struct CloudGuard(std::sync::MutexGuard<'static, ()>);
-
-    fn cloud_guard(url: String) -> CloudGuard {
-        let guard = CloudGuard(CLOUD_LOCK.lock().unwrap_or_else(|p| p.into_inner()));
-        set_cloud(Some(url));
-        guard
-    }
-
-    impl Drop for CloudGuard {
-        fn drop(&mut self) {
-            set_cloud(None);
-        }
-    }
-
-    /// A fake cloud.zed.dev: serves one canned raw HTTP response per
-    /// connection (in order) and captures each request's start line,
-    /// headers (minus content-length), and body. When the canned responses
-    /// run out the accept thread exits and closes the listener, so an
-    /// overrun request fails immediately instead of stalling until the
-    /// client timeout.
-    struct FakeCloud {
-        base_url: String,
-        requests: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>, // (start line + headers, body)
-    }
-
-    impl FakeCloud {
-        fn spawn(responses: Vec<String>) -> Self {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let srv_requests = requests.clone();
-            std::thread::spawn(move || {
-                let mut remaining = responses.into_iter();
-                for stream in listener.incoming().flatten() {
-                    let Some(response) = remaining.next() else { break };
-                    let mut stream = stream;
-                    use std::io::{BufRead, BufReader, Read, Write};
-                    let mut reader = BufReader::new(stream.try_clone().unwrap());
-                    let mut captured = String::new();
-                    let mut length = 0usize;
-                    // read start line + headers, capture them, then the body
-                    loop {
-                        let mut line = String::new();
-                        reader.read_line(&mut line).unwrap();
-                        let trimmed_end = line.trim_end();
-                        if trimmed_end.is_empty() {
-                            break;
-                        }
-                        if let Some((n, v)) = trimmed_end.split_once(':') {
-                            if n.trim().eq_ignore_ascii_case("content-length") {
-                                length = v.trim().parse().unwrap_or(0);
-                            }
-                        }
-                        if !trimmed_end.to_ascii_lowercase().starts_with("content-length") {
-                            captured.push_str(trimmed_end);
-                            captured.push('\n');
-                        }
-                    }
-                    let mut body = vec![0u8; length];
-                    reader.read_exact(&mut body).unwrap();
-                    srv_requests.lock().unwrap().push((
-                        captured.trim().to_owned(),
-                        String::from_utf8_lossy(&body).into_owned(),
-                    ));
-                    stream.write_all(response.as_bytes()).unwrap();
-                }
-            });
-            Self { base_url, requests }
-        }
-    }
-
-    fn http_ok_json(json: &str) -> String {
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-            json.len(),
-            json
-        )
-    }
 
     #[test]
     fn blob_round_trip() {
@@ -354,14 +488,22 @@ mod tests {
             organization_id: Some("org_1".into()),
         };
         let blob = cred.to_blob().unwrap();
-        assert_eq!(blob, r#"{"userId":"605409","accessToken":"tok","organizationId":"org_1"}"#);
+        assert_eq!(
+            blob,
+            r#"{"userId":"605409","accessToken":"tok","organizationId":"org_1"}"#
+        );
         assert_eq!(ZedCredential::from_blob(&blob).unwrap(), cred);
     }
 
     #[test]
     fn blob_omits_null_org_and_rejects_empty() {
-        let blob = ZedCredential { user_id: "1".into(), access_token: "t".into(), organization_id: None }
-            .to_blob().unwrap();
+        let blob = ZedCredential {
+            user_id: "1".into(),
+            access_token: "t".into(),
+            organization_id: None,
+        }
+        .to_blob()
+        .unwrap();
         assert!(!blob.contains("organizationId"));
         // A blob without the organizationId key deserializes to `None`.
         assert_eq!(
@@ -386,7 +528,10 @@ mod tests {
         // sorted by model_id: "bare" < "claude-sonnet-5"
         assert_eq!(models[0].model_id, "bare");
         assert_eq!(models[0].alias, "bare"); // alias falls back to the id
-        assert_eq!(models[0].context_window, crate::tide_providers::DEFAULT_CONTEXT_WINDOW);
+        assert_eq!(
+            models[0].context_window,
+            crate::tide_providers::DEFAULT_CONTEXT_WINDOW
+        );
         assert!(!models[0].reasoning && !models[0].vision);
         let first = &models[1];
         assert_eq!(first.model_id, "claude-sonnet-5");
@@ -411,7 +556,10 @@ mod tests {
             { "display_name": "x" }, { "id": "  " }, { "id": 7 }
         ]});
         let err = parse_zed_models(&all_bad).unwrap_err();
-        assert!(err.to_string().contains("usable id"), "unexpected error: {err}");
+        assert!(
+            err.to_string().contains("usable id"),
+            "unexpected error: {err}"
+        );
         // A mix keeps only the usable entry, with the id as alias fallback.
         let models = parse_zed_models(&serde_json::json!({ "models": [
             { "display_name": "x" }, { "id": "good-one" }
@@ -424,14 +572,78 @@ mod tests {
 
     #[test]
     fn blob_rejects_invalid_credentials_in_both_directions() {
-        let empty_user =
-            ZedCredential { user_id: "".into(), access_token: "t".into(), organization_id: None };
+        let empty_user = ZedCredential {
+            user_id: "".into(),
+            access_token: "t".into(),
+            organization_id: None,
+        };
         assert!(empty_user.to_blob().is_err());
         assert!(ZedCredential::from_blob(r#"{"userId":"   ","accessToken":"t"}"#).is_err());
         assert!(
             ZedCredential::from_blob(r#"{"userId":"1","accessToken":"t","organizationId":""}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn blob_rejects_control_characters() {
+        // A control character would fail HeaderValue::from_str when the
+        // request is sent, surfacing as a misleading network error.
+        let bad_user = ZedCredential {
+            user_id: "1\u{0}".into(),
+            access_token: "t".into(),
+            organization_id: None,
+        };
+        let bad_token = ZedCredential {
+            user_id: "1".into(),
+            access_token: "t\n".into(),
+            organization_id: None,
+        };
+        assert!(bad_user.to_blob().is_err());
+        assert!(bad_token.to_blob().is_err());
+        let err = bad_user.to_blob().unwrap_err().to_string();
+        assert!(err.contains("control characters"), "{err}");
+    }
+
+    #[test]
+    fn keychain_password_parses_quoted_and_hex_forms() {
+        // The common shape: `security` prints the password quoted, on
+        // stdout or stderr.
+        let quoted = "keychain: \"login\"\nclass: \"inet\"\n";
+        assert_eq!(
+            keychain_password("password: \"sekret-token\"\n", quoted).unwrap(),
+            "sekret-token"
+        );
+        // Exactly one outer pair of quotes is stripped, so a password that
+        // itself starts or ends with a quote survives (trim_matches ate it).
+        assert_eq!(keychain_password("password: \"a\"b\"\n", "").unwrap(), "a\"b");
+        // An unrenderable password comes back as a hex dump followed by
+        // security's quoted guess; only the hex is the password.
+        assert_eq!(
+            keychain_password("password: 0x746F6B656E  \"token\"\n", "").unwrap(),
+            "token"
+        );
+        // An empty password is never usable.
+        assert!(keychain_password("password: \"\"\n", "").is_err());
+        // No password line anywhere is the not-signed-in case.
+        let err = keychain_password(
+            "keychain: \"login\"\n",
+            "SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("no Zed credentials"), "{err}");
+    }
+
+    #[test]
+    fn keychain_account_rejects_null_and_missing() {
+        let attributes =
+            "attributes:\n    \"acct\"<blob>=\"605409\"\n    \"srvr\"<blob>=\"zed.dev\"\n";
+        assert_eq!(keychain_account(attributes).unwrap(), "605409");
+        // An unset account prints as the literal <NULL>.
+        let null_acct = "attributes:\n    \"acct\"<blob>=\"<NULL>\"\n";
+        let err = keychain_account(null_acct).unwrap_err();
+        assert!(err.to_string().contains("no Zed user id"), "{err}");
+        assert!(keychain_account("attributes:\n    \"srvr\"<blob>=\"zed.dev\"\n").is_err());
     }
 
     #[test]
@@ -460,11 +672,14 @@ mod tests {
             "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
         let cloud = FakeCloud::spawn(vec![denied]);
         let _cloud = cloud_guard(cloud.base_url.clone());
-        let err = zed_llm_token(&http_client().unwrap(), &ZedCredential {
-            user_id: "1".into(),
-            access_token: "dead".into(),
-            organization_id: None,
-        })
+        let err = zed_llm_token(
+            &http_client().unwrap(),
+            &ZedCredential {
+                user_id: "1".into(),
+                access_token: "dead".into(),
+                organization_id: None,
+            },
+        )
         .unwrap_err()
         .to_string();
         assert!(err.to_lowercase().contains("sign"), "{err}");
@@ -479,34 +694,51 @@ mod tests {
             ),
         ]);
         let _cloud = cloud_guard(cloud.base_url.clone());
-        let models = zed_models(&http_client().unwrap(), &ZedCredential {
-            user_id: "1".into(),
-            access_token: "a".into(),
-            organization_id: None,
-        })
+        let models = zed_models(
+            &http_client().unwrap(),
+            &ZedCredential {
+                user_id: "1".into(),
+                access_token: "a".into(),
+                organization_id: None,
+            },
+        )
         .unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].model_id, "claude-sonnet-5");
         assert_eq!(models[0].context_window, 1000);
         assert!(models[0].reasoning);
-        let captured: Vec<String> =
-            cloud.requests.lock().unwrap().iter().map(|(c, _)| c.clone()).collect();
+        let captured: Vec<String> = cloud
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(c, _)| c.clone())
+            .collect();
         assert!(captured[1].contains("GET /models"), "{captured:?}");
-        assert!(captured[1].contains("authorization: Bearer llm-tok"), "{captured:?}");
-        assert!(captured[1].contains("x-zed-client-supports-x-ai: true"), "{captured:?}");
+        assert!(
+            captured[1].contains("authorization: Bearer llm-tok"),
+            "{captured:?}"
+        );
+        assert!(
+            captured[1].contains("x-zed-client-supports-x-ai: true"),
+            "{captured:?}"
+        );
     }
 
     #[test]
     fn models_surfaces_http_error_body() {
-        let denied =
-            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let denied = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            .to_owned();
         let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"T"}"#), denied]);
         let _cloud = cloud_guard(cloud.base_url.clone());
-        let err = zed_models(&http_client().unwrap(), &ZedCredential {
-            user_id: "1".into(),
-            access_token: "a".into(),
-            organization_id: None,
-        })
+        let err = zed_models(
+            &http_client().unwrap(),
+            &ZedCredential {
+                user_id: "1".into(),
+                access_token: "a".into(),
+                organization_id: None,
+            },
+        )
         .unwrap_err()
         .to_string();
         assert!(err.contains("401"), "{err}");
@@ -540,12 +772,22 @@ mod tests {
                 .to_owned(),
         ]);
         let _cloud = cloud_guard(cloud.base_url.clone());
-        let cred =
-            ZedCredential { user_id: "1".into(), access_token: "a".into(), organization_id: None };
-        let auth_err = zed_users_me(&http_client().unwrap(), &cred).unwrap_err().to_string();
-        assert!(auth_err.to_lowercase().contains("sign in to zed"), "{auth_err}");
+        let cred = ZedCredential {
+            user_id: "1".into(),
+            access_token: "a".into(),
+            organization_id: None,
+        };
+        let auth_err = zed_users_me(&http_client().unwrap(), &cred)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            auth_err.to_lowercase().contains("sign in to zed"),
+            "{auth_err}"
+        );
         // A 5xx outage is a plain HTTP error, not a sign-in prompt.
-        let outage_err = zed_users_me(&http_client().unwrap(), &cred).unwrap_err().to_string();
+        let outage_err = zed_users_me(&http_client().unwrap(), &cred)
+            .unwrap_err()
+            .to_string();
         assert!(outage_err.contains("500"), "{outage_err}");
         assert!(!outage_err.to_lowercase().contains("sign"), "{outage_err}");
     }
@@ -558,9 +800,13 @@ mod tests {
             "plans_by_organization":{"org_p":"zed_student","org_v":"zed_vip"}}"#;
         let cloud = FakeCloud::spawn(vec![http_ok_json(me)]);
         let _cloud_guard = cloud_guard(cloud.base_url.clone());
-        let result = zed_sign_in(|| Ok(ZedCredential {
-            user_id: "605409".into(), access_token: "acc".into(), organization_id: None,
-        }))
+        let result = zed_sign_in(|| {
+            Ok(ZedCredential {
+                user_id: "605409".into(),
+                access_token: "acc".into(),
+                organization_id: None,
+            })
+        })
         .unwrap();
         assert_eq!(result.username, "yodeput");
         assert_eq!(result.display_name.as_deref(), Some("Yogi"));
@@ -588,9 +834,13 @@ mod tests {
         let me = r#"{"user":{"username":"solo"},"organizations":[{"id":"","name":"Ghost","is_personal":false}]}"#;
         let cloud = FakeCloud::spawn(vec![http_ok_json(me)]);
         let _cloud_guard = cloud_guard(cloud.base_url.clone());
-        let result = zed_sign_in(|| Ok(ZedCredential {
-            user_id: "7".into(), access_token: "t".into(), organization_id: None,
-        }))
+        let result = zed_sign_in(|| {
+            Ok(ZedCredential {
+                user_id: "7".into(),
+                access_token: "t".into(),
+                organization_id: None,
+            })
+        })
         .unwrap();
         assert!(result.organizations.is_empty());
         assert_eq!(result.display_name, None);
@@ -602,8 +852,11 @@ mod tests {
     fn fake_cloud_overrun_fails_fast() {
         let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"one"}"#)]);
         let _cloud = cloud_guard(cloud.base_url.clone());
-        let cred =
-            ZedCredential { user_id: "1".into(), access_token: "a".into(), organization_id: None };
+        let cred = ZedCredential {
+            user_id: "1".into(),
+            access_token: "a".into(),
+            organization_id: None,
+        };
         let client = http_client().unwrap();
         assert_eq!(zed_llm_token(&client, &cred).unwrap(), "one");
         // A request beyond the canned responses must fail immediately (the

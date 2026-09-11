@@ -83,9 +83,9 @@ pub fn providers() -> anyhow::Result<Vec<TideProviderWire>> {
 fn validate_api_style(style: &str) -> anyhow::Result<()> {
     match style {
         "openai" | "anthropic" | "zed" => Ok(()),
-        other => bail!(
-            "unknown api style {other:?}; expected \"openai\", \"anthropic\", or \"zed\""
-        ),
+        other => {
+            bail!("unknown api style {other:?}; expected \"openai\", \"anthropic\", or \"zed\"")
+        }
     }
 }
 
@@ -683,6 +683,7 @@ mod wire_shape_tests {
 #[cfg(test)]
 mod probe_tests {
     use super::*;
+    use crate::tide_zed::{FakeCloud, cloud_guard, http_ok_json};
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -871,10 +872,15 @@ mod probe_tests {
         assert!(validate_api_style("nope").is_err());
     }
 
-    /// A zed blob against an unreachable cloud must fail with the zed
-    /// error, not the openai/anthropic /models path.
+    /// A zed probe must fail with the zed transport error — never the
+    /// openai/anthropic /models path. The override points at a port that
+    /// refuses connections, so the failure is deterministic instead of a
+    /// real round-trip to cloud.zed.dev (which a captive portal or a hung
+    /// route would turn into a flaky 20s wait). The held lock serializes
+    /// with the other FakeCloud tests and the guard clears the override.
     #[test]
     fn probe_models_dispatches_zed_branch() {
+        let _cloud = cloud_guard("http://127.0.0.1:9".to_owned());
         let error = probe_models(
             "zed".into(),
             "https://cloud.zed.dev".into(),
@@ -882,9 +888,58 @@ mod probe_tests {
         )
         .unwrap_err()
         .to_string();
+        assert!(error.contains("cloud.zed.dev"), "unexpected error: {error}");
+    }
+
+    /// The wizard's Connect step: a valid blob against a cloud that answers
+    /// the llm-token dance with a token is a working connection.
+    #[test]
+    fn test_connection_zed_accepts_working_credentials() {
+        let cloud = FakeCloud::spawn(vec![http_ok_json(r#"{"token":"t"}"#)]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let (ok, error) = test_connection(
+            "zed".into(),
+            "https://cloud.zed.dev".into(),
+            r#"{"userId":"1","accessToken":"a"}"#.into(),
+            "claude-sonnet-5".into(),
+        );
+        assert!(ok, "unexpected error: {error:?}");
+        assert!(error.is_none());
+    }
+
+    /// A blob that fails local validation never reaches the network.
+    #[test]
+    fn test_connection_zed_reports_an_invalid_blob() {
+        let _cloud = cloud_guard("http://127.0.0.1:9".to_owned());
+        let (ok, error) = test_connection(
+            "zed".into(),
+            "https://cloud.zed.dev".into(),
+            r#"{"userId":"","accessToken":"a"}"#.into(),
+            "claude-sonnet-5".into(),
+        );
+        assert!(!ok);
+        let error = error.expect("an invalid blob must carry an error");
         assert!(
-            error.contains("cloud.zed.dev") || error.contains("Zed") || error.contains("HTTP"),
+            error.contains("zed credential"),
             "unexpected error: {error}"
         );
+    }
+
+    /// Dead credentials surface Zed's rejection, not a generic HTTP error.
+    #[test]
+    fn test_connection_zed_surfaces_rejected_credentials() {
+        let cloud = FakeCloud::spawn(vec![
+            http_response("HTTP/1.1 401 Unauthorized", "").to_owned(),
+        ]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let (ok, error) = test_connection(
+            "zed".into(),
+            "https://cloud.zed.dev".into(),
+            r#"{"userId":"1","accessToken":"a"}"#.into(),
+            "claude-sonnet-5".into(),
+        );
+        assert!(!ok);
+        let error = error.expect("rejected credentials must carry an error");
+        assert!(error.contains("401"), "unexpected error: {error}");
     }
 }
