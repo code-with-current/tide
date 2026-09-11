@@ -20,12 +20,14 @@ in Rust with GPUI. GPL-3.0-only.
   Depends on `protocol`; runtime implementations stay behind its `Backend`
   trait.
 - `crates/backend` — daemon-side runtime: session drivers, provider discovery,
-  persistence, Git services, computer use. Depends on `transport` to implement
-  its request handler, but contains no socket or UI code.
+  Git services, and computer use. Depends on `transport` to implement its
+  request handler, but contains no socket, persistence implementation, or UI
+  code.
 - `crates/engine` — the ONLY crate permitted to depend on `rig` (churn
   firewall, pinned rig_core). Keep provider churn inside it.
-- `crates/store` — rusqlite persistence (sessions, config, RAG index, in-place
-  `~/.tide`).
+- `crates/store` — all daemon and desktop persistence: task/session SQLite,
+  settings and config, attachments and blobs, provider state, and the RAG
+  index (in-place `~/.tide`).
 - `crates/tools` — built-in agent tools plus the permission gate.
   Engine-agnostic: nothing here imports `rig` or `engine`.
 - `crates/rag` — local-first RAG engine over a vendored ONNX model.

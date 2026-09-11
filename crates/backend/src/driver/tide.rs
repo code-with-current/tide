@@ -1068,7 +1068,7 @@ fn ensure_assistant_tail(history: &mut Vec<HistoryMessage>) -> bool {
 /// A missing directory is harmless: resolution against a not-yet-created
 /// store simply never matches.
 fn daemon_read_annex_roots() -> Vec<PathBuf> {
-    let mut roots = match crate::persistence::StateStore::default_path().parent() {
+    let mut roots = match store::persistence::StateStore::default_path().parent() {
         Some(parent) => vec![parent.join("attachments"), parent.join("blobs")],
         None => Vec::new(),
     };

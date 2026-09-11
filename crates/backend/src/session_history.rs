@@ -146,7 +146,7 @@ pub fn install_session_reader(db_path: impl Into<PathBuf>) {
 mod tests {
     use super::*;
     use crate::model::{Message, MessageRole, ProviderKind};
-    use crate::persistence::{PersistedState, StateStore};
+    use store::persistence::{PersistedState, StateStore};
     use tools::{ListSessionsTool, ReadSessionTool, Tool, ToolContext};
     use uuid::Uuid;
 

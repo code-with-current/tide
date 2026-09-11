@@ -18,8 +18,6 @@ macro_rules! tr {
 }
 
 pub mod action_jobs;
-pub mod attachments;
-pub mod blob_store;
 pub mod checkpoint;
 pub mod command_env;
 pub mod composer_complete;
@@ -37,11 +35,9 @@ pub mod kb_commands;
 pub mod model;
 pub mod model_metadata;
 pub mod or_catalog;
-pub mod persistence;
 pub mod projectless;
 pub mod rag;
 pub mod session_history;
-pub mod settings;
 pub mod skills;
 pub mod terminal;
 pub mod theme;
@@ -55,6 +51,7 @@ pub mod worktree;
 
 mod fs_ext;
 pub use settings::{DaemonSettings, DaemonSettingsStore};
+pub use store::{attachments, blob_store, persistence, settings};
 pub use transport::{
     APP_EXECUTABLE_ENV, ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
     PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError,

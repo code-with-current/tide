@@ -10,8 +10,8 @@ use base64::Engine as _;
 use uuid::Uuid;
 
 pub use protocol::attachments::{
-    ATTACHMENT_SCHEME, AttachmentUpload, AttachmentUploadEntry, MAX_ATTACHMENT_BYTES,
-    MAX_ATTACHMENT_FILES, StoredAttachment,
+    AttachmentUpload, AttachmentUploadEntry, StoredAttachment, ATTACHMENT_SCHEME,
+    MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_FILES,
 };
 
 pub struct AttachmentStore {

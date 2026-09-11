@@ -98,17 +98,22 @@ fn open_db(data_dir: &Path) -> rusqlite::Result<Connection> {
     // dropped rather than altered: the leftover `tokens` column would
     // otherwise shadow the per-class sums forever.
     let legacy = conn
-        .query_row("SELECT COUNT(*) = 1 FROM pragma_table_info('usage_event') WHERE name = 'model'", [], |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) = 1 FROM pragma_table_info('usage_event') WHERE name = 'model'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
         .unwrap_or(0)
         == 0
         && conn
-            .query_row("SELECT COUNT(*) FROM pragma_table_info('usage_event') WHERE name = 'tokens'", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('usage_event') WHERE name = 'tokens'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .unwrap_or(0)
-            > 0;    if legacy {
+            > 0;
+    if legacy {
         conn.execute_batch("DROP TABLE usage_event;")?;
     }
     conn.execute_batch(USAGE_EVENT_SCHEMA)?;
@@ -256,13 +261,17 @@ mod tests {
         let dir = temp_dir("windows");
         let now = 1_000_000_000_000i64;
         record_provider_usage(
-            &dir, "p_1", "m-a", "/w", "s1", &delta(1_000), now - 6 * 60 * 60 * 1000,
+            &dir,
+            "p_1",
+            "m-a",
+            "/w",
+            "s1",
+            &delta(1_000),
+            now - 6 * 60 * 60 * 1000,
         )
         .unwrap();
-        record_provider_usage(&dir, "p_1", "m-b", "/w", "s1", &delta(1_000), now - 60_000)
-            .unwrap();
-        record_provider_usage(&dir, "p_2", "m-a", "/w", "s2", &delta(1_000), now - 60_000)
-            .unwrap();
+        record_provider_usage(&dir, "p_1", "m-b", "/w", "s1", &delta(1_000), now - 60_000).unwrap();
+        record_provider_usage(&dir, "p_2", "m-a", "/w", "s2", &delta(1_000), now - 60_000).unwrap();
 
         let five = provider_window_usage(&dir, "p_1", FIVE_HOUR_MS, now);
         assert_eq!(five.tokens, 1_000, "the 6h-old row fell out of the window");
@@ -286,12 +295,19 @@ mod tests {
     fn zero_usage_writes_nothing_and_prune_drops_ancient_rows() {
         let dir = temp_dir("prune");
         let now = 1_000_000_000_000i64;
-        record_provider_usage(&dir, "p_1", "m-a", "/w", "s1", &UsageDelta::default(), now)
-            .unwrap();
+        record_provider_usage(&dir, "p_1", "m-a", "/w", "s1", &UsageDelta::default(), now).unwrap();
         assert_eq!(provider_window_usage(&dir, "p_1", WEEK_MS, now).tokens, 0);
 
-        record_provider_usage(&dir, "p_1", "m-a", "/w", "s1", &delta(10), now - HISTORY_MS - 1)
-            .unwrap();
+        record_provider_usage(
+            &dir,
+            "p_1",
+            "m-a",
+            "/w",
+            "s1",
+            &delta(10),
+            now - HISTORY_MS - 1,
+        )
+        .unwrap();
         // The prune runs on write: recording a fresh row drops the ancient one.
         record_provider_usage(&dir, "p_1", "m-a", "/w", "s1", &delta(10), now).unwrap();
         assert_eq!(provider_window_usage(&dir, "p_1", WEEK_MS, now).tokens, 10);

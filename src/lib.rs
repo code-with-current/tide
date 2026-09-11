@@ -216,8 +216,8 @@ fn ensure_single_instance() {
     if std::env::var_os("TIDE_NO_SINGLETON").is_some() {
         return;
     }
-    let lock_path = backend::persistence::StateStore::default_path()
-        .with_file_name("tide-single-instance.lock");
+    let lock_path =
+        store::persistence::StateStore::default_path().with_file_name("tide-single-instance.lock");
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

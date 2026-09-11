@@ -67,13 +67,13 @@ fn serve_in_process(exposure: DaemonExposureSettings) -> anyhow::Result<client::
     let address = listener.local_addr()?;
     let token = exposure.token.clone();
 
-    let task_path = backend::persistence::StateStore::default_path();
-    let settings = backend::DaemonSettingsStore::open_with_legacy(
-        backend::DaemonSettings::default_path(),
+    let task_path = store::persistence::StateStore::default_path();
+    let settings = store::settings::DaemonSettingsStore::open_with_legacy(
+        store::settings::DaemonSettings::default_path(),
         [task_path.with_file_name("settings.json")],
     )
     .context("could not load daemon settings")?;
-    let task_store = backend::persistence::StateStore::daemon(task_path);
+    let task_store = store::persistence::StateStore::daemon(task_path);
     let backend = Arc::new(backend::daemon::TideBackend::new(settings, task_store)?);
     let core = Arc::new(transport::ServerCore::new(backend));
 

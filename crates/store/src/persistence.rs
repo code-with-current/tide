@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use parking_lot::Mutex;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -960,13 +960,14 @@ impl StateStore {
         state.ensure_runtime_session();
         // The session that opens on launch is the one session whose transcript
         // is needed immediately; the rest stay as list rows until selected.
-        if let Some(selected) = state.selected_session
-            && let Some(session) = state
+        if let Some(selected) = state.selected_session {
+            if let Some(session) = state
                 .sessions
                 .iter_mut()
                 .find(|session| session.id == selected)
-        {
-            let _ = self.hydrate(session);
+            {
+                let _ = self.hydrate(session);
+            }
         }
         state
     }
@@ -2340,12 +2341,10 @@ mod tests {
                 branch: "tide/investigate".into(),
             }
         );
-        assert!(
-            session
-                .messages
-                .iter()
-                .any(|message| message.content == "an answer")
-        );
+        assert!(session
+            .messages
+            .iter()
+            .any(|message| message.content == "an answer"));
 
         fs::remove_dir_all(directory).ok();
     }
@@ -2547,10 +2546,14 @@ mod tests {
             .push(TranscriptBlock {
                 after_message: 0,
                 turn_id: None,
-                activities: vec![
-                    ActivityItem::new(None, ActivityKind::Tool, "Screenshot", None, true)
-                        .with_image_urls(vec![data_url]),
-                ],
+                activities: vec![ActivityItem::new(
+                    None,
+                    ActivityKind::Tool,
+                    "Screenshot",
+                    None,
+                    true,
+                )
+                .with_image_urls(vec![data_url])],
             });
         store.save(&mut state).unwrap();
 
@@ -2892,12 +2895,10 @@ mod tests {
 
         let checked = load_hydrated(&store_in(&directory));
         assert_eq!(checked.sessions[0].title, "Renamed task");
-        assert!(
-            checked.sessions[0]
-                .messages
-                .iter()
-                .any(|message| message.content == "still here")
-        );
+        assert!(checked.sessions[0]
+            .messages
+            .iter()
+            .any(|message| message.content == "still here"));
 
         fs::remove_dir_all(directory).ok();
     }
@@ -3205,18 +3206,14 @@ mod tests {
 
         let reopened = store_in(&directory);
         let skeletons = reopened.load().unwrap();
-        assert!(
-            skeletons
-                .sessions
-                .iter()
-                .all(|session| !session.detail_loaded)
-        );
-        assert!(
-            skeletons
-                .sessions
-                .iter()
-                .all(|session| session.messages.is_empty())
-        );
+        assert!(skeletons
+            .sessions
+            .iter()
+            .all(|session| !session.detail_loaded));
+        assert!(skeletons
+            .sessions
+            .iter()
+            .all(|session| session.messages.is_empty()));
 
         let matches = reopened.session_message_search("needle".into(), 50)().unwrap();
         assert_eq!(
@@ -3525,10 +3522,14 @@ mod tests {
             .push(TranscriptBlock {
                 after_message: 0,
                 turn_id: None,
-                activities: vec![
-                    ActivityItem::new(None, ActivityKind::Tool, "Screenshot", None, true)
-                        .with_image_urls(vec![data_url]),
-                ],
+                activities: vec![ActivityItem::new(
+                    None,
+                    ActivityKind::Tool,
+                    "Screenshot",
+                    None,
+                    true,
+                )
+                .with_image_urls(vec![data_url])],
             });
 
         store.save(&mut state).unwrap();

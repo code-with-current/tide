@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use backend::daemon::TideBackend;
-use backend::persistence::StateStore;
-use backend::settings::DaemonSettingsStore;
 use backend::terminal::DaemonTerminal;
 use backend::{Backend, Command, EventSink, Request, ResponsePayload, ServerOptions, serve};
 use base64::Engine as _;
 use client::DaemonClient;
 use crossbeam_channel::{Sender, bounded};
 use protocol::model::{AgentSession, Project, ProviderKind};
+use store::persistence::StateStore;
+use store::settings::DaemonSettingsStore;
 use uuid::Uuid;
 
 fn start_server(backend: Arc<dyn Backend>) -> (String, std::thread::JoinHandle<()>) {

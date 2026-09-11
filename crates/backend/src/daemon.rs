@@ -15,16 +15,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::attachments::AttachmentStore;
 use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
     Project, ProviderKind, ProviderResumeCursor, SessionStatus, UsageBreakdown,
 };
-use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
-use crate::settings::DaemonSettingsStore;
 use protocol::git_settings::GitOpResultWire;
+use store::attachments::AttachmentStore;
+use store::persistence::{ComposerDraftStore, PersistedState, StateStore};
+use store::settings::DaemonSettingsStore;
 
 pub struct TideBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
