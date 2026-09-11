@@ -461,4 +461,44 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
         assert!(response.contains("claude"));
     }
+
+    #[test]
+    fn expired_llm_token_is_recreated_once() {
+        let unauthorized = "HTTP/1.1 401 Unauthorized\r\nx-zed-expired-token: true\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let cloud = FakeCloud::spawn(vec![
+            http_ok_json(r#"{"token":"A"}"#),
+            unauthorized,
+            http_ok_json(r#"{"token":"B"}"#),
+            ndjson_ok(&[serde_json::json!({"type":"message_stop"})]),
+        ]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        // Distinct blob: bridges are cached per-credential process-wide, so
+        // reusing another test's blob would inherit its cached llm_token.
+        let bridge = shared_bridge(r#"{"userId":"9","accessToken":"acc-refresh"}"#).unwrap();
+        let response = post_to_bridge(&bridge, &serde_json::json!({
+            "model": "claude-haiku-4-5", "messages": [{ "role": "user", "content": "hi" }]
+        }));
+        assert!(response.contains("event:"), "{response}");
+        let token_mints = cloud
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(line, _)| line.contains("llm_tokens"))
+            .count();
+        assert_eq!(token_mints, 2, "exactly one recreate");
+    }
+
+    #[test]
+    fn dead_access_token_surfaces_sign_in_expired() {
+        let denied = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let cloud = FakeCloud::spawn(vec![denied]);
+        let _cloud = cloud_guard(cloud.base_url.clone());
+        let bridge = shared_bridge(r#"{"userId":"9","accessToken":"dead"}"#).unwrap();
+        let response = post_to_bridge(&bridge, &serde_json::json!({
+            "model": "claude-haiku-4-5", "messages": []
+        }));
+        assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+        assert!(response.contains("sign-in expired"), "{response}");
+    }
 }
