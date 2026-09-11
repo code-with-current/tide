@@ -79,6 +79,9 @@ pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire
         .iter()
         .filter_map(|model| {
             let id = model.get("id")?.as_str()?.to_owned();
+            if id.trim().is_empty() {
+                return None;
+            }
             Some(TideModelWire {
                 alias: model
                     .get("display_name")
@@ -101,7 +104,7 @@ pub(crate) fn parse_zed_models(json: &Value) -> anyhow::Result<Vec<TideModelWire
         })
         .collect();
     if models.is_empty() {
-        bail!("the zed model list response contained no models");
+        bail!("the zed model list contained no models with a usable id");
     }
     models.sort_by(|a, b| a.model_id.cmp(&b.model_id));
     Ok(models)
@@ -166,6 +169,25 @@ mod tests {
     fn parse_zed_models_rejects_empty() {
         assert!(parse_zed_models(&serde_json::json!({})).is_err());
         assert!(parse_zed_models(&serde_json::json!({ "models": [] })).is_err());
+    }
+
+    #[test]
+    fn parse_zed_models_skips_unusable_ids() {
+        // A non-string id, a missing id, and a blank id are all skipped; when
+        // every entry is skipped the parse fails with its own message.
+        let all_bad = serde_json::json!({ "models": [
+            { "display_name": "x" }, { "id": "  " }, { "id": 7 }
+        ]});
+        let err = parse_zed_models(&all_bad).unwrap_err();
+        assert!(err.to_string().contains("usable id"), "unexpected error: {err}");
+        // A mix keeps only the usable entry, with the id as alias fallback.
+        let models = parse_zed_models(&serde_json::json!({ "models": [
+            { "display_name": "x" }, { "id": "good-one" }
+        ]}))
+        .unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model_id, "good-one");
+        assert_eq!(models[0].alias, "good-one");
     }
 
     #[test]
