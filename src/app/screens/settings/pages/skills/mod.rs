@@ -13,10 +13,34 @@ use std::path::Path;
 
 use gpui::KeyBinding;
 
-use super::composer::next_picker_highlight;
+use crate::app::composer::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
 
-use super::*;
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, ClipboardItem, Context, Div, FontWeight, SharedString, canvas, div, list, px,
+};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
+
+use crate::app::Tide;
+use crate::md;
+use crate::md::render::{
+    Ctx as MarkdownCtx, MarkdownView, Metrics as MarkdownMetrics, Palette as MarkdownPalette,
+};
+use crate::model::{compact_path, unix_time};
+use crate::theme::{Theme, sp};
+use crate::ui::{
+    MenuChip,
+    chip::chip,
+    icon,
+    menu::{MenuAlign, MenuItem, SelectNextEntry, SelectPreviousEntry, dropdown_menu},
+    scrollbar,
+    text_field::TextField,
+};
 
 /// Key context the left pane declares around its search field.
 const SKILLS_PANE_CONTEXT: &str = "SkillsPane";
@@ -59,7 +83,7 @@ pub fn init(cx: &mut App) {
 /// in [`Tide::sync_skills_rows`]: a changed row — catalog identity, enabled
 /// state, or selection — re-measures from that point on.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum SkillsRow {
+pub(in crate::app) enum SkillsRow {
     Section {
         label: SharedString,
         count: usize,
@@ -77,7 +101,7 @@ impl Tide {
     /// Start a background library scan unless a current-enough catalog (or an
     /// in-flight scan) already covers it. Results from superseded scans are
     /// discarded by generation.
-    pub(super) fn ensure_skills_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
+    pub(in crate::app) fn ensure_skills_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.skills_scan_pending {
             return;
         }
@@ -338,7 +362,7 @@ impl Tide {
 
     // ── Page ───────────────────────────────────────────────────────────────
 
-    pub(super) fn render_skills_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::app) fn render_skills_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let catalog = self.skills_catalog.clone();
         let query = self.skills_search.read(cx).content().trim().to_lowercase();

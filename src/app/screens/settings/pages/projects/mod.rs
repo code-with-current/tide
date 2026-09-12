@@ -10,12 +10,29 @@ use std::path::{Path, PathBuf};
 
 use gpui::{KeyBinding, actions};
 
-use super::composer::next_picker_highlight;
-use super::image_preview::image_format_for_name;
-use super::model_picker::{ModelPickerClear, ModelPickerConfig, ModelPickerSelect};
+use crate::app::composer::next_picker_highlight;
+use crate::app::image_preview::image_format_for_name;
+use crate::app::model_picker::{ModelPickerClear, ModelPickerConfig, ModelPickerSelect};
 use crate::ui::card::{CardRow, card_body, card_rows, settings_group_head, settings_page_header};
 
-use super::*;
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, Context, Div, Entity, FontWeight, Hsla, MouseButton, PathPromptOptions,
+    SharedString, Window, div, img, list, px, rgb,
+};
+use std::rc::Rc;
+use uuid::Uuid;
+
+use crate::app::{RemoteTaskStateSnapshot, Tide};
+use crate::input::{InputEvent, TextInput};
+use crate::model::{Project, ProjectAction, ProjectIcon, ProviderKind};
+use crate::theme::{Theme, sp};
+use crate::ui::{
+    MenuChip, icon,
+    menu::{MenuAlign, MenuItem, SelectNextEntry, SelectPreviousEntry, dropdown_menu},
+    scrollbar,
+    text_field::TextField,
+};
 
 /// Key context the left pane declares around its search field.
 const PROJECTS_PANE_CONTEXT: &str = "ProjectsPane";
@@ -78,7 +95,7 @@ fn prune_old_uploads_in(dir: &Path, project_id: Uuid, keep: &str) {
 /// The project avatar in every surface: preset glyph, uploaded image,
 /// well-known repo file, or the initials fallback. `probe` is the landed
 /// background result for this project, when one exists.
-pub(super) fn project_avatar(
+pub(in crate::app) fn project_avatar(
     project: &Project,
     probe: Option<&ProjectIconProbe>,
     size: f32,
@@ -199,23 +216,23 @@ fn icon_tile_background(project: &Project) -> Hsla {
 /// One landed background probe: the root it ran against, whether the
 /// directory is on disk, and the best well-known icon file, if any.
 #[derive(Clone, Debug)]
-pub(super) struct ProjectIconProbe {
-    pub(super) root: PathBuf,
-    pub(super) dir_exists: bool,
-    pub(super) well_known: Option<PathBuf>,
+pub(in crate::app) struct ProjectIconProbe {
+    pub(in crate::app) root: PathBuf,
+    pub(in crate::app) dir_exists: bool,
+    pub(in crate::app) well_known: Option<PathBuf>,
 }
 
 /// The remove-project confirmation. `delete_history` mirrors the checkbox —
 /// sessions and their transcripts go with the project when set — while
 /// `confirm_input` is the type-the-title gate: the confirm control stays
 /// inert until the field matches `project_name` exactly.
-pub(super) struct RemoveProjectDialog {
-    pub(super) project_id: Uuid,
-    pub(super) project_name: String,
-    pub(super) delete_history: bool,
+pub(in crate::app) struct RemoveProjectDialog {
+    pub(in crate::app) project_id: Uuid,
+    pub(in crate::app) project_name: String,
+    pub(in crate::app) delete_history: bool,
     /// Materialized at the dialog's first render, not on open, because
     /// [`TextInput::new`] needs a window.
-    pub(super) confirm_input: Option<Entity<TextInput>>,
+    pub(in crate::app) confirm_input: Option<Entity<TextInput>>,
 }
 
 /// The selection after a removal: the row that took the removed row's place
@@ -266,7 +283,7 @@ fn project_row_key(id: Uuid) -> u64 {
 /// in [`Tide::sync_projects_rows`]: a changed row — identity or selection —
 /// re-measures from that point on.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum ProjectsRow {
+pub(in crate::app) enum ProjectsRow {
     Project {
         id: Uuid,
         row_key: u64,
@@ -277,7 +294,7 @@ pub(super) enum ProjectsRow {
 impl Tide {
     // ── Selection ──────────────────────────────────────────────────────────
 
-    pub(super) fn landed_probe(&self, project_id: Uuid) -> Option<ProjectIconProbe> {
+    pub(in crate::app) fn landed_probe(&self, project_id: Uuid) -> Option<ProjectIconProbe> {
         self.projects_icon_probes.borrow().get(&project_id).cloned()
     }
 
@@ -294,7 +311,7 @@ impl Tide {
 
     /// Everything the detail panel needs for the effective selection: probe
     /// the directory, load the rename field, warm the RAG status.
-    pub(super) fn sync_project_selection_ui(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn sync_project_selection_ui(&mut self, cx: &mut Context<Self>) {
         let Some((id, path)) = self.projects_settings_target() else {
             return;
         };
@@ -329,7 +346,7 @@ impl Tide {
 
     /// Probe every ordinary project once, so avatars render with data in all
     /// surfaces (sidebar, pickers) without any frame touching the filesystem.
-    pub(super) fn ensure_all_project_icon_probes(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn ensure_all_project_icon_probes(&mut self, cx: &mut Context<Self>) {
         let targets: Vec<(Uuid, PathBuf)> = self
             .state
             .projects
@@ -344,7 +361,7 @@ impl Tide {
 
     /// Start a background probe of the project directory unless a
     /// current-enough one (for the same root) already landed.
-    pub(super) fn ensure_project_icon_probe(
+    pub(in crate::app) fn ensure_project_icon_probe(
         &mut self,
         project_id: Uuid,
         root: PathBuf,
@@ -397,7 +414,7 @@ impl Tide {
 
     /// The project the detail panel will show: the rail selection, or the
     /// first ordinary project. `(id, path)` so callers borrow nothing.
-    pub(super) fn projects_settings_target(&self) -> Option<(Uuid, PathBuf)> {
+    pub(in crate::app) fn projects_settings_target(&self) -> Option<(Uuid, PathBuf)> {
         let id = self.projects_settings_selected.or_else(|| {
             self.state
                 .projects
@@ -447,7 +464,7 @@ impl Tide {
 
     // ── Page ───────────────────────────────────────────────────────────────
 
-    pub(super) fn render_projects_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::app) fn render_projects_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let query = self
             .projects_settings_search
@@ -870,7 +887,7 @@ impl Tide {
 
     /// The Enter-commit for the name field. Empty or unchanged text is a
     /// no-op; the value stages locally until the settings round-trip lands.
-    pub(super) fn commit_project_rename(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn commit_project_rename(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.projects_settings_selected else {
             return;
         };
@@ -1429,7 +1446,7 @@ impl Tide {
     }
 
     /// Enter in the add-row's name field: resolve the rail selection and add.
-    pub(super) fn add_project_action_from_selection(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn add_project_action_from_selection(&mut self, cx: &mut Context<Self>) {
         if let Some((id, _)) = self.projects_settings_target() {
             self.add_project_action(id, cx);
         }
@@ -1746,7 +1763,7 @@ impl Tide {
         cx.notify();
     }
 
-    pub(super) fn render_projects_remove_dialog(
+    pub(in crate::app) fn render_projects_remove_dialog(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,

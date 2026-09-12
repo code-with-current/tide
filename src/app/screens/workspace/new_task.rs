@@ -7,7 +7,7 @@ use gpui::{Context, Div, FontWeight, SharedString, Window, div, px};
 use crate::app::CONTENT_MAX_WIDTH;
 use crate::app::Tide;
 use crate::app::components::project_identity::ProjectNameSelector;
-use crate::app::projects_page::project_avatar;
+use crate::app::screens::settings::pages::projects::project_avatar;
 use crate::model::Project;
 use crate::theme::{Theme, sp};
 use crate::ui::icon;

@@ -14,8 +14,8 @@ use gpui::{
     KeyDownEvent, KeystrokeEvent, ListAlignment, ListOffset, ListState, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit,
     PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful, StyleRefinement,
-    TextRun, WeakEntity, Window, WindowBounds, canvas, div, ease_out_quint, fill, font, img,
-    linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
+    TextRun, WeakEntity, Window, WindowBounds, canvas, div, ease_out_quint, font, img,
+    linear_color_stop, linear_gradient, list, point, prelude::*, px, rgb,
 };
 use uuid::Uuid;
 
@@ -33,7 +33,7 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProjectAction, ProjectIcon, ProviderKind,
+    MessageRole, PendingPermission, Project, ProviderKind,
     ProviderModel, ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock,
     RuntimeMode, SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
     SubagentToolStatus, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
@@ -1439,7 +1439,7 @@ pub struct Tide {
     skills_scrollbar: Rc<ScrollbarState>,
     /// The rows the list currently draws — sections and catalog indices —
     /// refreshed once per frame rather than per row.
-    skills_rows: RefCell<Vec<skills_page::SkillsRow>>,
+    skills_rows: RefCell<Vec<crate::app::screens::settings::pages::skills::SkillsRow>>,
     /// The skill directory the detail pane shows. `None` falls back to the
     /// first visible row, so the pane never opens empty.
     skills_selected: Option<PathBuf>,
@@ -1461,17 +1461,20 @@ pub struct Tide {
     projects_settings_scrollbar: Rc<ScrollbarState>,
     /// The rows the list currently draws, refreshed once per frame rather
     /// than per row.
-    projects_settings_rows: RefCell<Vec<projects_page::ProjectsRow>>,
+    projects_settings_rows:
+        RefCell<Vec<crate::app::screens::settings::pages::projects::ProjectsRow>>,
     /// The project the detail panel shows. `None` falls back to the first
     /// visible row, so the panel never opens empty.
     projects_settings_selected: Option<Uuid>,
     projects_detail_scroll: ScrollHandle,
     /// Landed icon probes, keyed by project id.
-    projects_icon_probes: RefCell<HashMap<Uuid, projects_page::ProjectIconProbe>>,
+    projects_icon_probes:
+        RefCell<HashMap<Uuid, crate::app::screens::settings::pages::projects::ProjectIconProbe>>,
     /// Bumped per probe; a result from a superseded probe is discarded.
     projects_icon_probe_generation: u64,
     /// The remove-project confirmation, when open.
-    projects_remove_dialog: Option<projects_page::RemoveProjectDialog>,
+    projects_remove_dialog:
+        Option<crate::app::screens::settings::pages::projects::RemoveProjectDialog>,
     /// Live action runs: (session, project, action name) → daemon job id.
     action_job_ids: RefCell<HashMap<(Uuid, Uuid, String), String>>,
     /// OS-probed listening ports by action job id.
@@ -1683,7 +1686,6 @@ mod mermaid_images;
 mod model_picker;
 mod navigation_rail;
 mod permission_flow;
-mod projects_page;
 mod rag_settings;
 mod remote_control;
 mod right_panel;
@@ -1692,7 +1694,6 @@ mod screens;
 mod sessions;
 mod settings;
 mod sidebar;
-mod skills_page;
 mod streaming;
 mod task_switcher;
 mod tide_providers;
@@ -1702,8 +1703,8 @@ mod transcript;
 mod transcript_search;
 mod transcript_view;
 mod usage_meter;
-mod usage_page;
-
+pub use crate::app::screens::settings::pages::projects::init as init_projects_keys;
+pub use crate::app::screens::settings::pages::skills::init as init_skills_keys;
 pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
@@ -1717,11 +1718,9 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 use inspector::{InspectorState, StreamLogEntry};
 use navigation_rail::{ConversationNavigationRail, TranscriptNavigationTurn};
-pub use projects_page::init as init_projects_keys;
 pub use screens::settings::navigation::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
-pub use skills_page::init as init_skills_keys;
 use streaming::*;
 use timeline_v2::{TranscriptV2, timeline_v2_enabled};
 use transcript::*;

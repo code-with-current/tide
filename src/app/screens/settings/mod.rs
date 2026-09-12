@@ -3,6 +3,8 @@
 
 pub(in crate::app) mod navigation;
 
+pub(in crate::app) mod pages;
+
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Div, Window, div, px};
 

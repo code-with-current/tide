@@ -1,7 +1,7 @@
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
 use gpui::{KeyBinding, actions, solid_background};
 
-use super::projects_page::project_avatar;
+use super::screens::settings::pages::projects::project_avatar;
 use super::*;
 use crate::app::components::status::status_color;
 

@@ -15,7 +15,22 @@ use chrono::{Datelike, Local, NaiveDate};
 use client::tide::TideProviderWire;
 use gpui::{PathBuilder, hsla, relative};
 
-use super::*;
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, Context, Div, FontWeight, Hsla, KeyDownEvent, MouseMoveEvent, ScrollHandle,
+    SharedString, canvas, div, fill, list, point, pulsating_between, px,
+};
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
+
+use crate::app::{SettingsPage, Tide, UsageBreakdown, UsageMetric, UsageViewMode};
+use crate::theme::{Theme, sp};
+use crate::ui::menu::{MenuAlign, MenuItem, dropdown_menu};
+use crate::ui::scrollbar::ScrollbarState;
+use crate::ui::tooltip::Tooltip;
+use crate::ui::{MenuChip, icon, motion, scrollbar, text_field::TextField};
+
 use crate::usage_report::{
     DaySlice, MONTHLY_WINDOW, ModelSlice, MonthSlice, ProviderUsage, UsageReport, UsageWindow,
     WINDOW_CHOICES, days_in_month, enumerate_days, enumerate_months, first_of_month,
@@ -177,7 +192,11 @@ impl UsageBin {
 impl Tide {
     /// Switch the settings view to `page`, warming the Usage report when that
     /// is where the user is heading.
-    pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+    pub(in crate::app) fn open_settings_page(
+        &mut self,
+        page: SettingsPage,
+        cx: &mut Context<Self>,
+    ) {
         self.settings_page = Some(page);
         // Each page starts at its own top; a scroll position carried over
         // from the previous page would land mid-content.
@@ -225,7 +244,7 @@ impl Tide {
     /// an in-flight fetch for the same window) already covers it. `force` is
     /// the refresh button. Results from superseded fetches are discarded by
     /// generation, so a window change mid-fetch cannot land stale data.
-    pub(super) fn ensure_usage_report(&mut self, force: bool, cx: &mut Context<Self>) {
+    pub(in crate::app) fn ensure_usage_report(&mut self, force: bool, cx: &mut Context<Self>) {
         let window = self.effective_usage_window();
         let satisfied = self
             .usage_report
@@ -302,7 +321,7 @@ impl Tide {
         cx.notify();
     }
 
-    pub(super) fn render_usage_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::app) fn render_usage_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let pending = self.usage_report_pending_for.is_some();
         let expected = self.effective_usage_window();
