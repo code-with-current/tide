@@ -6,6 +6,7 @@ use crate::app::FOLLOWUP_TURN_TOP_GAP;
 use crate::app::LIVE_REASONING_TAIL_BLOCKS;
 use crate::app::LIVE_REASONING_WINDOW_MAX;
 use crate::app::LIVE_REASONING_WINDOW_TARGET;
+use crate::app::features::right_panel::diff::{DiffRowStyle, render_diff_code_row};
 use crate::app::features::transcript::components::activity::{
     ActivityDisclosureSectionKind, activity_action_label, activity_disclosure_sections,
     activity_file_change_stats, activity_group_is_live, activity_header_title, activity_icon,
@@ -14,7 +15,6 @@ use crate::app::features::transcript::components::activity::{
 use crate::app::features::transcript::components::message::{
     MessageRender, render_message, render_message_footer,
 };
-use crate::app::right_panel::{DiffRowStyle, render_diff_code_row};
 use base64::Engine as _;
 use gpui::prelude::*;
 

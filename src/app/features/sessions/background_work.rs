@@ -71,8 +71,6 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
-use crate::model::ProviderKind;
-use crate::model::ProviderResumeCursor;
 /// Width of the background-jobs popup card.
 const COMPOSER_JOBS_POPUP_WIDTH: f32 = 344.0;
 
@@ -427,7 +425,7 @@ impl BackgroundWorkRegistry {
         let port = item
             .output
             .as_deref()
-            .and_then(crate::app::right_panel::scan_exposed_port);
+            .and_then(crate::app::features::right_panel::terminal::scan_exposed_port);
         action_debug(format!(
             "state: job {job_id} status={:?} running={running} output_len={} port={port:?}",
             item.status,
@@ -4259,9 +4257,9 @@ mod tests {
     #[test]
     fn info_popover_uses_tide_task_and_native_agent_ids() {
         let task_id = Uuid::parse_str("ed28ee51-43cf-4a83-a52f-04c509ca2c09").unwrap();
-        let mut session = AgentSession::new(Uuid::nil(), ProviderKind::Tide);
+        let mut session = AgentSession::new(Uuid::nil(), crate::model::ProviderKind::Tide);
         session.id = task_id;
-        session.provider_cursor = Some(ProviderResumeCursor::Tide {
+        session.provider_cursor = Some(crate::model::ProviderResumeCursor::Tide {
             session_id: "019cfd7a-6942-78b1-9d47-30576c562321".into(),
         });
 

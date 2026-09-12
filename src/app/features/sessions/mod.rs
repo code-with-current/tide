@@ -20,6 +20,8 @@ use crate::app::PanelResizeTarget;
 use crate::app::RIGHT_PANEL_MIN_WIDTH;
 use crate::app::SIDEBAR_MIN_WIDTH;
 use crate::app::SessionActivationTransition;
+#[cfg(test)]
+use crate::app::SessionNavigation;
 use crate::app::SettingsPage;
 use crate::app::Tide;
 use crate::app::fitted_file_tree_width;
@@ -58,7 +60,6 @@ use gpui::Window;
 use gpui::WindowBounds;
 use std::time::Instant;
 use uuid::Uuid;
-use crate::app::SessionNavigation;
 pub(in crate::app) mod background_work;
 pub(in crate::app) mod runtime;
 pub(in crate::app) mod streaming;

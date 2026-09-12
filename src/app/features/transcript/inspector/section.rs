@@ -6,7 +6,6 @@
 //! and the hit area is the full row, not just the glyph.
 
 use super::*;
-use gpui::prelude::*;
 
 use crate::app::Tide;
 use crate::theme::Theme;

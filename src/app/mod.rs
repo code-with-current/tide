@@ -11,8 +11,8 @@ use gpui::{
     Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context, Div, Entity,
     FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent, KeystrokeEvent,
     ListAlignment, ListOffset, ListState, MouseButton, ObjectFit, Pixels, Render, ScrollHandle,
-    SharedString, Stateful, TextRun, WeakEntity, Window, canvas, div, ease_out_quint, font, img,
-    list, point, prelude::*, px, rgb,
+    SharedString, Stateful, WeakEntity, Window, canvas, div, ease_out_quint, img, list, point,
+    prelude::*, px, rgb,
 };
 use uuid::Uuid;
 
@@ -25,10 +25,10 @@ use crate::git_branch::BranchSnapshot;
 use crate::input::{InputEvent, TextInput};
 use crate::md;
 use crate::model::{
-    AgentSession, BackgroundWorkEvent, BackgroundWorkKey, BackgroundWorkKind, CheckpointStatus,
-    ContextUsage, DriverEvent, MessageAttachment, MessageRole, PendingPermission, Project,
-    ProviderKind, ProviderModel, QueuedMessage, SessionStatus, SessionUsageTotals,
-    SessionWorkspace, TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time,
+    AgentSession, BackgroundWorkKey, ContextUsage, DriverEvent, MessageAttachment, MessageRole,
+    PendingPermission, Project, ProviderKind, ProviderModel, QueuedMessage, SessionStatus,
+    SessionUsageTotals, SessionWorkspace, TurnStatus, UserInputAnswer, UserInputQuestion,
+    unix_time,
 };
 
 use crate::md::render::{
@@ -49,13 +49,12 @@ use crate::persistence::{
 use crate::query::{Query, QueryCache};
 use crate::terminal::TerminalView;
 use crate::theme::{Theme, ThemePreference, sp};
-use crate::ui::chip::{Chip, ChipTone, chip};
 use crate::ui::text_field::TextField;
-use crate::ui::{ActivationExt, MenuChip, file_icon, icon, icon_button, motion, toggle_switch};
+use crate::ui::{ActivationExt, icon, motion, toggle_switch};
 use crate::{
     CancelTaskSwitch, CloseFind, CloseWindow, ConfirmTaskSwitch, FindNext, FindPrevious,
     FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession, OpenFind,
-    OpenFindReplace, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
+    OpenFindReplace, OpenSettings, ReplaceAllMatches, SelectFirstTask, SelectLastTask,
     SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
     ToggleFindRegex, ToggleFindWholeWord, ToggleModelPicker, ToggleRemoteControl, ToggleRightPanel,
     ToggleSidebar, ToggleUsagePanel,
@@ -1383,10 +1382,10 @@ pub struct Tide {
     file_search: Option<file_search::FileSearch>,
     /// The working tree as currently drawn. Held so a refresh can redraw the
     /// previous listing instead of blanking the panel.
-    right_panel_working_tree: Vec<right_panel::WorkingTreeEntry>,
+    right_panel_working_tree: Vec<right_panel::tabs::WorkingTreeEntry>,
     /// Working tree per project path. Walking it is filesystem I/O and must
     /// never happen in a frame.
-    working_trees: QueryCache<PathBuf, Vec<right_panel::WorkingTreeEntry>>,
+    working_trees: QueryCache<PathBuf, Vec<right_panel::tabs::WorkingTreeEntry>>,
     /// Set when a turn finishes; the drain loop drops the workspace queries,
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
@@ -1662,7 +1661,6 @@ mod image_preview;
 mod layouts;
 mod permission_flow;
 mod remote_control;
-mod right_panel;
 mod screens;
 mod sidebar;
 mod task_switcher;
@@ -1670,7 +1668,7 @@ mod tide_wizard;
 mod usage_meter;
 pub use crate::app::features::composer::autocomplete::init as init_composer_autocomplete;
 pub use crate::app::features::git::init as init_git_panel_keys;
-use crate::app::features::sessions::background_work::{BackgroundWorkRegistry, work_kind_icon};
+use crate::app::features::sessions::background_work::BackgroundWorkRegistry;
 use crate::app::features::sessions::streaming::*;
 use crate::app::features::transcript::inspector::{InspectorState, StreamLogEntry};
 use crate::app::features::transcript::navigation_rail::{
@@ -1682,6 +1680,7 @@ pub use crate::app::screens::settings::pages::projects::init as init_projects_ke
 pub use crate::app::screens::settings::pages::skills::init as init_skills_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
+use features::right_panel;
 use features::transcript::components::activity::ActivityDisclosureSectionKind;
 pub use git_dialogs::init as init_git_dialog_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;

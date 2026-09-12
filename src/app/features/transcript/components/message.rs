@@ -16,8 +16,8 @@ use gpui::{
 };
 
 use crate::app::features::composer::chat_composer::ChatComposer;
+use crate::app::features::right_panel::files;
 use crate::app::image_preview;
-use crate::app::right_panel;
 use crate::app::{AssistantMessageAction, Tide, UserMessageAction};
 use crate::md;
 use crate::md::render::{Ctx as MarkdownCtx, MarkdownView, TranscriptSelection};
@@ -346,7 +346,7 @@ fn render_sent_message_attachments(
         let icon_path = if attachment.is_dir {
             "icons/folder.svg"
         } else {
-            right_panel::file_icon_for_path(&attachment.mention)
+            files::file_icon_for_path(&attachment.mention)
         };
         let attachment_image = attachment_images.get(index).and_then(|image| image.clone());
         let mut tile = div()

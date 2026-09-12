@@ -622,7 +622,7 @@ impl Tide {
                 let icon_path = if file.is_dir {
                     "icons/folder.svg"
                 } else {
-                    crate::app::right_panel::file_icon_for_path(&file.path)
+                    crate::app::features::right_panel::files::file_icon_for_path(&file.path)
                 };
                 base.child(icon(icon_path, 13.0, theme.text_tertiary))
                     .child(

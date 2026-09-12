@@ -11,7 +11,6 @@ use crate::app::sidebar::format_time_ago;
 use crate::md::render::MONO_FAMILY;
 use crate::usage::format_tokens;
 use client::tide::TideProviderWire;
-use gpui::prelude::*;
 use gpui::relative;
 use protocol::git_panel::{PanelAheadBehind, PanelFileChange};
 

@@ -15,8 +15,8 @@
 use super::super::EditingMessage;
 use super::super::rows::activity_group::GroupToggle;
 use super::super::rows::turn_item::clock_time;
+use crate::app::features::right_panel::files;
 use crate::app::image_preview;
-use crate::app::right_panel;
 use crate::md::render::{self, FlatText, TranscriptSelection};
 use crate::md::selection::TextKey;
 use crate::model::{AgentSession, MessageRole};
@@ -548,7 +548,7 @@ fn render_bubble_attachments(attachments: &[UserBubbleAttachment], theme: &Theme
         let icon_path = if attachment.is_dir {
             "icons/folder.svg"
         } else {
-            right_panel::file_icon_for_path(&attachment.name)
+            files::file_icon_for_path(&attachment.name)
         };
         let key = attachment.key.as_str();
         let mut tile = div()

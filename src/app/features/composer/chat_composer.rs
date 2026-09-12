@@ -624,7 +624,7 @@ impl Tide {
             let icon_path = if attachment.is_dir {
                 "icons/folder.svg"
             } else {
-                crate::app::right_panel::file_icon_for_path(&attachment.mention)
+                crate::app::features::right_panel::files::file_icon_for_path(&attachment.mention)
             };
             let mut tile = div()
                 .id(SharedString::from(format!("composer-attachment-{index}")))

@@ -9,6 +9,7 @@
 //! generation counter if a newer refresh (or a session switch) started.
 pub(in crate::app) mod branches;
 pub(in crate::app) mod git_history;
+pub(in crate::app) mod panel_surface;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
