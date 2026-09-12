@@ -1298,6 +1298,7 @@ impl Tide {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ProviderResumeCursor;
 
     fn score(query: &str, candidate: &str) -> Option<u32> {
         let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);

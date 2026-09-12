@@ -8,7 +8,7 @@
 use gpui::{PathBuilder, relative};
 
 use super::*;
-use crate::app::timeline_v2::tools_dim;
+use crate::app::features::transcript::timeline_v2::tools_dim;
 // The protocol's per-step usage shape; the panel's meter segments and
 // totals read it directly.
 use crate::md::render::MONO_FAMILY;

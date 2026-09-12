@@ -5,7 +5,9 @@ use gpui::prelude::*;
 use gpui::{FontWeight, div};
 use std::rc::Rc;
 
-use crate::app::model_picker::{ModelPickerClear, ModelPickerConfig, ModelPickerSelect};
+use crate::app::features::composer::model_picker::{
+    ModelPickerClear, ModelPickerConfig, ModelPickerSelect,
+};
 use crate::model::ProviderKind;
 use crate::theme::{Theme, sp};
 use crate::ui::{MenuChip, menu::MenuAlign, toggle_switch};

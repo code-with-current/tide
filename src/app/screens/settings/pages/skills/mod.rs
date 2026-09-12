@@ -13,7 +13,7 @@ use std::path::Path;
 
 use gpui::KeyBinding;
 
-use crate::app::composer::next_picker_highlight;
+use crate::app::features::composer::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
 
 use gpui::prelude::*;

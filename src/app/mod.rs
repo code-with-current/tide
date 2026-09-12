@@ -6,49 +6,37 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Div,
-    Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent,
-    KeystrokeEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels,
-    Render, ScrollHandle, SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window,
-    WindowBounds, canvas, div, ease_out_quint, font, img, linear_color_stop, linear_gradient, list,
-    point, prelude::*, px, rgb,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context, Div, Entity,
+    FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent, KeystrokeEvent,
+    ListAlignment, ListOffset, ListState, MouseButton, ObjectFit, Pixels, Render, ScrollHandle,
+    SharedString, Stateful, TextRun, WeakEntity, Window, canvas, div, ease_out_quint, font, img,
+    list, point, prelude::*, px, rgb,
 };
 use uuid::Uuid;
 
-use crate::checkpoint;
 use crate::composer_complete::{FileEntry, SlashCommand};
 use crate::computer_use::{
-    ComputerPermissions, ComputerTarget, ComputerUsePhase, ComputerUseState,
-    PendingComputerApproval,
+    ComputerPermissions, ComputerTarget, ComputerUsePhase, PendingComputerApproval,
 };
-use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
+use crate::driver::{self, DriverHandle, DriverStartOptions};
 use crate::git_branch::BranchSnapshot;
 use crate::input::{InputEvent, TextInput};
 use crate::md;
 use crate::model::{
-    ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
-    BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
-    ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderModelOption,
-    ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus,
-    SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun, SubagentToolStatus,
-    TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time,
-    unix_time_millis,
+    AgentSession, BackgroundWorkEvent, BackgroundWorkKey, BackgroundWorkKind, CheckpointStatus,
+    ContextUsage, DriverEvent, MessageAttachment, MessageRole, PendingPermission, Project,
+    ProviderKind, ProviderModel, QueuedMessage, SessionStatus, SessionUsageTotals,
+    SessionWorkspace, TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time,
 };
-use unicode_segmentation::UnicodeSegmentation;
 
 use crate::md::render::{
     Ctx as MarkdownCtx, MarkdownView, Metrics as MarkdownMetrics, Palette as MarkdownPalette,
     TranscriptSelection,
 };
 use crate::ui::menu::{
-    ConfirmEntry, ContextMenuHandle, DismissMenu, MenuAlign, MenuItem, SelectNextEntry,
-    SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu, dropdown_menu,
-    floating_menu, popover, toggle_popover,
+    ContextMenuHandle, MenuAlign, MenuItem, context_menu, dropdown_menu, popover,
 };
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::tooltip::Tooltip;
@@ -63,18 +51,19 @@ use crate::terminal::TerminalView;
 use crate::theme::{Theme, ThemePreference, sp};
 use crate::ui::chip::{Chip, ChipTone, chip};
 use crate::ui::text_field::TextField;
-use crate::ui::{
-    ActivationExt, MenuChip, contain_scroll, file_icon, icon, icon_button, motion, toggle_switch,
-};
+use crate::ui::{ActivationExt, MenuChip, file_icon, icon, icon_button, motion, toggle_switch};
 use crate::{
-    CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
-    FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
-    OpenFind, OpenFindReplace, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstTask,
-    SelectLastTask, SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleModelPicker, ToggleRemoteControl, ToggleRightPanel, ToggleSidebar, ToggleUsagePanel,
+    CancelTaskSwitch, CloseFind, CloseWindow, ConfirmTaskSwitch, FindNext, FindPrevious,
+    FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession, OpenFind,
+    OpenFindReplace, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
+    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleModelPicker, ToggleRemoteControl, ToggleRightPanel,
+    ToggleSidebar, ToggleUsagePanel,
 };
 
+use crate::app::features::browser::mermaid_images;
+use crate::app::features::composer::autocomplete;
+use crate::app::features::composer::model_picker;
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
@@ -1078,7 +1067,7 @@ pub struct Tide {
     pub(crate) git_settings: crate::app::screens::settings::pages::git::GitSettingsPanel,
     pub(crate) rag_settings: crate::app::screens::settings::pages::memory::RagSettingsPanel,
     pub(crate) remote_control: crate::app::remote_control::RemoteControlState,
-    pub(crate) git_panel: crate::app::git_panel::GitPanelState,
+    pub(crate) git_panel: crate::app::features::git::GitPanelState,
     /// Sessions with a tide-generated title request in flight; lands are
     /// deduplicated against this so only one generation runs per session.
     title_generation_in_flight: HashSet<Uuid>,
@@ -1367,7 +1356,7 @@ pub struct Tide {
     /// The Git panel Changes tab's flattened rows and their virtualized
     /// list, refreshed by `sync_git_panel_changes_rows` whenever the
     /// queries or the view state move.
-    git_panel_changes_rows: RefCell<Vec<crate::app::git_panel::GitChangesRow>>,
+    git_panel_changes_rows: RefCell<Vec<crate::app::features::git::GitChangesRow>>,
     git_panel_changes_list_state: ListState,
     git_panel_changes_scrollbar: Rc<ScrollbarState>,
     /// The History tab's virtualized commit rows (uniform 24px) and its
@@ -1414,7 +1403,8 @@ pub struct Tide {
     /// `navigate_pending_browser_url` once the surface's renderer creates
     /// the view. Each op then rides the view's own load-waiter queue until
     /// the page it targeted settles.
-    right_panel_pending_agent_ops: HashMap<Uuid, Vec<browser_bridge::PendingAgentOp>>,
+    right_panel_pending_agent_ops:
+        HashMap<Uuid, Vec<crate::app::features::browser::PendingAgentOp>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
@@ -1659,67 +1649,46 @@ pub struct Tide {
     fps_value: u32,
 }
 
-mod activity_diff;
-mod autocomplete;
-mod background_work;
-mod branches;
-mod browser_bridge;
-mod chat_composer;
 mod command_palette;
 mod commit_dialog;
 mod components;
-mod composer;
-mod drafts;
 mod features;
 
-use chat_composer::{ChatComposer, ChatComposerEvent};
+use crate::app::features::composer::chat_composer::{ChatComposer, ChatComposerEvent};
 mod file_search;
 mod git_dialogs;
-mod git_history;
-mod git_panel;
 mod goal_dialog;
 mod image_preview;
-mod inspector;
 mod layouts;
-mod mermaid_images;
-mod model_picker;
-mod navigation_rail;
 mod permission_flow;
 mod remote_control;
 mod right_panel;
-mod runtime;
 mod screens;
-mod sessions;
 mod sidebar;
-mod streaming;
 mod task_switcher;
 mod tide_wizard;
-mod timeline_v2;
-mod transcript;
-mod transcript_search;
-mod transcript_view;
 mod usage_meter;
+pub use crate::app::features::composer::autocomplete::init as init_composer_autocomplete;
+pub use crate::app::features::git::init as init_git_panel_keys;
+use crate::app::features::sessions::background_work::{BackgroundWorkRegistry, work_kind_icon};
+use crate::app::features::sessions::streaming::*;
+use crate::app::features::transcript::inspector::{InspectorState, StreamLogEntry};
+use crate::app::features::transcript::navigation_rail::{
+    ConversationNavigationRail, TranscriptNavigationTurn,
+};
+use crate::app::features::transcript::timeline_v2::{TranscriptV2, timeline_v2_enabled};
+use crate::app::features::transcript::*;
 pub use crate::app::screens::settings::pages::projects::init as init_projects_keys;
 pub use crate::app::screens::settings::pages::skills::init as init_skills_keys;
-pub use autocomplete::init as init_composer_autocomplete;
-use background_work::{
-    BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
-};
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use features::transcript::components::activity::ActivityDisclosureSectionKind;
 pub use git_dialogs::init as init_git_dialog_keys;
-pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
-use inspector::{InspectorState, StreamLogEntry};
-use navigation_rail::{ConversationNavigationRail, TranscriptNavigationTurn};
 pub use screens::settings::navigation::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
-use streaming::*;
-use timeline_v2::{TranscriptV2, timeline_v2_enabled};
-use transcript::*;
 
 impl Tide {
     pub(super) fn control_was_copied(&self, control_id: &str) -> bool {
@@ -2864,7 +2833,7 @@ impl Tide {
                     cx,
                 ),
                 remote_control: crate::app::remote_control::RemoteControlState::default(),
-                git_panel: crate::app::git_panel::GitPanelState::default(),
+                git_panel: crate::app::features::git::GitPanelState::default(),
                 title_generation_in_flight: HashSet::new(),
                 computer_permissions: ComputerPermissions::default(),
                 computer_permission_tx,
@@ -2995,7 +2964,9 @@ impl Tide {
                     .with_uniform_item_height(px(28.0)),
                 git_panel_changes_scrollbar: ScrollbarState::new(),
                 git_panel_history_list_state: ListState::new(0, ListAlignment::Top, px(180.0))
-                    .with_uniform_item_height(px(crate::app::git_history::HISTORY_ROW_H)),
+                    .with_uniform_item_height(px(
+                        crate::app::features::git::git_history::HISTORY_ROW_H,
+                    )),
                 git_panel_history_scrollbar: ScrollbarState::new(),
                 right_panel_editor_scroll_handle: ScrollHandle::new(),
                 right_panel_editor_scrollbar: ScrollbarState::new(),
@@ -3151,7 +3122,7 @@ impl Tide {
             // handles. Linux installs nothing: browser tool calls fail
             // cleanly there per the seam's no-backend test.
             #[cfg(any(target_os = "macos", target_os = "windows"))]
-            browser_bridge::install_browser_backend(cx);
+            crate::app::features::browser::install_browser_backend(cx);
             this.restart_task_state_sync();
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);

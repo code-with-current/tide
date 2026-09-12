@@ -4,7 +4,7 @@
 use gpui::prelude::*;
 use gpui::{App, Context, Div, MouseButton, SharedString, Stateful, Window, div, px};
 
-use crate::app::composer::next_picker_highlight;
+use crate::app::features::composer::next_picker_highlight;
 use crate::app::layouts::window;
 use crate::app::{DEFAULT_SIDEBAR_WIDTH, SettingsPage, TRAFFIC_LIGHT_CLEARANCE, Tide};
 use crate::theme::{Theme, sp};

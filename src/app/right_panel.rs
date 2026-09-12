@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::branches::{BranchPickerContext, BranchPickerSurface};
-use super::git_history::{self, GRAPH_WIDTH, HISTORY_ROW_H};
-use super::git_panel::{GitChangesRow, GitFileSection, GitPanelTab, HistoryActionStage};
 use super::*;
+use crate::app::features::git::branches::{BranchPickerContext, BranchPickerSurface};
+use crate::app::features::git::git_history::{self, GRAPH_WIDTH, HISTORY_ROW_H};
+use crate::app::features::git::{GitChangesRow, GitFileSection, GitPanelTab, HistoryActionStage};
 use crate::query::Query;
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use protocol::git_panel::{PanelCommit, PanelConflict, PanelFileChange};
@@ -4618,12 +4618,12 @@ impl Tide {
         let card = div()
             .id("git-stash-card")
             .key_context("GitStashDialog")
-            .on_action(
-                cx.listener(|this, _: &super::git_panel::DismissGitStash, _, cx| {
+            .on_action(cx.listener(
+                |this, _: &crate::app::features::git::DismissGitStash, _, cx| {
                     this.git_panel.stash_dialog_open = false;
                     cx.notify();
-                }),
-            )
+                },
+            ))
             .tab_group()
             .tab_stop(false)
             .w_full()
@@ -5037,7 +5037,7 @@ impl Tide {
                     let _ = weak.update(cx, |this, cx| {
                         if open {
                             this.git_panel.history_action =
-                                Some(super::git_panel::HistoryRowAction {
+                                Some(crate::app::features::git::HistoryRowAction {
                                     sha: sha.clone(),
                                     stage: HistoryActionStage::Menu,
                                     branch_input: None,
@@ -6370,11 +6370,11 @@ impl Tide {
 
         let message_field = div()
             .key_context("GitPanelCommitMessage")
-            .on_action(
-                cx.listener(|this, _: &super::git_panel::ConfirmGitPanelCommit, _, cx| {
+            .on_action(cx.listener(
+                |this, _: &crate::app::features::git::ConfirmGitPanelCommit, _, cx| {
                     this.confirm_git_panel_commit(cx);
-                }),
-            )
+                },
+            ))
             .flex()
             .flex_col()
             .min_w_0()

@@ -1,17 +1,4 @@
-use super::chat_composer::{ComposerSubmitAction, composer_submit_action};
-use super::composer::{
-    dropped_file_mention, latest_todo_plan, merged_submission, next_picker_highlight,
-    pasted_text_attachment_name, visible_branch_entries,
-};
-use super::features::transcript::components::message::fenced_code;
-use super::navigation_rail::{
-    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, active_navigation_turn_index,
-    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
-    navigation_rail_scale, should_show_navigation_rail,
-};
-use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::screens::settings::navigation::visible_settings_pages;
-use super::sessions::effective_start_model;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     PendingUserInput, SessionNavigation, StreamDeltaKind, TranscriptRowKind::*,
@@ -26,6 +13,21 @@ use super::{
     transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
     transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
     widened_panel_width_for_file_editor, widened_panel_width_for_review,
+};
+use crate::app::features::composer::chat_composer::{ComposerSubmitAction, composer_submit_action};
+use crate::app::features::composer::{
+    dropped_file_mention, latest_todo_plan, merged_submission, next_picker_highlight,
+    pasted_text_attachment_name, visible_branch_entries,
+};
+use crate::app::features::sessions::effective_start_model;
+use crate::app::features::sessions::runtime::{
+    merge_remote_session_catalog, session_has_active_provider_turn,
+};
+use crate::app::features::transcript::components::message::fenced_code;
+use crate::app::features::transcript::navigation_rail::{
+    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, active_navigation_turn_index,
+    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
+    navigation_rail_scale, should_show_navigation_rail,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -1986,7 +1988,7 @@ fn computer_use_navigation_is_macos_only() {
 #[test]
 fn picker_rows_filter_by_tab_and_search_the_tide_catalog() {
     use super::ModelPickerTab;
-    use super::composer::visible_picker_models;
+    use crate::app::features::composer::visible_picker_models;
     use crate::model::{FavoriteModel, ProviderModel, ProviderModelOption};
 
     let model = |id: &str, name: &str, sub: &str| ProviderModel {
@@ -2041,7 +2043,7 @@ fn picker_rows_filter_by_tab_and_search_the_tide_catalog() {
 #[test]
 fn tab_cycle_walks_favorites_then_configured_tide_providers_in_order() {
     use super::ModelPickerTab;
-    use super::composer::visible_picker_tabs;
+    use crate::app::features::composer::visible_picker_tabs;
 
     let row = |provider_id: &str| {
         (
@@ -2067,7 +2069,7 @@ fn tab_cycle_walks_favorites_then_configured_tide_providers_in_order() {
 
 #[test]
 fn model_picker_subtitle_deduplicates_the_provider_name() {
-    use super::composer::model_picker_subtitle;
+    use crate::app::features::composer::model_picker_subtitle;
     use crate::model::{ProviderModel, ProviderModelOption};
 
     // Without a resolved model the sub-provider name (or the tide fallback)
@@ -2104,7 +2106,7 @@ fn model_picker_subtitle_deduplicates_the_provider_name() {
 
 #[test]
 fn latest_todo_plan_reads_the_newest_parsable_todo_card() {
-    use super::timeline_v2::parts::tool_part::TodoState;
+    use crate::app::features::transcript::timeline_v2::parts::tool_part::TodoState;
 
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
     let mut older = ActivityItem::new(None, ActivityKind::Plan, "todo_write", None, true);
@@ -2138,7 +2140,7 @@ fn latest_todo_plan_reads_the_newest_parsable_todo_card() {
 
 #[test]
 fn latest_todo_plan_keeps_the_last_known_list_while_a_card_is_in_flight() {
-    use super::timeline_v2::parts::tool_part::TodoState;
+    use crate::app::features::transcript::timeline_v2::parts::tool_part::TodoState;
 
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Tide);
     let mut settled = ActivityItem::new(None, ActivityKind::Plan, "todo_write", None, true);

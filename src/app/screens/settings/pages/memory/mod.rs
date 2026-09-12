@@ -2048,9 +2048,9 @@ impl Tide {
                         .child(icon(
                             "icons/alert.svg",
                             12.0,
-                            crate::app::timeline_v2::status_color(
+                            crate::app::features::transcript::timeline_v2::status_color(
                                 theme,
-                                crate::app::timeline_v2::Status::Error,
+                                crate::app::features::transcript::timeline_v2::Status::Error,
                             ),
                         ))
                         .child(
@@ -2301,10 +2301,12 @@ impl Tide {
                         div()
                             .max_w(px(180.0))
                             .text_size(sp(10.5))
-                            .text_color(crate::app::timeline_v2::status_color(
-                                theme,
-                                crate::app::timeline_v2::Status::Error,
-                            ))
+                            .text_color(
+                                crate::app::features::transcript::timeline_v2::status_color(
+                                    theme,
+                                    crate::app::features::transcript::timeline_v2::Status::Error,
+                                ),
+                            )
                             .truncate()
                             .child(SharedString::from(error)),
                     )
@@ -2732,9 +2734,9 @@ impl Tide {
                 icon(
                     "icons/alert.svg",
                     13.0,
-                    crate::app::timeline_v2::status_color(
+                    crate::app::features::transcript::timeline_v2::status_color(
                         theme,
-                        crate::app::timeline_v2::Status::Error,
+                        crate::app::features::transcript::timeline_v2::Status::Error,
                     ),
                 )
                 .into_any_element()
@@ -2876,9 +2878,9 @@ fn render_init_progress(progress: &client::InitProgressWire, theme: &Theme) -> D
                     icon(
                         "icons/alert.svg",
                         13.0,
-                        crate::app::timeline_v2::status_color(
+                        crate::app::features::transcript::timeline_v2::status_color(
                             theme,
-                            crate::app::timeline_v2::Status::Error,
+                            crate::app::features::transcript::timeline_v2::Status::Error,
                         ),
                     )
                     .into_any_element()
@@ -3273,9 +3275,9 @@ impl Tide {
                                     if source.status == "error"
                                         || source.injection.as_deref() == Some("flagged")
                                     {
-                                        crate::app::timeline_v2::status_color(
+                                        crate::app::features::transcript::timeline_v2::status_color(
                                             theme,
-                                            crate::app::timeline_v2::Status::Error,
+                                            crate::app::features::transcript::timeline_v2::Status::Error,
                                         )
                                     } else {
                                         theme.text_tertiary

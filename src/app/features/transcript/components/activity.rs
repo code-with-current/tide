@@ -5,7 +5,7 @@
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::app::transcript::format_worked_duration;
+use crate::app::features::transcript::format_worked_duration;
 use crate::model::{ActivityItem, ActivityKind, ReasoningBlock};
 
 pub(in crate::app) fn activity_icon(kind: ActivityKind) -> &'static str {

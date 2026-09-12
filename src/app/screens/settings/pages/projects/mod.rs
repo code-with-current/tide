@@ -10,9 +10,11 @@ use std::path::{Path, PathBuf};
 
 use gpui::{KeyBinding, actions};
 
-use crate::app::composer::next_picker_highlight;
+use crate::app::features::composer::model_picker::{
+    ModelPickerClear, ModelPickerConfig, ModelPickerSelect,
+};
+use crate::app::features::composer::next_picker_highlight;
 use crate::app::image_preview::image_format_for_name;
-use crate::app::model_picker::{ModelPickerClear, ModelPickerConfig, ModelPickerSelect};
 use crate::ui::card::{CardRow, card_body, card_rows, settings_group_head, settings_page_header};
 
 use gpui::prelude::*;

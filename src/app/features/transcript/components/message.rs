@@ -15,7 +15,7 @@ use gpui::{
     SharedString, div, img, px,
 };
 
-use crate::app::chat_composer::ChatComposer;
+use crate::app::features::composer::chat_composer::ChatComposer;
 use crate::app::image_preview;
 use crate::app::right_panel;
 use crate::app::{AssistantMessageAction, Tide, UserMessageAction};
