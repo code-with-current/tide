@@ -728,7 +728,7 @@ impl Tide {
     }
 
     fn start_available_update(&mut self, cx: &mut Context<Self>) {
-        if self.updater_status != crate::updater::UpdateStatus::Available {
+        if self.updater.status != crate::updater::UpdateStatus::Available {
             return;
         }
         let started = cx
@@ -736,14 +736,14 @@ impl Tide {
             .and_then(|state| state.0.as_ref())
             .is_some_and(|updater| updater.install_available_update());
         if started {
-            self.updater_status = crate::updater::UpdateStatus::Updating;
+            self.updater.status = crate::updater::UpdateStatus::Updating;
             self.reset_updater_button_animation();
             cx.notify();
         }
     }
 
     fn render_updater_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let status = self.updater_status;
+        let status = self.updater.status;
         if status == crate::updater::UpdateStatus::Idle {
             return None;
         }
@@ -753,7 +753,7 @@ impl Tide {
         let available = status == crate::updater::UpdateStatus::Available;
         let button = div()
             .id("sidebar-update")
-            .track_focus(&self.updater_button_focus)
+            .track_focus(&self.updater.button_focus)
             .when(available, |button| button.tab_index(0))
             .w(px(UPDATER_BUTTON_COLLAPSED_WIDTH))
             .h(px(20.0))
@@ -803,7 +803,7 @@ impl Tide {
         }
 
         let label: SharedString = tr_cow!("updater.update").into();
-        let animation_generation = self.updater_button_animation_generation;
+        let animation_generation = self.updater.button_animation_generation;
         if animation_generation == 0 {
             return Some(
                 button
@@ -812,8 +812,8 @@ impl Tide {
             );
         }
 
-        let from_width = self.updater_button_animation_from_width;
-        let from_reveal = self.updater_button_animation_from_reveal;
+        let from_width = self.updater.button_animation_from_width;
+        let from_reveal = self.updater.button_animation_from_reveal;
         let target_width = if self.updater_button_expanded() {
             UPDATER_BUTTON_EXPANDED_WIDTH
         } else {
@@ -824,8 +824,8 @@ impl Tide {
         } else {
             0.0
         };
-        let current_width = self.updater_button_width.clone();
-        let current_reveal = self.updater_button_label_reveal.clone();
+        let current_width = self.updater.button_width.clone();
+        let current_reveal = self.updater.button_label_reveal.clone();
 
         Some(
             button

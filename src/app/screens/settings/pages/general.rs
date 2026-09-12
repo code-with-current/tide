@@ -37,7 +37,7 @@ impl Tide {
                 .control(analytics_toggle),
         ];
         if updater_available {
-            let enabled = self.automatic_updates_enabled;
+            let enabled = self.updater.automatic_updates_enabled;
             let toggle = toggle_switch(
                 "automatic-updates-toggle",
                 enabled,
@@ -245,7 +245,7 @@ impl Tide {
     }
 
     fn set_automatic_updates_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.automatic_updates_enabled = enabled;
+        self.updater.automatic_updates_enabled = enabled;
         if let Some(updater) = cx
             .try_global::<crate::updater::UpdaterState>()
             .and_then(|updater| updater.0.as_ref())

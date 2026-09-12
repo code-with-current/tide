@@ -1045,19 +1045,8 @@ pub struct Tide {
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
-    /// Mirror of Sparkle's persisted automatic-check setting. Refreshed when
-    /// settings opens and on toggle, so frames never read user defaults —
-    /// that lookup can reach cfprefsd.
-    automatic_updates_enabled: bool,
-    updater_status: crate::updater::UpdateStatus,
-    updater_button_focus: FocusHandle,
-    updater_button_hovered: bool,
-    updater_button_focused: bool,
-    updater_button_width: Rc<Cell<f32>>,
-    updater_button_label_reveal: Rc<Cell<f32>>,
-    updater_button_animation_from_width: f32,
-    updater_button_animation_from_reveal: f32,
-    updater_button_animation_generation: u64,
+    /// Update-check status and the header updater button's chrome state.
+    updater: state::UpdaterButtonState,
     pub(crate) tide: crate::app::screens::settings::pages::providers::TideProviderPanel,
     /// Flattened tide model catalog — every configured tide provider's models
     /// as picker rows. Rebuilt whenever the provider list lands; frames and
@@ -1755,50 +1744,52 @@ fn migrate_legacy_projectless_projects(
 
 impl Tide {
     fn updater_button_expanded(&self) -> bool {
-        self.updater_button_hovered || self.updater_button_focused
+        self.updater.button_hovered || self.updater.button_focused
     }
 
     fn begin_updater_button_animation(&mut self, cx: &mut Context<Self>) {
-        self.updater_button_animation_from_width = self.updater_button_width.get();
-        self.updater_button_animation_from_reveal = self.updater_button_label_reveal.get();
-        self.updater_button_animation_generation = self
-            .updater_button_animation_generation
+        self.updater.button_animation_from_width = self.updater.button_width.get();
+        self.updater.button_animation_from_reveal = self.updater.button_label_reveal.get();
+        self.updater.button_animation_generation = self
+            .updater
+            .button_animation_generation
             .wrapping_add(1)
             .max(1);
         cx.notify();
     }
 
     fn set_updater_button_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
-        if self.updater_button_hovered == hovered {
+        if self.updater.button_hovered == hovered {
             return;
         }
         let was_expanded = self.updater_button_expanded();
-        self.updater_button_hovered = hovered;
+        self.updater.button_hovered = hovered;
         if was_expanded != self.updater_button_expanded() {
             self.begin_updater_button_animation(cx);
         }
     }
 
     fn set_updater_button_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        if self.updater_button_focused == focused {
+        if self.updater.button_focused == focused {
             return;
         }
         let was_expanded = self.updater_button_expanded();
-        self.updater_button_focused = focused;
+        self.updater.button_focused = focused;
         if was_expanded != self.updater_button_expanded() {
             self.begin_updater_button_animation(cx);
         }
     }
 
     fn reset_updater_button_animation(&mut self) {
-        self.updater_button_hovered = false;
-        self.updater_button_focused = false;
-        self.updater_button_width
+        self.updater.button_hovered = false;
+        self.updater.button_focused = false;
+        self.updater
+            .button_width
             .set(UPDATER_BUTTON_COLLAPSED_WIDTH);
-        self.updater_button_label_reveal.set(0.0);
-        self.updater_button_animation_from_width = UPDATER_BUTTON_COLLAPSED_WIDTH;
-        self.updater_button_animation_from_reveal = 0.0;
-        self.updater_button_animation_generation = 0;
+        self.updater.button_label_reveal.set(0.0);
+        self.updater.button_animation_from_width = UPDATER_BUTTON_COLLAPSED_WIDTH;
+        self.updater.button_animation_from_reveal = 0.0;
+        self.updater.button_animation_generation = 0;
     }
 
     fn handle_updater_event(
@@ -1808,16 +1799,16 @@ impl Tide {
     ) {
         match event {
             crate::updater::UpdaterEvent::StatusChanged(status) => {
-                self.updater_status = status;
+                self.updater.status = status;
                 self.reset_updater_button_animation();
             }
             crate::updater::UpdaterEvent::UpToDate => {
-                self.updater_status = crate::updater::UpdateStatus::Idle;
+                self.updater.status = crate::updater::UpdateStatus::Idle;
                 self.reset_updater_button_animation();
                 self.show_success_toast(tr!("updater.up_to_date"));
             }
             crate::updater::UpdaterEvent::Failed(error) => {
-                self.updater_status = crate::updater::UpdateStatus::Idle;
+                self.updater.status = crate::updater::UpdateStatus::Idle;
                 self.reset_updater_button_animation();
                 self.show_toast(tr!("updater.failed", error = error));
             }
@@ -2771,19 +2762,7 @@ impl Tide {
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,
-                automatic_updates_enabled: cx
-                    .try_global::<crate::updater::UpdaterState>()
-                    .and_then(|updater| updater.0.as_ref())
-                    .is_some_and(|updater| updater.automatically_checks_for_updates()),
-                updater_status,
-                updater_button_focus,
-                updater_button_hovered: false,
-                updater_button_focused: false,
-                updater_button_width: Rc::new(Cell::new(UPDATER_BUTTON_COLLAPSED_WIDTH)),
-                updater_button_label_reveal: Rc::new(Cell::new(0.0)),
-                updater_button_animation_from_width: UPDATER_BUTTON_COLLAPSED_WIDTH,
-                updater_button_animation_from_reveal: 0.0,
-                updater_button_animation_generation: 0,
+                updater: state::UpdaterButtonState::new(cx, updater_status, updater_button_focus),
                 tide: crate::app::screens::settings::pages::providers::TideProviderPanel::new(),
                 tide_models: Vec::new(),
                 git_settings: crate::app::screens::settings::pages::git::GitSettingsPanel::new(),

@@ -83,3 +83,45 @@ impl UsageState {
         }
     }
 }
+
+/// Update-check status plus the header updater button's hover/focus/animation
+/// chrome. `status` mirrors the updater's last known state; the animation
+/// fields drive the collapsed→expanded label reveal.
+pub(in crate::app) struct UpdaterButtonState {
+    pub(in crate::app) automatic_updates_enabled: bool,
+    pub(in crate::app) status: crate::updater::UpdateStatus,
+    pub(in crate::app) button_focus: gpui::FocusHandle,
+    pub(in crate::app) button_hovered: bool,
+    pub(in crate::app) button_focused: bool,
+    pub(in crate::app) button_width: std::rc::Rc<std::cell::Cell<f32>>,
+    pub(in crate::app) button_label_reveal: std::rc::Rc<std::cell::Cell<f32>>,
+    pub(in crate::app) button_animation_from_width: f32,
+    pub(in crate::app) button_animation_from_reveal: f32,
+    pub(in crate::app) button_animation_generation: u64,
+}
+
+impl UpdaterButtonState {
+    pub(in crate::app) fn new(
+        cx: &gpui::App,
+        status: crate::updater::UpdateStatus,
+        button_focus: gpui::FocusHandle,
+    ) -> Self {
+        Self {
+            automatic_updates_enabled: cx
+                .try_global::<crate::updater::UpdaterState>()
+                .and_then(|updater| updater.0.as_ref())
+                .is_some_and(|updater| updater.automatically_checks_for_updates()),
+            status,
+            button_focus,
+            button_hovered: false,
+            button_focused: false,
+            button_width: std::rc::Rc::new(std::cell::Cell::new(
+                crate::app::UPDATER_BUTTON_COLLAPSED_WIDTH,
+            )),
+            button_label_reveal: std::rc::Rc::new(std::cell::Cell::new(0.0)),
+            button_animation_from_width: crate::app::UPDATER_BUTTON_COLLAPSED_WIDTH,
+            button_animation_from_reveal: 0.0,
+            button_animation_generation: 0,
+        }
+    }
+}
