@@ -9,7 +9,7 @@ use gpui::{
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use gpui::{KeyDownEvent, WindowButton};
 
-use super::Tide;
+use crate::app::Tide;
 use crate::theme::Theme;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::ui::{icon, tooltip::Tooltip};
@@ -18,7 +18,7 @@ const CLIENT_FRAME_INSET: f32 = 10.0;
 const CLIENT_FRAME_ROUNDING: f32 = 10.0;
 
 #[derive(Clone, Copy)]
-pub(super) enum WindowControlSide {
+pub(in crate::app) enum WindowControlSide {
     Left,
     Right,
 }
@@ -27,7 +27,7 @@ impl Tide {
     /// Draw the frame a Wayland compositor delegates back to the client.
     /// Server-decorated windows pass through untouched, so X11 and Wayland
     /// compositors that provide native chrome keep doing so.
-    pub(super) fn render_window_frame(
+    pub(in crate::app) fn render_window_frame(
         &self,
         content: AnyElement,
         window: &mut Window,
@@ -105,7 +105,7 @@ impl Tide {
     /// Render the window controls Tide owns: the desktop's configured button
     /// order when GPUI had to fall back from server-side to client-side
     /// decorations, and the platform order on Windows.
-    pub(super) fn render_client_window_controls(
+    pub(in crate::app) fn render_client_window_controls(
         &self,
         side: WindowControlSide,
         window: &Window,

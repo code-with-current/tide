@@ -11,7 +11,7 @@ use super::navigation_rail::{
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::effective_start_model;
-use super::settings::visible_settings_pages;
+use super::screens::settings::navigation::visible_settings_pages;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     PendingUserInput, SessionNavigation, StreamDeltaKind, TranscriptRowKind::*,

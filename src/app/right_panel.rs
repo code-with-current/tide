@@ -3073,7 +3073,7 @@ impl Tide {
         self.window_drag_region(
             header.child(self.render_right_panel_toggle(cx)).children(
                 self.render_client_window_controls(
-                    super::window_chrome::WindowControlSide::Right,
+                    super::layouts::window::WindowControlSide::Right,
                     window,
                     cx,
                 ),

@@ -1678,6 +1678,7 @@ mod git_settings;
 mod goal_dialog;
 mod image_preview;
 mod inspector;
+mod layouts;
 mod mermaid_images;
 mod model_picker;
 mod navigation_rail;
@@ -1685,9 +1686,9 @@ mod permission_flow;
 mod projects_page;
 mod rag_settings;
 mod remote_control;
-mod render;
 mod right_panel;
 mod runtime;
+mod screens;
 mod sessions;
 mod settings;
 mod sidebar;
@@ -1702,7 +1703,6 @@ mod transcript_search;
 mod transcript_view;
 mod usage_meter;
 mod usage_page;
-mod window_chrome;
 
 pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
@@ -1718,7 +1718,7 @@ pub use image_preview::init as init_image_preview_keys;
 use inspector::{InspectorState, StreamLogEntry};
 use navigation_rail::{ConversationNavigationRail, TranscriptNavigationTurn};
 pub use projects_page::init as init_projects_keys;
-pub use settings::init as init_settings_keys;
+pub use screens::settings::navigation::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
 pub use skills_page::init as init_skills_keys;
@@ -3189,3 +3189,203 @@ impl Tide {
 
 #[cfg(test)]
 mod tests;
+
+impl Render for Tide {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Panel geometry first: the browser sync right below reads whether a
+        // panel is mid-slide, and settling here rather than at the point of
+        // use keeps the pane islands and the transcript on one set of widths.
+        let panels = self.settle_panel_slides(window);
+        if panels.sliding {
+            // The manual drive for the width tweens — the same scheduling
+            // `with_animation` would do, minus its element-id keying.
+            window.request_animation_frame();
+        }
+        // Before anything can early-return (the settings page below), settle
+        // whether each native browser webview belongs on screen this frame —
+        // it floats above everything GPUI paints.
+        self.sync_browser_webviews(cx);
+        if self.fps_counter_visible {
+            self.tick_fps(window);
+        }
+        let image_preview = self.render_image_preview(cx);
+        let task_switcher = self.render_task_switcher(window, cx);
+        if self.settings_page.is_some() {
+            let command_palette = self.render_command_palette(window, cx);
+            let commit_dialog = self.render_commit_dialog(cx);
+            let goal_dialog = self.render_goal_dialog(window, cx);
+            let git_dialogs = self.render_git_dialogs(window, cx);
+            let rag_dialog = self.render_rag_source_dialog(window, cx);
+            let rag_endpoint_dialog = self.render_rag_endpoint_dialog(window, cx);
+            let rag_model_dialog = self.render_rag_model_dialog(window, cx);
+            let tide_wizard = self.render_tide_wizard(window, cx);
+            let projects_remove = self.render_projects_remove_dialog(window, cx);
+            let toast = self.render_active_toast(cx);
+            let content = div()
+                .relative()
+                .size_full()
+                .on_action(cx.listener(Self::toggle_command_palette_action))
+                .on_action(cx.listener(Self::switch_task_forward_action))
+                .on_action(cx.listener(Self::switch_task_backward_action))
+                .on_action(cx.listener(Self::select_first_task_action))
+                .on_action(cx.listener(Self::select_last_task_action))
+                .on_action(cx.listener(Self::confirm_task_switch_action))
+                .on_action(cx.listener(Self::cancel_task_switch_action))
+                .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
+                .child(self.render_settings(window, cx))
+                .children(toast)
+                .children(command_palette)
+                .children(commit_dialog)
+                .children(goal_dialog)
+                .children(git_dialogs)
+                .children(rag_dialog)
+                .children(rag_endpoint_dialog)
+                .children(rag_model_dialog)
+                .children(projects_remove)
+                .children(tide_wizard)
+                .children(image_preview)
+                .children(task_switcher)
+                .into_any_element();
+            return self.render_window_frame(content, window, cx);
+        }
+        let content = self.render_workspace(panels, image_preview, task_switcher, window, cx);
+        self.render_window_frame(content, window, cx)
+    }
+}
+
+impl Tide {
+    fn tick_fps(&mut self, window: &Window) {
+        let now = Instant::now();
+        self.fps_frame_count = self.fps_frame_count.saturating_add(1);
+        if now.duration_since(self.fps_last_frame) >= Duration::from_secs(1) {
+            self.fps_value = self.fps_frame_count as u32;
+            self.fps_frame_count = 0;
+            self.fps_last_frame = now;
+        }
+        window.request_animation_frame();
+    }
+}
+
+impl Tide {
+    /// Arm the dismiss timer and build the floating toast layer, if a toast
+    /// is active. Every full-window surface (workspace and settings alike)
+    /// must include this, or a toast raised there stays invisible until the
+    /// user navigates away.
+    fn render_active_toast(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.start_toast_dismiss_timer(cx);
+        let toast = self
+            .toast
+            .as_ref()
+            .map(|toast| (toast.message.clone(), toast.tone, toast.id));
+        toast.map(|(message, tone, generation)| {
+            self.render_toast(message, tone, generation, cx)
+                .into_any_element()
+        })
+    }
+
+    fn render_toast(
+        &self,
+        message: String,
+        tone: ToastTone,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        let (status_icon, status_color) = match tone {
+            ToastTone::Alert => ("icons/alert.svg", theme.danger),
+            ToastTone::Success => ("icons/check.svg", theme.success),
+        };
+        let palette = MarkdownPalette::from_theme(&theme);
+        let text_ctx = MarkdownCtx::new(
+            format!("toast-{generation}"),
+            &palette,
+            self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
+            self.toast_selection.clone(),
+        );
+        let message = md::render::plain_text(
+            message,
+            md::render::SANS_FAMILY,
+            FontWeight::NORMAL,
+            theme.text,
+            &text_ctx,
+        );
+        let dismiss = div()
+            .id(SharedString::from(format!("dismiss-toast-{generation}")))
+            .tab_index(0)
+            .size(px(26.0))
+            .flex_none()
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(tr!("common.dismiss_notification")))
+            .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.hide_toast();
+                cx.notify();
+                cx.stop_propagation();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space" | "escape") {
+                    this.hide_toast();
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }));
+
+        div()
+            .id(SharedString::from(format!("toast-layer-{generation}")))
+            .absolute()
+            .left_0()
+            .top(px(56.0))
+            .w_full()
+            .px(px(20.0))
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .id(SharedString::from(format!("toast-{generation}")))
+                    .occlude()
+                    .max_w(px(560.0))
+                    .min_w_0()
+                    .px(px(10.0))
+                    .py(px(7.0))
+                    .rounded(px(10.0))
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .bg(theme.raised)
+                    .shadow_lg()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text)
+                    .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
+                        this.set_toast_hovered(*hovering, cx);
+                    }))
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(md::render::frame_reset(self.toast_selection.clone()))
+                    .child(icon(status_icon, 14.0, status_color))
+                    .child(div().flex_1().min_w_0().whitespace_normal().child(message))
+                    .child(dismiss)
+                    .child(self.toast_selection_input()),
+            )
+            // Keep the toast top-centered just beneath Tide's 48px header.
+            // GPUI's animation path honors the system reduce-motion preference
+            // and resolves immediately.
+            .with_animation(
+                SharedString::from(format!("toast-enter-{generation}")),
+                Animation::new(TOAST_ANIMATION_DURATION).with_easing(ease_out_quint()),
+                |element, delta| {
+                    element
+                        .top(px(48.0 + 8.0 * delta))
+                        .opacity(0.4 + 0.6 * delta)
+                },
+            )
+    }
+}
