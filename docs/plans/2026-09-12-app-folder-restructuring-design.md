@@ -1,6 +1,6 @@
 # Desktop App Folder Restructuring — Design
 
-Date: 2026-09-12 · Branch: `feature/global-rag-settings` · Status: design
+Date: 2026-09-12 · Branch: `feature/global-rag-settings` · Status: accepted; implementation in progress (Stage 1 complete)
 
 Reorganizes the root GPUI crate around explicit application concepts:
 full-window screens, pages within those screens, structural layouts, product
@@ -588,6 +588,9 @@ coordination, and potential frame churn. Use them only when measurement or
 ownership demands them.
 
 ## 15. Open questions
+
+Resolved 2026-09-12: all five recommendations below were adopted as written
+(taxonomy acceptance, Stage 0).
 
 1. **Folder name `features` versus `domains`:** recommendation: `features`,
    because the contents include state, behavior, and visible capability rather
