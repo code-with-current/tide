@@ -460,10 +460,10 @@ fn task_notification_tags_route_to_the_corresponding_task() {
 
 #[test]
 fn conversation_navigation_rail_visibility_uses_all_three_gates() {
-    assert!(should_show_navigation_rail(true, 2, 872.0));
-    assert!(!should_show_navigation_rail(false, 2, 872.0));
-    assert!(!should_show_navigation_rail(true, 1, 872.0));
-    assert!(!should_show_navigation_rail(true, 2, 871.0));
+    assert!(should_show_navigation_rail(true, 2, 1002.0));
+    assert!(!should_show_navigation_rail(false, 2, 1002.0));
+    assert!(!should_show_navigation_rail(true, 1, 1002.0));
+    assert!(!should_show_navigation_rail(true, 2, 1001.0));
 }
 
 #[test]
@@ -579,9 +579,9 @@ fn conversation_navigation_preview_does_not_change_during_a_running_turn() {
 fn panel_widths_preserve_main_content_when_the_window_narrows() {
     let (sidebar, right_panel) = fitted_panel_widths(980.0, true, true, 420.0, 720.0);
 
-    assert_eq!(sidebar, 340.0);
-    assert_eq!(right_panel, 280.0);
-    assert_eq!(980.0 - sidebar - right_panel, 360.0);
+    assert_eq!(sidebar, 280.0);
+    assert_eq!(right_panel, 300.0);
+    assert_eq!(980.0 - sidebar - right_panel, 400.0);
 }
 
 #[test]
@@ -589,7 +589,7 @@ fn hidden_panels_do_not_consume_layout_width() {
     let (sidebar, right_panel) = fitted_panel_widths(980.0, false, true, 420.0, 720.0);
 
     assert_eq!(sidebar, 0.0);
-    assert_eq!(right_panel, 620.0);
+    assert_eq!(right_panel, 580.0);
 }
 
 #[test]
