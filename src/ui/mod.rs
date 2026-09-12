@@ -1,8 +1,7 @@
 use gpui::{
     AnyElement, App, Context, Div, ElementId, Hsla, Img, InteractiveElement, Interactivity,
-    KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString,
-    Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb,
-    svg,
+    KeyDownEvent, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString, Stateful,
+    StyleRefinement, Styled, Svg, Window, div, img, prelude::*, px, svg,
 };
 
 pub mod badge;
@@ -21,7 +20,6 @@ pub mod text;
 pub mod text_field;
 pub mod tooltip;
 
-use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
 
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
@@ -187,60 +185,7 @@ where
     }
 }
 
-/// Brand hue for the tide mark: theme-adaptive ink, like tide's own glyph.
-pub fn provider_color(theme: &Theme, _provider: ProviderKind) -> Hsla {
-    if theme.is_dark {
-        rgb(0xF3F3F3).into()
-    } else {
-        rgb(0x34363B).into()
-    }
-}
-
-/// The tide mark, matching the model picker vocabulary.
-pub fn provider_icon(_provider: ProviderKind) -> &'static str {
-    "icons/provider-tide.svg"
-}
-
-pub fn status_color(theme: &Theme, status: SessionStatus) -> Hsla {
-    match status {
-        SessionStatus::Idle => theme.text_ghost,
-        SessionStatus::Connecting | SessionStatus::Working => theme.accent,
-        SessionStatus::Waiting => theme.warning,
-        SessionStatus::Failed => theme.danger,
-    }
-}
-
-pub fn activity_icon(kind: ActivityKind) -> &'static str {
-    match kind {
-        ActivityKind::Reasoning => "icons/sparkle.svg",
-        ActivityKind::Command => "icons/terminal.svg",
-        ActivityKind::FileChange => "icons/pencil.svg",
-        ActivityKind::FileRead => "icons/file.svg",
-        ActivityKind::FileSearch => "icons/search.svg",
-        ActivityKind::FileList => "icons/folder.svg",
-        ActivityKind::Search => "icons/search.svg",
-        ActivityKind::Plan => "icons/list.svg",
-        ActivityKind::Compact => "icons/rewind.svg",
-        ActivityKind::Tool => "icons/wrench.svg",
-    }
-}
-
-pub fn activity_noun(kind: ActivityKind) -> (String, String) {
-    match kind {
-        ActivityKind::Reasoning => (tr!("activity.thought"), tr!("activity.thoughts")),
-        ActivityKind::Command => (tr!("activity.command"), tr!("activity.commands")),
-        ActivityKind::FileChange => (tr!("activity.file_edit"), tr!("activity.file_edits")),
-        ActivityKind::FileRead => (tr!("activity.file_read"), tr!("activity.file_reads")),
-        ActivityKind::FileSearch => (tr!("activity.file_search"), tr!("activity.file_searches")),
-        ActivityKind::FileList => (tr!("activity.file_list"), tr!("activity.file_lists")),
-        ActivityKind::Search => (tr!("activity.search"), tr!("activity.searches")),
-        ActivityKind::Plan => (tr!("activity.plan_step"), tr!("activity.plan_steps")),
-        ActivityKind::Compact => (tr!("activity.compaction"), tr!("activity.compactions")),
-        ActivityKind::Tool => (tr!("activity.tool_call"), tr!("activity.tool_calls")),
-    }
-}
-
-/// A compact chip used as a dropdown-menu trigger. `selected` is driven by the
+/// The shared pill switch used by settings and automation forms. `selected` is driven by the
 /// menu's open state and renders as a soft fill.
 #[derive(IntoElement)]
 pub struct MenuChip {
@@ -395,84 +340,6 @@ impl RenderOnce for MenuChip {
     }
 }
 
-/// An inline, link-like dropdown trigger used for the project name in the
-/// empty-state headline.
-#[derive(IntoElement)]
-pub struct ProjectNameSelector {
-    base: Stateful<Div>,
-    label: SharedString,
-    selected: bool,
-}
-
-impl ProjectNameSelector {
-    pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Self {
-        Self {
-            base: div().id(id),
-            label: label.into(),
-            selected: false,
-        }
-    }
-
-    /// Emphasised underline while its menu is open.
-    pub fn selected(mut self, selected: bool) -> Self {
-        self.selected = selected;
-        self
-    }
-}
-
-impl Styled for ProjectNameSelector {
-    fn style(&mut self) -> &mut StyleRefinement {
-        self.base.style()
-    }
-}
-
-impl InteractiveElement for ProjectNameSelector {
-    fn interactivity(&mut self) -> &mut Interactivity {
-        self.base.interactivity()
-    }
-}
-
-impl ParentElement for ProjectNameSelector {
-    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.base.extend(elements);
-    }
-}
-
-impl RenderOnce for ProjectNameSelector {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        let underline_color = if self.selected {
-            theme.text_secondary
-        } else {
-            theme.text_tertiary
-        };
-
-        self.base
-            .relative()
-            .flex_none()
-            .cursor_default()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .child(self.label)
-            .child(
-                canvas(
-                    |_, _, _| {},
-                    move |bounds, _, window, _| {
-                        let y = bounds.origin.y + bounds.size.height - px(0.5);
-                        let mut builder =
-                            PathBuilder::stroke(px(1.0)).dash_array(&[px(1.0), px(2.0)]);
-                        builder.move_to(point(bounds.origin.x, y));
-                        builder.line_to(point(bounds.origin.x + bounds.size.width, y));
-                        if let Ok(line) = builder.build() {
-                            window.paint_path(line, underline_color);
-                        }
-                    },
-                )
-                .absolute()
-                .inset_0(),
-            )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,10 +370,9 @@ mod tests {
     #[test]
     fn every_referenced_icon_is_embedded() {
         use crate::assets::Assets;
-        use crate::model::{ActivityKind, ProviderKind};
         use gpui::AssetSource;
 
-        let mut paths = vec![
+        let paths = vec![
             "icons/panel-left.svg",
             "icons/plus.svg",
             "icons/arrow-left.svg",
@@ -542,22 +408,6 @@ mod tests {
             "icons/package.svg",
             "icons/trash.svg",
         ];
-        for provider in ProviderKind::ALL {
-            paths.push(provider_icon(provider));
-        }
-        for kind in [
-            ActivityKind::Reasoning,
-            ActivityKind::Command,
-            ActivityKind::FileChange,
-            ActivityKind::FileRead,
-            ActivityKind::FileSearch,
-            ActivityKind::FileList,
-            ActivityKind::Search,
-            ActivityKind::Plan,
-            ActivityKind::Tool,
-        ] {
-            paths.push(activity_icon(kind));
-        }
         for path in paths {
             assert!(
                 Assets.load(path).unwrap().is_some(),

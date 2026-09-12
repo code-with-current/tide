@@ -3,6 +3,8 @@ use gpui::{KeyBinding, actions, solid_background};
 
 use super::projects_page::project_avatar;
 use super::*;
+use crate::app::components::project_identity::ProjectNameSelector;
+use crate::app::components::status::status_color;
 
 actions!(tide_sidebar, [CancelSessionRename]);
 

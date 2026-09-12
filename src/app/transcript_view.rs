@@ -3,6 +3,14 @@ use super::navigation_rail::{
 };
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
+use crate::app::features::transcript::components::activity::{
+    ActivityDisclosureSectionKind, activity_action_label, activity_disclosure_sections,
+    activity_file_change_stats, activity_group_is_live, activity_header_title, activity_icon,
+    activity_preview, activity_row_detail, activity_shows_diff,
+};
+use crate::app::features::transcript::components::message::{
+    MessageRender, render_message, render_message_footer,
+};
 use base64::Engine as _;
 
 const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
@@ -847,7 +855,7 @@ impl Tide {
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
                             let source = if message.role == MessageRole::User {
-                                super::components::user_mention_links(
+                                super::features::transcript::components::message::user_mention_links(
                                     message.visible_content(),
                                     self.selected_workspace_path(),
                                 )

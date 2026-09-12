@@ -11,6 +11,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
 use super::*;
+use crate::app::components::provider::{provider_color, provider_icon};
 
 actions!(
     tide_command_palette,

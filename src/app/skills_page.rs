@@ -31,7 +31,9 @@ const SKILLS_LIST_WIDTH: f32 = 264.0;
 fn skill_source_icon(source: SkillSource) -> &'static str {
     match source {
         SkillSource::Shared => "icons/package.svg",
-        SkillSource::Provider(provider) => crate::ui::provider_icon(provider),
+        SkillSource::Provider(provider) => {
+            crate::app::components::provider::provider_icon(provider)
+        }
     }
 }
 

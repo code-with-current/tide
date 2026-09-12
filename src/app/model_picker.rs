@@ -3,6 +3,7 @@ use super::composer::{
     visible_picker_tabs,
 };
 use super::*;
+use crate::app::components::provider::{provider_color, provider_icon};
 
 /// What picking a model does at one call site of the shared model picker.
 ///

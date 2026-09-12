@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, ClipboardEntry, ClipboardItem,
@@ -64,9 +64,7 @@ use crate::theme::{Theme, ThemePreference, sp};
 use crate::ui::chip::{Chip, ChipTone, chip};
 use crate::ui::text_field::TextField;
 use crate::ui::{
-    ActivationExt, MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll,
-    file_icon, icon, icon_button, motion, provider_color, provider_icon, status_color,
-    toggle_switch,
+    ActivationExt, MenuChip, contain_scroll, file_icon, icon, icon_button, motion, toggle_switch,
 };
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
@@ -1669,6 +1667,7 @@ mod commit_dialog;
 mod components;
 mod composer;
 mod drafts;
+mod features;
 
 use chat_composer::{ChatComposer, ChatComposerEvent};
 mod file_search;
@@ -1711,7 +1710,7 @@ use background_work::{
 };
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
-use components::*;
+use features::transcript::components::activity::ActivityDisclosureSectionKind;
 pub use git_dialogs::init as init_git_dialog_keys;
 pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
@@ -1726,6 +1725,35 @@ pub use skills_page::init as init_skills_keys;
 use streaming::*;
 use timeline_v2::{TranscriptV2, timeline_v2_enabled};
 use transcript::*;
+
+impl Tide {
+    pub(super) fn control_was_copied(&self, control_id: &str) -> bool {
+        self.copied_control_feedback.contains_key(control_id)
+    }
+
+    pub(super) fn show_control_copied(
+        &mut self,
+        control_id: impl Into<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let control_id = control_id.into();
+        self.copied_control_generation = self.copied_control_generation.wrapping_add(1);
+        let generation = self.copied_control_generation;
+        self.copied_control_feedback
+            .insert(control_id.clone(), generation);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.copied_control_feedback.get(&control_id) == Some(&generation) {
+                    this.copied_control_feedback.remove(&control_id);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+}
 
 /// Collapse provider- or page-supplied text into a label that cannot contain
 /// hard line breaks. GPUI's `truncate()` prevents wrapping, but explicit

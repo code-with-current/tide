@@ -4,6 +4,7 @@ use super::timeline_v2::parts::tool_part::{
     TodoState, is_todo_write, parse_todo_output, todo_checkbox, todo_row,
 };
 use super::*;
+use crate::app::components::provider::{provider_color, provider_icon};
 
 use anyhow::Context as _;
 use base64::Engine as _;

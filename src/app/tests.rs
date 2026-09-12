@@ -3,6 +3,7 @@ use super::composer::{
     dropped_file_mention, latest_todo_plan, merged_submission, next_picker_highlight,
     pasted_text_attachment_name, visible_branch_entries,
 };
+use super::features::transcript::components::message::fenced_code;
 use super::navigation_rail::{
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, active_navigation_turn_index,
     navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
@@ -15,7 +16,7 @@ use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     PendingUserInput, SessionNavigation, StreamDeltaKind, TranscriptRowKind::*,
     append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
+    assistant_response_footer_time, compact_driver_error, disclosure_leading_space,
     fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
     format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, paused_toast_duration, pop_stream_batch,

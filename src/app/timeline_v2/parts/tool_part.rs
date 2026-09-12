@@ -13,7 +13,7 @@ use super::super::{
 use std::rc::Rc;
 
 use super::diff_rows::{self, MAX_DIFF_ROWS};
-use crate::app::components::activity_file_change_stats;
+use crate::app::features::transcript::components::activity::activity_file_change_stats;
 use crate::md;
 use crate::md::render::TranscriptSelection;
 use crate::md::selection::TextKey;

@@ -7,6 +7,8 @@
 //! laid out in no more than two rows.
 
 use super::*;
+use crate::app::components::provider::{provider_color, provider_icon};
+use crate::app::components::status::status_color;
 
 const CARD_WIDTH: f32 = 194.0;
 const CARD_HEIGHT: f32 = 169.0;
