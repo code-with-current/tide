@@ -872,7 +872,7 @@ impl Tide {
                 .and_then(|session| session.messages.get(message_index))
                 .cloned()
                 .map(|message| {
-                    let copied = self.copied_message_feedback.contains_key(&message.id);
+                    let copied = self.shell.copied_message_feedback.contains_key(&message.id);
                     let (assistant_footer_copy_content, assistant_footer_time) =
                         self.assistant_response_footer_cached(message_index);
                     let assistant_message_action =
@@ -1065,7 +1065,7 @@ impl Tide {
         let Some(copy_content) = copy_content else {
             return div().into_any_element();
         };
-        let copied = self.copied_message_feedback.contains_key(&message.id);
+        let copied = self.shell.copied_message_feedback.contains_key(&message.id);
         let action = self.assistant_message_action_for_message(message_index);
         let force_visible = self
             .hovered_response_row

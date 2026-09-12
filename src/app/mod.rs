@@ -1336,7 +1336,6 @@ pub struct Tide {
     /// plus its floating insets — so the transcript measures its content
     /// against the width it actually has. Zero while hidden.
     inspector_rendered_width: f32,
-    fps_counter_visible: bool,
     panel_resize_drag: Option<PanelResizeDrag>,
     right_panel_session_states: HashMap<Uuid, RightPanelSessionState>,
     right_panel_surfaces: Vec<RightPanelSurface>,
@@ -1492,10 +1491,7 @@ pub struct Tide {
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
-    copied_control_feedback: HashMap<String, u64>,
-    copied_control_generation: u64,
-    copied_message_feedback: HashMap<Uuid, u64>,
-    copied_message_generation: u64,
+    shell: state::ShellState,
     copied_activity_feedback: HashMap<(Uuid, ActivityDisclosureSectionKind), u64>,
     copied_activity_generation: u64,
     message_edit: Option<MessageEdit>,
@@ -1642,10 +1638,6 @@ pub struct Tide {
     time_label_wake: Cell<Option<u64>>,
     /// Bumped per (re)arm so a superseded wake-up discards itself.
     time_label_wake_generation: Cell<u64>,
-    /// Live frames-per-second measurement for the header counter.
-    fps_last_frame: Instant,
-    fps_frame_count: u64,
-    fps_value: u32,
 }
 
 mod command_palette;
@@ -1663,6 +1655,7 @@ mod permission_flow;
 mod remote_control;
 mod screens;
 mod sidebar;
+pub(in crate::app) mod state;
 mod task_switcher;
 mod tide_wizard;
 mod usage_meter;
@@ -1691,7 +1684,7 @@ use sidebar::{SidebarGroup, SidebarRow};
 
 impl Tide {
     pub(super) fn control_was_copied(&self, control_id: &str) -> bool {
-        self.copied_control_feedback.contains_key(control_id)
+        self.shell.copied_control_feedback.contains_key(control_id)
     }
 
     pub(super) fn show_control_copied(
@@ -1700,16 +1693,17 @@ impl Tide {
         cx: &mut Context<Self>,
     ) {
         let control_id = control_id.into();
-        self.copied_control_generation = self.copied_control_generation.wrapping_add(1);
-        let generation = self.copied_control_generation;
-        self.copied_control_feedback
+        self.shell.copied_control_generation = self.shell.copied_control_generation.wrapping_add(1);
+        let generation = self.shell.copied_control_generation;
+        self.shell
+            .copied_control_feedback
             .insert(control_id.clone(), generation);
         cx.notify();
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.copied_control_feedback.get(&control_id) == Some(&generation) {
-                    this.copied_control_feedback.remove(&control_id);
+                if this.shell.copied_control_feedback.get(&control_id) == Some(&generation) {
+                    this.shell.copied_control_feedback.remove(&control_id);
                     cx.notify();
                 }
             });
@@ -2947,7 +2941,6 @@ impl Tide {
                     0.0
                 },
                 inspector_rendered_width: 0.0,
-                fps_counter_visible: false,
                 panel_resize_drag: None,
                 right_panel_session_states: HashMap::new(),
                 right_panel_surfaces: Vec::new(),
@@ -3035,10 +3028,6 @@ impl Tide {
                     hovered: false,
                 }),
                 toast_generation: 0,
-                copied_control_feedback: HashMap::new(),
-                copied_control_generation: 0,
-                copied_message_feedback: HashMap::new(),
-                copied_message_generation: 0,
                 copied_activity_feedback: HashMap::new(),
                 copied_activity_generation: 0,
                 message_edit: None,
@@ -3096,9 +3085,7 @@ impl Tide {
                 inspector_pane: inspector_pane.clone(),
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
-                fps_last_frame: Instant::now(),
-                fps_frame_count: 0,
-                fps_value: 0,
+                shell: state::ShellState::new(),
             }
         });
         navigation_rail.update(cx, |rail, _| rail.set_tide(entity.downgrade()));
@@ -3172,7 +3159,7 @@ impl Render for Tide {
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
         self.sync_browser_webviews(cx);
-        if self.fps_counter_visible {
+        if self.shell.fps_counter_visible {
             self.tick_fps(window);
         }
         let image_preview = self.render_image_preview(cx);
@@ -3223,11 +3210,11 @@ impl Render for Tide {
 impl Tide {
     fn tick_fps(&mut self, window: &Window) {
         let now = Instant::now();
-        self.fps_frame_count = self.fps_frame_count.saturating_add(1);
-        if now.duration_since(self.fps_last_frame) >= Duration::from_secs(1) {
-            self.fps_value = self.fps_frame_count as u32;
-            self.fps_frame_count = 0;
-            self.fps_last_frame = now;
+        self.shell.fps_frame_count = self.shell.fps_frame_count.saturating_add(1);
+        if now.duration_since(self.shell.fps_last_frame) >= Duration::from_secs(1) {
+            self.shell.fps_value = self.shell.fps_frame_count as u32;
+            self.shell.fps_frame_count = 0;
+            self.shell.fps_last_frame = now;
         }
         window.request_animation_frame();
     }

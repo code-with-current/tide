@@ -127,15 +127,17 @@ fn format_message_time_at(created_at: u64, now: DateTime<Local>) -> String {
 
 impl Tide {
     fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
-        self.copied_message_generation = self.copied_message_generation.wrapping_add(1);
-        let generation = self.copied_message_generation;
-        self.copied_message_feedback.insert(message_id, generation);
+        self.shell.copied_message_generation = self.shell.copied_message_generation.wrapping_add(1);
+        let generation = self.shell.copied_message_generation;
+        self.shell
+            .copied_message_feedback
+            .insert(message_id, generation);
         cx.notify();
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.copied_message_feedback.get(&message_id) == Some(&generation) {
-                    this.copied_message_feedback.remove(&message_id);
+                if this.shell.copied_message_feedback.get(&message_id) == Some(&generation) {
+                    this.shell.copied_message_feedback.remove(&message_id);
                     cx.notify();
                 }
             });

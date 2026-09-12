@@ -595,7 +595,7 @@ impl Tide {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.fps_counter_visible = !self.fps_counter_visible;
+        self.shell.fps_counter_visible = !self.shell.fps_counter_visible;
         cx.notify();
     }
 

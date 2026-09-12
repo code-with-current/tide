@@ -390,7 +390,7 @@ impl Tide {
 
     fn render_fps_counter(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let fps = self.fps_value;
+        let fps = self.shell.fps_value;
         let dot = if fps == 0 {
             theme.text_ghost
         } else if fps >= 55 {
@@ -2083,7 +2083,7 @@ impl Tide {
             .child(self.render_background_work_summary(cx))
             .when(!self.right_panel_visible, |element| {
                 element
-                    .when(self.fps_counter_visible, |element| {
+                    .when(self.shell.fps_counter_visible, |element| {
                         element.child(self.render_fps_counter(cx))
                     })
                     .child(self.render_right_panel_toggle(cx))
