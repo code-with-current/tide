@@ -630,7 +630,7 @@ pub(crate) fn config_data(
         {
             Some(resolved) => (
                 resolved.name.clone(),
-                Some(crate::app::tide_providers::brand_for(
+                Some(crate::app::screens::settings::pages::providers::brand_for(
                     &resolved.base_url,
                     &resolved.api_style,
                 )),
@@ -1511,7 +1511,9 @@ impl Tide {
                         .text_color(theme.text_tertiary)
                         .child(SharedString::from(format!(
                             "{} · {}",
-                            super::super::rag_settings::init_phase_label(&progress.phase),
+                            crate::app::screens::settings::pages::memory::init_phase_label(
+                                &progress.phase
+                            ),
                             counts
                         ))),
                 )

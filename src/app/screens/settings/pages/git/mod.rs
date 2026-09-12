@@ -164,3 +164,5 @@ impl GitSettingsPanel {
         }
     }
 }
+
+pub(in crate::app) mod page;

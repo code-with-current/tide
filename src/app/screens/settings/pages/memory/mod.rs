@@ -5,10 +5,26 @@
 //! event pump, and transient states (model download, ingestion, indexing)
 //! keep a 2 s self-sustaining poll alive.
 
-use super::*;
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, Context, Div, Entity, FontWeight, MouseButton, PathPromptOptions,
+    SharedString, Stateful, Window, div, px,
+};
+use std::path::PathBuf;
+use uuid::Uuid;
+
+use crate::app::{Tide, signal_event_pump};
+use crate::model::Project;
+use crate::theme::{Theme, sp};
 use crate::ui::card::{
     CardButton, CardRow, card_body, card_body_flush, card_pill, card_rows, settings_group_head,
 };
+use crate::ui::{
+    MenuChip, icon,
+    menu::{MenuAlign, MenuItem, dropdown_menu},
+    motion, toggle_switch,
+};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 
 pub(crate) enum RagOpsEvent {
     Status(Result<client::RagStatusWire, String>),
@@ -411,7 +427,7 @@ pub(crate) enum InlineField {
 impl Tide {
     /// Browse for a local docs file or folder and drop the chosen path into
     /// the add dialog's location field.
-    pub(super) fn rag_browse_local_source(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn rag_browse_local_source(&mut self, cx: &mut Context<Self>) {
         if self.daemon.is_remote() {
             self.show_toast(tr!("errors.remote_project_picker"));
             return;
@@ -442,7 +458,7 @@ impl Tide {
 
     /// Generic RAG command dispatch: request on a thread, reply through the
     /// ops channel, wake the pump.
-    pub(super) fn rag_dispatch(
+    pub(in crate::app) fn rag_dispatch(
         &self,
         event: impl FnOnce(client::ResponsePayload) -> RagOpsEvent + Send + 'static,
         command: client::Command,
@@ -467,7 +483,7 @@ impl Tide {
 
     /// Result-taking dispatch for the global-config ops (transport errors
     /// route through the event's own Err, not the project status card).
-    pub(super) fn rag_dispatch_result(
+    pub(in crate::app) fn rag_dispatch_result(
         &self,
         event: impl FnOnce(Result<client::ResponsePayload, String>) -> RagOpsEvent + Send + 'static,
         command: client::Command,
@@ -490,7 +506,7 @@ impl Tide {
 
     /// Load the global config bundle + model catalog (idempotent; the
     /// Knowledge page requests it on first render).
-    pub(super) fn rag_config_load(&self) {
+    pub(in crate::app) fn rag_config_load(&self) {
         self.rag_dispatch_result(
             |result| match result {
                 Ok(client::ResponsePayload::RagConfig {
@@ -530,7 +546,7 @@ impl Tide {
 
     /// Merge a partial settings update; a non-empty affected reply opens
     /// the rebuild dialog.
-    pub(super) fn rag_config_update(&self, patch: client::RagConfigPatchWire) {
+    pub(in crate::app) fn rag_config_update(&self, patch: client::RagConfigPatchWire) {
         self.rag_settings.config_pending.set(true);
         self.rag_dispatch_result(
             |result| match result {
@@ -548,7 +564,7 @@ impl Tide {
 
     /// Download / delete a catalog model (delete reports affected indexes
     /// through the rebuild dialog).
-    pub(super) fn rag_model_command(&self, command: client::Command) {
+    pub(in crate::app) fn rag_model_command(&self, command: client::Command) {
         if let client::Command::RagModelDownload { model_id }
         | client::Command::RagModelDelete { model_id } = &command
         {
@@ -579,7 +595,7 @@ impl Tide {
 
     /// Custom-endpoint commands. Add keeps the dialog open with the error
     /// inline when the probe fails.
-    pub(super) fn rag_endpoint_command(&self, command: client::Command) {
+    pub(in crate::app) fn rag_endpoint_command(&self, command: client::Command) {
         if let client::Command::RagEndpointRemove { endpoint_id } = &command {
             *self.rag_settings.pending_endpoint.borrow_mut() = Some(endpoint_id.clone());
         }
@@ -602,7 +618,7 @@ impl Tide {
 
     /// Rebuild: re-init each affected project serially. Knowledge sources
     /// reindex at [`Self::rag_rebuild_finish`], not here.
-    pub(super) fn rag_rebuild_start(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn rag_rebuild_start(&mut self, cx: &mut Context<Self>) {
         let Some(rebuild) = self.rag_settings.rebuild.as_mut() else {
             return;
         };
@@ -622,7 +638,7 @@ impl Tide {
     }
 
     /// Continue a stalled rebuild from the front of its remaining queue.
-    pub(super) fn rag_rebuild_retry(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn rag_rebuild_retry(&mut self, cx: &mut Context<Self>) {
         let Some(rebuild) = self.rag_settings.rebuild.as_mut() else {
             return;
         };
@@ -700,7 +716,7 @@ impl Tide {
     }
 
     /// Load status + sources for a project.
-    pub(super) fn rag_refresh(&self, project_id: &str) {
+    pub(in crate::app) fn rag_refresh(&self, project_id: &str) {
         let status_id = project_id.to_owned();
         self.rag_dispatch(
             move |payload| match payload {
@@ -721,7 +737,7 @@ impl Tide {
     }
 
     /// Enable/disable RAG for a project, then refresh.
-    pub(super) fn rag_set_enabled(
+    pub(in crate::app) fn rag_set_enabled(
         &mut self,
         project_id: &str,
         enabled: bool,
@@ -749,7 +765,7 @@ impl Tide {
     }
 
     /// Kick index building, then refresh.
-    pub(super) fn rag_init(&self, project_id: &str, cx: &mut Context<Self>) {
+    pub(in crate::app) fn rag_init(&self, project_id: &str, cx: &mut Context<Self>) {
         self.rag_dispatch(
             move |payload| match payload {
                 client::ResponsePayload::RagInit { .. } => RagOpsEvent::Noop,
@@ -765,7 +781,7 @@ impl Tide {
 
     /// Submit the add dialog (upstream's handleSubmit: name required,
     /// location required, http(s) for url/crawl). Errors stay inline.
-    pub(super) fn rag_source_add(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn rag_source_add(&mut self, cx: &mut Context<Self>) {
         let Some(dialog) = self.rag_settings.dialog.as_ref() else {
             return;
         };
@@ -809,7 +825,7 @@ impl Tide {
 
     /// Submit the add-endpoint sheet: client-side presence checks, then
     /// the daemon probes before persisting; failures stay inline.
-    pub(super) fn rag_endpoint_add(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::app) fn rag_endpoint_add(&mut self, cx: &mut Context<Self>) {
         let Some(dialog) = self.rag_settings.endpoint_dialog.as_ref() else {
             return;
         };
@@ -844,7 +860,7 @@ impl Tide {
 
     /// One inline field submitted (Enter): parse, patch, and surface a
     /// toast on a bad value. Empty chunk fields clear the override.
-    pub(super) fn rag_inline_submit(
+    pub(in crate::app) fn rag_inline_submit(
         &mut self,
         field: InlineField,
         raw: String,
@@ -904,7 +920,7 @@ impl Tide {
     }
 
     /// Adjust top-K from the stepper (clamped by the daemon too).
-    pub(super) fn rag_topk_bump(&self, delta: i64) {
+    pub(in crate::app) fn rag_topk_bump(&self, delta: i64) {
         let current = self
             .rag_settings
             .config
@@ -921,7 +937,7 @@ impl Tide {
     }
 
     /// Reindex or remove one source.
-    pub(super) fn rag_source_command(&mut self, command: client::Command) {
+    pub(in crate::app) fn rag_source_command(&mut self, command: client::Command) {
         if let client::Command::SourcesReindex { source_id }
         | client::Command::SourcesRemove { source_id } = &command
         {
@@ -952,7 +968,7 @@ impl Tide {
     /// Ensure the Knowledge Library source row + directory exist and
     /// fetch the card state (idempotent backend; the card calls it on
     /// first render so the row exists before anything is clicked).
-    pub(super) fn rag_library_ensure(&self) {
+    pub(in crate::app) fn rag_library_ensure(&self) {
         self.rag_dispatch_result(
             |result| match result {
                 Ok(client::ResponsePayload::Library {
@@ -974,7 +990,7 @@ impl Tide {
     /// Copy the built-in `/kb-*` bodies into the commands folder as
     /// editable overrides (idempotent; 0 means copies already exist —
     /// the commands work either way, built-ins need no files).
-    pub(super) fn rag_kb_install(&self) {
+    pub(in crate::app) fn rag_kb_install(&self) {
         self.rag_settings.kb_pending.set(true);
         self.rag_dispatch_result(
             |result| match result {
@@ -990,7 +1006,7 @@ impl Tide {
 
     /// Drain ops events; keeps a 2 s poll alive while anything transient is
     /// in flight (download, ingestion, indexing, queued).
-    pub(super) fn drain_rag_ops_events(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::app) fn drain_rag_ops_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok(event) = self.rag_settings.ops_rx.try_recv() {
             changed = true;
@@ -1886,7 +1902,11 @@ fn rag_dialog_footer(theme: &Theme, error: Option<&str>, pills: Vec<Stateful<Div
 impl Tide {
     /// The embedding-model card: the picker in the body, the current
     /// selection in the head, cloud fallback + cloud model id beneath.
-    pub(super) fn render_rag_model_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    pub(in crate::app) fn render_rag_model_card(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         if self.rag_settings.config.is_none() && !self.rag_settings.config_requested.get() {
             self.rag_settings.config_requested.set(true);
             self.rag_config_load();
@@ -2062,7 +2082,7 @@ impl Tide {
 
     /// Retrieval tuning: top-K stepper and minimum similarity (inline
     /// field — commits on Enter).
-    pub(super) fn render_rag_retrieval_card(
+    pub(in crate::app) fn render_rag_retrieval_card(
         &self,
         window: &mut Window,
         theme: &Theme,
@@ -2349,7 +2369,11 @@ impl Tide {
     /// empty clears back to the chunker defaults). Changes route through
 
     /// Custom endpoints: BYOK rows with remove; add opens the sheet.
-    pub(super) fn render_rag_endpoints_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    pub(in crate::app) fn render_rag_endpoints_card(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let add = CardButton::new("rag-endpoint-add", tr!("settings.rag.add_endpoint"))
             .icon("icons/plus.svg")
             .render(*theme, cx, |this, window, cx| {
@@ -2406,7 +2430,7 @@ impl Tide {
     /// The add-endpoint dialog — the wizard vocabulary: labeled
     /// TextField rows, probe hint, footer pills (the daemon verifies with
     /// one test embedding before anything persists; failures stay inline).
-    pub(super) fn render_rag_endpoint_dialog(
+    pub(in crate::app) fn render_rag_endpoint_dialog(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
@@ -2520,7 +2544,7 @@ impl Tide {
     /// Select applies the model and leaves stale indexes flagged on
     /// their cards; Select & Rebuild chains the update straight into the
     /// serial rebuild, whose progress strip renders below the cards.
-    pub(super) fn render_rag_model_dialog(
+    pub(in crate::app) fn render_rag_model_dialog(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
@@ -2673,7 +2697,7 @@ impl Tide {
     /// The serial rebuild's live progress, below the Memory cards — the
     /// offer dialog is gone by now (it never renders while running). A
     /// step that outlives the watchdog shows a stall error + Retry.
-    pub(super) fn render_rag_rebuild_progress(
+    pub(in crate::app) fn render_rag_rebuild_progress(
         &self,
         theme: &Theme,
         cx: &mut Context<Self>,
@@ -2927,7 +2951,7 @@ impl Tide {
     /// selected project.
     /// The Memory & RAG card for an explicit project — the Projects settings
     /// page renders it for the rail selection.
-    pub(super) fn render_memory_rag_card_for(
+    pub(in crate::app) fn render_memory_rag_card_for(
         &self,
         project: Option<Project>,
         theme: &Theme,
@@ -3076,7 +3100,7 @@ impl Tide {
 
     /// The knowledge-sources card: the list in a full-bleed body; the
     /// add action lives in the page header.
-    pub(super) fn render_sources_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    pub(in crate::app) fn render_sources_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let add = CardButton::new("rag-source-new", tr!("settings.rag.add"))
             .icon("icons/plus.svg")
             .render(*theme, cx, |this, window, cx| {
@@ -3285,7 +3309,7 @@ impl Tide {
     /// row + directory exist before anything is clicked; the root path
     /// comes from the daemon's reply (a remote daemon's data dir is not
     /// ours to guess).
-    pub(super) fn render_library_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    pub(in crate::app) fn render_library_card(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         // Same retry idiom as the config card (`is_none() && !requested`):
         // a failed ensure clears `library_requested` in the error arm, so
         // the next render retries instead of stranding the card — the
@@ -3433,7 +3457,7 @@ impl Tide {
     /// vocabulary (composer card, TextField fields, tile grid, footer
     /// pills): target project selector, name, a 2×2 kind tile grid, and
     /// the location field with the docs browser.
-    pub(super) fn render_rag_source_dialog(
+    pub(in crate::app) fn render_rag_source_dialog(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
@@ -3999,3 +4023,5 @@ mod tests {
         assert_eq!(kb_install_note(4), "4 copied to commands folder");
     }
 }
+
+pub(in crate::app) mod page;

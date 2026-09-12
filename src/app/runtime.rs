@@ -3241,29 +3241,29 @@ impl Tide {
             .spawn(move || {
                 let event = match daemon.request(Uuid::nil(), Uuid::nil(), command) {
                     Ok(client::ResponsePayload::TideProviders { providers }) => {
-                        super::tide_providers::TideOpsEvent::Providers(Ok(providers))
+                        crate::app::screens::settings::pages::providers::TideOpsEvent::Providers(Ok(providers))
                     }
                     Ok(client::ResponsePayload::TideModels { models }) => {
-                        super::tide_providers::TideOpsEvent::Models(Ok(models))
+                        crate::app::screens::settings::pages::providers::TideOpsEvent::Models(Ok(models))
                     }
                     Ok(client::ResponsePayload::TideProtocol { api_style, error }) => {
                         match (api_style, error) {
                             (Some(style), None) => {
-                                super::tide_providers::TideOpsEvent::Protocol(Ok(style))
+                                crate::app::screens::settings::pages::providers::TideOpsEvent::Protocol(Ok(style))
                             }
                             (_, Some(error)) => {
-                                super::tide_providers::TideOpsEvent::Protocol(Err(error))
+                                crate::app::screens::settings::pages::providers::TideOpsEvent::Protocol(Err(error))
                             }
-                            (None, None) => super::tide_providers::TideOpsEvent::Protocol(Err(
+                            (None, None) => crate::app::screens::settings::pages::providers::TideOpsEvent::Protocol(Err(
                                 "the endpoint answered but named no protocol".into(),
                             )),
                         }
                     }
                     Ok(client::ResponsePayload::TideConnection { ok, error }) => {
                         if ok {
-                            super::tide_providers::TideOpsEvent::Connection(Ok(()))
+                            crate::app::screens::settings::pages::providers::TideOpsEvent::Connection(Ok(()))
                         } else {
-                            super::tide_providers::TideOpsEvent::Connection(Err(
+                            crate::app::screens::settings::pages::providers::TideOpsEvent::Connection(Err(
                                 error.unwrap_or_else(|| "the connection test failed".into())
                             ))
                         }
@@ -3271,21 +3271,21 @@ impl Tide {
                     Ok(client::ResponsePayload::TideZedSignIn { result, error }) => {
                         match (result, error) {
                             (Some(sign_in), None) => {
-                                super::tide_providers::TideOpsEvent::ZedSignIn(Ok(sign_in))
+                                crate::app::screens::settings::pages::providers::TideOpsEvent::ZedSignIn(Ok(sign_in))
                             }
                             (_, Some(error)) => {
-                                super::tide_providers::TideOpsEvent::ZedSignIn(Err(error))
+                                crate::app::screens::settings::pages::providers::TideOpsEvent::ZedSignIn(Err(error))
                             }
-                            (None, None) => super::tide_providers::TideOpsEvent::ZedSignIn(Err(
+                            (None, None) => crate::app::screens::settings::pages::providers::TideOpsEvent::ZedSignIn(Err(
                                 "the Zed sign-in failed without an error".into(),
                             )),
                         }
                     }
-                    Ok(_) => super::tide_providers::TideOpsEvent::Providers(Err(
+                    Ok(_) => crate::app::screens::settings::pages::providers::TideOpsEvent::Providers(Err(
                         "the backend returned an unexpected response".into(),
                     )),
                     Err(error) => {
-                        super::tide_providers::TideOpsEvent::Providers(Err(error.to_string()))
+                        crate::app::screens::settings::pages::providers::TideOpsEvent::Providers(Err(error.to_string()))
                     }
                 };
                 if ops_tx.send(event).is_ok() {
@@ -3300,11 +3300,13 @@ impl Tide {
 
     pub(super) fn tide_open_add_wizard(
         &mut self,
-        preset: Option<&'static super::tide_providers::TidePreset>,
+        preset: Option<&'static crate::app::screens::settings::pages::providers::TidePreset>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.tide.wizard = Some(super::tide_providers::TideWizard::new(preset, window, cx));
+        self.tide.wizard = Some(
+            crate::app::screens::settings::pages::providers::TideWizard::new(preset, window, cx),
+        );
         self.tide.error = None;
         cx.notify();
     }
@@ -3316,7 +3318,8 @@ impl Tide {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut wizard = super::tide_providers::TideWizard::new(None, window, cx);
+        let mut wizard =
+            crate::app::screens::settings::pages::providers::TideWizard::new(None, window, cx);
         wizard.api_style = api_style.to_owned();
         self.tide.wizard = Some(wizard);
         self.tide.error = None;
@@ -3340,11 +3343,12 @@ impl Tide {
         else {
             return;
         };
-        let preset = super::tide_providers::TIDE_PRESETS
+        let preset = crate::app::screens::settings::pages::providers::TIDE_PRESETS
             .iter()
             .find(|preset| preset.base_url == provider.base_url);
-        let mut wizard = super::tide_providers::TideWizard::new(preset, window, cx);
-        wizard.step = super::tide_providers::TideWizardStep::Connect;
+        let mut wizard =
+            crate::app::screens::settings::pages::providers::TideWizard::new(preset, window, cx);
+        wizard.step = crate::app::screens::settings::pages::providers::TideWizardStep::Connect;
         wizard.edit_provider_id = Some(provider_id);
         wizard.api_style = provider.api_style.clone();
         wizard
@@ -3371,7 +3375,7 @@ impl Tide {
     /// Choose-step tile click: prefill from the preset and move to Connect.
     pub(super) fn tide_choose_preset(
         &mut self,
-        preset: &'static super::tide_providers::TidePreset,
+        preset: &'static crate::app::screens::settings::pages::providers::TidePreset,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3380,8 +3384,12 @@ impl Tide {
         };
         wizard.preset = Some(preset);
         wizard.api_style = preset.api_style.to_owned();
-        wizard.zed = super::tide_providers::TideWizard::zed_state(Some(preset), window, cx);
-        wizard.step = super::tide_providers::TideWizardStep::Connect;
+        wizard.zed = crate::app::screens::settings::pages::providers::TideWizard::zed_state(
+            Some(preset),
+            window,
+            cx,
+        );
+        wizard.step = crate::app::screens::settings::pages::providers::TideWizardStep::Connect;
         wizard.error = None;
         // tide's `uniqueName`: "Name", then "Name 2", "Name 3", …
         let taken: Vec<String> = self
@@ -3425,7 +3433,10 @@ impl Tide {
                 wizard.tested = true; // the sign-in (or stored key) IS the test
                 wizard.error = None;
             }
-            self.tide_wizard_step(super::tide_providers::TideWizardStep::Models, cx);
+            self.tide_wizard_step(
+                crate::app::screens::settings::pages::providers::TideWizardStep::Models,
+                cx,
+            );
             return;
         }
         if base_url.is_empty() {
@@ -3507,13 +3518,13 @@ impl Tide {
 
     pub(super) fn tide_wizard_step(
         &mut self,
-        step: super::tide_providers::TideWizardStep,
+        step: crate::app::screens::settings::pages::providers::TideWizardStep,
         cx: &mut Context<Self>,
     ) {
         let Some(wizard) = self.tide.wizard.as_mut() else {
             return;
         };
-        if step == super::tide_providers::TideWizardStep::Models
+        if step == crate::app::screens::settings::pages::providers::TideWizardStep::Models
             && wizard.models.is_empty()
             && !wizard.fetching
         {
@@ -3725,7 +3736,9 @@ impl Tide {
         while let Ok(event) = self.tide.ops_rx.try_recv() {
             changed = true;
             match event {
-                super::tide_providers::TideOpsEvent::Providers(result) => match result {
+                crate::app::screens::settings::pages::providers::TideOpsEvent::Providers(
+                    result,
+                ) => match result {
                     Ok(providers) => {
                         self.tide.providers = providers;
                         self.tide.error = None;
@@ -3759,7 +3772,7 @@ impl Tide {
                         }
                     }
                 },
-                super::tide_providers::TideOpsEvent::Models(result) => {
+                crate::app::screens::settings::pages::providers::TideOpsEvent::Models(result) => {
                     if let Some(wizard) = self.tide.wizard.as_mut() {
                         wizard.fetching = false;
                         match result {
@@ -3791,7 +3804,7 @@ impl Tide {
                         }
                     }
                 }
-                super::tide_providers::TideOpsEvent::Protocol(result) => {
+                crate::app::screens::settings::pages::providers::TideOpsEvent::Protocol(result) => {
                     if let Some(wizard) = self.tide.wizard.as_mut() {
                         wizard.testing = false;
                         match result {
@@ -3801,7 +3814,7 @@ impl Tide {
                                 }
                                 wizard.tested = true;
                                 wizard.error = None;
-                                wizard.step = super::tide_providers::TideWizardStep::Models;
+                                wizard.step = crate::app::screens::settings::pages::providers::TideWizardStep::Models;
                                 // Entering Models auto-fetches the list.
                                 wizard.fetching = true;
                                 let (api_style, base_url, api_key) = (
@@ -3819,7 +3832,9 @@ impl Tide {
                         }
                     }
                 }
-                super::tide_providers::TideOpsEvent::Connection(result) => {
+                crate::app::screens::settings::pages::providers::TideOpsEvent::Connection(
+                    result,
+                ) => {
                     if let Some(wizard) = self.tide.wizard.as_mut() {
                         wizard.testing = false;
                         if let Err(error) = result {
@@ -3827,7 +3842,9 @@ impl Tide {
                         }
                     }
                 }
-                super::tide_providers::TideOpsEvent::ZedSignIn(result) => {
+                crate::app::screens::settings::pages::providers::TideOpsEvent::ZedSignIn(
+                    result,
+                ) => {
                     let Some(wizard) = self.tide.wizard.as_mut() else {
                         return changed;
                     };
@@ -3870,24 +3887,34 @@ impl Tide {
             .spawn(move || {
                 let event = match daemon.request(Uuid::nil(), Uuid::nil(), command) {
                     Ok(client::ResponsePayload::GitSnapshot { snapshot }) => {
-                        super::git_settings::GitOpsEvent::Snapshot(Ok(snapshot))
+                        crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(Ok(
+                            snapshot,
+                        ))
                     }
                     Ok(client::ResponsePayload::GithubDeviceStart { start }) => {
-                        super::git_settings::GitOpsEvent::DeviceStart(Ok(start))
+                        crate::app::screens::settings::pages::git::GitOpsEvent::DeviceStart(Ok(
+                            start,
+                        ))
                     }
                     Ok(client::ResponsePayload::GithubConnectPoll { poll }) => {
                         if gh_connect {
-                            super::git_settings::GitOpsEvent::GhConnect(Ok(poll))
+                            crate::app::screens::settings::pages::git::GitOpsEvent::GhConnect(Ok(
+                                poll,
+                            ))
                         } else {
-                            super::git_settings::GitOpsEvent::DevicePoll(Ok(poll))
+                            crate::app::screens::settings::pages::git::GitOpsEvent::DevicePoll(Ok(
+                                poll,
+                            ))
                         }
                     }
                     Ok(client::ResponsePayload::GitCredentials { items }) => {
-                        super::git_settings::GitOpsEvent::Credentials(Ok(items))
+                        crate::app::screens::settings::pages::git::GitOpsEvent::Credentials(Ok(
+                            items,
+                        ))
                     }
                     Ok(client::ResponsePayload::GitOp { result }) => {
                         if !result.ok {
-                            super::git_settings::GitOpsEvent::OpFailed(
+                            crate::app::screens::settings::pages::git::GitOpsEvent::OpFailed(
                                 result
                                     .error
                                     .unwrap_or_else(|| "the git operation failed".into()),
@@ -3896,17 +3923,17 @@ impl Tide {
                             // A successful op answers with its own snapshot
                             // payload instead of a bare GitOp; reaching this
                             // arm means the backend replied out of contract.
-                            super::git_settings::GitOpsEvent::Snapshot(Err(
+                            crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(Err(
                                 "the backend returned an unexpected response".into(),
                             ))
                         }
                     }
-                    Ok(_) => super::git_settings::GitOpsEvent::Snapshot(Err(
+                    Ok(_) => crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(Err(
                         "the backend returned an unexpected response".into(),
                     )),
-                    Err(error) => {
-                        super::git_settings::GitOpsEvent::Snapshot(Err(error.to_string()))
-                    }
+                    Err(error) => crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(
+                        Err(error.to_string()),
+                    ),
                 };
                 if ops_tx.send(event).is_ok() {
                     signal_event_pump(&event_wake);
@@ -4022,19 +4049,21 @@ impl Tide {
                         match daemon.request(Uuid::nil(), Uuid::nil(), client::Command::GitSnapshot)
                         {
                             Ok(client::ResponsePayload::GitSnapshot { snapshot }) => {
-                                super::git_settings::GitOpsEvent::Snapshot(Ok(snapshot))
+                                crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(
+                                    Ok(snapshot),
+                                )
                             }
-                            _ => super::git_settings::GitOpsEvent::Snapshot(Err(
-                                "failed to reload git settings after the update".into(),
-                            )),
+                            _ => crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(
+                                Err("failed to reload git settings after the update".into()),
+                            ),
                         }
                     }
-                    Ok(_) => super::git_settings::GitOpsEvent::Snapshot(Err(
+                    Ok(_) => crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(Err(
                         "the backend returned an unexpected response".into(),
                     )),
-                    Err(error) => {
-                        super::git_settings::GitOpsEvent::Snapshot(Err(error.to_string()))
-                    }
+                    Err(error) => crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(
+                        Err(error.to_string()),
+                    ),
                 };
                 if ops_tx.send(event).is_ok() {
                     signal_event_pump(&event_wake);
@@ -4046,10 +4075,12 @@ impl Tide {
     /// Open the profile dialog on a blank draft. The dialog materializes on
     /// the next frame — its `TextInput` entities need a window.
     pub(super) fn git_new_profile(&mut self, cx: &mut Context<Self>) {
-        self.git_settings.profile_request = Some(super::git_settings::GitProfileRequest {
-            editing: None,
-            prefill: None,
-        });
+        self.git_settings.profile_request = Some(
+            crate::app::screens::settings::pages::git::GitProfileRequest {
+                editing: None,
+                prefill: None,
+            },
+        );
         cx.notify();
     }
 
@@ -4065,10 +4096,12 @@ impl Tide {
         }) else {
             return;
         };
-        self.git_settings.profile_request = Some(super::git_settings::GitProfileRequest {
-            editing: Some(profile),
-            prefill: None,
-        });
+        self.git_settings.profile_request = Some(
+            crate::app::screens::settings::pages::git::GitProfileRequest {
+                editing: Some(profile),
+                prefill: None,
+            },
+        );
         cx.notify();
     }
 
@@ -4123,29 +4156,32 @@ impl Tide {
         while let Ok(event) = self.git_settings.ops_rx.try_recv() {
             changed = true;
             match event {
-                super::git_settings::GitOpsEvent::Snapshot(result) => match result {
-                    Ok(snapshot) => {
-                        self.git_settings.snapshot = Some(snapshot);
-                        self.git_settings.loaded = true;
-                        self.git_settings.saving_attribution = false;
-                        self.git_settings.error = None;
-                        // An identity applied from the Git panel's picker
-                        // lands here — refresh the panel's queries (the
-                        // current identity among them) when it is on screen.
-                        if self.git_panel_visible() {
-                            self.refresh_git_panel(cx);
+                crate::app::screens::settings::pages::git::GitOpsEvent::Snapshot(result) => {
+                    match result {
+                        Ok(snapshot) => {
+                            self.git_settings.snapshot = Some(snapshot);
+                            self.git_settings.loaded = true;
+                            self.git_settings.saving_attribution = false;
+                            self.git_settings.error = None;
+                            // An identity applied from the Git panel's picker
+                            // lands here — refresh the panel's queries (the
+                            // current identity among them) when it is on screen.
+                            if self.git_panel_visible() {
+                                self.refresh_git_panel(cx);
+                            }
+                        }
+                        Err(error) => {
+                            self.git_settings.loaded = true;
+                            self.git_settings.error = Some(error);
                         }
                     }
-                    Err(error) => {
-                        self.git_settings.loaded = true;
-                        self.git_settings.error = Some(error);
-                    }
-                },
-                super::git_settings::GitOpsEvent::DeviceStart(result) => match result {
-                    Ok(start) => {
-                        if matches!(
+                }
+                crate::app::screens::settings::pages::git::GitOpsEvent::DeviceStart(result) => {
+                    match result {
+                        Ok(start) => {
+                            if matches!(
                             self.git_settings.device_flow,
-                            Some(super::git_settings::DeviceFlowPhase::Starting)
+                            Some(crate::app::screens::settings::pages::git::DeviceFlowPhase::Starting)
                         ) {
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
@@ -4154,7 +4190,7 @@ impl Tide {
                             let (device_code, interval) =
                                 (start.device_code.clone(), start.interval);
                             self.git_settings.device_flow =
-                                Some(super::git_settings::DeviceFlowPhase::Waiting {
+                                Some(crate::app::screens::settings::pages::git::DeviceFlowPhase::Waiting {
                                     device_code,
                                     user_code: start.user_code,
                                     verification_uri: start.verification_uri,
@@ -4171,21 +4207,26 @@ impl Tide {
                                 cx,
                             );
                         }
+                        }
+                        Err(error) => {
+                            self.git_settings.device_flow = Some(
+                                crate::app::screens::settings::pages::git::DeviceFlowPhase::Error(
+                                    error,
+                                ),
+                            );
+                        }
                     }
-                    Err(error) => {
-                        self.git_settings.device_flow =
-                            Some(super::git_settings::DeviceFlowPhase::Error(error));
-                    }
-                },
-                super::git_settings::GitOpsEvent::DevicePoll(result) => match result {
-                    Ok(poll) => {
-                        // Any device-flow reply also settles a stray gh-cli
-                        // spinner (its replies ride the dedicated GhConnect
-                        // event, this is belt-and-braces).
-                        self.git_settings.gh_connecting = None;
-                        match poll.status.as_str() {
+                }
+                crate::app::screens::settings::pages::git::GitOpsEvent::DevicePoll(result) => {
+                    match result {
+                        Ok(poll) => {
+                            // Any device-flow reply also settles a stray gh-cli
+                            // spinner (its replies ride the dedicated GhConnect
+                            // event, this is belt-and-braces).
+                            self.git_settings.gh_connecting = None;
+                            match poll.status.as_str() {
                             "pending" => {
-                                if let Some(super::git_settings::DeviceFlowPhase::Waiting {
+                                if let Some(crate::app::screens::settings::pages::git::DeviceFlowPhase::Waiting {
                                     device_code,
                                     interval,
                                     ..
@@ -4207,57 +4248,65 @@ impl Tide {
                             }
                             "denied" => {
                                 self.git_settings.device_flow =
-                                    Some(super::git_settings::DeviceFlowPhase::Denied);
+                                    Some(crate::app::screens::settings::pages::git::DeviceFlowPhase::Denied);
                             }
                             "expired" => {
                                 self.git_settings.device_flow =
-                                    Some(super::git_settings::DeviceFlowPhase::Expired);
+                                    Some(crate::app::screens::settings::pages::git::DeviceFlowPhase::Expired);
                             }
                             _ => {
                                 self.git_settings.device_flow =
-                                    Some(super::git_settings::DeviceFlowPhase::Error(
+                                    Some(crate::app::screens::settings::pages::git::DeviceFlowPhase::Error(
                                         poll.error.unwrap_or_else(|| {
                                             "the GitHub connection failed".into()
                                         }),
                                     ));
                             }
                         }
-                    }
-                    Err(error) => {
-                        self.git_settings.device_flow =
-                            Some(super::git_settings::DeviceFlowPhase::Error(error));
-                    }
-                },
-                super::git_settings::GitOpsEvent::GhConnect(result) => match result {
-                    Ok(poll) => {
-                        self.git_settings.gh_connecting = None;
-                        if poll.status == "success" {
-                            self.git_load_snapshot();
-                        } else {
-                            self.git_settings.error = Some(
-                                poll.error
-                                    .unwrap_or_else(|| "the gh CLI connect failed".into()),
+                        }
+                        Err(error) => {
+                            self.git_settings.device_flow = Some(
+                                crate::app::screens::settings::pages::git::DeviceFlowPhase::Error(
+                                    error,
+                                ),
                             );
                         }
                     }
-                    Err(error) => {
-                        self.git_settings.gh_connecting = None;
-                        self.git_settings.error = Some(error);
+                }
+                crate::app::screens::settings::pages::git::GitOpsEvent::GhConnect(result) => {
+                    match result {
+                        Ok(poll) => {
+                            self.git_settings.gh_connecting = None;
+                            if poll.status == "success" {
+                                self.git_load_snapshot();
+                            } else {
+                                self.git_settings.error = Some(
+                                    poll.error
+                                        .unwrap_or_else(|| "the gh CLI connect failed".into()),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            self.git_settings.gh_connecting = None;
+                            self.git_settings.error = Some(error);
+                        }
                     }
-                },
-                super::git_settings::GitOpsEvent::Credentials(result) => match result {
-                    Ok(items) => {
-                        // Upstream drops pairs without a username.
-                        self.git_settings.import_list = Some(
-                            items
-                                .into_iter()
-                                .filter(|item| !item.username.is_empty())
-                                .collect(),
-                        );
+                }
+                crate::app::screens::settings::pages::git::GitOpsEvent::Credentials(result) => {
+                    match result {
+                        Ok(items) => {
+                            // Upstream drops pairs without a username.
+                            self.git_settings.import_list = Some(
+                                items
+                                    .into_iter()
+                                    .filter(|item| !item.username.is_empty())
+                                    .collect(),
+                            );
+                        }
+                        Err(error) => self.git_settings.error = Some(error),
                     }
-                    Err(error) => self.git_settings.error = Some(error),
-                },
-                super::git_settings::GitOpsEvent::OpFailed(error) => {
+                }
+                crate::app::screens::settings::pages::git::GitOpsEvent::OpFailed(error) => {
                     self.git_settings.error = Some(error);
                 }
             }

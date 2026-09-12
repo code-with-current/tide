@@ -6,9 +6,11 @@
 use gpui::{AnyElement, KeyBinding, actions};
 use protocol::git_settings::{GitDiscoveredCredentialWire, GitProfileWire, GithubAccountWire};
 
-use super::git_settings::{DeviceFlowPhase, GitProfileRequest, ProfileDraft};
-use super::settings::{git_dot_color, git_identity_icon, git_segment_chip};
 use super::*;
+use crate::app::screens::settings::pages::git::page::{
+    git_dot_color, git_identity_icon, git_segment_chip,
+};
+use crate::app::screens::settings::pages::git::{DeviceFlowPhase, GitProfileRequest, ProfileDraft};
 
 actions!(
     tide_git_dialogs,

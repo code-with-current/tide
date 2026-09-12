@@ -795,8 +795,10 @@ impl Tide {
             .providers
             .iter()
             .map(|provider| {
-                let (logo, accent) =
-                    crate::app::tide_providers::brand_for(&provider.base_url, &provider.api_style);
+                let (logo, accent) = crate::app::screens::settings::pages::providers::brand_for(
+                    &provider.base_url,
+                    &provider.api_style,
+                );
                 (
                     provider.id.clone(),
                     provider.name.clone(),
@@ -832,7 +834,7 @@ impl Tide {
                             .find(|tide_provider| tide_provider.id == prefix)
                     })
                     .map(|tide_provider| {
-                        crate::app::tide_providers::brand_for(
+                        crate::app::screens::settings::pages::providers::brand_for(
                             &tide_provider.base_url,
                             &tide_provider.api_style,
                         )

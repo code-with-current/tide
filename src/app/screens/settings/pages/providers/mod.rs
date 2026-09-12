@@ -513,3 +513,5 @@ impl TideWizard {
         self.zed.as_ref()?.credential_blob(cx)
     }
 }
+
+pub(in crate::app) mod page;

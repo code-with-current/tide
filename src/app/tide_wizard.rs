@@ -6,7 +6,7 @@
 use super::*;
 use client::tide::TideModelWire;
 
-use crate::app::tide_providers::{TIDE_PRESETS, TideWizardStep, preset_added};
+use crate::app::screens::settings::pages::providers::{TIDE_PRESETS, TideWizardStep, preset_added};
 use crate::ui::text_field::TextField;
 use crate::ui::{icon, icon_button};
 
@@ -410,15 +410,16 @@ impl Tide {
             ("aggregator", tr!("tide.group_aggregator")),
             ("local", tr!("tide.group_local")),
         ] {
-            let presets: Vec<&'static crate::app::tide_providers::TidePreset> = TIDE_PRESETS
-                .iter()
-                .filter(|preset| {
-                    preset.group == group_key
-                        && (query.is_empty()
-                            || preset.name.to_lowercase().contains(&query)
-                            || preset.id.contains(&query))
-                })
-                .collect();
+            let presets: Vec<&'static crate::app::screens::settings::pages::providers::TidePreset> =
+                TIDE_PRESETS
+                    .iter()
+                    .filter(|preset| {
+                        preset.group == group_key
+                            && (query.is_empty()
+                                || preset.name.to_lowercase().contains(&query)
+                                || preset.id.contains(&query))
+                    })
+                    .collect();
             let customs_visible = group_key == "local"
                 && (query.is_empty()
                     || tr!("tide.custom_openai").to_lowercase().contains(&query)

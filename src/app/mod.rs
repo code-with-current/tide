@@ -9,13 +9,13 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Local};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, ClipboardEntry, ClipboardItem,
-    Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, IntoElement,
-    KeyDownEvent, KeystrokeEvent, ListAlignment, ListOffset, ListState, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit,
-    PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful, StyleRefinement,
-    TextRun, WeakEntity, Window, WindowBounds, canvas, div, ease_out_quint, font, img,
-    linear_color_stop, linear_gradient, list, point, prelude::*, px, rgb,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Div,
+    Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent,
+    KeystrokeEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels,
+    Render, ScrollHandle, SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window,
+    WindowBounds, canvas, div, ease_out_quint, font, img, linear_color_stop, linear_gradient, list,
+    point, prelude::*, px, rgb,
 };
 use uuid::Uuid;
 
@@ -33,11 +33,11 @@ use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AgentTurn, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProviderKind,
-    ProviderModel, ProviderModelOption, ProviderResumeCursor, QueuedMessage, ReasoningBlock,
-    RuntimeMode, SessionStatus, SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun,
-    SubagentToolStatus, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
-    compact_path, unix_time, unix_time_millis,
+    MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderModelOption,
+    ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus,
+    SessionUsageTotals, SessionWorkspace, SubagentBlock, SubagentRun, SubagentToolStatus,
+    TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time,
+    unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1070,13 +1070,13 @@ pub struct Tide {
     updater_button_animation_from_width: f32,
     updater_button_animation_from_reveal: f32,
     updater_button_animation_generation: u64,
-    pub(crate) tide: crate::app::tide_providers::TideProviderPanel,
+    pub(crate) tide: crate::app::screens::settings::pages::providers::TideProviderPanel,
     /// Flattened tide model catalog — every configured tide provider's models
     /// as picker rows. Rebuilt whenever the provider list lands; frames and
     /// metadata lookups read this instead of walking the wire rows.
     tide_models: Vec<ProviderModel>,
-    pub(crate) git_settings: crate::app::git_settings::GitSettingsPanel,
-    pub(crate) rag_settings: crate::app::rag_settings::RagSettingsPanel,
+    pub(crate) git_settings: crate::app::screens::settings::pages::git::GitSettingsPanel,
+    pub(crate) rag_settings: crate::app::screens::settings::pages::memory::RagSettingsPanel,
     pub(crate) remote_control: crate::app::remote_control::RemoteControlState,
     pub(crate) git_panel: crate::app::git_panel::GitPanelState,
     /// Sessions with a tide-generated title request in flight; lands are
@@ -1677,7 +1677,6 @@ mod file_search;
 mod git_dialogs;
 mod git_history;
 mod git_panel;
-mod git_settings;
 mod goal_dialog;
 mod image_preview;
 mod inspector;
@@ -1686,17 +1685,14 @@ mod mermaid_images;
 mod model_picker;
 mod navigation_rail;
 mod permission_flow;
-mod rag_settings;
 mod remote_control;
 mod right_panel;
 mod runtime;
 mod screens;
 mod sessions;
-mod settings;
 mod sidebar;
 mod streaming;
 mod task_switcher;
-mod tide_providers;
 mod tide_wizard;
 mod timeline_v2;
 mod transcript;
@@ -2861,10 +2857,12 @@ impl Tide {
                 updater_button_animation_from_width: UPDATER_BUTTON_COLLAPSED_WIDTH,
                 updater_button_animation_from_reveal: 0.0,
                 updater_button_animation_generation: 0,
-                tide: crate::app::tide_providers::TideProviderPanel::new(),
+                tide: crate::app::screens::settings::pages::providers::TideProviderPanel::new(),
                 tide_models: Vec::new(),
-                git_settings: crate::app::git_settings::GitSettingsPanel::new(),
-                rag_settings: crate::app::rag_settings::RagSettingsPanel::new(cx),
+                git_settings: crate::app::screens::settings::pages::git::GitSettingsPanel::new(),
+                rag_settings: crate::app::screens::settings::pages::memory::RagSettingsPanel::new(
+                    cx,
+                ),
                 remote_control: crate::app::remote_control::RemoteControlState::default(),
                 git_panel: crate::app::git_panel::GitPanelState::default(),
                 title_generation_in_flight: HashSet::new(),

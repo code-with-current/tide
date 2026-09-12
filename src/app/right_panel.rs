@@ -70,7 +70,7 @@ fn file_menu_items(
     path: String,
     staged: bool,
     tide: &gpui::WeakEntity<Tide>,
-    cx: &mut App,
+    _cx: &mut App,
 ) -> Vec<MenuItem> {
     let stage_label = if staged {
         tr!("git_panel.unstage")
@@ -6143,7 +6143,12 @@ impl Tide {
             .as_ref()
             .and_then(|identity| identity.profile_id.as_ref())
             .and_then(|profile_id| profiles.iter().find(|p| &p.id == profile_id))
-            .map(|profile| super::settings::git_dot_color(&profile.color, &theme));
+            .map(|profile| {
+                crate::app::screens::settings::pages::git::page::git_dot_color(
+                    &profile.color,
+                    &theme,
+                )
+            });
         let no_identity = identity
             .as_ref()
             .is_some_and(|identity| identity.name.is_none() && identity.email.is_none());
@@ -6232,7 +6237,10 @@ impl Tide {
                         .clone()
                         .unwrap_or_else(|| menu_profile.user_name.clone());
                     let email = menu_profile.user_email.clone();
-                    let dot = super::settings::git_dot_color(&menu_profile.color, &theme);
+                    let dot = crate::app::screens::settings::pages::git::page::git_dot_color(
+                        &menu_profile.color,
+                        &theme,
+                    );
                     let selected = active_profile_id.as_deref() == Some(menu_profile.id.as_str());
                     items.push(
                         MenuItem::custom(move |_, _| {
