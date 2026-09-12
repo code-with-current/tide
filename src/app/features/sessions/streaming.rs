@@ -301,7 +301,7 @@ impl Tide {
                     session.available_commands = names;
                     // The drain has no `Context`; the frame loop rebuilds the
                     // drawn index when it sees this.
-                    self.composer_sources_stale = true;
+                    self.sources.stale = true;
                 }
             }
             DriverEvent::TurnStarted => {

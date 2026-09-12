@@ -1645,7 +1645,7 @@ impl Tide {
             self.selected_session().and_then(|session| {
                 let command = crate::composer_complete::parse_goal_submission(
                     prompt,
-                    &self.slash_command_index,
+                    &self.sources.slash_index,
                 )?;
                 Some((session.id, command, session.thread_goal.clone()))
             })

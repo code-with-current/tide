@@ -130,12 +130,12 @@ impl Tide {
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf)
         else {
-            self.slash_command_index = Rc::new(Vec::new());
-            self.slash_command_index_key = None;
-            self.slash_command_index_loading = false;
-            self.mention_file_index = Rc::new(Vec::new());
-            self.mention_file_index_path = None;
-            self.mention_file_index_loading = false;
+            self.sources.slash_index = Rc::new(Vec::new());
+            self.sources.slash_index_key = None;
+            self.sources.slash_index_loading = false;
+            self.sources.mention_index = Rc::new(Vec::new());
+            self.sources.mention_index_path = None;
+            self.sources.mention_index_loading = false;
             return;
         };
         let provider = self
@@ -148,28 +148,28 @@ impl Tide {
             .unwrap_or_default();
 
         let command_key = (provider, project_path.clone());
-        match self.slash_commands.read(&command_key) {
+        match self.sources.slash_commands.read(&command_key) {
             Query::Ready(commands) => {
-                self.slash_command_index = Rc::new(composer_complete::merge_reported_commands(
+                self.sources.slash_index = Rc::new(composer_complete::merge_reported_commands(
                     &commands, &reported,
                 ));
-                self.slash_command_index_key = Some(command_key);
-                self.slash_command_index_loading = false;
+                self.sources.slash_index_key = Some(command_key);
+                self.sources.slash_index_loading = false;
             }
             Query::Pending => {
-                self.slash_command_index_loading = true;
+                self.sources.slash_index_loading = true;
                 // A scan for this exact key is in flight; anything drawn
                 // meanwhile must not be another provider's list.
-                if self.slash_command_index_key.as_ref() != Some(&command_key) {
-                    self.slash_command_index = Rc::new(Vec::new());
-                    self.slash_command_index_key = None;
+                if self.sources.slash_index_key.as_ref() != Some(&command_key) {
+                    self.sources.slash_index = Rc::new(Vec::new());
+                    self.sources.slash_index_key = None;
                 }
             }
             Query::Missing(token) => {
-                self.slash_command_index_loading = true;
-                if self.slash_command_index_key.as_ref() != Some(&command_key) {
-                    self.slash_command_index = Rc::new(Vec::new());
-                    self.slash_command_index_key = None;
+                self.sources.slash_index_loading = true;
+                if self.sources.slash_index_key.as_ref() != Some(&command_key) {
+                    self.sources.slash_index = Rc::new(Vec::new());
+                    self.sources.slash_index_key = None;
                 }
                 let path = project_path.clone();
                 let workspace = client::WorkspaceClient::new(self.daemon.client());
@@ -190,7 +190,7 @@ impl Tide {
                         })
                         .await;
                     tide.update(cx, |tide, cx| {
-                        if tide.slash_commands.fulfill(token, commands) {
+                        if tide.sources.slash_commands.fulfill(token, commands) {
                             tide.refresh_composer_sources(cx);
                             cx.notify();
                         }
@@ -201,24 +201,24 @@ impl Tide {
             }
         }
 
-        match self.mention_files.read(&project_path) {
+        match self.sources.mention_files.read(&project_path) {
             Query::Ready(files) => {
-                self.mention_file_index = files.as_ref().clone().into();
-                self.mention_file_index_path = Some(project_path);
-                self.mention_file_index_loading = false;
+                self.sources.mention_index = files.as_ref().clone().into();
+                self.sources.mention_index_path = Some(project_path);
+                self.sources.mention_index_loading = false;
             }
             Query::Pending => {
-                self.mention_file_index_loading = true;
-                if self.mention_file_index_path.as_ref() != Some(&project_path) {
-                    self.mention_file_index = Rc::new(Vec::new());
-                    self.mention_file_index_path = None;
+                self.sources.mention_index_loading = true;
+                if self.sources.mention_index_path.as_ref() != Some(&project_path) {
+                    self.sources.mention_index = Rc::new(Vec::new());
+                    self.sources.mention_index_path = None;
                 }
             }
             Query::Missing(token) => {
-                self.mention_file_index_loading = true;
-                if self.mention_file_index_path.as_ref() != Some(&project_path) {
-                    self.mention_file_index = Rc::new(Vec::new());
-                    self.mention_file_index_path = None;
+                self.sources.mention_index_loading = true;
+                if self.sources.mention_index_path.as_ref() != Some(&project_path) {
+                    self.sources.mention_index = Rc::new(Vec::new());
+                    self.sources.mention_index_path = None;
                 }
                 let path = project_path.clone();
                 let workspace = client::WorkspaceClient::new(self.daemon.client());
@@ -236,7 +236,7 @@ impl Tide {
                         })
                         .await;
                     tide.update(cx, |tide, cx| {
-                        if tide.mention_files.fulfill(token, files) {
+                        if tide.sources.mention_files.fulfill(token, files) {
                             tide.refresh_composer_sources(cx);
                             cx.notify();
                         }
@@ -258,8 +258,10 @@ impl Tide {
                 .selected_session()
                 .map(|session| session.provider)
                 .unwrap_or(self.state.last_provider);
-            self.slash_commands.invalidate(&(provider, path.clone()));
-            self.mention_files.invalidate(&path);
+            self.sources
+                .slash_commands
+                .invalidate(&(provider, path.clone()));
+            self.sources.mention_files.invalidate(&path);
         }
         self.refresh_composer_sources(cx);
     }
@@ -293,8 +295,8 @@ impl Tide {
     /// cursor and `enter` so an index always means the same row everywhere.
     fn autocomplete_rows(&self, trigger: &Trigger) -> Rc<Vec<AutocompleteRow>> {
         let source = match trigger.kind {
-            TriggerKind::Command => Rc::as_ptr(&self.slash_command_index) as usize,
-            TriggerKind::File => Rc::as_ptr(&self.mention_file_index) as usize,
+            TriggerKind::Command => Rc::as_ptr(&self.sources.slash_index) as usize,
+            TriggerKind::File => Rc::as_ptr(&self.sources.mention_index) as usize,
         };
         {
             let memo = self.composer_autocomplete.results.borrow();
@@ -307,7 +309,7 @@ impl Tide {
         let mut matcher = self.composer_autocomplete.matcher.borrow_mut();
         let rows = match trigger.kind {
             TriggerKind::Command => composer_complete::filter_commands(
-                &self.slash_command_index,
+                &self.sources.slash_index,
                 &trigger.query,
                 &mut matcher,
             )
@@ -315,7 +317,7 @@ impl Tide {
             .map(AutocompleteRow::Command)
             .collect::<Vec<_>>(),
             TriggerKind::File => composer_complete::filter_files(
-                &self.mention_file_index,
+                &self.sources.mention_index,
                 &trigger.query,
                 &mut matcher,
             )
@@ -433,8 +435,8 @@ impl Tide {
         let trigger = self.composer_trigger(window, cx)?;
         let rows = self.autocomplete_rows(&trigger);
         let loading = match trigger.kind {
-            TriggerKind::Command => self.slash_command_index_loading,
-            TriggerKind::File => self.mention_file_index_loading,
+            TriggerKind::Command => self.sources.slash_index_loading,
+            TriggerKind::File => self.sources.mention_index_loading,
         };
         if rows.is_empty() && !loading {
             return None;

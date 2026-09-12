@@ -2561,7 +2561,7 @@ impl Tide {
     /// prompt crosses into the tide engine: template commands expand to their
     /// body; everything else passes through untouched.
     fn resolve_provider_submission(&self, prompt: &str) -> String {
-        crate::composer_complete::resolved_submission(prompt, &self.slash_command_index)
+        crate::composer_complete::resolved_submission(prompt, &self.sources.slash_index)
             .unwrap_or_else(|| prompt.to_owned())
     }
 
@@ -3091,7 +3091,7 @@ impl Tide {
         if std::mem::take(&mut self.workspace_queries_stale) {
             self.invalidate_workspace_queries(cx);
         }
-        if std::mem::take(&mut self.composer_sources_stale) {
+        if std::mem::take(&mut self.sources.stale) {
             self.refresh_composer_sources(cx);
         }
         self.maybe_refresh_background_work(cx);

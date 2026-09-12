@@ -237,3 +237,38 @@ impl BranchState {
         }
     }
 }
+
+/// The composer's autocomplete source indexes: slash commands and `@`
+/// mention files per workspace, their drawn index snapshots, and the
+/// stale flag a mid-drain registry report sets.
+pub(in crate::app) struct SlashMentionState {
+    pub(in crate::app) slash_commands: crate::query::QueryCache<
+        (crate::model::ProviderKind, std::path::PathBuf),
+        Vec<crate::composer_complete::SlashCommand>,
+    >,
+    pub(in crate::app) slash_index: std::rc::Rc<Vec<crate::composer_complete::SlashCommand>>,
+    pub(in crate::app) slash_index_key: Option<(crate::model::ProviderKind, std::path::PathBuf)>,
+    pub(in crate::app) slash_index_loading: bool,
+    pub(in crate::app) mention_files:
+        crate::query::QueryCache<std::path::PathBuf, Vec<crate::composer_complete::FileEntry>>,
+    pub(in crate::app) mention_index: std::rc::Rc<Vec<crate::composer_complete::FileEntry>>,
+    pub(in crate::app) mention_index_path: Option<std::path::PathBuf>,
+    pub(in crate::app) mention_index_loading: bool,
+    pub(in crate::app) stale: bool,
+}
+
+impl SlashMentionState {
+    pub(in crate::app) fn new() -> Self {
+        Self {
+            slash_commands: crate::query::QueryCache::new(2 * super::MAX_CACHED_WORKSPACES),
+            slash_index: std::rc::Rc::new(Vec::new()),
+            slash_index_key: None,
+            slash_index_loading: false,
+            mention_files: crate::query::QueryCache::new(super::MAX_CACHED_WORKSPACES),
+            mention_index: std::rc::Rc::new(Vec::new()),
+            mention_index_path: None,
+            mention_index_loading: false,
+            stale: false,
+        }
+    }
+}
