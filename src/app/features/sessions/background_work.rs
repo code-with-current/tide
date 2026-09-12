@@ -1292,7 +1292,7 @@ impl Tide {
                 return;
             }
             let _ = this.update(cx, |this, cx| {
-                this.open_in_apps = Rc::new(apps);
+                this.computer.open_in_apps = Rc::new(apps);
                 cx.notify();
             });
         })
@@ -1305,9 +1305,14 @@ impl Tide {
         self.state
             .open_in_app
             .as_deref()
-            .and_then(|id| self.open_in_apps.iter().find(|app| app.id == id))
-            .or_else(|| self.open_in_apps.iter().find(|app| app.id == "finder"))
-            .or_else(|| self.open_in_apps.first())
+            .and_then(|id| self.computer.open_in_apps.iter().find(|app| app.id == id))
+            .or_else(|| {
+                self.computer
+                    .open_in_apps
+                    .iter()
+                    .find(|app| app.id == "finder")
+            })
+            .or_else(|| self.computer.open_in_apps.first())
     }
 
     /// Open the workspace folder in the catalog app `app_id` and remember it
@@ -1315,6 +1320,7 @@ impl Tide {
     /// asynchronously, so this one-shot action never blocks a frame.
     fn open_workspace_in_app(&mut self, path: &Path, app_id: &str, cx: &mut Context<Self>) {
         let Some(bundle_id) = self
+            .computer
             .open_in_apps
             .iter()
             .find(|app| app.id == app_id)
@@ -1347,7 +1353,7 @@ impl Tide {
         let preferred_id = preferred.id;
         let preferred_label = preferred.label;
         let preferred_icon = preferred.icon.clone();
-        let apps = self.open_in_apps.clone();
+        let apps = self.computer.open_in_apps.clone();
         let theme = Theme::current(cx);
         let handle = self.menu_handle(OPEN_IN_MENU_ID, cx);
         let focus = self.transcript_control_focus("header-open-in", cx);

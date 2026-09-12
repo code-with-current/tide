@@ -3114,10 +3114,10 @@ impl Tide {
 
     pub(in crate::app) fn drain_computer_permission_events(&mut self) -> bool {
         let mut changed = false;
-        while let Ok(result) = self.computer_permission_events.try_recv() {
-            self.computer_permission_request_pending = false;
+        while let Ok(result) = self.computer.permission_events.try_recv() {
+            self.computer.permission_request_pending = false;
             match result {
-                Ok(permissions) => self.computer_permissions = permissions,
+                Ok(permissions) => self.computer.permissions = permissions,
                 Err(error) => self.show_toast(error),
             }
             changed = true;

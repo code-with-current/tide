@@ -166,7 +166,7 @@ impl Tide {
             // results through `drain_computer_permission_events`, so the
             // status here is already fresh.
             if let Some(session) = &self.permission_flow.session
-                && session.pane.granted(&self.computer_permissions)
+                && session.pane.granted(&self.computer.permissions)
             {
                 self.close_permission_flow(cx);
                 return true;

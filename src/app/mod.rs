@@ -17,9 +17,7 @@ use gpui::{
 use uuid::Uuid;
 
 use crate::composer_complete::{FileEntry, SlashCommand};
-use crate::computer_use::{
-    ComputerPermissions, ComputerTarget, ComputerUsePhase, PendingComputerApproval,
-};
+use crate::computer_use::{ComputerTarget, ComputerUsePhase, PendingComputerApproval};
 use crate::driver::{self, DriverHandle, DriverStartOptions};
 use crate::git_branch::BranchSnapshot;
 use crate::input::{InputEvent, TextInput};
@@ -1059,24 +1057,12 @@ pub struct Tide {
     /// Sessions with a tide-generated title request in flight; lands are
     /// deduplicated against this so only one generation runs per session.
     title_generation_in_flight: HashSet<Uuid>,
-    computer_permissions: ComputerPermissions,
-    computer_permission_tx: Sender<Result<ComputerPermissions, String>>,
-    computer_permission_events: Receiver<Result<ComputerPermissions, String>>,
-    computer_permission_request_pending: bool,
-    /// When the last permission probe was kicked off, throttling the
-    /// Computer Use page's background grant-status poll.
-    last_permission_probe: Option<Instant>,
     /// The floating drag-to-authorize panel state (macOS guidance flow).
     permission_flow: permission_flow::PermissionFlowHost,
     /// The settings Usage page's full snapshot, view state, and list caches.
     usage: state::UsageState,
-    computer_use_app_icons: RefCell<HashMap<String, Option<std::sync::Arc<gpui::Image>>>>,
-    computer_use_app_icon_loads: RefCell<HashSet<String>>,
-    /// Installed folder-capable apps for the header's "open project in"
-    /// control, icons included, resolved once at launch on the background
-    /// executor. Render only reads this; empty means not resolved yet (or
-    /// nothing to offer) and hides the control.
-    open_in_apps: Rc<Vec<crate::platform::ExternalApp>>,
+    /// Computer Use permissions, app-icon caches, and the "open in" app list.
+    computer: state::ComputerUseState,
     model_picker_tab: ModelPickerTab,
     /// Per-site inputs of the shared model picker (`render_model_picker`),
     /// keyed by menu id and refreshed on every render so the toggle observer
@@ -2772,16 +2758,12 @@ impl Tide {
                 remote_control: crate::app::remote_control::RemoteControlState::default(),
                 git_panel: crate::app::features::git::GitPanelState::default(),
                 title_generation_in_flight: HashSet::new(),
-                computer_permissions: ComputerPermissions::default(),
-                computer_permission_tx,
-                computer_permission_events,
-                computer_permission_request_pending: false,
-                last_permission_probe: None,
                 permission_flow: permission_flow::PermissionFlowHost::default(),
                 usage: state::UsageState::new(usage_project_filter, usage_projects_list),
-                computer_use_app_icons: RefCell::new(HashMap::new()),
-                computer_use_app_icon_loads: RefCell::new(HashSet::new()),
-                open_in_apps: Rc::new(Vec::new()),
+                computer: state::ComputerUseState::new(
+                    computer_permission_tx,
+                    computer_permission_events,
+                ),
                 model_picker_tab,
                 model_picker_highlight: None,
                 model_picker_configs: RefCell::new(HashMap::new()),

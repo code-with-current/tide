@@ -27,8 +27,8 @@ impl Tide {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let enabled = self.state.computer_use_enabled;
-        let permissions = self.computer_permissions.clone();
-        let pending = self.computer_permission_request_pending;
+        let permissions = self.computer.permissions.clone();
+        let pending = self.computer.permission_request_pending;
         let helper_name = crate::computer_use::helper_display_name();
         let mut allowed_apps = div().flex().flex_col();
         if self.state.computer_use_allowed_apps.is_empty() {
@@ -116,6 +116,7 @@ impl Tide {
         if !pending
             && !(permissions.screen_recording && permissions.accessibility)
             && self
+                .computer
                 .last_permission_probe
                 .is_none_or(|started| started.elapsed() >= PERMISSION_PROBE_INTERVAL)
         {
@@ -230,12 +231,12 @@ impl Tide {
         prompt: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.computer_permission_request_pending {
+        if self.computer.permission_request_pending {
             return;
         }
-        self.computer_permission_request_pending = true;
-        self.last_permission_probe = Some(Instant::now());
-        let tx = self.computer_permission_tx.clone();
+        self.computer.permission_request_pending = true;
+        self.computer.last_permission_probe = Some(Instant::now());
+        let tx = self.computer.permission_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         let daemon = self.daemon.client();
         std::thread::Builder::new()
@@ -273,13 +274,14 @@ impl Tide {
         bundle_id: &str,
         cx: &mut Context<Self>,
     ) -> Option<std::sync::Arc<gpui::Image>> {
-        if let Some(icon) = self.computer_use_app_icons.borrow().get(bundle_id) {
+        if let Some(icon) = self.computer.use_app_icons.borrow().get(bundle_id) {
             return icon.clone();
         }
 
         let bundle_id = bundle_id.to_owned();
         if self
-            .computer_use_app_icon_loads
+            .computer
+            .use_app_icon_loads
             .borrow_mut()
             .insert(bundle_id.clone())
         {
@@ -292,10 +294,12 @@ impl Tide {
                         })
                         .await;
                 let _ = this.update(cx, |this, cx| {
-                    this.computer_use_app_icon_loads
+                    this.computer
+                        .use_app_icon_loads
                         .borrow_mut()
                         .remove(&bundle_id);
-                    this.computer_use_app_icons
+                    this.computer
+                        .use_app_icons
                         .borrow_mut()
                         .insert(bundle_id, icon);
                     cx.notify();

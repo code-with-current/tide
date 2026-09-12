@@ -1,9 +1,11 @@
 //! Root-owned state groups (design 8): plain structs held by the `Tide`
 //! entity, one per shell concern, moved one group at a time.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use uuid::Uuid;
+
+use crate::computer_use::ComputerPermissions;
 
 /// Transient shell feedback and instrumentation: copy-button acknowledgement
 /// generations and the FPS counter.
@@ -122,6 +124,40 @@ impl UpdaterButtonState {
             button_animation_from_width: crate::app::UPDATER_BUTTON_COLLAPSED_WIDTH,
             button_animation_from_reveal: 0.0,
             button_animation_generation: 0,
+        }
+    }
+}
+
+/// Computer Use permissions and caches: the grant-status channel, the
+/// app-icon load dedup set, and the installed "open project in" apps.
+pub(in crate::app) struct ComputerUseState {
+    pub(in crate::app) permissions: ComputerPermissions,
+    pub(in crate::app) permission_tx:
+        crossbeam_channel::Sender<Result<ComputerPermissions, String>>,
+    pub(in crate::app) permission_events:
+        crossbeam_channel::Receiver<Result<ComputerPermissions, String>>,
+    pub(in crate::app) permission_request_pending: bool,
+    pub(in crate::app) last_permission_probe: Option<Instant>,
+    pub(in crate::app) use_app_icons:
+        std::cell::RefCell<HashMap<String, Option<std::sync::Arc<gpui::Image>>>>,
+    pub(in crate::app) use_app_icon_loads: std::cell::RefCell<HashSet<String>>,
+    pub(in crate::app) open_in_apps: std::rc::Rc<Vec<crate::platform::ExternalApp>>,
+}
+
+impl ComputerUseState {
+    pub(in crate::app) fn new(
+        permission_tx: crossbeam_channel::Sender<Result<ComputerPermissions, String>>,
+        permission_events: crossbeam_channel::Receiver<Result<ComputerPermissions, String>>,
+    ) -> Self {
+        Self {
+            permissions: ComputerPermissions::default(),
+            permission_tx,
+            permission_events,
+            permission_request_pending: false,
+            last_permission_probe: None,
+            use_app_icons: std::cell::RefCell::new(HashMap::new()),
+            use_app_icon_loads: std::cell::RefCell::new(HashSet::new()),
+            open_in_apps: std::rc::Rc::new(Vec::new()),
         }
     }
 }
