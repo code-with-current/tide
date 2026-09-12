@@ -1,7 +1,8 @@
+use super::motion;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Animation, AnimationExt, App, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window, div, px,
+    App, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window,
+    div, px,
 };
 use std::time::Duration;
 
@@ -65,7 +66,7 @@ impl Default for PixelLoaderSize {
 }
 
 // ---------------------------------------------------------------------
-// Pulse curve (see note 2 above)
+// Pulse curve
 // ---------------------------------------------------------------------
 
 const PULSE_BASE: f32 = 0.15;
@@ -187,14 +188,15 @@ fn pattern_for(variant: PixelLoaderVariant) -> Pattern {
     }
 }
 
-/// One grid cell: a static dim square if `delay_ms` is `None`, otherwise
-/// an infinitely-repeating opacity pulse phase-shifted by its delay.
-fn grid_cell(
-    id: impl Into<SharedString>,
+/// One grid cell at a moment of the shared clock's cycle: a static dim
+/// square if `delay_ms` is `None`, otherwise an opacity pulse phase-shifted
+/// by its delay.
+fn pixel_cell(
     size_px: f32,
     round: bool,
     color: Hsla,
     delay_ms: Option<f32>,
+    phase: f32,
     dur_ms: f32,
 ) -> gpui::AnyElement {
     let base = div()
@@ -208,23 +210,53 @@ fn grid_cell(
     };
 
     let phase_offset = (delay_ms / dur_ms).rem_euclid(1.0);
-
-    base.opacity(PULSE_BASE)
-        .with_animation(
-            id.into(),
-            Animation::new(Duration::from_millis(dur_ms.round() as u64)).repeat(),
-            move |cell, delta| cell.opacity(pixel_pulse(delta + phase_offset)),
-        )
+    base.opacity(pixel_pulse(phase + phase_offset))
         .into_any_element()
 }
 
+/// The 3×3 grid for a variant, driven by the shared pulse clock rather than
+/// a repeating `with_animation` element: an animation element re-arms its
+/// redraw chain only while its view actually re-renders, and the panes this
+/// loader lives in render on notify (their subtrees are display-list
+/// cached), so between commits the chain dies and the loader freezes
+/// mid-pattern. Reading the phase from the shared clock leases the pane
+/// instead — the same mechanism as the spinner pulses — which keeps the
+/// loader, and its row's elapsed ticker, alive for as long as it is
+/// mounted. Half cadence, like the wave dots: the footer stays up for a
+/// whole turn.
+fn render_grid(variant: PixelLoaderVariant, size_px: f32, color: Hsla) -> gpui::AnyElement {
+    let pattern = pattern_for(variant);
+    let cell_px = (size_px / 4.2).max(2.0);
+    let gap = (cell_px * 0.375).max(1.0);
+    let round = pattern.round;
+    let delays = pattern.delays;
+    let dur_ms = pattern.dur_ms;
+
+    motion::pulse(Duration::from_millis(dur_ms.round() as u64), move |phase| {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(gap))
+            .children((0..3).map(move |row| {
+                div().flex().gap(px(gap)).children((0..3).map(move |col| {
+                    let i = row * 3 + col;
+                    pixel_cell(cell_px, round, color, delays[i], phase, dur_ms)
+                }))
+            }))
+            .into_any_element()
+    })
+    .every(2)
+    .into_any_element()
+}
+
 // ---------------------------------------------------------------------
-// Globe variant (see note 1 above — dots move, nothing rotates)
+// Globe variant (dots move, nothing rotates)
 // ---------------------------------------------------------------------
 
-fn ring_dot(
-    id: SharedString,
-    base_deg: f32,
+/// One ring of eight orbiting dots, positioned from the shared clock's
+/// phase. The dots sit in an absolute overlay so the ring imposes no
+/// layout of its own.
+fn orbit_ring(
     center: f32,
     radius_x: f32,
     radius_y: f32,
@@ -233,29 +265,33 @@ fn ring_dot(
     reverse: bool,
     color: Hsla,
 ) -> gpui::AnyElement {
-    // Fixed per-slot opacity, matching the original: the shading pattern
-    // rotates together with the ring rather than reacting to absolute
-    // screen angle.
-    let opacity = (0.2 + 0.5 * ((base_deg + 90.0).to_radians().cos())).clamp(0.05, 1.0);
-
-    div()
-        .absolute()
-        .size(px(dot_px))
-        .rounded(px(1.0))
-        .bg(color)
-        .opacity(opacity)
-        .with_animation(
-            id,
-            Animation::new(Duration::from_millis(period_ms)).repeat(),
-            move |this, delta| {
-                let delta = if reverse { 1.0 - delta } else { delta };
+    motion::pulse(Duration::from_millis(period_ms), move |phase| {
+        let delta = if reverse { 1.0 - phase } else { phase };
+        div()
+            .absolute()
+            .inset_0()
+            .children((0..8).map(move |i| {
+                let base_deg = i as f32 * 45.0;
+                // Fixed per-slot opacity, matching the original: the
+                // shading pattern rotates together with the ring rather
+                // than reacting to absolute screen angle.
+                let opacity = (0.2 + 0.5 * ((base_deg + 90.0).to_radians().cos())).clamp(0.05, 1.0);
                 let angle = (base_deg + delta * 360.0).to_radians();
                 let x = center + radius_x * angle.cos() - dot_px / 2.0;
                 let y = center + radius_y * angle.sin() - dot_px / 2.0;
-                this.left(px(x)).top(px(y))
-            },
-        )
-        .into_any_element()
+                div()
+                    .absolute()
+                    .size(px(dot_px))
+                    .rounded(px(1.0))
+                    .bg(color)
+                    .opacity(opacity)
+                    .left(px(x))
+                    .top(px(y))
+            }))
+            .into_any_element()
+    })
+    .every(2)
+    .into_any_element()
 }
 
 fn render_globe(size_px: f32, color: Hsla) -> impl IntoElement {
@@ -266,32 +302,19 @@ fn render_globe(size_px: f32, color: Hsla) -> impl IntoElement {
     div()
         .relative()
         .size(px(size_px))
-        .children((0..8).map(|i| {
-            ring_dot(
-                SharedString::from(format!("pixel-loader-globe-a-{i}")),
-                i as f32 * 45.0,
-                center,
-                radius,
-                radius, // circular ring
-                dot_px,
-                1100,
-                false,
-                color,
-            )
-        }))
-        .children((0..8).map(|i| {
-            ring_dot(
-                SharedString::from(format!("pixel-loader-globe-b-{i}")),
-                i as f32 * 45.0,
-                center,
-                radius,
-                radius * 0.45, // squashed into an ellipse, crosses ring A
-                dot_px,
-                1600,
-                true,
-                color,
-            )
-        }))
+        .child(orbit_ring(
+            center, radius, radius, // circular ring
+            dot_px, 1100, false, color,
+        ))
+        .child(orbit_ring(
+            center,
+            radius,
+            radius * 0.45, // squashed into an ellipse, crosses ring A
+            dot_px,
+            1600,
+            true,
+            color,
+        ))
 }
 
 // ---------------------------------------------------------------------
@@ -370,28 +393,7 @@ impl RenderOnce for PixelLoader {
         let indicator = if self.variant == PixelLoaderVariant::Globe {
             render_globe(size_px, color).into_any_element()
         } else {
-            let pattern = pattern_for(self.variant);
-            let cell_px = (size_px / 4.2).max(2.0);
-            let gap = (cell_px * 0.375).max(1.0);
-
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(gap))
-                .children((0..3).map(|row| {
-                    div().flex().gap(px(gap)).children((0..3).map(|col| {
-                        let i = row * 3 + col;
-                        grid_cell(
-                            format!("pixel-loader-{:?}-{i}", self.variant),
-                            cell_px,
-                            pattern.round,
-                            color,
-                            pattern.delays[i],
-                            pattern.dur_ms,
-                        )
-                    }))
-                }))
-                .into_any_element()
+            render_grid(self.variant, size_px, color)
         };
 
         div()

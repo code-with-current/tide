@@ -1,9 +1,9 @@
 //! The live turn's closing row — tide's TurnWorkingFooter. A left-aligned
-//! 24px strip: the three-dot wave (the still-working signal) and the
-//! elapsed ticker reading the turn's full wall clock from its start, not
-//! from the row's mount. The ticker recomputes at render: the stream pump's
-//! commit cadence and the dots' own pulse lease both keep the pane waking,
-//! so no new timer is scheduled here.
+//! 24px strip: the pixel loader (the still-working signal) and the elapsed
+//! ticker reading the turn's full wall clock from its start, not from the
+//! row's mount. The ticker recomputes at render: the stream pump's commit
+//! cadence and the loader's own pulse lease both keep the pane waking, so
+//! no new timer is scheduled here.
 
 use super::turn_item::format_duration;
 use crate::theme::{Theme, sp};
