@@ -125,7 +125,8 @@ impl Tide {
         // vendored engine, so no CLI binary is required for it.
         let invocation = self.commit_invocation();
         let cached_branch = self
-            .visible_branch_snapshot
+            .branch
+            .visible_snapshot
             .as_ref()
             .filter(|(path, _)| path == &workspace)
             .map(|(_, snapshot)| snapshot);
@@ -452,7 +453,7 @@ impl Tide {
                 {
                     tide.invalidate_workspace_queries(cx);
                 } else {
-                    tide.branch_snapshots.invalidate(&workspace);
+                    tide.branch.snapshots.invalidate(&workspace);
                 }
                 let focus = match result {
                     Ok(()) => {

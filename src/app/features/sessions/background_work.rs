@@ -1143,7 +1143,8 @@ impl Tide {
                     .map(|project| project.path.as_path())
             });
         let snapshot = workspace_path.and_then(|path| {
-            self.visible_branch_snapshot
+            self.branch
+                .visible_snapshot
                 .as_ref()
                 .filter(|(snapshot_path, _)| snapshot_path == path)
                 .map(|(_, snapshot)| snapshot)

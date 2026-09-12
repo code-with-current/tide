@@ -502,7 +502,7 @@ impl Tide {
         };
         // Extract only the scalars; cloning whole snapshots per frame would
         // churn the branch list for nothing.
-        let snapshot_summary = match self.branch_snapshots.read(&cwd) {
+        let snapshot_summary = match self.branch.snapshots.read(&cwd) {
             Query::Ready(result) => match result.as_ref() {
                 Ok(Some(snapshot)) => Some((
                     snapshot.display_branch().map(str::to_owned),

@@ -2625,7 +2625,7 @@ impl Tide {
                             planned_worktree: false,
                             surface: BranchPickerSurface::GitPanel,
                         },
-                        busy.is_none() && !self.branch_operation_pending,
+                        busy.is_none() && !self.branch.operation_pending,
                         move |snapshot| {
                             snapshot
                                 .current

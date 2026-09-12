@@ -244,10 +244,10 @@ impl Tide {
         self.model.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.search_models"), cx)
         });
-        self.branch_search.update(cx, |input, cx| {
+        self.branch.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.search_branches"), cx)
         });
-        self.branch_create_input.update(cx, |input, cx| {
+        self.branch.create_input.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.new_branch_name"), cx)
         });
         self.settings_search.update(cx, |input, cx| {

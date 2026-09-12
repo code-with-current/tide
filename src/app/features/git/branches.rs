@@ -59,12 +59,13 @@ pub(in crate::app) struct BranchPickerContext {
 
 impl Tide {
     pub(in crate::app) fn sync_branch_picker_rows(&self, rows: &[crate::git_branch::BranchEntry]) {
-        let mut cached = self.branch_picker_row_cache.borrow_mut();
+        let mut cached = self.branch.picker_row_cache.borrow_mut();
         if cached.as_slice() == rows {
             return;
         }
         *cached = rows.to_vec();
-        self.branch_picker_list_state
+        self.branch
+            .picker_list_state
             .reset_with_uniform_height(rows.len(), px(BRANCH_PICKER_ROW_HEIGHT));
     }
 
@@ -78,27 +79,29 @@ impl Tide {
     ) -> Option<BranchSnapshot> {
         let workspace_path = workspace_path.to_path_buf();
         let fallback = self
-            .visible_branch_snapshot
+            .branch
+            .visible_snapshot
             .as_ref()
             .filter(|(path, _)| path == &workspace_path)
             .map(|(_, snapshot)| snapshot.clone());
 
-        match self.branch_snapshots.read(&workspace_path) {
+        match self.branch.snapshots.read(&workspace_path) {
             Query::Ready(result) => match result.as_ref() {
                 Ok(Some(snapshot)) => {
                     let snapshot = snapshot.clone();
                     self.cache_sidebar_branch_label(&workspace_path, snapshot.display_branch());
-                    self.visible_branch_snapshot = Some((workspace_path, snapshot.clone()));
+                    self.branch.visible_snapshot = Some((workspace_path, snapshot.clone()));
                     Some(snapshot)
                 }
                 Ok(None) => {
                     self.cache_sidebar_branch_label(&workspace_path, None);
                     if self
-                        .visible_branch_snapshot
+                        .branch
+                        .visible_snapshot
                         .as_ref()
                         .is_some_and(|(path, _)| path == &workspace_path)
                     {
-                        self.visible_branch_snapshot = None;
+                        self.branch.visible_snapshot = None;
                     }
                     None
                 }
@@ -132,7 +135,7 @@ impl Tide {
                         })
                         .await;
                     let _ = tide.update(cx, |tide, cx| {
-                        if !tide.branch_snapshots.fulfill(token, result.clone()) {
+                        if !tide.branch.snapshots.fulfill(token, result.clone()) {
                             return;
                         }
                         match &result {
@@ -157,12 +160,12 @@ impl Tide {
                                         *branch = current.to_owned();
                                         persisted_branch_changed = true;
                                     }
-                                    tide.visible_branch_snapshot = Some((fetch_path, snapshot));
+                                    tide.branch.visible_snapshot = Some((fetch_path, snapshot));
                                     if persisted_branch_changed {
                                         tide.save();
                                     }
                                 }
-                                Ok(None) => tide.visible_branch_snapshot = None,
+                                Ok(None) => tide.branch.visible_snapshot = None,
                                 Err(_) => {}
                             }
                             cx.notify();
@@ -180,10 +183,10 @@ impl Tide {
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf)
         else {
-            self.visible_branch_snapshot = None;
+            self.branch.visible_snapshot = None;
             return;
         };
-        self.branch_snapshots.invalidate(&path);
+        self.branch.snapshots.invalidate(&path);
         cx.notify();
     }
 
@@ -219,7 +222,7 @@ impl Tide {
         let Some(session) = self.selected_session() else {
             return false;
         };
-        if session.is_busy() || self.branch_operation_pending {
+        if session.is_busy() || self.branch.operation_pending {
             return false;
         }
         if matches!(session.workspace, SessionWorkspace::NewWorktree { .. }) {
@@ -247,7 +250,8 @@ impl Tide {
             return false;
         };
         if self
-            .visible_branch_snapshot
+            .branch
+            .visible_snapshot
             .as_ref()
             .filter(|(snapshot_path, _)| snapshot_path == &path)
             .and_then(|(_, snapshot)| snapshot.current.as_deref())
@@ -264,7 +268,7 @@ impl Tide {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.branch_operation_pending
+        if self.branch.operation_pending
             || self.selected_session().is_none_or(|session| {
                 session.is_busy()
                     || matches!(session.workspace, SessionWorkspace::NewWorktree { .. })
@@ -272,11 +276,12 @@ impl Tide {
         {
             return;
         }
-        self.branch_picker_mode = BranchPickerMode::Create;
-        self.branch_picker_highlight = None;
-        self.branch_create_input
+        self.branch.picker_mode = BranchPickerMode::Create;
+        self.branch.picker_highlight = None;
+        self.branch
+            .create_input
             .update(cx, |input, cx| input.clear(cx));
-        let focus = self.branch_create_input.read(cx).focus_handle(cx);
+        let focus = self.branch.create_input.read(cx).focus_handle(cx);
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         });
@@ -294,9 +299,9 @@ impl Tide {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.branch_picker_mode = BranchPickerMode::Browse;
-        self.branch_picker_highlight = None;
-        let focus = self.branch_search.read(cx).focus_handle(cx);
+        self.branch.picker_mode = BranchPickerMode::Browse;
+        self.branch.picker_highlight = None;
+        let focus = self.branch.search.read(cx).focus_handle(cx);
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         });
@@ -304,11 +309,12 @@ impl Tide {
     }
 
     pub(in crate::app) fn confirm_branch_creation(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.branch_picker_mode != BranchPickerMode::Create || self.branch_operation_pending {
+        if self.branch.picker_mode != BranchPickerMode::Create || self.branch.operation_pending {
             return false;
         }
         let branch = self
-            .branch_create_input
+            .branch
+            .create_input
             .read(cx)
             .content()
             .trim()
@@ -332,11 +338,12 @@ impl Tide {
         actions: &[BranchPickerAction],
         cx: &mut Context<Self>,
     ) {
-        if self.branch_picker_mode != BranchPickerMode::Browse || actions.is_empty() {
+        if self.branch.picker_mode != BranchPickerMode::Browse || actions.is_empty() {
             return;
         }
         let current = self
-            .branch_picker_highlight
+            .branch
+            .picker_highlight
             .filter(|index| *index < actions.len());
         let next = match (key, current) {
             ("up", Some(0)) => actions.len() - 1,
@@ -345,15 +352,16 @@ impl Tide {
             (_, Some(index)) => (index + 1) % actions.len(),
             (_, None) => 0,
         };
-        self.branch_picker_highlight = Some(next);
+        self.branch.picker_highlight = Some(next);
         if let Some(BranchPickerAction::Checkout(branch)) = actions.get(next)
             && let Some(row) = self
-                .branch_picker_row_cache
+                .branch
+                .picker_row_cache
                 .borrow()
                 .iter()
                 .position(|entry| entry.name == *branch)
         {
-            self.branch_picker_list_state.scroll_to_reveal_item(row);
+            self.branch.picker_list_state.scroll_to_reveal_item(row);
         }
         cx.notify();
     }
@@ -366,10 +374,10 @@ impl Tide {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.branch_picker_mode == BranchPickerMode::Create {
+        if self.branch.picker_mode == BranchPickerMode::Create {
             return self.confirm_branch_creation(cx);
         }
-        let Some(action) = actions.get(self.branch_picker_highlight.unwrap_or(0)) else {
+        let Some(action) = actions.get(self.branch.picker_highlight.unwrap_or(0)) else {
             return false;
         };
         match action {
@@ -393,10 +401,10 @@ impl Tide {
         operation: BranchOperation,
         cx: &mut Context<Self>,
     ) {
-        if self.branch_operation_pending {
+        if self.branch.operation_pending {
             return;
         }
-        self.branch_operation_pending = true;
+        self.branch.operation_pending = true;
         cx.notify();
         let workspace = client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |tide, cx| {
@@ -422,13 +430,13 @@ impl Tide {
                 })
                 .await;
             let _ = tide.update(cx, |tide, cx| {
-                tide.branch_operation_pending = false;
+                tide.branch.operation_pending = false;
                 match result {
                     Ok(snapshot) => {
                         let current = snapshot.current.clone();
                         tide.cache_sidebar_branch_label(&path, snapshot.display_branch());
-                        tide.visible_branch_snapshot = Some((path.clone(), snapshot));
-                        tide.branch_snapshots.invalidate(&path);
+                        tide.branch.visible_snapshot = Some((path.clone(), snapshot));
+                        tide.branch.snapshots.invalidate(&path);
                         let selected_path = tide
                             .selected_workspace_path()
                             .map(std::path::Path::to_path_buf);
@@ -493,8 +501,8 @@ impl Tide {
         let selected_branch = selected_from_snapshot(&snapshot);
 
         let weak = cx.entity().downgrade();
-        let search = self.branch_search.clone();
-        let create_input = self.branch_create_input.clone();
+        let search = self.branch.search.clone();
+        let create_input = self.branch.create_input.clone();
         let search_focus = search.read(cx).focus_handle(cx);
         let handle = {
             let toggle_weak = weak.clone();
@@ -504,8 +512,8 @@ impl Tide {
             self.menu_handle_with(context.menu_id, cx, move |open, window, cx| {
                 let _ = toggle_weak.update(cx, |this, cx| {
                     if open {
-                        this.branch_picker_mode = BranchPickerMode::Browse;
-                        this.branch_picker_highlight = None;
+                        this.branch.picker_mode = BranchPickerMode::Browse;
+                        this.branch.picker_highlight = None;
                         let placeholder = match surface {
                             BranchPickerSurface::Composer => {
                                 let project_name = this
@@ -523,7 +531,7 @@ impl Tide {
                         reset_create.update(cx, |input, cx| input.clear(cx));
                         this.refresh_selected_branch_snapshot(cx);
                     } else {
-                        this.branch_picker_mode = BranchPickerMode::Browse;
+                        this.branch.picker_mode = BranchPickerMode::Browse;
                         if surface == BranchPickerSurface::Composer {
                             let focus = this.composer_focus(cx);
                             window.focus(&focus, cx);
@@ -546,13 +554,14 @@ impl Tide {
         }
 
         let normalized_query = self
-            .branch_search
+            .branch
+            .search
             .read(cx)
             .content()
             .trim()
             .to_ascii_lowercase();
         let visible_branches = Rc::new(
-            if handle.is_open() && self.branch_picker_mode == BranchPickerMode::Browse {
+            if handle.is_open() && self.branch.picker_mode == BranchPickerMode::Browse {
                 visible_branch_entries(&snapshot.branches, &selected_branch, &normalized_query)
             } else {
                 Vec::new()
@@ -569,13 +578,14 @@ impl Tide {
                 .collect::<Vec<_>>(),
         );
         let highlight = self
-            .branch_picker_highlight
+            .branch
+            .picker_highlight
             .filter(|index| *index < actions.len());
-        let mode = self.branch_picker_mode;
+        let mode = self.branch.picker_mode;
         if handle.is_open() && mode == BranchPickerMode::Browse {
             self.sync_branch_picker_rows(&visible_branches);
         }
-        let branch_list = self.branch_picker_list_state.clone();
+        let branch_list = self.branch.picker_list_state.clone();
 
         Some(popover(
             trigger,
@@ -910,7 +920,7 @@ impl Tide {
                     .on_action(move |_: &DismissMenu, window, cx| {
                         let handled = dismiss_weak
                             .update(cx, |this, cx| {
-                                if this.branch_picker_mode == BranchPickerMode::Create {
+                                if this.branch.picker_mode == BranchPickerMode::Create {
                                     this.cancel_branch_creation(window, cx);
                                     return true;
                                 }

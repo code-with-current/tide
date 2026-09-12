@@ -344,7 +344,7 @@ impl Tide {
         else {
             return;
         };
-        self.branch_snapshots.invalidate(&workspace_path);
+        self.branch.snapshots.invalidate(&workspace_path);
         self.sidebar_branch_scan_fingerprint.set(None);
         self.sidebar_branch_scan_generation
             .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));

@@ -2043,9 +2043,9 @@ impl Tide {
         let workspace_path = self.workspace_path_for_session(session)?.to_path_buf();
         self.selected_project()
             .filter(|project| !project.is_projectless())?;
-        let branch_enabled = !session.is_busy() && !self.branch_operation_pending;
+        let branch_enabled = !session.is_busy() && !self.branch.operation_pending;
         let planned_worktree = matches!(workspace, SessionWorkspace::NewWorktree { .. });
-        let pending = self.branch_operation_pending;
+        let pending = self.branch.operation_pending;
 
         let selected_from_snapshot = move |snapshot: &BranchSnapshot| {
             match &workspace {

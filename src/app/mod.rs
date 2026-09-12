@@ -19,7 +19,6 @@ use uuid::Uuid;
 use crate::composer_complete::{FileEntry, SlashCommand};
 use crate::computer_use::{ComputerTarget, ComputerUsePhase, PendingComputerApproval};
 use crate::driver::{self, DriverHandle, DriverStartOptions};
-use crate::git_branch::BranchSnapshot;
 use crate::input::{InputEvent, TextInput};
 use crate::md;
 use crate::model::{
@@ -1087,21 +1086,7 @@ pub struct Tide {
     /// A tide provider the ⋯ rail menu asked to edit; the wizard opens on
     /// the next render pass, where a Window is available for its inputs.
     tide_edit_request: Option<String>,
-    branch_search: Entity<TextInput>,
-    branch_create_input: Entity<TextInput>,
-    branch_picker_mode: BranchPickerMode,
-    /// Keyboard cursor over the branch picker's enabled actions. Disabled
-    /// rows remain visible but never enter this index.
-    branch_picker_highlight: Option<usize>,
-    branch_picker_list_state: ListState,
-    branch_picker_row_cache: RefCell<Vec<crate::git_branch::BranchEntry>>,
-    /// Git subprocess results per concrete workspace path. Render only reads
-    /// this in-memory cache; misses are fulfilled on the background executor.
-    branch_snapshots: QueryCache<PathBuf, Result<Option<BranchSnapshot>, String>>,
-    /// Stale-while-revalidate value for the selected path, avoiding label
-    /// flicker when app activation invalidates the query.
-    visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
-    branch_operation_pending: bool,
+    branch: state::BranchState,
     /// Window-modal Git commit/push UI. Its repository snapshot is filled
     /// off-thread; frames only read this in-memory value.
     commit_dialog: Option<commit_dialog::CommitDialogState>,
@@ -2490,13 +2475,13 @@ impl Tide {
                 &branch_search,
                 |this: &mut Self, search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited)
-                        && this.branch_picker_mode == BranchPickerMode::Browse
+                        && this.branch.picker_mode == BranchPickerMode::Browse
                     {
                         if search.read(cx).content().trim().is_empty() {
-                            this.branch_picker_highlight = None;
+                            this.branch.picker_highlight = None;
                         } else {
-                            this.branch_picker_highlight = Some(0);
-                            this.branch_picker_list_state.scroll_to_reveal_item(0);
+                            this.branch.picker_highlight = Some(0);
+                            this.branch.picker_list_state.scroll_to_reveal_item(0);
                         }
                         cx.notify();
                     }
@@ -2721,8 +2706,11 @@ impl Tide {
                 composer_draft_save_generation: 0,
                 command_palette: command_palette::CommandPaletteUi::new(command_palette_search),
                 task_switcher,
-                branch_search,
-                branch_create_input,
+                branch: state::BranchState::new(
+                    branch_search,
+                    branch_create_input,
+                    branch_picker_list_state,
+                ),
                 settings_search,
                 daemon_reconfigure_pending: false,
                 settings_focus,
@@ -2754,13 +2742,6 @@ impl Tide {
                 inspector: InspectorState::new(),
                 inspector_stream_log: HashMap::new(),
                 tide_edit_request: None,
-                branch_picker_mode: BranchPickerMode::Browse,
-                branch_picker_highlight: None,
-                branch_picker_list_state,
-                branch_picker_row_cache: RefCell::new(Vec::new()),
-                branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
-                visible_branch_snapshot: None,
-                branch_operation_pending: false,
                 commit_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,

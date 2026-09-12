@@ -198,3 +198,42 @@ impl ModelPickerState {
         }
     }
 }
+
+/// Branch picker inputs plus the git snapshot caches backing the branch
+/// surfaces. Snapshot misses are fulfilled off-thread; frames read only the
+/// in-memory cache.
+pub(in crate::app) struct BranchState {
+    pub(in crate::app) search: gpui::Entity<crate::input::TextInput>,
+    pub(in crate::app) create_input: gpui::Entity<crate::input::TextInput>,
+    pub(in crate::app) picker_mode: super::BranchPickerMode,
+    pub(in crate::app) picker_highlight: Option<usize>,
+    pub(in crate::app) picker_list_state: gpui::ListState,
+    pub(in crate::app) picker_row_cache: std::cell::RefCell<Vec<crate::git_branch::BranchEntry>>,
+    pub(in crate::app) snapshots: crate::query::QueryCache<
+        std::path::PathBuf,
+        Result<Option<crate::git_branch::BranchSnapshot>, String>,
+    >,
+    pub(in crate::app) visible_snapshot:
+        Option<(std::path::PathBuf, crate::git_branch::BranchSnapshot)>,
+    pub(in crate::app) operation_pending: bool,
+}
+
+impl BranchState {
+    pub(in crate::app) fn new(
+        search: gpui::Entity<crate::input::TextInput>,
+        create_input: gpui::Entity<crate::input::TextInput>,
+        picker_list_state: gpui::ListState,
+    ) -> Self {
+        Self {
+            search,
+            create_input,
+            picker_mode: super::BranchPickerMode::Browse,
+            picker_highlight: None,
+            picker_list_state,
+            picker_row_cache: std::cell::RefCell::new(Vec::new()),
+            snapshots: crate::query::QueryCache::new(super::MAX_CACHED_WORKSPACES),
+            visible_snapshot: None,
+            operation_pending: false,
+        }
+    }
+}
