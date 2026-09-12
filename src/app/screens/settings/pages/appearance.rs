@@ -256,7 +256,7 @@ impl Tide {
         self.skills_search.update(cx, |input, cx| {
             input.set_placeholder(tr!("skills.search"), cx)
         });
-        self.usage_project_filter.update(cx, |input, cx| {
+        self.usage.project_filter.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.filter_projects"), cx)
         });
         self.refresh_command_palette_localized_text(cx);

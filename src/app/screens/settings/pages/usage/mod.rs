@@ -234,9 +234,9 @@ impl Tide {
     /// covers a year of calendar months; the daily and project views share
     /// the trailing-days selector.
     fn effective_usage_window(&self) -> UsageWindow {
-        match self.usage_view {
+        match self.usage.view {
             UsageViewMode::Monthly => MONTHLY_WINDOW,
-            UsageViewMode::Daily | UsageViewMode::Projects => self.usage_window,
+            UsageViewMode::Daily | UsageViewMode::Projects => self.usage.window,
         }
     }
 
@@ -247,24 +247,26 @@ impl Tide {
     pub(in crate::app) fn ensure_usage_report(&mut self, force: bool, cx: &mut Context<Self>) {
         let window = self.effective_usage_window();
         let satisfied = self
-            .usage_report
+            .usage
+            .report
             .as_ref()
             .is_some_and(|report| report.window == window)
             && self
-                .usage_report_scanned_at
+                .usage
+                .report_scanned_at
                 .is_some_and(|scanned| scanned.elapsed() < USAGE_REFRESH_AFTER);
         // A fetch for this window already absorbs even a forced refresh — it
         // only just started reading the same table, and a duplicate would
         // burn a background pass to produce the same answer.
-        if self.usage_report_pending_for == Some(window) {
+        if self.usage.report_pending_for == Some(window) {
             return;
         }
         if !force && satisfied {
             return;
         }
-        self.usage_report_pending_for = Some(window);
-        self.usage_report_generation += 1;
-        let generation = self.usage_report_generation;
+        self.usage.report_pending_for = Some(window);
+        self.usage.report_generation += 1;
+        let generation = self.usage.report_generation;
         let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
             let report = cx
@@ -281,17 +283,17 @@ impl Tide {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.usage_report_generation != generation {
+                if this.usage.report_generation != generation {
                     return;
                 }
-                this.usage_report_pending_for = None;
+                this.usage.report_pending_for = None;
                 // The day axis may have changed length; a stale index would
                 // point at the wrong day.
-                this.usage_chart_hover = None;
+                this.usage.chart_hover = None;
                 match report {
                     Ok(report) => {
-                        this.usage_report_scanned_at = Some(Instant::now());
-                        this.usage_report = Some(report);
+                        this.usage.report_scanned_at = Some(Instant::now());
+                        this.usage.report = Some(report);
                     }
                     Err(error) => this.show_toast(error.to_string()),
                 }
@@ -303,19 +305,19 @@ impl Tide {
     }
 
     fn set_usage_window(&mut self, window: UsageWindow, cx: &mut Context<Self>) {
-        if self.usage_window == window {
+        if self.usage.window == window {
             return;
         }
-        self.usage_window = window;
+        self.usage.window = window;
         self.ensure_usage_report(false, cx);
         cx.notify();
     }
 
     fn set_usage_view(&mut self, view: UsageViewMode, cx: &mut Context<Self>) {
-        if self.usage_view == view {
+        if self.usage.view == view {
             return;
         }
-        self.usage_view = view;
+        self.usage.view = view;
         // The statement view fetches a different window; the others share one.
         self.ensure_usage_report(false, cx);
         cx.notify();
@@ -323,7 +325,7 @@ impl Tide {
 
     pub(in crate::app) fn render_usage_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let pending = self.usage_report_pending_for.is_some();
+        let pending = self.usage.report_pending_for.is_some();
         let expected = self.effective_usage_window();
         // A snapshot of the other shape (statement months vs trailing days)
         // must not masquerade as this view's data — a 30-day fetch rendered as
@@ -332,7 +334,7 @@ impl Tide {
         // replacement fetches: the range caption names what is actually shown,
         // and swapping to a spinner on every window click would blink away a
         // page that is still substantially right.
-        let report = self.usage_report.as_ref().filter(|report| {
+        let report = self.usage.report.as_ref().filter(|report| {
             matches!(
                 (report.window, expected),
                 (UsageWindow::TrailingDays(_), UsageWindow::TrailingDays(_))
@@ -346,7 +348,7 @@ impl Tide {
         let mut page = div()
             .flex()
             .flex_col()
-            .when(self.usage_view == UsageViewMode::Projects, |element| {
+            .when(self.usage.view == UsageViewMode::Projects, |element| {
                 // This view's list owns scrolling, so the page fills the
                 // pane instead of growing it. The other views ride the
                 // shared scroll container like every settings page.
@@ -359,7 +361,7 @@ impl Tide {
             // skeleton in the incoming view's silhouette, so the swap to
             // data doesn't jump.
             return page
-                .child(usage_skeleton(self.usage_view, &theme))
+                .child(usage_skeleton(self.usage.view, &theme))
                 .into_any_element();
         };
 
@@ -381,7 +383,7 @@ impl Tide {
             .gap(px(28.0))
             .child(self.render_usage_summary(report, &providers, &theme, cx))
             .child(self.render_usage_chart_column(report, &providers, &theme, cx));
-        page = match self.usage_view {
+        page = match self.usage.view {
             UsageViewMode::Daily => page
                 .child(dashboard)
                 .child(usage_metric_strip(report, &theme))
@@ -401,8 +403,8 @@ impl Tide {
                     report,
                     &providers,
                     &theme,
-                    &self.usage_months_scroll,
-                    &self.usage_months_scrollbar,
+                    &self.usage.months_scroll,
+                    &self.usage.months_scrollbar,
                     cx,
                 )),
             UsageViewMode::Projects => {
@@ -436,7 +438,7 @@ impl Tide {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let monthly = self.usage_view == UsageViewMode::Monthly;
+        let monthly = self.usage.view == UsageViewMode::Monthly;
 
         let mut view_options = div()
             .rounded(px(7.0))
@@ -449,7 +451,7 @@ impl Tide {
             (UsageViewMode::Monthly, tr!("usage.monthly")),
             (UsageViewMode::Projects, tr!("usage.projects")),
         ] {
-            let selected = self.usage_view == view;
+            let selected = self.usage.view == view;
             view_options = view_options.child(
                 div()
                     .id(SharedString::from(format!(
@@ -483,7 +485,7 @@ impl Tide {
         // The statement view fixes its own range, so the window selector
         // would be a dead control there.
         let window_selector = (!monthly).then(|| {
-            let selected = self.usage_window;
+            let selected = self.usage.window;
             let weak = cx.entity().downgrade();
             let handle = self.menu_handle("usage-window-selector", cx);
             dropdown_menu(
@@ -591,7 +593,7 @@ impl Tide {
         theme: &Theme,
         _cx: &mut Context<Self>,
     ) -> Div {
-        let metric = self.usage_metric;
+        let metric = self.usage.metric;
         let headline = match metric {
             UsageMetric::Cost => format_usd(report.cost_usd),
             UsageMetric::Tokens => format_tokens_compact(report.total_tokens as f64),
@@ -742,8 +744,8 @@ impl Tide {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let metric = self.usage_metric;
-        let bin = UsageBin::for_view(self.usage_view);
+        let metric = self.usage.metric;
+        let bin = UsageBin::for_view(self.usage.view);
         let mut toggle = div()
             .rounded(px(7.0))
             .border_1()
@@ -777,8 +779,8 @@ impl Tide {
                     })
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.usage_metric != option {
-                            this.usage_metric = option;
+                        if this.usage.metric != option {
+                            this.usage.metric = option;
                             cx.notify();
                         }
                     })),
@@ -877,7 +879,7 @@ impl Tide {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let metric = self.usage_metric;
+        let metric = self.usage.metric;
         let by_cost = metric == UsageMetric::Cost;
         let key_count = keys.len();
         // One column per bin, per provider in report order. The chart paths
@@ -936,9 +938,9 @@ impl Tide {
             );
         }
 
-        let hover = self.usage_chart_hover.filter(|index| *index < key_count);
+        let hover = self.usage.chart_hover.filter(|index| *index < key_count);
         let colors = providers.colors_in_order();
-        let bounds_cell = self.usage_chart_bounds.clone();
+        let bounds_cell = self.usage.chart_bounds.clone();
         let paint_series = series.clone();
         let paint_ticks = ticks.clone();
         let paint_colors = colors.clone();
@@ -1065,7 +1067,7 @@ impl Tide {
             .tab_index(0)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                let Some(bounds) = this.usage_chart_bounds.get() else {
+                let Some(bounds) = this.usage.chart_bounds.get() else {
                     return;
                 };
                 if key_count == 0 || f32::from(bounds.size.width) <= 0.0 {
@@ -1075,14 +1077,14 @@ impl Tide {
                     ((event.position.x - bounds.origin.x) / bounds.size.width).clamp(0.0, 1.0);
                 let index = ((fraction * key_count.saturating_sub(1) as f32).round() as usize)
                     .min(key_count - 1);
-                if this.usage_chart_hover != Some(index) {
-                    this.usage_chart_hover = Some(index);
+                if this.usage.chart_hover != Some(index) {
+                    this.usage.chart_hover = Some(index);
                     cx.notify();
                 }
             }))
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                if !hovered && this.usage_chart_hover.is_some() {
-                    this.usage_chart_hover = None;
+                if !hovered && this.usage.chart_hover.is_some() {
+                    this.usage.chart_hover = None;
                     cx.notify();
                 }
             }))
@@ -1095,21 +1097,23 @@ impl Tide {
                 let last = key_count - 1;
                 let next = match event.keystroke.key.as_str() {
                     "left" => Some(
-                        this.usage_chart_hover
+                        this.usage
+                            .chart_hover
                             .map_or(last, |index| index.saturating_sub(1)),
                     ),
                     "right" => Some(
-                        this.usage_chart_hover
+                        this.usage
+                            .chart_hover
                             .map_or(0, |index| (index + 1).min(last)),
                     ),
                     "home" => Some(0),
                     "end" => Some(last),
-                    "escape" if this.usage_chart_hover.is_some() => None,
+                    "escape" if this.usage.chart_hover.is_some() => None,
                     _ => return,
                 };
                 cx.stop_propagation();
-                if this.usage_chart_hover != next {
-                    this.usage_chart_hover = next;
+                if this.usage.chart_hover != next {
+                    this.usage.chart_hover = next;
                     cx.notify();
                 }
             }))
@@ -1148,8 +1152,8 @@ impl Tide {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let breakdown = self.usage_breakdown;
-        let bin = UsageBin::for_view(self.usage_view);
+        let breakdown = self.usage.breakdown;
+        let bin = UsageBin::for_view(self.usage.view);
         let mut toggle = div()
             .rounded(px(7.0))
             .border_1()
@@ -1189,8 +1193,8 @@ impl Tide {
                     })
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.usage_breakdown != option {
-                            this.usage_breakdown = option;
+                        if this.usage.breakdown != option {
+                            this.usage.breakdown = option;
                             cx.notify();
                         }
                     })),
@@ -1271,7 +1275,8 @@ impl Tide {
     ) -> Div {
         let by_cost = rank_by_cost(report);
         let filter = self
-            .usage_project_filter
+            .usage
+            .project_filter
             .read(cx)
             .content()
             .trim()
@@ -1303,7 +1308,7 @@ impl Tide {
                 }
             })
             .fold(0.0_f64, f64::max);
-        self.usage_projects_scale.set((peak, by_cost));
+        self.usage.projects_scale.set((peak, by_cost));
         self.sync_usage_project_rows(&indices);
 
         let caption = if filter.is_empty() {
@@ -1352,7 +1357,7 @@ impl Tide {
                 .child(
                     div().px(px(20.0)).size_full().child(
                         list(
-                            self.usage_projects_list.clone(),
+                            self.usage.projects_list.clone(),
                             move |index, _window, cx| {
                                 let palette = palette_for_list.clone();
                                 entity
@@ -1369,8 +1374,8 @@ impl Tide {
                     ),
                 )
                 .child(scrollbar::vertical(
-                    &self.usage_projects_list,
-                    &self.usage_projects_scrollbar,
+                    &self.usage.projects_list,
+                    &self.usage.projects_scrollbar,
                 ))
                 .into_any_element()
         };
@@ -1432,7 +1437,7 @@ impl Tide {
                             ),
                     )
                     .child(
-                        TextField::new("usage-project-filter", self.usage_project_filter.clone())
+                        TextField::new("usage-project-filter", self.usage.project_filter.clone())
                             .icon("icons/search.svg", 13.0)
                             .w(px(240.0))
                             .flex_none(),
@@ -1445,7 +1450,7 @@ impl Tide {
     /// Filtering preserves order, so unrelated churn splices only the
     /// changed suffix and scroll position survives typing in the filter.
     fn sync_usage_project_rows(&self, indices: &[usize]) {
-        let mut cached = self.usage_projects_rows.borrow_mut();
+        let mut cached = self.usage.projects_rows.borrow_mut();
         if cached.as_slice() == indices {
             return;
         }
@@ -1457,14 +1462,17 @@ impl Tide {
         let old_count = cached.len();
         *cached = indices.to_vec();
         if old_count == 0 {
-            self.usage_projects_list
+            self.usage
+                .projects_list
                 .reset_with_uniform_height(indices.len(), px(USAGE_PROJECT_ROW_HEIGHT));
         } else {
-            self.usage_projects_list
+            self.usage
+                .projects_list
                 .splice(prefix..old_count, indices.len() - prefix);
             // Newly inserted rows have no measured height yet; the uniform
             // hint keeps the scrollbar's total height honest.
-            self.usage_projects_list
+            self.usage
+                .projects_list
                 .clone()
                 .with_uniform_item_height(px(USAGE_PROJECT_ROW_HEIGHT));
         }
@@ -1480,14 +1488,15 @@ impl Tide {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let (peak, by_cost) = self.usage_projects_scale.get();
-        let rows = self.usage_projects_rows.borrow();
+        let (peak, by_cost) = self.usage.projects_scale.get();
+        let rows = self.usage.projects_rows.borrow();
         let last = row + 1 == rows.len();
         let Some(index) = rows.get(row).copied() else {
             return div().into_any_element();
         };
         let Some(project) = self
-            .usage_report
+            .usage
+            .report
             .as_ref()
             .and_then(|report| report.projects.get(index))
         else {
@@ -1518,7 +1527,7 @@ impl Tide {
         let models_control = self.usage_models_control(
             format!(
                 "usage-project-models-{}-{index}",
-                self.usage_report_generation
+                self.usage.report_generation
             ),
             &project.top_models,
             project.cost_usd,

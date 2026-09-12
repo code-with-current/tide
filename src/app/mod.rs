@@ -1079,43 +1079,8 @@ pub struct Tide {
     last_permission_probe: Option<Instant>,
     /// The floating drag-to-authorize panel state (macOS guidance flow).
     permission_flow: permission_flow::PermissionFlowHost,
-    /// The settings Usage page's snapshot: token/cost usage folded from the
-    /// per-turn ledger off-thread. Frames read only this.
-    usage_report: Option<crate::usage_report::UsageReport>,
-    /// The window a build is currently in flight for, so a repeat request for
-    /// the same window coalesces while a changed window supersedes it.
-    usage_report_pending_for: Option<crate::usage_report::UsageWindow>,
-    /// Bumped per build; a result from a superseded build is discarded.
-    usage_report_generation: u64,
-    /// When the current snapshot landed, for the reopen-staleness check.
-    usage_report_scanned_at: Option<Instant>,
-    usage_view: UsageViewMode,
-    /// The selected window for the daily and project views; the statement
-    /// view fixes its own.
-    usage_window: crate::usage_report::UsageWindow,
-    usage_metric: UsageMetric,
-    usage_breakdown: UsageBreakdown,
-    /// Scroll position of the monthly statement card, which scrolls
-    /// internally like the projects card so the two list views feel alike.
-    usage_months_scroll: ScrollHandle,
-    usage_months_scrollbar: Rc<ScrollbarState>,
-    /// Filter query over the Usage page's project rows.
-    usage_project_filter: Entity<TextInput>,
-    /// Virtualized list over the filtered project rows, so only visible rows
-    /// build elements no matter how many working directories have usage.
-    usage_projects_list: ListState,
-    usage_projects_scrollbar: Rc<ScrollbarState>,
-    /// Indices into `usage_report.projects` the filter leaves visible — the
-    /// row builder reads only this.
-    usage_projects_rows: RefCell<Vec<usize>>,
-    /// `(peak value, rank-by-cost)` for the visible rows' bars, refreshed
-    /// once per frame rather than per row.
-    usage_projects_scale: Cell<(f64, bool)>,
-    /// Hovered or keyboard-selected day index on the Usage page's chart.
-    usage_chart_hover: Option<usize>,
-    /// The chart plot's window bounds, written during paint so the mouse-move
-    /// handler can map positions to day indices.
-    usage_chart_bounds: Rc<Cell<Option<gpui::Bounds<Pixels>>>>,
+    /// The settings Usage page's full snapshot, view state, and list caches.
+    usage: state::UsageState,
     computer_use_app_icons: RefCell<HashMap<String, Option<std::sync::Arc<gpui::Image>>>>,
     computer_use_app_icon_loads: RefCell<HashSet<String>>,
     /// Installed folder-capable apps for the header's "open project in"
@@ -2834,23 +2799,7 @@ impl Tide {
                 computer_permission_request_pending: false,
                 last_permission_probe: None,
                 permission_flow: permission_flow::PermissionFlowHost::default(),
-                usage_report: None,
-                usage_report_pending_for: None,
-                usage_report_generation: 0,
-                usage_report_scanned_at: None,
-                usage_view: UsageViewMode::Daily,
-                usage_window: crate::usage_report::UsageWindow::TrailingDays(30),
-                usage_metric: UsageMetric::Cost,
-                usage_breakdown: UsageBreakdown::Model,
-                usage_months_scroll: ScrollHandle::new(),
-                usage_months_scrollbar: ScrollbarState::new(),
-                usage_project_filter,
-                usage_projects_list,
-                usage_projects_scrollbar: ScrollbarState::new(),
-                usage_projects_rows: RefCell::new(Vec::new()),
-                usage_projects_scale: Cell::new((0.0, true)),
-                usage_chart_hover: None,
-                usage_chart_bounds: Rc::default(),
+                usage: state::UsageState::new(usage_project_filter, usage_projects_list),
                 computer_use_app_icons: RefCell::new(HashMap::new()),
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),

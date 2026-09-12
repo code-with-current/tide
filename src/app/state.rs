@@ -32,3 +32,54 @@ impl ShellState {
         }
     }
 }
+
+/// The settings Usage page: folded snapshots, view/metric selection, and the
+/// virtualized project list's caches. Built with the two `cx`-allocated
+/// pieces (`Entity<TextInput>` filter, `ListState` rows).
+pub(in crate::app) struct UsageState {
+    pub(in crate::app) report: Option<crate::usage_report::UsageReport>,
+    pub(in crate::app) report_pending_for: Option<crate::usage_report::UsageWindow>,
+    pub(in crate::app) report_generation: u64,
+    pub(in crate::app) report_scanned_at: Option<Instant>,
+    pub(in crate::app) view: super::UsageViewMode,
+    pub(in crate::app) window: crate::usage_report::UsageWindow,
+    pub(in crate::app) metric: super::UsageMetric,
+    pub(in crate::app) breakdown: super::UsageBreakdown,
+    pub(in crate::app) months_scroll: gpui::ScrollHandle,
+    pub(in crate::app) months_scrollbar: std::rc::Rc<crate::ui::scrollbar::ScrollbarState>,
+    pub(in crate::app) project_filter: gpui::Entity<crate::input::TextInput>,
+    pub(in crate::app) projects_list: gpui::ListState,
+    pub(in crate::app) projects_scrollbar: std::rc::Rc<crate::ui::scrollbar::ScrollbarState>,
+    pub(in crate::app) projects_rows: std::cell::RefCell<Vec<usize>>,
+    pub(in crate::app) projects_scale: std::cell::Cell<(f64, bool)>,
+    pub(in crate::app) chart_hover: Option<usize>,
+    pub(in crate::app) chart_bounds:
+        std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
+}
+
+impl UsageState {
+    pub(in crate::app) fn new(
+        project_filter: gpui::Entity<crate::input::TextInput>,
+        projects_list: gpui::ListState,
+    ) -> Self {
+        Self {
+            report: None,
+            report_pending_for: None,
+            report_generation: 0,
+            report_scanned_at: None,
+            view: super::UsageViewMode::Daily,
+            window: crate::usage_report::UsageWindow::TrailingDays(30),
+            metric: super::UsageMetric::Cost,
+            breakdown: super::UsageBreakdown::Model,
+            months_scroll: gpui::ScrollHandle::new(),
+            months_scrollbar: crate::ui::scrollbar::ScrollbarState::new(),
+            project_filter,
+            projects_list,
+            projects_scrollbar: crate::ui::scrollbar::ScrollbarState::new(),
+            projects_rows: std::cell::RefCell::new(Vec::new()),
+            projects_scale: std::cell::Cell::new((0.0, true)),
+            chart_hover: None,
+            chart_bounds: std::rc::Rc::default(),
+        }
+    }
+}

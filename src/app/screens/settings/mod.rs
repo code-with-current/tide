@@ -90,7 +90,7 @@ impl Tide {
         // dashboard scrolls with the page like Daily, its statement card
         // capped internally.
         let fills_viewport =
-            page == SettingsPage::Usage && self.usage_view == UsageViewMode::Projects;
+            page == SettingsPage::Usage && self.usage.view == UsageViewMode::Projects;
         // The titlebar strip is transparent; once content slides under it, a
         // hairline marks the boundary so the clip edge reads as a header
         // rather than a glitch.
