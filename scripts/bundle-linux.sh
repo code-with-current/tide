@@ -21,7 +21,10 @@ cd "$root"
 
 target_dir="${CARGO_TARGET_DIR:-target}"
 version="$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"name":"tide","version":"\([^"]*\)".*/\1/p')"
-package_version="${version//-/~}"
+# Prereleases sort before their release: build the tilde form with tr rather
+# than a bash substitution, and never write it through an expanding heredoc —
+# a stray '~' expansion onto the runner's HOME corrupts the control version.
+package_version="$(printf '%s' "$version" | tr -- '-' '~')"
 
 host_arch="$(uname -m)"
 case "$host_arch" in
@@ -67,17 +70,18 @@ install -Dm644 LICENSE "$tree/usr/share/licenses/tide/LICENSE"
 deb_root="$staging/deb"
 mkdir -p "$deb_root/DEBIAN"
 cp -R "$tree/." "$deb_root/"
-cat > "$deb_root/DEBIAN/control" <<EOF
-Package: tide
-Version: ${package_version}
-Section: devel
-Priority: optional
-Architecture: ${deb_arch}
-Maintainer: Tide <contact@tide.codes>
-Depends: libfontconfig1, libxkbcommon-x11-0, libvulkan1
-Homepage: https://tide.codes
-Description: ${description}
-EOF
+{
+  printf 'Package: tide\n'
+  printf 'Version: %s\n' "$package_version"
+  printf 'Section: devel\n'
+  printf 'Priority: optional\n'
+  printf 'Architecture: %s\n' "$deb_arch"
+  printf 'Maintainer: Tide <contact@tide.codes>\n'
+  printf 'Depends: libfontconfig1, libxkbcommon-x11-0, libvulkan1\n'
+  printf 'Homepage: https://tide.codes\n'
+  printf 'Description: %s\n' "$description"
+} > "$deb_root/DEBIAN/control"
+echo "deb control version: $(sed -n 's/^Version: //p' "$deb_root/DEBIAN/control")"
 dpkg-deb --build --root-owner-group "$deb_root" "$release_dir/$prefix.deb"
 
 # --- rpm ------------------------------------------------------------------
@@ -87,7 +91,7 @@ mkdir -p "$rpm_top/BUILD" "$rpm_top/RPMS" "$rpm_top/SOURCES" "$rpm_top/SPECS" "$
 cp -R "$tree" "$staging/rpm-root"
 cat > "$rpm_top/SPECS/tide.spec" <<EOF
 Name:           tide
-Version:        ${package_version}
+Version:        @PACKAGE_VERSION@
 Release:        1
 Summary:        ${description}
 License:        GPL-3.0-only
@@ -104,6 +108,7 @@ ${description}
 /usr/share/icons/hicolor/256x256/apps/codes.tide.png
 /usr/share/licenses/tide/LICENSE
 EOF
+sed -i "s|@PACKAGE_VERSION@|${package_version}|" "$rpm_top/SPECS/tide.spec"
 rpmbuild -bb --quiet \
   --define "_topdir $rpm_top" \
   --buildroot "$staging/rpm-root" \

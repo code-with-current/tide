@@ -14,6 +14,9 @@
 #ifndef Arch
   #error Arch must be defined (ISCC /DArch=...)
 #endif
+#ifndef NumericVersion
+  #error NumericVersion must be defined (ISCC /DNumericVersion=x.x.x) for VersionInfoVersion
+#endif
 #ifndef StageDir
   #error StageDir must be defined (ISCC /DStageDir=...)
 #endif
@@ -36,7 +39,7 @@
 AppId={{23af0d31-8864-4a77-b1c8-b0a90f9770ca}
 AppName=Tide
 AppVersion={#AppVersion}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
 AppPublisher=Tide
 AppPublisherURL=https://tide.codes
 AppSupportURL=https://github.com/code-with-current/page/issues

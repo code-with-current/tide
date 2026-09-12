@@ -104,6 +104,9 @@ const version = metadata.packages.find(
 if (!version) {
   throw new Error(`Cargo package "${packageName}" was not found.`);
 }
+// Inno's VersionInfoVersion must be plain x.x.x.x — a pre-release suffix like
+// "-beta" is valid in AppVersion display strings but aborts the compile.
+const numericVersion = version.replace(/[-+].*$/, "");
 
 const hostLine = (await $`rustc -vV`.quiet().text())
   .split("\n")
@@ -257,7 +260,7 @@ try {
   // The installer is what the in-app updater downloads and re-runs, so it
   // ships from the same signed staging directory as the zip.
   await rm(installer, { force: true });
-  await $`${findInnoSetupCompiler()} ${`/DAppVersion=${version}`} ${`/DArch=${architecture}`} ${`/DStageDir=${packageDirectory}`} ${`/DOutputDir=${releaseDirectory}`} ${join(projectRoot, "resources", "windows", "tide.iss")}`;
+  await $`${findInnoSetupCompiler()} ${`/DAppVersion=${version}`} ${`/DNumericVersion=${numericVersion}`} ${`/DArch=${architecture}`} ${`/DStageDir=${packageDirectory}`} ${`/DOutputDir=${releaseDirectory}`} ${join(projectRoot, "resources", "windows", "tide.iss")}`;
   if (!existsSync(installer)) {
     throw new Error(`ISCC did not produce ${installer}`);
   }
