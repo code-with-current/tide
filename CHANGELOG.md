@@ -16,6 +16,8 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [Unreleased]
 
+## [0.1.0-beta]
+
 - Slash commands and skills resolve in one call: invoking `/name` through the
   slash_command tool now checks the workspace's enabled skill catalog when no
   command file matches — including multi-word skill names like
