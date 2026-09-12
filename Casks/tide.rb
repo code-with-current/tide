@@ -1,8 +1,8 @@
 cask "tide" do
-  version "0.1.16"
+  version "0.1.0-beta"
 
   url "https://github.com/code-with-current/tide/releases/download/v#{version}/tide-v#{version}-mac-arm64.dmg"
-  sha256 "2e64bffe8a7abf252e16aceb16724635b1816c186ae1788eb1070c0016736494"
+  sha256 "417df5c106541bc58048354bf429b76161639348c51c968b34efa871920dc2fe"
 
   depends_on arch: :arm64
 
