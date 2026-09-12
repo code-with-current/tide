@@ -60,7 +60,6 @@ use crate::{
 
 use crate::app::features::browser::mermaid_images;
 use crate::app::features::composer::autocomplete;
-use crate::app::features::composer::model_picker;
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
@@ -1037,7 +1036,6 @@ pub struct Tide {
     composer_draft_save_generation: u64,
     command_palette: command_palette::CommandPaletteUi,
     task_switcher: task_switcher::TaskSwitcherUi,
-    model_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
     settings_focus: FocusHandle,
@@ -1063,16 +1061,9 @@ pub struct Tide {
     usage: state::UsageState,
     /// Computer Use permissions, app-icon caches, and the "open in" app list.
     computer: state::ComputerUseState,
-    model_picker_tab: ModelPickerTab,
+    model: state::ModelPickerState,
     /// Per-site inputs of the shared model picker (`render_model_picker`),
     /// keyed by menu id and refreshed on every render so the toggle observer
-    /// — which is only consulted the first time a menu id is seen — always
-    /// reads the calling surface's current state.
-    model_picker_configs: RefCell<HashMap<SharedString, model_picker::ModelPickerConfig>>,
-    /// The selection of the surface whose picker menu is open, recorded when
-    /// it toggled open: the session's model for the composer, the stored
-    /// override for a background-task row. Reveal and tab cycling read it.
-    model_picker_active: Option<(ProviderKind, String)>,
     /// Feature flag for the parallel tide-anatomy transcript pane. Resolved
     /// once in `Tide::new` from `TIDE_TIMELINE_V2` (`1`/`0`) over the
     /// debug-on / release-off default; always off under `cfg(test)` so the
@@ -1096,16 +1087,6 @@ pub struct Tide {
     /// A tide provider the ⋯ rail menu asked to edit; the wizard opens on
     /// the next render pass, where a Window is available for its inputs.
     tide_edit_request: Option<String>,
-    /// Keyboard cursor over the model picker's filtered rows. `None` means the
-    /// keyboard has not moved yet, so `enter` takes the first row.
-    model_picker_highlight: Option<usize>,
-    model_picker_scroll: ScrollHandle,
-    model_picker_scrollbar: Rc<ScrollbarState>,
-    /// Focus for the picker's no-providers state. The panel takes focus on
-    /// open so `escape` has a focused descendant to dispatch up from, and
-    /// normally that is the filter field — which the empty state does not
-    /// draw, so its one button holds focus instead.
-    model_picker_empty_focus: FocusHandle,
     branch_search: Entity<TextInput>,
     branch_create_input: Entity<TextInput>,
     branch_picker_mode: BranchPickerMode,
@@ -2484,11 +2465,11 @@ impl Tide {
                 |this: &mut Self, search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
                         if search.read(cx).content().trim().is_empty() {
-                            this.model_picker_highlight = None;
+                            this.model.highlight = None;
                             this.reveal_selected_picker_model();
                         } else {
-                            this.model_picker_highlight = Some(0);
-                            this.model_picker_scroll.scroll_to_item(0);
+                            this.model.highlight = Some(0);
+                            this.model.scroll.scroll_to_item(0);
                         }
                         cx.notify();
                     }
@@ -2740,7 +2721,6 @@ impl Tide {
                 composer_draft_save_generation: 0,
                 command_palette: command_palette::CommandPaletteUi::new(command_palette_search),
                 task_switcher,
-                model_search,
                 branch_search,
                 branch_create_input,
                 settings_search,
@@ -2764,18 +2744,16 @@ impl Tide {
                     computer_permission_tx,
                     computer_permission_events,
                 ),
-                model_picker_tab,
-                model_picker_highlight: None,
-                model_picker_configs: RefCell::new(HashMap::new()),
-                model_picker_active: None,
+                model: state::ModelPickerState::new(
+                    model_search,
+                    model_picker_tab,
+                    model_picker_empty_focus,
+                ),
                 timeline_v2,
                 timeline_v2_state: TranscriptV2::new(),
                 inspector: InspectorState::new(),
                 inspector_stream_log: HashMap::new(),
                 tide_edit_request: None,
-                model_picker_scroll: ScrollHandle::new(),
-                model_picker_scrollbar: ScrollbarState::new(),
-                model_picker_empty_focus,
                 branch_picker_mode: BranchPickerMode::Browse,
                 branch_picker_highlight: None,
                 branch_picker_list_state,

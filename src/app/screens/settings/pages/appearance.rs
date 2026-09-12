@@ -241,7 +241,7 @@ impl Tide {
         self.composer.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.do_anything"), cx)
         });
-        self.model_search.update(cx, |input, cx| {
+        self.model.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.search_models"), cx)
         });
         self.branch_search.update(cx, |input, cx| {

@@ -1111,11 +1111,11 @@ impl Tide {
         tab: ModelPickerTab,
         cx: &mut Context<Self>,
     ) {
-        if self.model_picker_tab != tab {
-            self.model_picker_tab = tab;
+        if self.model.tab != tab {
+            self.model.tab = tab;
             // A different tab renumbers the rows under the keyboard cursor,
             // and would otherwise inherit the old tab's scroll offset.
-            self.model_picker_highlight = None;
+            self.model.highlight = None;
             self.reveal_selected_picker_model();
             cx.notify();
         }

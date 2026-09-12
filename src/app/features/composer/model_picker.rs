@@ -93,21 +93,22 @@ impl Tide {
         // The observer registered below only runs the first time a menu id is
         // seen, so it re-reads this config from the map instead of capturing
         // it; render refreshes the entry every frame.
-        self.model_picker_configs
+        self.model
+            .configs
             .borrow_mut()
             .insert(menu_id.clone(), config.clone());
 
-        let search_query = self.model_search.read(cx).content().to_owned();
+        let search_query = self.model.search.read(cx).content().to_owned();
         let normalized_query = search_query.trim().to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
-        let selected_tab = self.model_picker_tab.clone();
+        let selected_tab = self.model.tab.clone();
         let open_selected_tab = selected_tab.clone();
         let tide_models = self.tide_models.clone();
         let favorites = self.state.favorite_models.clone();
         let weak = cx.entity().downgrade();
-        let search = self.model_search.clone();
+        let search = self.model.search.clone();
         let search_focus = search.read(cx).focus_handle(cx);
-        let empty_focus = self.model_picker_empty_focus.clone();
+        let empty_focus = self.model.empty_focus.clone();
         let no_providers = self.model_picker_has_no_providers();
         let tide_loaded = self.tide.loaded;
 
@@ -131,28 +132,24 @@ impl Tide {
                     // observer is only consulted the first time the menu id
                     // is seen, while the caller refreshes the entry every
                     // render.
-                    let config = this
-                        .model_picker_configs
-                        .borrow()
-                        .get(&toggle_menu_id)
-                        .cloned();
+                    let config = this.model.configs.borrow().get(&toggle_menu_id).cloned();
                     let Some(config) = config else {
                         return;
                     };
                     if open {
                         // The picker's shared follow-up state (reveal target,
                         // tab cycling lock) is whatever this surface picked.
-                        this.model_picker_active = config.active.clone();
+                        this.model.active = config.active.clone();
                         empty = this.model_picker_has_no_providers();
                         // Open onto the configured provider owning the active
                         // model (its id prefix), falling back to the first
                         // rail row; favorites win when the picker was last on
                         // them.
-                        this.model_picker_tab = if open_selected_tab == ModelPickerTab::Favorites {
+                        this.model.tab = if open_selected_tab == ModelPickerTab::Favorites {
                             ModelPickerTab::Favorites
                         } else {
                             let selected_prefix =
-                                this.model_picker_active.as_ref().and_then(|(_, model)| {
+                                this.model.active.as_ref().and_then(|(_, model)| {
                                     model.split_once('/').map(|(prefix, _)| prefix.to_owned())
                                 });
                             let rows = this.tide_provider_rail_rows();
@@ -173,7 +170,7 @@ impl Tide {
                         if !this.tide.loaded {
                             this.tide_load_providers();
                         }
-                        this.model_picker_highlight = None;
+                        this.model.highlight = None;
                         reset_search.update(cx, |search, cx| search.clear(cx));
                         this.reveal_selected_picker_model();
                     } else if config.refocus_composer_on_close {
@@ -224,8 +221,8 @@ impl Tide {
         } else {
             Vec::new()
         });
-        let scroll = self.model_picker_scroll.clone();
-        let scrollbar_state = self.model_picker_scrollbar.clone();
+        let scroll = self.model.scroll.clone();
+        let scrollbar_state = self.model.scrollbar.clone();
 
         // The keyboard cursor addresses the optional reset entry first, then
         // every visible model row — one ordering the rendered rows, the
@@ -238,9 +235,7 @@ impl Tide {
                 .chain((0..available_models.len()).map(ModelPickerAction::Model))
                 .collect(),
         );
-        let highlight = self
-            .model_picker_highlight
-            .filter(|index| *index < actions.len());
+        let highlight = self.model.highlight.filter(|index| *index < actions.len());
 
         let trigger = build_trigger(handle.is_open());
 
@@ -791,17 +786,15 @@ impl Tide {
         actions: &[ModelPickerAction],
         cx: &mut Context<Self>,
     ) {
-        let current = self
-            .model_picker_highlight
-            .filter(|index| *index < actions.len());
+        let current = self.model.highlight.filter(|index| *index < actions.len());
         let Some(next) = next_picker_highlight(current, actions.len(), key) else {
             return;
         };
-        self.model_picker_highlight = Some(next);
+        self.model.highlight = Some(next);
         // Only a model row has a place in the scroll list to reveal; the
         // pinned reset entry is always on screen.
         if let ModelPickerAction::Model(row) = actions[next] {
-            self.model_picker_scroll.scroll_to_item(row);
+            self.model.scroll.scroll_to_item(row);
         }
         cx.notify();
     }
@@ -812,11 +805,11 @@ impl Tide {
     /// selected and searches across all of them, so cycling waits until the
     /// field is cleared.
     fn cycle_model_picker_tab(&mut self, key: &str, cx: &mut Context<Self>) {
-        if !self.model_search.read(cx).content().trim().is_empty() {
+        if !self.model.search.read(cx).content().trim().is_empty() {
             return;
         }
         let tabs = visible_picker_tabs(&self.tide_provider_rail_rows());
-        let current = tabs.iter().position(|tab| *tab == self.model_picker_tab);
+        let current = tabs.iter().position(|tab| *tab == self.model.tab);
         let Some(next) = next_picker_highlight(current, tabs.len(), key) else {
             return;
         };
@@ -836,14 +829,14 @@ impl Tide {
     /// menu toggled open: the session's model for the composer, the stored
     /// override for a background row.
     pub(in crate::app) fn reveal_selected_picker_model(&self) {
-        let (provider, selected_model) = match self.model_picker_active.clone() {
+        let (provider, selected_model) = match self.model.active.clone() {
             Some((kind, model)) => (kind, Some(model)),
             None => (ProviderKind::default(), None),
         };
         let index = visible_picker_models(
             &self.tide_models,
             &self.state.favorite_models,
-            self.model_picker_tab.clone(),
+            self.model.tab.clone(),
             "",
         )
         .iter()
@@ -851,7 +844,7 @@ impl Tide {
             *kind == provider && selected_model.as_deref() == Some(model.id.as_str())
         })
         .unwrap_or(0);
-        self.model_picker_scroll.scroll_to_item(index);
+        self.model.scroll.scroll_to_item(index);
     }
 
     /// Take the action the selection is on, defaulting to the first so `enter`
@@ -864,7 +857,7 @@ impl Tide {
         clear: Option<&(SharedString, ModelPickerClear)>,
         cx: &mut Context<Self>,
     ) {
-        match actions.get(self.model_picker_highlight.unwrap_or(0)) {
+        match actions.get(self.model.highlight.unwrap_or(0)) {
             Some(ModelPickerAction::Clear) => {
                 let Some((_, clear)) = clear else {
                     return;

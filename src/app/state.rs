@@ -161,3 +161,40 @@ impl ComputerUseState {
         }
     }
 }
+
+/// The shared model picker: the filter input, open tab, per-site picker
+/// inputs, the active surface's selection, and the row list's scroll state.
+pub(in crate::app) struct ModelPickerState {
+    pub(in crate::app) search: gpui::Entity<crate::input::TextInput>,
+    pub(in crate::app) tab: super::ModelPickerTab,
+    pub(in crate::app) configs: std::cell::RefCell<
+        HashMap<
+            gpui::SharedString,
+            crate::app::features::composer::model_picker::ModelPickerConfig,
+        >,
+    >,
+    pub(in crate::app) active: Option<(crate::model::ProviderKind, String)>,
+    pub(in crate::app) highlight: Option<usize>,
+    pub(in crate::app) scroll: gpui::ScrollHandle,
+    pub(in crate::app) scrollbar: std::rc::Rc<crate::ui::scrollbar::ScrollbarState>,
+    pub(in crate::app) empty_focus: gpui::FocusHandle,
+}
+
+impl ModelPickerState {
+    pub(in crate::app) fn new(
+        search: gpui::Entity<crate::input::TextInput>,
+        tab: super::ModelPickerTab,
+        empty_focus: gpui::FocusHandle,
+    ) -> Self {
+        Self {
+            search,
+            tab,
+            configs: std::cell::RefCell::new(HashMap::new()),
+            active: None,
+            highlight: None,
+            scroll: gpui::ScrollHandle::new(),
+            scrollbar: crate::ui::scrollbar::ScrollbarState::new(),
+            empty_focus,
+        }
+    }
+}
