@@ -5,11 +5,34 @@ in Rust with GPUI. GPL-3.0-only.
 
 ## Workspace layout
 
-- Root crate `tide` (`src/`) is the GPUI desktop app: `src/app/` holds the UI
-  screens, `src/ui/` the in-house widget primitives, `src/md/` markdown
-  parsing and rendering. The backend serves its WebSocket protocol from an
-  in-process, app-owned listener — there is no separate daemon process to
-  build or hot-swap anymore.
+- Root crate `tide` (`src/`) is the GPUI desktop app: `src/app/` holds the UI,
+  `src/ui/` the in-house, domain-neutral widget primitives (no imports from
+  `model`/`protocol`/`backend`/feature code), `src/md/` markdown parsing and
+  rendering. The backend serves its WebSocket protocol from an in-process,
+  app-owned listener — there is no separate daemon process to build or
+  hot-swap anymore.
+- App code is organized by role, not by file size (design:
+  `docs/plans/2026-09-12-app-folder-restructuring-design.md`):
+  - `src/app/mod.rs` — the `Tide` root entity: `Render` impl, window-frame and
+    mode dispatch, cross-feature coordination. Root state moves into plain
+    structs in `src/app/state.rs` (e.g. `ShellState`), one aggregate at a
+    time.
+  - `src/app/screens/` — full-screen compositions. `workspace/` (panes,
+    empty state, new task), `settings/` (shell + `pages/` one directory per
+    family). Pages own their state and keybindings; the shell only routes.
+  - `src/app/layouts/` — geometry only: `window.rs` (frame, client
+    controls), `panels.rs` (pane frames, resize, tweens), `settings.rs`
+    (width caps). No app state, no feature logic.
+  - `src/app/features/` — a directory per stateful family: `composer/`,
+    `sessions/`, `transcript/` (incl. `components/`, `inspector/`,
+    `timeline_v2/`), `git/` (incl. the Git panel surface), `browser/`,
+    `right_panel/` (state, tabs, surfaces). Features own their state and
+    behavior; items shared by 2+ features live in `src/app/components/`.
+  - Root-level siblings (`sidebar.rs`, `command_palette.rs`, dialogs,
+    `tests.rs`) are app-shell pieces that predate the taxonomy — move them
+    into the tree when touching them, don't grow them.
+  - Visibility: cross-family items are `pub(in crate::app)`, not `pub`.
+    Explicit imports only — do not add `use super::*;` globs.
 - `crates/protocol` — versioned, transport-neutral wire contract. Serde types
   only: no DB, provider, filesystem, Git, or socket code.
 - `crates/client` — WebSocket client for the protocol: handshake, request

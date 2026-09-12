@@ -1,6 +1,13 @@
 # Desktop App Folder Restructuring — Design
 
-Date: 2026-09-12 · Branch: `feature/global-rag-settings` · Status: accepted; implementation in progress (Stage 1 complete)
+Date: 2026-09-12 · Branch: `feature/global-rag-settings` · Status: implemented (Stages 1–5 complete; Stage 6 started with the `ShellState` aggregate; Stage 7 docs updated)
+
+Implemented in commits `f13104d` (component boundary), `a0bfed2`
+(screens + layouts, `app.rs` → `app/mod.rs`), `61bd5bb` + `a6337a5`
+(settings pages), `6e157a4` (core features), `126004e` (right_panel split),
+`67de7f9` (`ShellState`). §15 resolutions: `features` naming; Git as Settings
+page + Workspace feature; background work under `features/sessions`;
+root-mounted overlays only; rename done in Stage 2.
 
 Reorganizes the root GPUI crate around explicit application concepts:
 full-window screens, pages within those screens, structural layouts, product
