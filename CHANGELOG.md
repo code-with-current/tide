@@ -16,6 +16,15 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [Unreleased]
 
+## [0.1.1-beta]
+
+### Fixed
+
+- The loading indicator no longer freezes mid-animation. The pixel loader in
+  the working footer (and the elapsed timer next to it) stopped animating
+  whenever the app went quiet between tool runs; it now stays animated — and
+  the timer keeps counting — for as long as the turn is running.
+
 ## [0.1.0-beta]
 
 - Slash commands and skills resolve in one call: invoking `/name` through the
